@@ -625,7 +625,7 @@
       if (!st || typeof st !== 'object') throw new Error('unexpected shape');
       return {
         riders: uCount(uNum(st.riders)), rides: uCount(uNum(st.ridesCompleted)), km: uKm(uNum(st.kmRidden)), groups: uCount(uNum(st.groupsRidden)),
-        sos: uCount(uNum(st.sosResolved)), rating: uNum(st.avgRating), updatedAt: st.updatedAt, gate: uCount(uNum(st.ridesCompleted)) !== null,
+        sos: uCount(uNum(st.sosResolved)), rating: uNum(st.avgRating), hours: uCount(uNum(st.movingHours)), updatedAt: st.updatedAt, gate: uCount(uNum(st.ridesCompleted)) !== null,
       };
     };
     var fromCommunity = function (j) {
@@ -660,6 +660,7 @@
       if (u.rides !== null && u.rides >= 10) tiles.push(['Rides completed', u.rides, uFmt]);
       if (u.km !== null && u.km >= 100) tiles.push(['Kilometres ridden', u.km, uFmt]);
       if (u.riders !== null && u.riders >= 10) tiles.push(['Riders', u.riders, uFmt]);
+      if (u.hours != null && u.hours >= 10) tiles.push(['Hours on the road', u.hours, uFmt]);
       if (u.groups !== null && u.groups >= 10) tiles.push(['Group rides', u.groups, uFmt]);
       if (u.sos !== null && u.sos >= 10) tiles.push(['SOS alerts resolved', u.sos, uFmt]);
       if (u.rating !== null && u.rating >= 1 && u.rating <= 5) tiles.push(['Average rider rating', u.rating, uRating]);
@@ -765,10 +766,11 @@
     });
   }
 
-  /* ---------- CoRoute impact, live (3.55): real totals from real riders ----------
-     Source: GET /api/public/impact-stats -> { ok, enabled, stats: { kmRidden, movingHours, ridesCompleted, groupRides,
-     largestGroup, longestTripKm, bikes, safety: { sosResolved, crashAlerts, alertsAnswered, medianResponseSec,
-     roadReports }, ... } }. The server already makes every number coarse (src/public_privacy.js safeImpact): 0 or null
+  /* ---------- CoRoute impact, all time (3.55b): real totals from real riders since CoRoute began ----------
+     Source: GET /api/public/alltime-stats -> { ok, enabled, scope: 'all-time', stats: { ridersWithRide, registeredRiders,
+     kmRidden, movingHours, ridesCompleted, groupRides, largestGroup, longestTripKm, bikes, safety: { sosResolved,
+     crashAlerts, alertsAnswered, medianResponseSec, roadReports }, thisWeek: { rides, km, movingHours, riders } } },
+     falling back to GET /api/public/impact-stats (same tiles, no rider count) on an older server. The server already makes every number coarse (src/public_privacy.js safeImpact): 0 or null
      means "not enough yet", and such a tile stays hidden. The same floors are applied here again, so an older or
      misconfigured server can never put an exact small number on the page. A box ([data-impact]) shows only when at
      least two of its tiles are real. Checked every minute while the tab is visible; counters roll up, never with
@@ -801,6 +803,8 @@
       var rides = iCount(st.ridesCompleted), groups = iCount(st.groupRides != null ? st.groupRides : st.groupsRidden);
       var largest = iNum(st.largestGroup), longest = iNum(st.longestTripKm), resp = iNum(s.medianResponseSec);
       return {
+        // Riders with at least one completed ride (all time); an older server has no such number.
+        riders: { n: iCount(st.ridersWithRide), fmt: iPlus },
         km: { n: iKm(st.kmRidden), fmt: iPlus },
         hours: { n: iCount(st.movingHours), fmt: iPlus },
         rides: { n: rides, fmt: iPlus },
@@ -868,6 +872,14 @@
         });
         var note = box.querySelector('[data-impact-note]');
         if (note) note.hidden = !(missing && real >= 2);
+        // This week, as a small second line: only when 10 rides that week are behind it.
+        var wk = box.querySelector('[data-impact-week]');
+        if (wk) {
+          var w = st.thisWeek && typeof st.thisWeek === 'object' ? st.thisWeek : {};
+          var wRides = iCount(w.rides), wKm = wRides !== null ? iKm(w.km) : null;
+          wk.textContent = wRides !== null ? 'This week: ' + iPlus(wRides) + ' rides' + (wKm !== null ? ', ' + iPlus(wKm) + ' km' : '') + '.' : '';
+          wk.hidden = wRides === null;
+        }
         var upd = box.querySelector('[data-impact-updated]');
         if (upd) upd.textContent = 'Updated ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
         box.hidden = real < 2;
@@ -877,8 +889,12 @@
     var loadImpact = function () {
       if (doc.hidden) return;
       iLast = Date.now();
-      fetch('/api/public/impact-stats', { headers: { Accept: 'application/json' }, credentials: 'omit' })
-        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      var iGet = function (url) {
+        return fetch(url, { headers: { Accept: 'application/json' }, credentials: 'omit' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+      };
+      iGet('/api/public/alltime-stats')
+        .catch(function () { return iGet('/api/public/impact-stats'); })
         .then(function (j) {
           // Switched off by the admin or the feature flag: hide, and say nothing.
           if (!j || j.enabled === false || !j.stats || typeof j.stats !== 'object') { impactBoxes.forEach(function (b) { b.hidden = true; }); return; }
@@ -899,6 +915,163 @@
     if (win.setInterval) win.setInterval(loadImpact, 60000);
     if (doc.addEventListener) {
       doc.addEventListener('visibilitychange', function () { if (!doc.hidden && Date.now() - iLast >= 60000) loadImpact(); });
+    }
+  }
+
+  /* ---------- Leaderboards (3.55b): riders by their unique username ----------
+     Source: GET /api/public/leaderboard -> { updatedAt, topScore: [{ username, score, rides }], longestRide: [{ username, km }],
+     mostKm: [{ username, km }], mostHours: [{ username, hours }], mostRides: [{ username, rides }] } (rounded on the server;
+     riders who hid their name in the app are not in it). A box ([data-leaderboard]) has tabs ([data-lb-tab="topScore"] ...),
+     one list ([data-lb-list]) and an empty note ([data-lb-empty]). With data-lb-hide-empty the whole box stays hidden until
+     a board has a rider (home page); without it the empty note shows (the leaderboard page). A missing endpoint (404) or
+     a bad answer counts as empty: nothing is invented. Usernames go in with textContent only, cleaned of control and
+     direction characters and cut to 32 characters. Tabs follow the ARIA tabs pattern (arrow keys, Home, End). Checked
+     every 5 minutes while the tab is visible; rows slide in and bars grow, never with reduced motion. */
+  var lbBoxes = doc.querySelectorAll ? Array.prototype.slice.call(doc.querySelectorAll('[data-leaderboard]')) : [];
+  if (lbBoxes.length && 'fetch' in win) {
+    var LB = {
+      topScore: { field: 'score', label: 'Top rider', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'pts', sub: 'rides' },
+      longestRide: { field: 'km', label: 'Longest ride', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'km' },
+      mostKm: { field: 'km', label: 'Most km', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'km' },
+      mostHours: { field: 'hours', label: 'Most hours', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'h' },
+      mostRides: { field: 'rides', label: 'Most rides', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'rides' },
+    };
+    var lbReduce = !win.matchMedia || win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var lbName = function (v) {
+      if (typeof v !== 'string') return '';
+      var s = v.replace(/[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028-\u202E\u2060-\u2069\uFEFF]/g, '').trim();
+      return Array.from ? Array.from(s).slice(0, 32).join('') : s.slice(0, 32);
+    };
+    var lbNum = function (v) { var n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) && n > 0 ? n : null; };
+    // Every board as a clean list: real usernames and positive values only, highest first, no duplicates.
+    var lbClean = function (j) {
+      var src = j && typeof j === 'object' ? (j.boards && typeof j.boards === 'object' ? j.boards : j) : {};
+      var out = {};
+      Object.keys(LB).forEach(function (key) {
+        var meta = LB[key], seen = {}, rows = [];
+        (Array.isArray(src[key]) ? src[key] : []).forEach(function (e) {
+          if (!e || typeof e !== 'object') return;
+          var name = lbName(e.username), n = lbNum(e[meta.field]);
+          if (!name || n === null || seen[name.toLowerCase()]) return;
+          seen[name.toLowerCase()] = true;
+          rows.push({ name: name, n: n, sub: meta.sub ? lbNum(e[meta.sub]) : null });
+        });
+        rows.sort(function (a, b) { return b.n - a.n; });
+        out[key] = rows;
+      });
+      return out;
+    };
+    var lbHue = function (name) { var h = 0; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360; return h; };
+    var lbRender = function (box, key, rows) {
+      var list = box.querySelector('[data-lb-list]');
+      if (!list) return;
+      var meta = LB[key], limit = parseInt(box.getAttribute('data-lb-limit') || '10', 10) || 10;
+      var shown = rows.slice(0, Math.max(1, Math.min(10, limit)));
+      var max = shown.length ? shown[0].n : 0;
+      list.textContent = '';
+      list.setAttribute('aria-label', meta.label + ', top ' + shown.length);
+      var bars = [];
+      shown.forEach(function (r, i) {
+        var li = doc.createElement('li');
+        li.className = 'lb-row' + (i < 3 ? ' lb-row--' + (i + 1) : '');
+        if (li.style && li.style.setProperty) li.style.setProperty('--i', String(i));
+        var rank = doc.createElement('span'); rank.className = 'lb-row__rank'; rank.textContent = String(i + 1);
+        var av = doc.createElement('span'); av.className = 'lb-row__avatar'; av.setAttribute('aria-hidden', 'true');
+        av.textContent = (Array.from ? Array.from(r.name)[0] : r.name.charAt(0)).toUpperCase();
+        if (av.style && av.style.setProperty) av.style.setProperty('--h', String(lbHue(r.name)));
+        var who = doc.createElement('span'); who.className = 'lb-row__who';
+        var nm = doc.createElement('span'); nm.className = 'lb-row__name'; nm.textContent = r.name;
+        who.appendChild(nm);
+        if (r.sub !== null) { var sb = doc.createElement('span'); sb.className = 'lb-row__sub'; sb.textContent = Math.floor(r.sub).toLocaleString('en-IN') + (Math.floor(r.sub) === 1 ? ' ride' : ' rides'); who.appendChild(sb); }
+        var val = doc.createElement('span'); val.className = 'lb-row__value';
+        val.textContent = meta.fmt(r.n);
+        var u = doc.createElement('small'); u.textContent = ' ' + (meta.unit === 'rides' && Math.floor(r.n) === 1 ? 'ride' : meta.unit); val.appendChild(u);
+        var bar = doc.createElement('span'); bar.className = 'lb-row__bar'; bar.setAttribute('aria-hidden', 'true');
+        var fill = doc.createElement('span'); bar.appendChild(fill);
+        bars.push([fill, max ? Math.max(4, Math.round((r.n / max) * 100)) : 0]);
+        li.appendChild(rank); li.appendChild(av); li.appendChild(who); li.appendChild(val); li.appendChild(bar);
+        list.appendChild(li);
+      });
+      var grow = function () { bars.forEach(function (b) { if (b[0].style) b[0].style.width = b[1] + '%'; }); };
+      if (lbReduce || !win.requestAnimationFrame) grow();
+      else {
+        if (list.classList) { list.classList.remove('is-anim'); void list.offsetWidth; list.classList.add('is-anim'); }
+        win.requestAnimationFrame(function () { win.requestAnimationFrame(grow); });
+      }
+    };
+    var lbSetup = function (box) {
+      if (box._lb) return box._lb;
+      var tabs = Array.prototype.slice.call(box.querySelectorAll('[data-lb-tab]'));
+      var state = box._lb = { tabs: tabs, current: null, boards: null };
+      var select = function (tab, focus) {
+        tabs.forEach(function (t) {
+          var on = t === tab;
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          t.setAttribute('tabindex', on ? '0' : '-1');
+        });
+        var panel = box.querySelector('[data-lb-panel]');
+        if (panel && tab.id) panel.setAttribute('aria-labelledby', tab.id);
+        state.current = tab.getAttribute('data-lb-tab');
+        if (focus && tab.focus) tab.focus();
+        if (state.boards) lbRender(box, state.current, state.boards[state.current] || []);
+      };
+      state.select = select;
+      tabs.forEach(function (t) {
+        if (!t.addEventListener) return;
+        t.addEventListener('click', function () { select(t, false); });
+        t.addEventListener('keydown', function (e) {
+          var vis = tabs.filter(function (x) { return !x.hidden; });
+          var i = vis.indexOf(t), next = null;
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = vis[(i + 1) % vis.length];
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = vis[(i - 1 + vis.length) % vis.length];
+          else if (e.key === 'Home') next = vis[0];
+          else if (e.key === 'End') next = vis[vis.length - 1];
+          if (next) { e.preventDefault(); select(next, true); }
+        });
+      });
+      return state;
+    };
+    var lbShow = function (boards, updatedAt) {
+      lbBoxes.forEach(function (box) {
+        var st = lbSetup(box);
+        st.boards = boards;
+        var any = false;
+        st.tabs.forEach(function (t) {
+          var has = (boards[t.getAttribute('data-lb-tab')] || []).length > 0;
+          t.hidden = !has;
+          if (has) any = true;
+        });
+        var empty = box.querySelector('[data-lb-empty]'), body = box.querySelector('[data-lb-body]');
+        if (empty) empty.hidden = any;
+        if (body) body.hidden = !any;
+        var live = box.querySelector('[data-lb-live]');
+        if (live) live.hidden = !any;
+        var upd = box.querySelector('[data-lb-updated]');
+        var at = updatedAt ? new Date(typeof updatedAt === 'string' && /^\d+$/.test(updatedAt) ? +updatedAt : updatedAt) : null;
+        if (upd) upd.textContent = any && at && !isNaN(at.getTime()) ? 'Updated ' + at.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ', ' + at.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+        box.hidden = !any && box.hasAttribute('data-lb-hide-empty');
+        if (!any) { var list = box.querySelector('[data-lb-list]'); if (list) list.textContent = ''; return; }
+        var keep = st.tabs.filter(function (t) { return !t.hidden && t.getAttribute('data-lb-tab') === st.current; })[0];
+        var first = keep || st.tabs.filter(function (t) { return !t.hidden; })[0];
+        if (first) st.select(first, false);
+      });
+    };
+    var lbLast = 0;
+    var loadBoards = function () {
+      if (doc.hidden) return;
+      lbLast = Date.now();
+      fetch('/api/public/leaderboard', { headers: { Accept: 'application/json' }, credentials: 'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (j) {
+          if (!j || j.enabled === false) return lbShow(lbClean(null), null);
+          lbShow(lbClean(j), j.updatedAt);
+        })
+        .catch(function () { lbShow(lbClean(null), null); });
+    };
+    loadBoards();
+    if (win.setInterval) win.setInterval(loadBoards, 300000);
+    if (doc.addEventListener) {
+      doc.addEventListener('visibilitychange', function () { if (!doc.hidden && Date.now() - lbLast >= 300000) loadBoards(); });
     }
   }
 

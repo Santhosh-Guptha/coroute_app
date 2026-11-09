@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leaderboards | Coroute</title>
+<meta name="description" content="CoRoute rider leaderboards: top rider score, longest ride, most kilometres, most hours and most rides, shown by unique username with rounded totals. Riders can hide their name in the app.">
+<link rel="canonical" href="__ORIGIN__/leaderboard">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CoRoute">
+<meta property="og:title" content="Leaderboards | Coroute">
+<meta property="og:description" content="CoRoute rider leaderboards: top rider score, longest ride, most kilometres, most hours and most rides, shown by unique username with rounded totals. Riders can hide their name in the app.">
+<meta property="og:url" content="__ORIGIN__/leaderboard">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Leaderboards | Coroute">
+<meta name="twitter:description" content="CoRoute rider leaderboards: top rider score, longest ride, most kilometres, most hours and most rides, shown by unique username with rounded totals. Riders can hide their name in the app.">
+<meta name="twitter:image" content="__ORIGIN__/og-image.png">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
+<script src="/assets/site.js" defer></script>
+</head>
+<body data-page="leaderboard">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
+    <div class="container">
+      <div class="hm-hero__inner">
+        <p class="eyebrow">Leaderboards</p>
+        <h1 id="hero-title">The riders setting the pace.</h1>
+        <p class="t-lead">The top ten CoRoute riders by rider score, longest ride, distance, hours and rides, each shown by their unique username. Totals are rounded, and every rider can hide their name.</p>
+        <div class="hm-hero__cta">
+          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
+          <a class="link-arrow" href="/#impact"><span>All-time community numbers</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+      </div>
+    </div>
+    <!--#include route-motif-->
+  </section>
+
+  <!-- Leaderboards: filled by site.js from GET /api/public/leaderboard. Nothing is written into this page; until a board
+       has a rider (or when the server has no leaderboard yet) the empty note shows instead. -->
+  <section class="section section--surface lb lb--page" id="leaderboard" aria-labelledby="lb-title" data-leaderboard data-lb-limit="10">
+    <div class="container">
+      <div class="lb__head">
+        <div class="hm-head">
+          <p class="eyebrow">Top 10</p>
+          <h2 id="lb-title">The top ten on every board.</h2>
+        </div>
+        <p class="imp__live" data-lb-live hidden><span class="live-dot" aria-hidden="true"></span><span data-lb-updated></span></p>
+      </div>
+      <div class="lb-card" data-lb-body hidden>
+        <div class="lb-tabs" role="tablist" aria-label="Leaderboards">
+          <button class="lb-tab" type="button" role="tab" id="lb-topScore" aria-controls="lb-panel" aria-selected="true" data-lb-tab="topScore"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-trophy"/></svg>Top rider</button>
+          <button class="lb-tab" type="button" role="tab" id="lb-longestRide" aria-controls="lb-panel" aria-selected="false" tabindex="-1" data-lb-tab="longestRide"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Longest ride</button>
+          <button class="lb-tab" type="button" role="tab" id="lb-mostKm" aria-controls="lb-panel" aria-selected="false" tabindex="-1" data-lb-tab="mostKm"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Most km</button>
+          <button class="lb-tab" type="button" role="tab" id="lb-mostHours" aria-controls="lb-panel" aria-selected="false" tabindex="-1" data-lb-tab="mostHours"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Most hours</button>
+          <button class="lb-tab" type="button" role="tab" id="lb-mostRides" aria-controls="lb-panel" aria-selected="false" tabindex="-1" data-lb-tab="mostRides"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Most rides</button>
+        </div>
+        <div class="lb-panel" id="lb-panel" role="tabpanel" aria-labelledby="lb-topScore" tabindex="0" data-lb-panel>
+          <ol class="lb-list" data-lb-list></ol>
+        </div>
+      </div>
+      <div class="lb-empty lb-empty--card" data-lb-empty>
+        <span class="lb-empty__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-trophy"/></svg></span>
+        <p><b>Leaderboards appear once riders complete enough rides.</b> Ride with CoRoute and your username can be up here.</p>
+      </div>
+      <p class="lb__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg><span>Usernames and rounded totals only. Riders can hide their name in the app.</span></p>
+    </div>
+  </section>
+
+  <!-- How the boards work -->
+  <section class="section" aria-labelledby="how-title">
+    <div class="container">
+      <div class="hm-head">
+        <p class="eyebrow">How it works</p>
+        <h2 id="how-title">Counted from completed rides.</h2>
+      </div>
+      <dl class="hm-facts">
+        <div><dt>Top rider</dt><dd>Rider score<span>A score the app builds from your completed rides. Your own score and how it is made are in the app.</span></dd></div>
+        <div><dt>Longest ride</dt><dd>One ride, in kilometres<span>The longest single completed ride of each rider.</span></dd></div>
+        <div><dt>Most km and most hours</dt><dd>All time<span>Distance and moving time added up over every completed ride.</span></dd></div>
+        <div><dt>Most rides</dt><dd>Completed rides<span>Every ride you finish with CoRoute, solo or in a group.</span></dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- Privacy -->
+  <section class="section section--surface" aria-labelledby="lb-privacy-title">
+    <div class="container">
+      <div class="hm-head">
+        <p class="eyebrow">Your privacy</p>
+        <h2 id="lb-privacy-title">Your name, your choice.</h2>
+      </div>
+      <ul class="hm-features" role="list">
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div><h3>Username only</h3><p>Boards show the unique username you picked in the app. Never your real name, e-mail, phone, bike or photo.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div><h3>Rounded totals</h3><p>Only rounded totals are shown. No routes, places, dates or times of any ride.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div><h3>Hide your name</h3><p>Prefer to ride unlisted? Hide your name from the leaderboards in the app, and your username is left off every board.</p></li>
+      </ul>
+      <p class="lb__more"><a class="link-arrow" href="/privacy#leaderboards"><span>Leaderboards in the privacy policy</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></p>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section section--tight">
+    <div class="container">
+      <div class="hm-cta">
+        <div><h2>Ride together, climb together.</h2><p>Every completed ride counts. Solo riding is always free.</p></div>
+        <div class="cluster cluster--16">
+          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
+          <a class="link-arrow" href="/how-it-works"><span>How it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

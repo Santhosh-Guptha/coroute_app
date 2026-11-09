@@ -74,8 +74,9 @@
           <li>In an SOS or crash alert your own group is always alerted first. A few riders of other groups on the same
             road may be asked to help, at most 3 at a time. They never get your phone number, and you can turn this off.
           </li>
-          <li>Medical info is optional. Your convoy sees it only while your SOS or crash alert is open, and
-            administrators never see it.</li>
+          <li>Medical info is optional. If you fill it in, it is shown on your lock screen Medical ID and, only while
+            your SOS or crash alert is open, to the people helping you: your convoy, your guardians and a rider who
+            accepted to help. There is no switch for this. Administrators never see it.</li>
           <li>Emergency texts and Groups nearby are off until they are switched on.</li>
           <li>During an SOS you, or your lead, can share a live link that shows your first name, last position and
             update time for 30 minutes. Weather and nearest hospital lookups send only rounded route points or the alert
@@ -125,6 +126,7 @@
             <li><a class="legal-toc__link" href="#bluetooth">Bluetooth</a></li>
             <li><a class="legal-toc__link" href="#trip-reviews">Trip reviews and group photos</a></li>
             <li><a class="legal-toc__link" href="#website-numbers">Numbers on our website</a></li>
+            <li><a class="legal-toc__link" href="#leaderboards">Public leaderboards</a></li>
             <li><a class="legal-toc__link" href="#who-can-see">Who can see your data</a></li>
             <li><a class="legal-toc__link" href="#where-data-lives">Where your data lives</a></li>
             <li><a class="legal-toc__link" href="#your-rights">Your choices and rights</a></li>
@@ -181,8 +183,7 @@
                 </tr>
                 <tr>
                   <td data-label="Data"><b>Nearby rider settings</b>: "Help nearby riders", "Ask nearby riders to help
-                    me", "Share medical info with a rider from another group who comes to help me", and when you agreed
-                    to the nearby rider network</td>
+                    me", and when you agreed to the nearby rider network</td>
                   <td data-label="Why">To decide whether you are asked to help other groups, whether other groups are
                     asked to help you, and what a helper may see</td>
                   <td data-label="Kept for">Until you change them or delete your account</td>
@@ -328,10 +329,10 @@
             mates or anyone's position other than the emergency point.</p>
           <p>If one of them taps "I Can Help", that rider also sees your first name and your vehicle type and colour, so
             they can find
-            you. Your medical info is shown to them only if you switched on "Share medical info with a rider from
-            another group who comes
-            to help me" (off unless you turn it on). Phone numbers are never given to riders of other groups; they can
-            call emergency
+            you. While your alert is open they also see the medical info you entered (blood group, allergies, notes)
+            and your emergency contact, so they can tell a doctor and reach your family; there is no switch for this,
+            and it is removed when the alert closes. Your own phone number and your ride mates' numbers are never
+            given to riders of other groups; they can call emergency
             services. Your group sees that "a nearby rider" is coming, their first name, how far away they are and their
             position while on
             the way, but not their group. When the emergency is closed, the riders of other groups lose access to it at
@@ -439,7 +440,8 @@
           </ul>
           <p>Session tokens and capability tokens are stored only as cryptographic hashes on our servers, ensuring raw
             credentials cannot be extracted from database storage. Observers cannot see other convoy members, group
-            chat, emergency contacts, or rider medical profiles. Grants can be paused or revoked at any time by the
+            chat or emergency contacts. While the rider's SOS or crash alert is open they see the medical info the
+            rider entered (blood group, allergies, notes). Grants can be paused or revoked at any time by the
             rider in the app. Access expires automatically when the ride ends or the chosen expiry duration lapses. All
             dependent records are purged upon convoy deletion or account removal.</p>
         </section>
@@ -565,7 +567,8 @@
 
         <section class="legal-section" id="website-numbers" aria-labelledby="website-numbers-h">
           <h2 id="website-numbers-h">Numbers on our website</h2>
-          <p>The home page can show a few totals, such as rides completed, kilometres ridden and riders on the road right
+          <p>The home page can show a few all-time totals, such as riders (registered riders with at least one completed
+            ride), hours on the road, rides completed and kilometres ridden, and how many riders are on the road right
             now. They are worked out on our server from completed rides and are totals only: never per city, per route,
             per ride or per rider. Before they leave the server, counts are rounded down to tens (hundreds from 1,000),
             distance to 100 km (1,000 km from 10,000 km), and anything below 10 shows as nothing, so a small number can
@@ -582,6 +585,15 @@
           <p>The website itself has no login, sets no cookies for analytics and loads no trackers or third-party
             scripts. It counts visits per page and day (with the name of the referring site), never per person. Your
             own ride analytics in the app are worked out from your own rides and are shown only to you.</p>
+        </section>
+
+        <section class="legal-section" id="leaderboards" aria-labelledby="leaderboards-h">
+          <h2 id="leaderboards-h">Public leaderboards</h2>
+          <p>The website's leaderboards (the home page and the leaderboard page) list the top riders by rider score,
+            longest ride, kilometres, hours and rides. A rider appears only by the unique username chosen in the app,
+            next to rounded totals. Never your real name, e-mail, phone number, bike, photo, routes, places, or the dates
+            and times of your rides. Riders can opt out: hide your name from the leaderboards in the app and your
+            username is left off every board.</p>
         </section>
 
         <section class="legal-section" id="who-can-see" aria-labelledby="who-can-see-h">

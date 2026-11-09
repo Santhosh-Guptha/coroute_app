@@ -103,7 +103,7 @@
           <div class="hp-head">
             <p class="eyebrow">CoRoute in numbers</p>
             <h2 id="numbers-title">Real rides, counted with privacy.</h2>
-            <p>Totals from completed rides on CoRoute, rounded down so that no single rider can be picked out. Nothing is estimated, and this page checks again every minute.</p>
+            <p>All-time totals from completed rides on CoRoute, rounded down so that no single rider can be picked out. Nothing is estimated, and this page checks again every minute.</p>
           </div>
           <p class="hp-numbers__badge"><span class="hx__pulse" aria-hidden="true"></span>Live</p>
         </div>
@@ -121,23 +121,27 @@
     </section>
     <!-- /numbers -->
 
-    <!-- CoRoute impact, live (3.55): filled by site.js from GET /api/public/impact-stats, checked every minute while the
-         page is open. Hidden until at least two real numbers come back; a tile without one stays hidden. No number is
-         written into this page. -->
+    <!-- CoRoute impact, all time (3.55b): filled by site.js from GET /api/public/alltime-stats (falls back to
+         /api/public/impact-stats), checked every minute while the page is open. Hidden until at least two real numbers
+         come back; a tile without one stays hidden. No number is written into this page. -->
     <section class="section section--surface imp" id="impact" aria-labelledby="impact-title" data-impact hidden>
       <div class="container">
         <div class="imp__head">
           <div class="hp-head">
-            <p class="eyebrow">CoRoute impact, live</p>
-            <h2 id="impact-title">What riders do together, counted live.</h2>
-            <p class="imp__lead">Real totals from real riders, rounded down. Never per rider and never per place, and nothing is estimated.</p>
+            <p class="eyebrow">CoRoute impact, all time</p>
+            <h2 id="impact-title">Everything riders have done together, since day one.</h2>
+            <p class="imp__lead">Real totals from real riders since CoRoute began, rounded down and kept up to date. Never per rider and never per place, and nothing is estimated.</p>
           </div>
           <p class="imp__live"><span class="live-dot" aria-hidden="true"></span><span data-impact-updated>Live</span></p>
         </div>
+        <p class="imp__week" data-impact-week hidden></p>
         <dl class="imp-grid imp-grid--main" aria-label="CoRoute riders, all time">
-          <div class="imp-tile" data-impact-key="km" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Kilometres ridden</dt><dd data-impact-value>&mdash;</dd></div>
-          <div class="imp-tile" data-impact-key="hours" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Hours on the road</dt><dd data-impact-value>&mdash;</dd></div>
-          <div class="imp-tile" data-impact-key="rides" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Rides</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--lead" data-impact-key="riders" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Riders on the road</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--lead" data-impact-key="hours" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Hours on the road</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--lead" data-impact-key="km" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Kilometres ridden</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--lead" data-impact-key="rides" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Rides completed</dt><dd data-impact-value>&mdash;</dd></div>
+        </dl>
+        <dl class="imp-grid imp-grid--records" aria-label="CoRoute records, all time">
           <div class="imp-tile" data-impact-key="groupRides" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group rides</dt><dd data-impact-value>&mdash;</dd></div>
           <div class="imp-tile imp-tile--amber" data-impact-key="largestGroup" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-meeting"/></svg>Largest group, riders</dt><dd data-impact-value>&mdash;</dd></div>
           <div class="imp-tile" data-impact-key="longestTrip" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Longest trip, km</dt><dd data-impact-value>&mdash;</dd></div>
@@ -157,10 +161,40 @@
           </dl>
         </div>
         <p class="imp__note" data-impact-note hidden>More numbers appear here once enough riders and rides are behind them.</p>
-        <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>How these are counted: totals only, from completed rides and closed alerts, rounded down, and shown only once at least ten rides or alerts are behind a number. Never per rider, per route or per place.</p>
+        <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>How these are counted: all-time totals, from completed rides and closed alerts, rounded down, and shown only once at least ten rides or alerts are behind a number. Riders on the road are registered riders with at least one completed ride; hours are moving time, added up for every rider. Never per rider, per route or per place.</p>
       </div>
     </section>
     <!-- /impact -->
+
+    <!-- Leaderboards (3.55b): filled by site.js from GET /api/public/leaderboard; hidden until a board has a rider.
+         Usernames only (riders can hide theirs in the app); nothing is written into this page. -->
+    <section class="section lb" id="leaderboard" aria-labelledby="lb-title" data-leaderboard data-lb-limit="5" data-lb-hide-empty hidden>
+      <div class="container">
+        <div class="lb__head">
+          <div class="hp-head">
+            <p class="eyebrow">Leaderboards</p>
+            <h2 id="lb-title">The riders setting the pace.</h2>
+            <p class="lb__lead">Top riders by rider score, longest ride, distance, hours and rides, by their unique CoRoute username.</p>
+          </div>
+          <a class="link-arrow" href="/leaderboard"><span>All leaderboards, top 10</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+        <div class="lb-card" data-lb-body>
+          <div class="lb-tabs" role="tablist" aria-label="Leaderboards">
+            <button class="lb-tab" type="button" role="tab" id="lb-home-topScore" aria-controls="lb-home-panel" aria-selected="true" data-lb-tab="topScore"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-trophy"/></svg>Top rider</button>
+            <button class="lb-tab" type="button" role="tab" id="lb-home-longestRide" aria-controls="lb-home-panel" aria-selected="false" tabindex="-1" data-lb-tab="longestRide"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Longest ride</button>
+            <button class="lb-tab" type="button" role="tab" id="lb-home-mostKm" aria-controls="lb-home-panel" aria-selected="false" tabindex="-1" data-lb-tab="mostKm"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Most km</button>
+            <button class="lb-tab" type="button" role="tab" id="lb-home-mostHours" aria-controls="lb-home-panel" aria-selected="false" tabindex="-1" data-lb-tab="mostHours"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Most hours</button>
+            <button class="lb-tab" type="button" role="tab" id="lb-home-mostRides" aria-controls="lb-home-panel" aria-selected="false" tabindex="-1" data-lb-tab="mostRides"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Most rides</button>
+          </div>
+          <div class="lb-panel" id="lb-home-panel" role="tabpanel" aria-labelledby="lb-home-topScore" tabindex="0" data-lb-panel>
+            <ol class="lb-list" data-lb-list></ol>
+          </div>
+        </div>
+        <p class="lb-empty" data-lb-empty hidden>Leaderboards appear once riders complete enough rides.</p>
+        <p class="lb__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg><span>Usernames and rounded totals only. Riders can hide their name in the app. <span data-lb-updated></span></span></p>
+      </div>
+    </section>
+    <!-- /leaderboard -->
 
     <!-- Features: safety first -->
     <section class="section fx" id="features" aria-labelledby="features-title">
@@ -360,7 +394,7 @@
         </div>
         <figure class="ra-card" aria-labelledby="ra-cap" data-ride-analytics>
           <div class="ra-card__frame">
-            <div class="ra-card__top"><span class="ra-card__title">CoRoute riders</span><span class="ra-badge ra-badge--live" id="ra-badge">Live</span></div>
+            <div class="ra-card__top"><span class="ra-card__title">CoRoute riders, all time</span><span class="ra-badge ra-badge--live" id="ra-badge">Live</span></div>
             <dl class="ra-tiles" id="ra-tiles">
               <div><dt>Distance</dt><dd data-ra="km">&mdash;</dd></div>
               <div><dt>Moving time</dt><dd data-ra="hours">&mdash;</dd></div>

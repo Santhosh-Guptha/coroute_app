@@ -142,6 +142,15 @@
     const alert = data.alerts?.[0];
     if (alert) el('incident').textContent = alert.type === 'POSSIBLE_ACCIDENT'
       ? 'A possible accident was reported. This is not confirmation of injury.' : 'An active request for help was reported.';
+    // Medical info the rider entered, shown only while the alert is open (textContent only).
+    const med = alert && alert.medical;
+    if (med) {
+      const parts = [];
+      if (med.bloodGroup) parts.push(`Blood group ${med.bloodGroup}`);
+      if (med.allergies) parts.push(`Allergies: ${med.allergies}`);
+      if (med.notes) parts.push(`Notes: ${med.notes}`);
+      if (parts.length) el('incident').textContent += ` Medical info: ${parts.join(' · ')}.`;
+    }
     // 3.55 no-signal ahead: said by the rider's phone before a stretch that had no signal on earlier rides.
     const ahead = data.signalAhead;
     if (!alert && ahead && isFinite(ahead.backAt)) {
