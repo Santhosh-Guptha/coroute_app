@@ -4,14 +4,20 @@
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <title>Ride Guardian | Coroute</title>
 <link rel="manifest" href="/watch.webmanifest">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<!-- Follows the system theme: this page allows no inline script (CSP). -->
 <link rel="stylesheet" href="/assets/site.css"><link rel="stylesheet" href="/assets/guardian.css">
 <script src="/assets/guardian.js" defer></script>
 </head><body data-page="guardian">
 <main class="guardian" id="main">
-<a class="guardian__brand" href="/">COROUTE</a>
-<p class="guardian__eyebrow">RIDE GUARDIAN</p>
+<a class="guardian__brand" href="/">CoRoute</a>
+<p class="guardian__eyebrow">Ride guardian</p>
 <h1>Stay close to the journey.</h1>
-<p class="guardian__intro">Private trip updates, shared with you. No account needed.</p>
+<p class="guardian__intro">Private trip updates. No account needed.</p>
 <section class="guardian__card" aria-labelledby="ride-title">
 <p id="connection" role="status" aria-live="polite">Opening shared access…</p>
 <h2 id="ride-title">Personal ride</h2>
@@ -38,7 +44,7 @@
 <a id="location" hidden target="_blank" rel="noreferrer noopener">View last reported location</a>
 <p id="expiry"></p>
 <div id="push-controls" hidden>
-<p>Get important trip updates even when this page is closed. Delivery depends on your browser, connection and notification settings.</p>
+<p>Get important updates even with this page closed. Depends on your browser and settings.</p>
 <label><input type="checkbox" id="push-emergencies" checked> Emergency updates</label>
 <label><input type="checkbox" id="push-trip" checked> Trip starts, pauses and ends</label>
 <button id="enable-alerts" type="button">Enable alerts</button>
@@ -48,6 +54,6 @@
 <div id="pin-box" hidden><label>Link PIN <input id="pin" inputmode="numeric" type="password" maxlength="8" autocomplete="off"></label></div>
 <button id="retry" type="button" hidden>Try again</button>
 </section>
-<p class="guardian__note">Live updates refresh while this page is open. Optional browser alerts appear when supported and enabled. On iPhone, add this page to your Home Screen to enable web alerts. Missing location updates do not necessarily mean an emergency.</p>
+<p class="guardian__note">Updates refresh while this page is open. On iPhone, add it to your Home Screen for alerts. A missing update does not always mean an emergency.</p>
 <noscript>Enable JavaScript to view this private ride. No location is included in this page's source.</noscript>
 </main></body></html>

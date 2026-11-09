@@ -11,13 +11,14 @@
 <meta name="referrer" content="no-referrer">
 <title>Link expired | Coroute</title>
 <meta name="description" content="This Coroute live emergency link has expired. Live links last 30 minutes or until the rider's group closes the alert.">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/live.css">
 <script src="/assets/live.js" defer></script>
@@ -26,7 +27,7 @@
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="live topo" aria-labelledby="live-title">
+  <section class="live" aria-labelledby="live-title">
     <div class="container live__wrap">
 
       <header class="live__head">
@@ -35,7 +36,7 @@
         <p class="t-lead">Live emergency links in Coroute last 30 minutes or until the rider's group closes the alert.</p>
       </header>
 
-      <div class="live__card card card--raised live__card--expired">
+      <div class="live__card live__card--expired">
         <p class="live__expired-line">If someone is in danger, call 112.</p>
         <p class="t-small t-muted">112 is the emergency number in India. Elsewhere, call your local emergency number.</p>
         <div class="live__actions">

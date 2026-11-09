@@ -19,8 +19,8 @@
 <meta name="twitter:title" content="Download for Android | Coroute">
 <meta name="twitter:description" content="Download CoRoute, the group motorcycle touring safety app, for Android 6.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -31,183 +31,108 @@
 <link rel="stylesheet" href="/assets/pages.css">
 <script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/site.js" defer></script>
+<script src="/assets/get.js" defer></script>
 </head>
 <body data-page="get">
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="page-hero topo">
+  <section class="ph" aria-labelledby="hero-title">
     <div class="container">
       <div class="pg-dl">
-        <div class="page-hero__inner">
+        <div class="ph__inner">
           <p class="eyebrow">Get the app</p>
-          <h1>Get <span class="hm-hero__accent">CoRoute.</span></h1>
-          <p class="t-lead">The group ride app for long-distance touring: live convoy map, push-to-talk, crash detection and guardians. Up to __MAX_RIDERS__ riders in one ride group.</p>
-          <div class="cluster cluster--16">
+          <h1 id="hero-title">Get CoRoute.</h1>
+          <p class="ph__sub">Up to __MAX_RIDERS__ riders in one ride group. Free to start.</p>
+          <div class="ph__cta">
             <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
             <!--ios--><a class="btn btn--secondary btn--lg" href="/download/ios" id="ios-download-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
             <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
-            <a class="btn btn--ghost btn--lg" href="/download/32bit">32-bit Android</a>
           </div>
-          <div class="pg-dl__meta">
-            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><!--ios-->Android 6.0+ &amp; iOS 14.0+<!--/ios--><!--no-ios-->Android 6.0+<!--/no-ios--></span>
-            <!--no-ios--><span>iOS app, building now <span class="soon-pill">Coming soon</span></span><!--/no-ios-->
-            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Version __APP_VERSION__</span>
-            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>No trackers or analytics SDKs</span>
-          </div>
+          <!-- 3.55: a code from a QR / share link shows here; get.js fills it with textContent only. -->
+          <div class="code-chip" id="code-chip" role="status" hidden></div>
+          <!--play--><span id="play-store" data-href="__PLAY_STORE_URL__" hidden></span><!--/play-->
+          <ul class="pg-dl__meta" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><!--ios-->Android 6.0+ &amp; iOS 14.0+<!--/ios--><!--no-ios-->Android 6.0+<!--/no-ios--></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Version __APP_VERSION__</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>No trackers</li>
+          </ul>
         </div>
-        <aside class="pg-dl__card" aria-labelledby="which-title" data-reveal>
-          <h2 class="t-h4" id="which-title">Which one do I need?</h2>
-          <p class="t-small t-muted">For Android, tap <strong style="color:var(--c-text)">Download for Android</strong> on almost any modern phone (64-bit). Older phones can use the 32-bit download.</p>
-<!--ios-->          <p class="t-small t-muted">For iPhone, tap <strong style="color:var(--c-text)">Download for iOS</strong> for TestFlight beta or App Store installation.</p>
-<!--/ios--><!--no-ios-->          <p class="t-small t-muted">On an iPhone? The iOS app is building now and coming soon. Until then, a guardian link works in any iPhone browser, no app needed.</p>
-<!--/no-ios-->          <p class="pg-dl__alt">Not sure? Try the main download first. Nothing breaks if it does not install.</p>
-        </aside>
+        <aside class="pg-dl__card" aria-labelledby="which-title">
+          <h2 id="which-title">Which one do I need?</h2>
+          <p><strong>Download for Android</strong> fits almost every modern phone.</p>
+          <p>Older phone? <a class="link" href="/download/32bit">Get the 32-bit build</a>.</p>
+<!--ios-->          <p>On iPhone, tap <strong>Download for iOS</strong>.</p>
+<!--/ios--><!--no-ios-->          <p>On an iPhone? The iOS app is building now and coming soon. Guardian links already work in any iPhone browser.</p>
+<!--/no-ios-->        </aside>
       </div>
     </div>
-    <!--#include route-motif-->
   </section>
 
-  <!-- Requirements -->
-  <section class="section section--tight" style="padding-top:var(--sp-24)" aria-labelledby="req-title">
+  <section class="section section--tight" aria-labelledby="req-title">
     <div class="container">
-      <div class="pg-sec-head" data-reveal>
-        <h2 id="req-title">What you need</h2>
-      </div>
-      <dl class="pg-facts" data-reveal>
-        <div><dt>Phone</dt><dd>Android 6.0 or newer<span>With GPS. Every rider in the group needs the app.</span></dd></div>
-        <div><dt>Account</dt><dd>Phone number, or sign in with Google<span>Plus your bike number (or pillion) and an emergency contact before your first group ride.</span></dd></div>
-        <div><dt>Connection</dt><dd>Mobile data during the ride<span>Short gaps are fine. Your route is kept on the phone and sent later.</span></dd></div>
-        <div><dt>iPhone</dt><dd><!--ios-->iOS 14.0 or newer<span>From the App Store or TestFlight.</span><!--/ios--><!--no-ios-->Building now, coming soon<span>The iOS app is building now and coming soon. It will appear on this page when it is ready.</span><!--/no-ios--></dd></div>
+      <div class="sh"><h2 id="req-title">What you need</h2></div>
+      <dl class="facts">
+        <div><dt>Phone</dt><dd>Android 6.0 or newer<span>With GPS. Every rider needs the app.</span></dd></div>
+        <div><dt>Account</dt><dd>Phone number or Google<span>Plus an emergency contact.</span></dd></div>
+        <div><dt>Connection</dt><dd>Mobile data on the ride<span>Short gaps are fine.</span></dd></div>
+        <div><dt>iPhone</dt><dd><!--ios-->iOS 14.0 or newer<span>From the App Store or TestFlight.</span><!--/ios--><!--no-ios-->Building now, coming soon<span>It will appear here when ready.</span><!--/no-ios--></dd></div>
       </dl>
     </div>
   </section>
 
-  <!-- Permissions -->
-  <section class="section section--surface" id="permissions" aria-labelledby="perm-title">
+  <section class="section section--alt" id="permissions" aria-labelledby="perm-title">
     <div class="container">
-      <div class="split" style="align-items:start">
-        <div class="stack stack--16 pg-sticky" data-reveal>
-          <p class="eyebrow">Permissions</p>
-          <h2 class="t-h2" id="perm-title">What Coroute asks for, and why.</h2>
-          <p class="t-lead">In plain words. Location and microphone are used only while you are in an active ride. Audio privacy is built in: microphone is OFF by default.</p>
-          <p class="t-small t-muted">If Android switches a permission off during a ride, a clear banner tells you and opens the right settings screen in one tap.</p>
+      <div class="split split--top">
+        <div class="pg-sticky"><div class="sh"><p class="eyebrow">Permissions</p><h2 id="perm-title">What CoRoute asks for, and why.</h2><p>Location and mic only during a ride. The mic is off by default.</p></div>
+          <p class="note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg><span>If Android switches one off mid-ride, a banner tells you and opens the right screen.</span></p>
         </div>
-        <div class="pg-perms" data-reveal>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>
-            <span class="pg-perm__name">Location <span class="pg-tag pg-tag--req">Needed</span></span>
-            <span class="pg-perm__why">So your group can see where you are during a ride, and you can see them.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>
-            <span class="pg-perm__name">Location in the background <span class="pg-tag pg-tag--req">Needed</span></span>
-            <span class="pg-perm__why">So your group still sees you with the phone in your pocket or mounted to the handlebar. Only during an active ride.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg>
-            <span class="pg-perm__name">Microphone</span>
-            <span class="pg-perm__why">Off by default. Used only while you hold Talk, or after you switch on hands-free mode yourself. Voice is never recorded or stored.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bell"/></svg>
-            <span class="pg-perm__name">Notifications</span>
-            <span class="pg-perm__why">For ride alerts, emergencies and the ride notification with the riders ahead and behind.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-phone"/></svg>
-            <span class="pg-perm__name">Run in the background</span>
-            <span class="pg-perm__why">Keeps GPS, the intercom and the connection to your group going with the screen locked. Android shows a notification while it runs.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-battery"/></svg>
-            <span class="pg-perm__name">Unrestricted battery use</span>
-            <span class="pg-perm__why">Some phones close apps in the background after a few minutes. This stops that during a long ride.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg>
-            <span class="pg-perm__name">Full-screen alarm</span>
-            <span class="pg-perm__why">So the crash alarm and the hold-to-send SOS screen can open over the lock screen.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg>
-            <span class="pg-perm__name">Emergency text <span class="pg-tag">No permission needed</span></span>
-            <span class="pg-perm__why">If your SOS cannot go over the internet, CoRoute opens your messages app with a ready-to-send text and your location. You send it from your own SIM.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bluetooth"/></svg>
-            <span class="pg-perm__name">Bluetooth connect <span class="pg-tag">Never asked</span></span>
-            <span class="pg-perm__why">Listed in the app, but Coroute does not ask for it and no feature depends on it. On Android 12 and newer it shows as "Nearby devices: not allowed", and that is fine.</span>
-          </div>
-          <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-signal"/></svg>
-            <span class="pg-perm__name">Internet, network state, keep awake, vibrate</span>
-            <span class="pg-perm__why">The basics: talk to the server, notice when the signal drops, keep the ride running, and buzz for alerts.</span>
-          </div>
-          <p class="t-small t-muted" style="padding-top:var(--sp-16)">The motion sensor for crash detection needs no permission. It is read on your phone only, during a ride. Spoken alerts use your phone's own text-to-speech.</p>
-        </div>
+        <ul class="pg-perms" role="list">
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg></span><span class="pg-perm__name">Location <span class="pg-tag pg-tag--req">Needed</span></span><span class="pg-perm__why">So your group sees you, and you see them.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg></span><span class="pg-perm__name">Location in the background <span class="pg-tag pg-tag--req">Needed</span></span><span class="pg-perm__why">Phone in a pocket or on the bars. Only during a ride.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg></span><span class="pg-perm__name">Microphone</span><span class="pg-perm__why">Off by default. Only while you hold Talk. Never recorded.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bell"/></svg></span><span class="pg-perm__name">Notifications</span><span class="pg-perm__why">Ride alerts, emergencies and the ride notification.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-phone"/></svg></span><span class="pg-perm__name">Run in the background</span><span class="pg-perm__why">Keeps GPS and talk going with the screen locked.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-battery"/></svg></span><span class="pg-perm__name">Unrestricted battery use</span><span class="pg-perm__why">Stops the phone closing the ride on long trips.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg></span><span class="pg-perm__name">Full-screen alarm</span><span class="pg-perm__why">The crash alarm and SOS open over the lock screen.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></span><span class="pg-perm__name">Emergency text <span class="pg-tag">No permission needed</span></span><span class="pg-perm__why">Opens your messages app with your location. You send it.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bluetooth"/></svg></span><span class="pg-perm__name">Bluetooth connect <span class="pg-tag">Never asked</span></span><span class="pg-perm__why">Listed, but never requested. "Nearby devices: not allowed" is fine.</span></li>
+          <li class="pg-perm"><span class="pg-perm__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-signal"/></svg></span><span class="pg-perm__name">Internet, network, keep awake, vibrate</span><span class="pg-perm__why">The basics for a running ride.</span></li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <!-- Install + updates -->
   <section class="section" aria-labelledby="install-title">
     <div class="container">
-      <div class="split" style="align-items:start">
-        <div class="stack stack--24" data-reveal>
-          <div class="stack stack--12">
-            <p class="eyebrow">Installing</p>
-            <h2 class="t-h3" id="install-title">Install from the download</h2>
-            <p class="t-small t-muted">The download is an APK file from this site. Android asks once before it installs apps from outside an app store.</p>
-          </div>
-          <ol class="pg-install" role="list">
-            <li><span>Tap <strong>Download for Android</strong> and wait for the file to finish.</span></li>
-            <li><span>Open the downloaded file from the notification or your Downloads folder.</span></li>
-            <li><span>If Android asks, allow your browser to install apps. You can switch this off again afterwards.</span></li>
-            <li><span>Tap <strong>Install</strong>, then <strong>Open</strong>.</span></li>
-            <li><span>Sign up, add your emergency contact and guardians, and run the pre-ride checklist.</span></li>
-          </ol>
-<!--ios-->          <div class="stack stack--12" id="ios" style="margin-top:var(--sp-24)">
-            <p class="eyebrow">iPhone and iPad</p>
-            <h2 class="t-h3" id="install-ios-title">Installing on iOS</h2>
-            <p class="t-small t-muted">iOS devices install apps through Apple TestFlight, the App Store, or developer sideloading.</p>
-          </div>
-          <ol class="pg-install" role="list">
-            <li><span>Tap <strong>Download for iOS</strong> above to open the TestFlight or App Store installation page.</span></li>
-            <li><span>If using TestFlight, install Apple TestFlight from the App Store and tap Start Testing.</span></li>
-            <li><span>For offline IPA installation, install the package using Xcode or AltStore with your Apple ID.</span></li>
-            <li><span>Open CoRoute, allow Location (select Always Allow for safety alarms while the phone is locked), Motion and Notifications.</span></li>
-          </ol><!--/ios-->
-        </div>
-        <div class="stack stack--24" data-reveal>
-          <div class="card">
-            <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-update"/></svg></div>
-            <h3>Updates</h3>
-            <p>When you need a new version, the app tells you and links to the download. Install it over the current app. Your account and your rides stay.</p>
-            <p>The newest version is always on this page.</p>
-          </div>
-          <div class="card">
-            <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div>
-            <h3>Privacy</h3>
-            <p>Your location is shared only with your ride group and the guardians you choose, only during the ride. Voice is never recorded. No ads, no trackers, no sale of data. Memberships are chosen and paid for by UPI in the app.</p>
-            <p><a class="link" href="/privacy">Read the privacy policy</a></p>
-          </div>
-        </div>
-      </div>
+      <div class="sh"><p class="eyebrow">Installing</p><h2 id="install-title">Install from the download</h2><p>Android asks once before installing an app from outside a store.</p></div>
+      <ol class="steps" role="list">
+        <li class="step"><span class="step__n" aria-hidden="true">1</span><h3>Download</h3><p>Tap Download for Android</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">2</span><h3>Open the file</h3><p>From the notification or Downloads</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">3</span><h3>Allow once</h3><p>Let your browser install apps</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">4</span><h3>Install, then Open</h3><p>Takes a few seconds</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">5</span><h3>Set up</h3><p>Contact, guardians, checklist</p></li>
+      </ol>
+      <!--ios-->
+      <div class="sh" id="ios" style="margin-top:40px"><p class="eyebrow">iPhone and iPad</p><h2 id="install-ios-title">Installing on iOS</h2><p>Through TestFlight, the App Store or sideloading.</p></div>
+      <ol class="steps" role="list">
+        <li class="step"><span class="step__n" aria-hidden="true">1</span><h3>Tap Download for iOS</h3><p>Opens TestFlight or the App Store</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">2</span><h3>TestFlight?</h3><p>Install it, then tap Start Testing</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">3</span><h3>Offline IPA</h3><p>Use Xcode or AltStore</p></li>
+        <li class="step"><span class="step__n" aria-hidden="true">4</span><h3>Allow access</h3><p>Location (Always), Motion, Notifications</p></li>
+      </ol><!--/ios-->
+      <ul class="tiles tiles--3 pg-after" role="list">
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-update"/></svg></span><h3>Updates</h3><p>The app tells you. Install over it; rides stay.</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></span><h3>Privacy</h3><p>Shared only with your group. <a href="/privacy">Privacy policy</a></p></li>
+      </ul>
     </div>
   </section>
 
   <section class="section section--tight">
     <div class="container">
-      <div class="pg-cta" data-reveal>
-        <div>
-          <h2>New here?</h2>
-          <p>See how a ride works, from the ride code to the trip report, or read what other riders say.</p>
-        </div>
-        <div class="cluster cluster--16">
-          <a class="btn btn--secondary" href="/how-it-works">How it works</a>
-          <a class="link-arrow" href="/#reviews"><span>Rider reviews</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
-        </div>
+      <div class="cta-band">
+        <div><h2>New here?</h2><p>See how a ride works, from the code to the trip report.</p></div>
+        <div class="cta-band__actions"><a class="btn btn--secondary btn--lg" href="/how-it-works">How it works</a><a class="link-arrow" href="/features"><span>All features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></div>
       </div>
     </div>
   </section>

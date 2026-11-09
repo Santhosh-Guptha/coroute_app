@@ -6,8 +6,8 @@
 <meta name="robots" content="noindex">
 <title>Page not found | Coroute</title>
 <meta name="description" content="This page is not on the Coroute site. Head back to the home page, or see the features, safety tools and download.">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -16,43 +16,20 @@
 <link rel="stylesheet" href="/assets/site.css">
 <script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/site.js" defer></script>
-<style>
-  .nf{min-height:calc(100svh - var(--header-h));display:flex;flex-direction:column;padding-top:clamp(48px,8vw,104px)}
-  .nf > .container{margin-block:auto;width:100%}
-  .nf__inner{display:flex;flex-direction:column;gap:var(--sp-24);max-width:760px}
-  .nf{background:radial-gradient(900px 380px at 85% -10%,var(--c-brand-light),transparent 70%),linear-gradient(180deg,var(--c-surface) 0%,var(--c-sky) 70%,var(--c-bg) 100%)}
-  .nf__code{font-family:var(--font-display);font-weight:800;font-size:var(--fs-xs);color:var(--c-safety-ink);display:inline-flex;width:fit-content;align-items:center;gap:10px;padding:6px 14px 6px 10px;border-radius:var(--r-full);background:var(--c-surface);border:1px solid var(--c-border);box-shadow:var(--shadow-sm)}
-  .nf__code .icon{width:18px;height:18px}
-  .nf h1{font-size:clamp(2.375rem,1.5rem + 3.6vw,4.25rem);line-height:1.04;letter-spacing:-0.035em;font-weight:800;max-width:12em}
-  .nf h1 span{color:var(--c-brand)}
-  @media (prefers-reduced-motion:no-preference){.nf__dot{animation:nf-wait 2.4s var(--ease) infinite}@keyframes nf-wait{50%{opacity:.45}}}
-  .nf .t-lead{color:var(--c-text-2);max-width:32em}
-  .nf__more{display:flex;flex-direction:column;gap:var(--sp-12);margin-top:var(--sp-8)}
-  .nf__more-label{color:var(--c-text-3)}
-  .nf__links{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--sp-8) var(--sp-32)}
-  .nf__links .link-arrow{min-height:44px}
-  .nf__scene{position:relative;flex:none;margin-top:clamp(40px,6vw,72px);height:clamp(120px,16vw,200px)}
-  .nf__scene svg{position:absolute;inset:0;width:100%;height:100%}
-  .nf__end-stripe{fill:var(--c-amber)}
-  .nf__end-bar{fill:var(--c-surface-2);stroke:var(--c-amber);stroke-width:2}
-  .nf__end-post{stroke:var(--c-line-strong);stroke-width:4;stroke-linecap:round}
-  .nf__dot{fill:var(--c-accent);stroke:var(--c-asphalt);stroke-width:4}
-</style>
 </head>
 <body data-page="404">
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
-  <section class="nf topo" aria-labelledby="nf-title">
+  <section class="nf" aria-labelledby="nf-title">
     <div class="container">
       <div class="nf__inner">
         <p class="nf__code"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>Error 404: page not found</p>
-        <h1 id="nf-title">This road <span>doesn't go anywhere.</span></h1>
-        <p class="t-lead">The address may be out of date or mistyped. Turn around and pick up the route from the home page.</p>
+        <h1 id="nf-title">This road doesn't go anywhere.</h1>
+        <p class="t-lead">The link may be old or mistyped.</p>
         <div class="cluster cluster--16">
           <a class="btn btn--primary btn--lg" href="/">Back to Coroute</a>
         </div>
         <nav class="nf__more" aria-label="Popular pages">
-          <p class="t-label nf__more-label">Or take another road</p>
           <ul class="nf__links" role="list">
             <li><a class="link-arrow" href="/features"><span>Features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
             <li><a class="link-arrow" href="/safety"><span>Safety</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
@@ -66,7 +43,7 @@
         <path class="road__edge" d="M-20 170 C 240 170 380 96 620 104 S 880 140 1000 140"/>
         <path class="road" d="M-20 170 C 240 170 380 96 620 104 S 880 140 1000 140"/>
         <path class="road__centre" d="M-20 170 C 240 170 380 96 620 104 S 880 140 990 140"/>
-        <path class="route-line" data-route="reveal" d="M-20 170 C 240 170 380 96 620 104 S 860 136 940 140"/>
+        <path class="route-line" d="M-20 170 C 240 170 380 96 620 104 S 860 136 940 140"/>
         <circle class="nf__dot" cx="940" cy="140" r="9"/>
         <line class="nf__end-post" x1="1022" y1="112" x2="1022" y2="174"/>
         <line class="nf__end-post" x1="1078" y1="112" x2="1078" y2="174"/>

@@ -19,8 +19,8 @@
 <meta name="twitter:title" content="Leaderboards | Coroute">
 <meta name="twitter:description" content="CoRoute rider leaderboards: top rider score, longest ride, most kilometres, most hours and most rides, shown by unique username with rounded totals. Riders can hide their name in the app.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -36,30 +36,22 @@
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
+  <section class="ph" aria-labelledby="hero-title">
     <div class="container">
-      <div class="hm-hero__inner">
+      <div class="ph__inner">
         <p class="eyebrow">Leaderboards</p>
         <h1 id="hero-title">The riders setting the pace.</h1>
-        <p class="t-lead">The top ten CoRoute riders by rider score, longest ride, distance, hours and rides, each shown by their unique username. Totals are rounded, and every rider can hide their name.</p>
-        <div class="hm-hero__cta">
-          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
-          <a class="link-arrow" href="/#impact"><span>All-time community numbers</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
-        </div>
+        <p class="ph__sub">Top ten by score, distance, hours and rides. Usernames only.</p>
+        <div class="ph__cta"><a class="btn btn--primary btn--lg" href="/get">Get the app</a><a class="link-arrow" href="/#impact"><span>All-time numbers</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></div>
       </div>
     </div>
-    <!--#include route-motif-->
   </section>
-
   <!-- Leaderboards: filled by site.js from GET /api/public/leaderboard. Nothing is written into this page; until a board
        has a rider (or when the server has no leaderboard yet) the empty note shows instead. -->
-  <section class="section section--surface lb lb--page" id="leaderboard" aria-labelledby="lb-title" data-leaderboard data-lb-limit="10">
+  <section class="section section--alt lb lb--page" id="leaderboard" aria-labelledby="lb-title" data-leaderboard data-lb-limit="10">
     <div class="container">
       <div class="lb__head">
-        <div class="hm-head">
-          <p class="eyebrow">Top 10</p>
-          <h2 id="lb-title">The top ten on every board.</h2>
-        </div>
+        <div class="sh"><p class="eyebrow">Top 10</p><h2 id="lb-title">The top ten on every board.</h2></div>
         <p class="imp__live" data-lb-live hidden><span class="live-dot" aria-hidden="true"></span><span data-lb-updated></span></p>
       </div>
       <div class="lb-card" data-lb-body hidden>
@@ -82,47 +74,35 @@
     </div>
   </section>
 
-  <!-- How the boards work -->
   <section class="section" aria-labelledby="how-title">
     <div class="container">
-      <div class="hm-head">
-        <p class="eyebrow">How it works</p>
-        <h2 id="how-title">Counted from completed rides.</h2>
-      </div>
-      <dl class="hm-facts">
-        <div><dt>Top rider</dt><dd>Rider score<span>A score the app builds from your completed rides. Your own score and how it is made are in the app.</span></dd></div>
-        <div><dt>Longest ride</dt><dd>One ride, in kilometres<span>The longest single completed ride of each rider.</span></dd></div>
-        <div><dt>Most km and most hours</dt><dd>All time<span>Distance and moving time added up over every completed ride.</span></dd></div>
-        <div><dt>Most rides</dt><dd>Completed rides<span>Every ride you finish with CoRoute, solo or in a group.</span></dd></div>
+      <div class="sh"><p class="eyebrow">How it works</p><h2 id="how-title">Counted from completed rides.</h2></div>
+      <dl class="facts">
+        <div><dt>Top rider</dt><dd>Rider score<span>Built from your completed rides.</span></dd></div>
+        <div><dt>Longest ride</dt><dd>One ride, in km<span>Your longest single ride.</span></dd></div>
+        <div><dt>Most km and hours</dt><dd>All time<span>Added up over every ride.</span></dd></div>
+        <div><dt>Most rides</dt><dd>Completed rides<span>Solo or in a group.</span></dd></div>
       </dl>
     </div>
   </section>
 
-  <!-- Privacy -->
-  <section class="section section--surface" aria-labelledby="lb-privacy-title">
+  <section class="section section--alt" aria-labelledby="lb-privacy-title">
     <div class="container">
-      <div class="hm-head">
-        <p class="eyebrow">Your privacy</p>
-        <h2 id="lb-privacy-title">Your name, your choice.</h2>
-      </div>
-      <ul class="hm-features" role="list">
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div><h3>Username only</h3><p>Boards show the unique username you picked in the app. Never your real name, e-mail, phone, bike or photo.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div><h3>Rounded totals</h3><p>Only rounded totals are shown. No routes, places, dates or times of any ride.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div><h3>Hide your name</h3><p>Prefer to ride unlisted? Hide your name from the leaderboards in the app, and your username is left off every board.</p></li>
+      <div class="sh"><p class="eyebrow">Your privacy</p><h2 id="lb-privacy-title">Your name, your choice.</h2></div>
+      <ul class="tiles tiles--3" role="list">
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span><h3>Username only</h3><p>Never your real name or photo</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></span><h3>Rounded totals</h3><p>No routes, places or times</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></span><h3>Hide your name</h3><p>One switch in the app</p></li>
       </ul>
       <p class="lb__more"><a class="link-arrow" href="/privacy#leaderboards"><span>Leaderboards in the privacy policy</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></p>
     </div>
   </section>
 
-  <!-- CTA -->
   <section class="section section--tight">
     <div class="container">
-      <div class="hm-cta">
+      <div class="cta-band">
         <div><h2>Ride together, climb together.</h2><p>Every completed ride counts. Solo riding is always free.</p></div>
-        <div class="cluster cluster--16">
-          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
-          <a class="link-arrow" href="/how-it-works"><span>How it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
-        </div>
+        <div class="cta-band__actions"><a class="btn btn--primary btn--lg" href="/get">Get the app</a><a class="link-arrow" href="/how-it-works"><span>How it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></div>
       </div>
     </div>
   </section>

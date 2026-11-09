@@ -19,8 +19,8 @@
 <meta name="twitter:title" content="Features for group motorcycle touring | Coroute">
 <meta name="twitter:description" content="Everything a touring group needs on a long motorcycle ride: live convoy map, push-to-talk, crash detection and SOS, guardian links, fuel range, break reminders, saved route maps and trip reports.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -36,81 +36,70 @@
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
+  <section class="ph" aria-labelledby="hero-title">
     <div class="container">
-      <div class="hm-hero__inner">
+      <div class="ph__inner">
         <p class="eyebrow">Features</p>
-        <h1 id="hero-title">Built around <span class="hm-hero__accent">the long ride.</span></h1>
-        <p class="t-lead">Up to __MAX_RIDERS__ riders can join one group. Everything a touring group needs before, during and after a multi-day ride, in one app: on Android today, with the iOS app building now.</p>
-        <nav class="pg-jump" aria-label="On this page">
-          <a href="#before"><span class="pg-jump__n">1</span>Before</a>
-          <a href="#during"><span class="pg-jump__n">2</span>During</a>
-          <a href="#after"><span class="pg-jump__n">3</span>After</a>
-        </nav>
+        <h1 id="hero-title">Built for the long ride.</h1>
+        <p class="ph__sub">Up to __MAX_RIDERS__ riders can join one group. Before, during and after the ride.</p>
+        <div class="ph__cta"><a class="btn btn--primary btn--lg" href="/get">Get the app</a></div>
+        <nav class="jump" aria-label="On this page"><a href="#before">Before</a><a href="#during">During</a><a href="#after">After</a></nav>
       </div>
     </div>
-    <!--#include route-motif-->
   </section>
-
-  <!-- Before the ride -->
-  <section class="section section--surface" id="before" aria-labelledby="before-title">
+  <section class="section section--alt" id="before" aria-labelledby="before-title">
     <div class="container">
-      <h2 class="hm-group__title" id="before-title">Before the ride <small>Plan once, ride light</small></h2>
-      <ul class="hm-features" role="list">
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-stop"/></svg></div><h3>Destination and stops</h3><p>Fuel, food and rest stops set on the route before anyone rolls off, so the whole group rides the same plan.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg></div><h3>Maps saved for the route</h3><p>Save the map along your planned route on Wi-Fi. It stays on your phone, so it still shows where there is no signal.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></div><h3>Fuel profile</h3><p>Tank size and mileage stay on your phone. CoRoute works out your range and reminds you to fill up in time.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg></div><h3>Lead and sweeper</h3><p>The lead picks an experienced rider to stay last and close the formation, so nobody is left behind on a climb.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-list"/></svg></div><h3>Pre-ride checklist</h3><p>Permissions, battery and emergency contact checked before your wheels turn, not discovered missing on the highway.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-heart"/></svg></div><h3>Emergency contact and medical ID</h3><p>Blood group, allergies and a contact number, ready for first responders if they are ever needed.</p></li>
+      <div class="sh"><h2 id="before-title">Before the ride</h2><p>Plan once, ride light.</p></div>
+      <ul class="tiles" role="list">
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-stop"/></svg></span><h3>Destination and stops</h3><p>One plan for everyone</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg></span><h3>Maps for no signal</h3><p>Saved on Wi-Fi at home</p></li>
+        <li class="tile tile--warm"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></span><h3>Fuel profile</h3><p>Range and fill-up reminders</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg></span><h3>Lead and sweeper</h3><p>Nobody left on a climb</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-list"/></svg></span><h3>Pre-ride checklist</h3><p>Battery, permissions, contact</p></li>
+        <li class="tile tile--sos"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-medical"/></svg></span><h3>Medical ID</h3><p>Blood group and allergies</p></li>
       </ul>
     </div>
   </section>
 
-  <!-- During the ride -->
   <section class="section" id="during" aria-labelledby="during-title">
     <div class="container">
-      <h2 class="hm-group__title" id="during-title">During the ride <small>Together on the road, looked after</small></h2>
-      <ul class="hm-features" role="list">
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg></div><h3>Live convoy map</h3><p>Every rider on one shared map, updated every few seconds, with who is ahead and who is behind by road distance.</p></li>
-        <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg></div><h3>Push-to-talk intercom</h3><p>Hold to talk to the group or to one rider, through your helmet headset or the phone. Voice is relayed live and never recorded.</p></li>
-        <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg></div><h3>Microphone off by default</h3><p>Nothing is heard until you hold Talk, or switch on hands-free mode yourself, which shows a clear on-air sign.</p></li>
-        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg></div><h3>Crash detection</h3><p>Runs on your phone through the ride. A hard fall starts a 15 second alarm you can cancel before anyone is told.</p></li>
-        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg></div><h3>Hold-to-send SOS</h3><p>Your group hears an alarm and gets a route to you, guardians are notified, and without internet a ready-to-send text with your location opens.</p></li>
-        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Guardian live links</h3><p>Family follow the ride in any browser, at the level you choose. They are told about a crash, an SOS or a long unexpected stop.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></div><h3>Fuel range in the group</h3><p>Share just your remaining range, and find fuel, puncture repair, food and medical help within reach of the road.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-rest"/></svg></div><h3>Break reminders</h3><p>After about two hours of riding without a proper stop, a gentle reminder to take ten minutes off the bike.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div><h3>Nobody quietly dropped</h3><p>The lead and the sweeper are told when a rider falls behind the sweeper, stops sending updates or runs low on battery.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg></div><h3>Glove-friendly ride screen</h3><p>Big controls for a handlebar mount, readable in direct sun, with the screen kept awake while you ride.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></div><h3>Short gaps are fine</h3><p>When the signal drops your route is kept on the phone and sent later, and an SOS keeps retrying until it gets through.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg></div><h3>Settings changed mid-ride?</h3><p>If Android switches off a permission the ride needs, a clear banner says so and opens the right settings screen in one tap.</p></li>
+      <div class="sh"><h2 id="during-title">During the ride</h2><p>Together on the road, and looked after.</p></div>
+      <ul class="tiles" role="list">
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg></span><h3>Live convoy map</h3><p>Who is ahead, who is behind</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg></span><h3>Push-to-talk</h3><p>Helmet or phone, never recorded</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg></span><h3>Mic off by default</h3><p>Only while you hold Talk</p></li>
+        <li class="tile tile--sos"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg></span><h3>Crash detection</h3><p>15 seconds to cancel</p></li>
+        <li class="tile tile--sos"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg></span><h3>Hold-to-send SOS</h3><p>Group, guardians, a text</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></span><h3>Guardian links</h3><p>Family follow in a browser</p></li>
+        <li class="tile tile--warm"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></span><h3>Fuel and essentials</h3><p>Fuel, repair, food, medical</p></li>
+        <li class="tile tile--warm"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-rest"/></svg></span><h3>Break reminders</h3><p>About every two hours</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span><h3>Nobody quietly dropped</h3><p>The lead hears who falls back</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg></span><h3>Glove-friendly screen</h3><p>Big controls, readable in sun</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></span><h3>Short gaps are fine</h3><p>Kept and sent later</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg></span><h3>Setting changed?</h3><p>One tap to fix it</p></li>
       </ul>
     </div>
   </section>
 
-  <!-- After the ride -->
-  <section class="section section--surface" id="after" aria-labelledby="after-title">
+  <section class="section section--alt" id="after" aria-labelledby="after-title">
     <div class="container">
-      <h2 class="hm-group__title" id="after-title">After the ride <small>A story to keep, private by design</small></h2>
-      <ul class="hm-features" role="list">
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-history"/></svg></div><h3>Trip report</h3><p>Distance, moving time, stops and every rider's route on one map, with the ride's timeline beneath it.</p></li>
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-replay"/></svg></div><h3>Route replay</h3><p>Watch the group's ride play back on the map, rider by rider, from the first morning to the last stop.</p></li>
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-share"/></svg></div><h3>Share card and GPX</h3><p>One image for the group chat, and the route as a GPX file for your own archive or another app.</p></li>
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-message"/></svg></div><h3>Rider stories</h3><p>Rate the trip and tell the story. If you allow it and the CoRoute team approves it, it appears in <a href="/#reviews">rider reviews</a>.</p></li>
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div><h3>Links that end</h3><p>Guardian links stop when the ride ends. Emergency links stop after 30 minutes or when the alert is closed.</p></li>
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div><h3>Private by default</h3><p>No ads, no trackers, no sale of data. Recorded routes are deleted after 90 days, and you can delete your account in the app.</p></li>
+      <div class="sh"><h2 id="after-title">After the ride</h2><p>A story to keep, private by design.</p></div>
+      <ul class="tiles" role="list">
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-history"/></svg></span><h3>Trip report</h3><p>Distance, time, stops, routes</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-replay"/></svg></span><h3>Route replay</h3><p>The whole group, rider by rider</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-share"/></svg></span><h3>Share card and GPX</h3><p>For the chat or your archive</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-message"/></svg></span><h3>Rider stories</h3><p>Shared with consent, checked first</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></span><h3>Links that end</h3><p>When the ride or alert ends</p></li>
+        <li class="tile"><span class="tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></span><h3>Private by default</h3><p>No ads, no trackers</p></li>
       </ul>
     </div>
   </section>
 
-  <!-- CoRoute impact, live (3.55, compact): filled by site.js from GET /api/public/impact-stats; hidden until real -->
+  <!-- CoRoute impact (compact): filled by site.js from the all-time stats; hidden until real numbers load -->
   <section class="section section--tight imp imp--compact" id="impact" aria-labelledby="impact-title" data-impact hidden>
     <div class="container">
       <div class="imp__head">
-        <div class="hm-head" style="margin-bottom:0">
-          <p class="eyebrow">CoRoute impact, live</p>
-          <h2 id="impact-title">These features, on real roads.</h2>
-        </div>
+        <div class="sh"><p class="eyebrow">CoRoute impact, live</p><h2 id="impact-title">These features, on real roads.</h2></div>
         <p class="imp__live"><span class="live-dot" aria-hidden="true"></span><span data-impact-updated>Live</span></p>
       </div>
       <dl class="imp-grid" aria-label="CoRoute riders, all time">
@@ -121,19 +110,15 @@
         <div class="imp-tile" data-impact-key="longestTrip" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Longest trip, km</dt><dd data-impact-value>&mdash;</dd></div>
         <div class="imp-tile" data-impact-key="bikes" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>Bikes on CoRoute</dt><dd data-impact-value>&mdash;</dd></div>
       </dl>
-      <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>Real totals from real riders, rounded down. Never per rider or per place. <a class="link" href="/#impact">More live numbers</a></p>
+      <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg><span>Real totals, rounded down. Never per rider or per place. <a class="link" href="/#impact">More live numbers</a></span></p>
     </div>
   </section>
 
-  <!-- CTA -->
   <section class="section section--tight">
     <div class="container">
-      <div class="hm-cta">
-        <div><h2>Free to join a ride.</h2><p>Invited riders join free of charge. The rider who hosts the ride chooses a membership inside the app.</p></div>
-        <div class="cluster cluster--16">
-          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
-          <a class="link-arrow" href="/safety"><span>How safety works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
-        </div>
+      <div class="cta-band">
+        <div><h2>Free to join a ride.</h2><p>Invited riders pay nothing. The host picks a plan in the app.</p></div>
+        <div class="cta-band__actions"><a class="btn btn--primary btn--lg" href="/get">Get the app</a><a class="link-arrow" href="/safety"><span>How safety works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></div>
       </div>
     </div>
   </section>

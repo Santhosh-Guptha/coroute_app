@@ -2,7 +2,7 @@
 <header class="site-header" data-header>
   <div class="site-header__inner container">
     <a class="brand" href="/" aria-label="CoRoute home">
-      <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><rect width="100" height="100" rx="22" fill="#0F171D"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#5CCAD3" stroke-width="15" stroke-linecap="round"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#0F171D" stroke-width="2.5" stroke-dasharray="5 5"/><circle cx="21.1" cy="72.3" r="9.5" fill="#0F171D"/><circle cx="21.1" cy="72.3" r="7" fill="#F2F6F8"/><circle cx="50" cy="50" r="9.5" fill="#0F171D"/><circle cx="50" cy="50" r="7" fill="#F2F6F8"/><circle cx="78.9" cy="27.7" r="9.5" fill="#0F171D"/><circle cx="78.9" cy="27.7" r="7" fill="#F0A070"/></svg>
+      <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><rect width="100" height="100" rx="24" fill="#2B7A8C"/><path d="M22 80 C22 38 78 62 78 20" fill="none" stroke="#F6F4F0" stroke-width="13" stroke-linecap="round"/><circle cx="23" cy="71" r="8.5" fill="#2B7A8C"/><circle cx="23" cy="71" r="6" fill="#FFFFFF"/><circle cx="50" cy="50" r="8.5" fill="#2B7A8C"/><circle cx="50" cy="50" r="6" fill="#FFFFFF"/><circle cx="77" cy="29" r="8.5" fill="#2B7A8C"/><circle cx="77" cy="29" r="6" fill="#E9A55B"/></svg>
       <span class="brand__word" aria-hidden="true">CoRoute</span>
     </a>
     <nav class="site-nav" aria-label="Main">
@@ -12,13 +12,13 @@
         <li><a class="site-nav__link" href="/how-it-works" data-nav="how-it-works">How it works</a></li>
         <li><a class="site-nav__link" href="/leaderboard" data-nav="leaderboard">Leaderboard</a></li>
         <li><a class="site-nav__link" href="/#pricing">Pricing</a></li>
-        <li><a class="site-nav__link" href="/#reviews">Reviews</a></li>
       </ul>
     </nav>
     <div class="site-header__actions">
-      <button class="theme-toggle-btn" id="theme-toggle" type="button" aria-label="Switch between light and dark theme">
-        <svg class="icon i-moon" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        <svg class="icon i-sun" aria-hidden="true" focusable="false" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <button class="theme-toggle-btn" id="theme-toggle" type="button" data-mode="system" aria-label="Theme: system. Change theme" title="Theme: system">
+        <svg class="icon i-system" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-system"/></svg>
+        <svg class="icon i-sun" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sun"/></svg>
+        <svg class="icon i-moon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-moon"/></svg>
       </button>
       <a class="btn btn--primary site-header__cta" href="/get" data-nav="get">Get the app</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu">
@@ -36,18 +36,17 @@
         <li><a class="mobile-menu__link" href="/how-it-works" data-nav="how-it-works">How it works<svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
         <li><a class="mobile-menu__link" href="/leaderboard" data-nav="leaderboard">Leaderboard<svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
         <li><a class="mobile-menu__link" href="/#pricing">Pricing<svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
-        <li><a class="mobile-menu__link" href="/#reviews">Reviews<svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
         <li><a class="mobile-menu__link" href="/get" data-nav="get">Get the app<svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
       </ul>
       <ul class="mobile-menu__minor">
         <li><a href="/about" data-nav="about">About</a></li>
         <li><a href="/privacy" data-nav="privacy">Privacy</a></li>
-        <li><a href="/#feedback">Contact</a></li>
+        <li><a href="/about#feedback">Contact</a></li>
       </ul>
     </nav>
     <div class="mobile-menu__foot">
       <a class="btn btn--primary btn--lg btn--block" href="/download">Download for Android</a>
-      <!--ios--><a class="btn btn--secondary btn--lg btn--block" href="/download/ios" style="margin-top:var(--sp-8)">Download for iOS</a><!--/ios-->
+      <!--ios--><a class="btn btn--secondary btn--lg btn--block" href="/download/ios">Download for iOS</a><!--/ios-->
       <!--no-ios--><button class="btn btn--soon btn--lg btn--block" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
       <p class="t-xs t-muted t-center"><!--ios-->Android 6.0+ or iOS 14.0+.<!--/ios--><!--no-ios-->Android 6.0 or newer, iOS coming soon.<!--/no-ios--> Free to start. No ads.</p>
     </div>

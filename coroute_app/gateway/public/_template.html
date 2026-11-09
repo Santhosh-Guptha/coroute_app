@@ -25,42 +25,38 @@
 <meta name="twitter:title" content="PAGE_TITLE | Coroute">
 <meta name="twitter:description" content="PAGE_DESCRIPTION">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
-<link rel="stylesheet" href="/assets/home.css">
-<script>document.documentElement.classList.add('js')</script>
-<script src="/assets/site.js" defer></script>
-<!-- Optional page-only styles go here, in one <style> block, using the tokens from site.css. -->
-</head>
-<body data-page="PAGE_KEY">
-<!--#include header-->
-<main id="main" class="site-main" tabindex="-1">
+<link rel="stylesheet" href="/assets/pages.css">
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
+<script src="/assets/site.js" defer></scrip<main id="main" class="site-main" tabindex="-1">
 
-  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
+  <section class="ph" aria-labelledby="hero-title">
     <div class="container">
-      <div class="hm-hero__inner">
+      <div class="ph__inner">
         <p class="eyebrow">PAGE_EYEBROW</p>
         <h1 id="hero-title">PAGE_HEADLINE</h1>
-        <p class="t-lead">PAGE_LEAD</p>
-        <div class="hm-hero__cta">
-          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
-        </div>
+        <p class="ph__sub">PAGE_SUBHEAD (one line)</p>
+        <div class="ph__cta"><a class="btn btn--primary btn--lg" href="/get">Get the app</a></div>
       </div>
     </div>
-    <!--#include route-motif-->
   </section>
 
-  <section class="section section--surface">
+  <section class="section section--alt" aria-labelledby="s1-title">
     <div class="container">
-      <div class="hm-head">
-        <p class="eyebrow">Section eyebrow</p>
+      <div class="sh"><h2 id="s1-title">Section headline</h2><p>One short line.</p></div>
+      <!-- <ul class="tiles" role="list"><li class="tile"><span class="tile__icon">icon</span><h3>Three to five words</h3><p>One short line</p></li></ul> -->
+    </div>
+  </section>
+
+yebrow</p>
         <h2>Section headline</h2>
         <p>One or two short sentences.</p>
       </div>

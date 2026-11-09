@@ -146,8 +146,8 @@
   }
   /* 3.55: cards on every page enter like the app's lists, a short stagger per row. Pages only mark their blocks with
      classes; this tags them, and siblings that reveal together get increasing delays (capped, so nothing waits long). */
-  var AUTO_REVEAL = '.hm-features > li, .hm-steps > li, .hm-facts > div, .philosophy-grid > *, .pg-never > *, .pg-perms > *, ' +
-    '.pg-faq details, .hm-cta, .pg-cta, .hm-notice, .pg-dl__card, .legal-summary, .imp-grid > .imp-tile, .imp-safety, .nf__links > li';
+  var AUTO_REVEAL = '.tiles > li, .steps > li, .facts > div, .faq details, .cta-band, .note, .pg-perms > li, ' +
+    '.imp-grid > .imp-tile, .imp-safety, .nf__links > li, .px-solo, .px-free, .hb-card';
   $$(AUTO_REVEAL).forEach(function (el) {
     if (!el.hasAttribute('data-reveal') && !el.closest('[data-pinned]')) el.setAttribute('data-reveal', '');
   });
@@ -749,22 +749,44 @@
     if (win.setInterval) win.setInterval(loadUsage, 60000);
   }
 
-  /* ---------- Theme toggle (light / dark), remembered in this browser only ---------- */
+  /* ---------- Theme toggle (system / light / dark), remembered in this browser only ----------
+     "system" follows the phone or computer setting (no data-theme). The head of every page applies a saved choice
+     before the first paint, so there is no flash of the wrong theme. */
   var themeBtn = doc.getElementById('theme-toggle');
-  var savedTheme = null;
-  try { savedTheme = win.localStorage.getItem('coroute_theme'); } catch (e) { /* storage blocked */ }
-  if (savedTheme !== 'dark' && savedTheme !== 'light') savedTheme = mq('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  root.setAttribute('data-theme', savedTheme);
+  var themeSetters = $$('[data-theme-set]');
+  var THEME_ORDER = ['system', 'light', 'dark'];
+  var THEME_BG = { light: '#F6F4F0', dark: '#15181C' };
+  var themeMetas = $$('meta[name="theme-color"]');
+  themeMetas.forEach(function (m) { m.setAttribute('data-default', m.getAttribute('content') || ''); });
+  var readTheme = function () {
+    var t = null;
+    try { t = win.localStorage.getItem('coroute_theme'); } catch (e) { /* storage blocked */ }
+    return t === 'dark' || t === 'light' ? t : 'system';
+  };
+  var applyTheme = function (mode, save) {
+    if (mode === 'light' || mode === 'dark') root.setAttribute('data-theme', mode);
+    else { mode = 'system'; root.removeAttribute('data-theme'); }
+    themeMetas.forEach(function (m) { m.setAttribute('content', mode === 'system' ? m.getAttribute('data-default') : THEME_BG[mode]); });
+    if (themeBtn) {
+      themeBtn.setAttribute('data-mode', mode);
+      themeBtn.setAttribute('aria-label', 'Theme: ' + mode + '. Change theme');
+      themeBtn.setAttribute('title', 'Theme: ' + mode);
+    }
+    themeSetters.forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-theme-set') === mode ? 'true' : 'false'); });
+    if (save) {
+      try { if (mode === 'system') win.localStorage.removeItem('coroute_theme'); else win.localStorage.setItem('coroute_theme', mode); } catch (e) { /* storage blocked */ }
+    }
+  };
+  applyTheme(readTheme(), false);
   if (themeBtn) {
-    var syncThemeBtn = function () { themeBtn.setAttribute('aria-pressed', root.getAttribute('data-theme') === 'dark' ? 'true' : 'false'); };
-    syncThemeBtn();
     themeBtn.addEventListener('click', function () {
-      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      root.setAttribute('data-theme', next);
-      syncThemeBtn();
-      try { win.localStorage.setItem('coroute_theme', next); } catch (e) { /* storage blocked */ }
+      var cur = themeBtn.getAttribute('data-mode') || 'system';
+      applyTheme(THEME_ORDER[(THEME_ORDER.indexOf(cur) + 1) % THEME_ORDER.length], true);
     });
   }
+  themeSetters.forEach(function (b) {
+    b.addEventListener('click', function () { applyTheme(b.getAttribute('data-theme-set'), true); });
+  });
 
   /* ---------- CoRoute impact, all time (3.55b): real totals from real riders since CoRoute began ----------
      Source: GET /api/public/alltime-stats -> { ok, enabled, scope: 'all-time', stats: { ridersWithRide, registeredRiders,
@@ -930,7 +952,7 @@
   var lbBoxes = doc.querySelectorAll ? Array.prototype.slice.call(doc.querySelectorAll('[data-leaderboard]')) : [];
   if (lbBoxes.length && 'fetch' in win) {
     var LB = {
-      topScore: { field: 'score', label: 'Top rider', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'pts', sub: 'rides' },
+      topScore: { field: 'score', label: 'Top rider', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: '/ 100', sub: 'rides' },
       longestRide: { field: 'km', label: 'Longest ride', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'km' },
       mostKm: { field: 'km', label: 'Most km', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'km' },
       mostHours: { field: 'hours', label: 'Most hours', fmt: function (n) { return Math.floor(n).toLocaleString('en-IN'); }, unit: 'h' },
