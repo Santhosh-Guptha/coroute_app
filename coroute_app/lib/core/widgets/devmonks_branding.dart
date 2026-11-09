@@ -22,7 +22,7 @@ class DevMonksBadge extends StatelessWidget {
           AppConstants.brandName,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800, letterSpacing: 0.5),
+          style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w500),
         ),
       );
     }
@@ -33,7 +33,7 @@ class DevMonksBadge extends StatelessWidget {
           TextSpan(text: 'Powered by ', style: AppText.caption),
           TextSpan(
             text: AppConstants.brandName,
-            style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800),
+            style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w500),
           ),
         ],
       ),

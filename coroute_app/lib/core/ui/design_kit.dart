@@ -8,7 +8,7 @@ import 'ui_tokens.dart';
 /// corners, borders, weights and colours stay identical across the app.
 /// Colours come from [AppTheme] getters, so light and dark both work.
 
-/// A white (or dark) card with a 2 px hairline border and 18 px corners.
+/// A flat card with a 1 px hairline border and 14 px corners.
 /// [accent] draws the teal border used for the "selected / best" state,
 /// [warning] the amber one, [tinted] fills the card with the pale teal tint.
 class DsCard extends StatelessWidget {
@@ -50,7 +50,7 @@ class DsCard extends StatelessWidget {
                 : AppTheme.border);
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(radius),
-      side: BorderSide(color: border, width: 2, style: dashed ? BorderStyle.none : BorderStyle.solid),
+      side: BorderSide(color: border, width: 1, style: dashed ? BorderStyle.none : BorderStyle.solid),
     );
     Widget body = Padding(padding: padding, child: child);
     if (dashed) {
@@ -80,8 +80,8 @@ class _DashedBorderPainter extends CustomPainter {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    final rrect = RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)).deflate(1);
+      ..strokeWidth = 1.5;
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)).deflate(0.75);
     final path = Path()..addRRect(rrect);
     const dash = 6.0, gap = 5.0;
     for (final metric in path.computeMetrics()) {
@@ -126,7 +126,7 @@ class DsHeroCard extends StatelessWidget {
   }
 }
 
-/// Small uppercase section header ("BIKE STATUS").
+/// Small sentence-case section header ("Bike status").
 class DsSectionHeader extends StatelessWidget {
   final String text;
   final Widget? trailing;
@@ -134,7 +134,7 @@ class DsSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = Text(text.toUpperCase(), style: AppText.overline);
+    final label = Text(text, style: AppText.overline);
     if (trailing == null) return label;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -212,7 +212,7 @@ class DsRoundButton extends StatelessWidget {
     this.iconColor,
     this.borderColor,
     this.background,
-    this.borderWidth = 2,
+    this.borderWidth = 1,
   });
 
   @override
@@ -265,8 +265,8 @@ class DsButton extends StatelessWidget {
     BorderSide side = BorderSide.none;
     switch (tone) {
       case DsButtonTone.brand:
-        bg = AppTheme.brand;
-        fg = Colors.white;
+        bg = AppTheme.primary;
+        fg = AppTheme.onPrimary;
       case DsButtonTone.sos:
         bg = AppTheme.sos;
         fg = Colors.white;
@@ -275,17 +275,17 @@ class DsButton extends StatelessWidget {
         fg = AppTheme.accentText;
       case DsButtonTone.warn:
         bg = AppTheme.warnText;
-        fg = Colors.white;
+        fg = AppTheme.isLight ? Colors.white : AppTheme.bg;
       case DsButtonTone.outline:
         bg = AppTheme.card;
         fg = AppTheme.text;
-        side = BorderSide(color: AppTheme.border, width: 2);
+        side = BorderSide(color: AppTheme.border2, width: 1);
     }
     return SizedBox(
       height: height,
       child: Material(
         color: onPressed == null ? bg.withValues(alpha: 0.5) : bg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: side),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md), side: side),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
@@ -302,7 +302,7 @@ class DsButton extends StatelessWidget {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: fg, fontSize: fontSize, fontWeight: FontWeight.w800),
+                    style: TextStyle(color: fg, fontSize: fontSize, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
@@ -314,7 +314,7 @@ class DsButton extends StatelessWidget {
   }
 }
 
-/// Small rounded label chip ("LEAD", "BEST", "REGROUP").
+/// Small pill label chip ("Lead", "Best", "Regroup"). Sentence case.
 class DsChip extends StatelessWidget {
   final String text;
   final bool warning;
@@ -328,7 +328,7 @@ class DsChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final fg = color ??
         (inverse
-            ? Colors.white
+            ? AppTheme.bg
             : warning
                 ? AppTheme.warnText
                 : AppTheme.accentText);
@@ -339,11 +339,11 @@ class DsChip extends StatelessWidget {
                 ? AppTheme.warnTint
                 : AppTheme.tint);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(7)),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
       child: Text(
-        text.toUpperCase(),
-        style: TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1),
+        text,
+        style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w500, height: 1.35),
       ),
     );
   }
@@ -381,7 +381,7 @@ class DsIconTile extends StatelessWidget {
       height: height,
       child: Material(
         color: background ?? AppTheme.soft,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -394,7 +394,7 @@ class DsIconTile extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: fg, fontSize: fontSize, fontWeight: FontWeight.w800),
+                style: TextStyle(color: fg, fontSize: fontSize, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -426,7 +426,7 @@ class DsAvatar extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: filled ? AppTheme.brand : (background ?? AppTheme.card),
-        border: filled ? Border.all(color: AppTheme.card, width: size >= 52 ? 4 : 2) : Border.all(color: ring, width: size >= 44 ? 3 : 2),
+        border: filled ? Border.all(color: AppTheme.card, width: size >= 52 ? 3 : 2) : Border.all(color: ring, width: size >= 44 ? 2 : 1.5),
       ),
       child: Text(
         initials.toUpperCase(),
@@ -435,7 +435,7 @@ class DsAvatar extends StatelessWidget {
         style: TextStyle(
           color: filled ? Colors.white : ring,
           fontSize: size * 0.32,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -476,7 +476,7 @@ class DsListRow extends StatelessWidget {
             Icon(icon, size: 22, color: AppTheme.accentText),
             const SizedBox(width: 12),
           ],
-          Expanded(child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+          Expanded(child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w500))),
           if (value != null) ...[
             const SizedBox(width: Space.s8),
             // Capped so a long value ("Manage & service") at a large text
@@ -488,7 +488,7 @@ class DsListRow extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.end,
-                style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: valueColor ?? AppTheme.accentText),
+                style: AppText.body.copyWith(fontWeight: FontWeight.w600, color: valueColor ?? AppTheme.accentText),
               ),
             ),
           ],
@@ -523,7 +523,7 @@ class DsSwitchRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text(label, style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w500)),
                 if (subtitle != null) Text(subtitle!, style: AppText.caption),
               ],
             ),
@@ -550,7 +550,7 @@ class DsStatCell extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppText.caption.copyWith(fontSize: 11, fontWeight: FontWeight.w700)),
+          Text(label, style: AppText.caption.copyWith(fontSize: 12, fontWeight: FontWeight.w500)),
           const SizedBox(height: 2),
           FittedBox(
             fit: BoxFit.scaleDown,
@@ -581,10 +581,10 @@ class DsSegment<T> extends StatelessWidget {
             child: SizedBox(
               height: 52,
               child: Material(
-                color: values[i] == selected ? AppTheme.brand : AppTheme.card,
+                color: values[i] == selected ? AppTheme.primary : AppTheme.card,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  side: BorderSide(color: values[i] == selected ? AppTheme.brand : AppTheme.border, width: 2),
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  side: BorderSide(color: values[i] == selected ? AppTheme.primary : AppTheme.border2, width: 1),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
@@ -596,9 +596,9 @@ class DsSegment<T> extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: values[i] == selected ? Colors.white : AppTheme.text,
+                        color: values[i] == selected ? AppTheme.onPrimary : AppTheme.text,
                         fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
@@ -612,7 +612,7 @@ class DsSegment<T> extends StatelessWidget {
   }
 }
 
-/// Progress track (fuel range, trip progress) — 14 px, teal on map tint.
+/// Progress track (fuel range, trip progress), teal on map tint.
 class DsProgressBar extends StatelessWidget {
   final double value;
   final Color? color;
@@ -631,7 +631,7 @@ class DsProgressBar extends StatelessWidget {
             FractionallySizedBox(
               widthFactor: value.clamp(0.0, 1.0),
               child: DecoratedBox(
-                decoration: BoxDecoration(color: color ?? AppTheme.brand, borderRadius: BorderRadius.circular(height / 2)),
+                decoration: BoxDecoration(color: color ?? AppTheme.primary, borderRadius: BorderRadius.circular(height / 2)),
               ),
             ),
           ],
@@ -641,9 +641,9 @@ class DsProgressBar extends StatelessWidget {
   }
 }
 
-/// Soft shadow used under floating cards on the map.
+/// Very soft shadow used under floating cards on the map (no glow).
 List<BoxShadow> dsFloatingShadow() => [
-      BoxShadow(color: AppTheme.shadow.withValues(alpha: AppTheme.isLight ? 0.14 : 0.5), blurRadius: 24, offset: const Offset(0, 8)),
+      BoxShadow(color: AppTheme.shadow, blurRadius: 16, offset: const Offset(0, 4)),
     ];
 
 /// Standard screen padding from the canvas (56 top handled by SafeArea).

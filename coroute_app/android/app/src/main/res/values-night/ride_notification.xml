@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Big ride notification (3.15), dark notification shade: lighter tones for contrast. -->
+<!-- Big ride notification (3.15), dark notification shade. Design system v3.55 dark tokens:
+     soft charcoal, warm off-white text, lighter teal. SOS keeps the deeper red (#D93A2F) as a
+     button fill so its white label stays >= 4.5:1. -->
 <resources>
-    <color name="ride_notif_accent">#5AA9FF</color>
-    <color name="ride_notif_critical">#FF6B6B</color>
-    <color name="ride_notif_warning">#FFB74D</color>
-    <color name="ride_notif_positive">#81C784</color>
-    <color name="ride_notif_btn_bg">#2B333E</color>
-    <color name="ride_notif_btn_text">#F1F4F7</color>
-    <color name="ride_notif_sos_bg">#D32F2F</color>
+    <color name="ride_notif_accent">#5FB3C4</color>
+    <color name="ride_notif_critical">#E5675C</color>
+    <color name="ride_notif_warning">#E0B15A</color>
+    <color name="ride_notif_positive">#6CC08B</color>
+    <color name="ride_notif_btn_bg">#242932</color>
+    <color name="ride_notif_btn_text">#E7E3DC</color>
+    <color name="ride_notif_sos_bg">#D93A2F</color>
     <color name="ride_notif_sos_text">#FFFFFF</color>
-    <color name="ride_notif_surface_normal">#152A31</color>
-    <color name="ride_notif_surface_warning">#342914</color>
-    <color name="ride_notif_surface_critical">#351D22</color>
-    <color name="ride_notif_surface_positive">#182E24</color>
+    <color name="ride_notif_surface_normal">#1F3A40</color>
+    <color name="ride_notif_surface_warning">#3A2C1D</color>
+    <color name="ride_notif_surface_critical">#351F1E</color>
+    <color name="ride_notif_surface_positive">#1E3327</color>
 </resources>

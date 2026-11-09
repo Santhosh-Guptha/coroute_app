@@ -7,7 +7,25 @@ import 'app_theme.dart';
 
 /// Dims map tiles in the dark theme so a night ride is not a bright white
 /// screen (easier on the eyes, and an OLED screen draws less power).
-Widget Function(BuildContext, Widget, TileImage)? get mapTileBuilder => AppTheme.isLight ? null : darkModeTileBuilder;
+///
+/// Only the OSM light tiles exist (offline packs depend on that URL), so the
+/// dark map is made on the phone: [softDarkTileBuilder] turns the tile into
+/// a low-contrast, slightly warm charcoal map instead of the stark
+/// black-and-white of a plain colour inversion.
+Widget Function(BuildContext, Widget, TileImage)? get mapTileBuilder => AppTheme.isLight ? null : softDarkTileBuilder;
+
+/// Luminance-inverted grey with a compressed range: white land becomes
+/// about #23272C (close to the dark surface token) and black labels become
+/// a warm grey about #A5A29B, so nothing on the map glows.
+const ColorFilter softDarkTileFilter = ColorFilter.matrix(<double>[
+  -0.2126 * 0.5098, -0.7152 * 0.5098, -0.0722 * 0.5098, 0, 165, //
+  -0.2126 * 0.4824, -0.7152 * 0.4824, -0.0722 * 0.4824, 0, 162, //
+  -0.2126 * 0.4353, -0.7152 * 0.4353, -0.0722 * 0.4353, 0, 155, //
+  0, 0, 0, 1, 0, //
+]);
+
+Widget softDarkTileBuilder(BuildContext context, Widget tileWidget, TileImage tile) =>
+    ColorFiltered(colorFilter: softDarkTileFilter, child: tileWidget);
 
 /// The tile source every map uses (3.16): tiles saved on the phone first, the
 /// network after, both with the app's User-Agent. Plain network when the cache

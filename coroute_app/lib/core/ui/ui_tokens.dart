@@ -18,14 +18,18 @@ class Radii {
   Radii._();
 
   static const double sm = 8;
-  static const double md = 14;
-  static const double lg = 18;
+
+  /// Buttons, inputs, inset tiles.
+  static const double md = 12;
+
+  /// Cards (design system v3.55: 14).
+  static const double lg = 14;
 
   /// Hero cards and large panels.
-  static const double xl = 22;
+  static const double xl = 16;
 
   /// Top corners of bottom sheets.
-  static const double sheet = 28;
+  static const double sheet = 20;
 
   static const BorderRadius smAll = BorderRadius.all(Radius.circular(sm));
   static const BorderRadius mdAll = BorderRadius.all(Radius.circular(md));
@@ -45,8 +49,10 @@ class Motion {
   static const Curve curve = Curves.easeOutCubic;
 }
 
-/// The five text levels. Getters, so they follow the light/dark switch.
-/// Change colour or weight with `copyWith`, never the size scale.
+/// The text levels. Getters, so they follow the light/dark switch.
+/// Change colour with `copyWith`, never the size scale. Design system v3.55:
+/// 400 body, 500 labels, 600 titles, 700 only for big numbers; sentence case;
+/// normal letter-spacing; line height 1.4-1.5.
 class AppText {
   AppText._();
 
@@ -54,8 +60,8 @@ class AppText {
   static TextStyle get metric => TextStyle(
         color: AppTheme.text,
         fontSize: 32,
-        fontWeight: FontWeight.w800,
-        height: 1.1,
+        fontWeight: FontWeight.w700,
+        height: 1.15,
         fontFeatures: const [FontFeature.tabularFigures()],
       );
 
@@ -63,50 +69,49 @@ class AppText {
   static TextStyle get headline => TextStyle(
         color: AppTheme.text,
         fontSize: 22,
-        fontWeight: FontWeight.w800,
-        height: 1.2,
-        letterSpacing: -0.3,
+        fontWeight: FontWeight.w600,
+        height: 1.3,
       );
 
   /// Card and sheet titles.
   static TextStyle get title => TextStyle(
         color: AppTheme.text,
         fontSize: 16,
-        fontWeight: FontWeight.w800,
-        height: 1.25,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
       );
 
   /// Normal reading text.
   static TextStyle get body => TextStyle(
         color: AppTheme.text,
         fontSize: 15,
-        fontWeight: FontWeight.w600,
-        height: 1.35,
+        fontWeight: FontWeight.w400,
+        height: 1.45,
       );
 
   /// Short labels under metrics, chip text, list secondary lines.
   static TextStyle get label => TextStyle(
         color: AppTheme.muted,
         fontSize: 13,
-        fontWeight: FontWeight.w600,
-        height: 1.25,
+        fontWeight: FontWeight.w500,
+        height: 1.4,
       );
 
-  /// Small uppercase section header ("BIKE STATUS", "RIDING ORDER").
+  /// Small section header ("Bike status", "Riding order"). Sentence case,
+  /// no letter-spacing (the name is kept for existing callers).
   static TextStyle get overline => TextStyle(
         color: AppTheme.muted,
-        fontSize: 12,
-        fontWeight: FontWeight.w800,
-        height: 1.2,
-        letterSpacing: 1.5,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
       );
 
   /// Smallest text in the app (12 sp): timestamps, hints.
   static TextStyle get caption => TextStyle(
         color: AppTheme.muted,
         fontSize: 12,
-        fontWeight: FontWeight.w600,
-        height: 1.3,
+        fontWeight: FontWeight.w400,
+        height: 1.4,
       );
 }
 
@@ -122,4 +127,7 @@ class StatusColors {
 
   /// Text and icons drawn on a solid [critical] background.
   static Color get onCritical => Colors.white;
+
+  /// Text and icons on a solid primary (teal) fill.
+  static Color get onPrimary => AppTheme.onPrimary;
 }

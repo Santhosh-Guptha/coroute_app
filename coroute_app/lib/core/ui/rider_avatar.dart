@@ -59,7 +59,7 @@ class RiderAvatar extends StatelessWidget {
                       style: TextStyle(
                         color: c,
                         fontSize: math.max(11.0, size * 0.36),
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),

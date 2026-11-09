@@ -6,11 +6,11 @@ import 'ui_tokens.dart';
 /// map enough to show that the screen behind is inactive, and a tap on it
 /// closes the pop-up (except the few protected ones).
 abstract final class AppScrim {
-  /// 0xFF15232E (the cockpit's dark slate) at 55 %.
-  static const Color color = Color(0x8C15232E);
+  /// The dark background token (0xFF15181C) at 45 %: soft, not a black-out.
+  static const Color color = Color(0x7315181C);
 }
 
-/// The one way to open a bottom sheet: same 44 x 5 handle, 28 dp top corners,
+/// The one way to open a bottom sheet: same 36 x 4 handle, 20 dp top corners,
 /// 20 dp side padding, safe area, keyboard-aware, 230 ms open/close,
 /// the cockpit scrim behind it. A tap on the scrim, the back button and a
 /// drag down close it ([isDismissible] / [enableDrag]; keep both on unless an

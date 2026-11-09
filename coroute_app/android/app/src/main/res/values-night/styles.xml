@@ -7,7 +7,7 @@
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
     </style>
-    <!-- Theme applied as soon as the process has started; CoRoute is a dark app so the window matches. -->
+    <!-- Theme applied as soon as the process has started; matches the v3.55 dark background (values-night/colors.xml). -->
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@color/splash_background</item>
     </style>

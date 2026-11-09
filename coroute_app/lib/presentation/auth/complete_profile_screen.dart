@@ -47,7 +47,7 @@ class CompleteProfileScreen extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                     child: DsScreenHeader(
                       title: 'Your safety details',
-                      subtitle: 'Needed before riding with a group',
+                      subtitle: 'Needed to ride with a group',
                       onBack: forced ? null : () => Navigator.maybePop(context),
                       trailing: forced
                           ? TextButton(
@@ -69,13 +69,11 @@ class CompleteProfileScreen extends StatelessWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.health_and_safety_rounded, size: 22, color: AppTheme.accentText),
+                              Icon(Icons.health_and_safety_outlined, size: 22, color: AppTheme.primary),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  isGoogleUser
-                                      ? 'One more step: how to reach you and your family in an emergency.'
-                                      : 'Your group needs a way to reach you and your family in an emergency.',
+                                  isGoogleUser ? 'One more step: who to call in an emergency.' : 'Who to call in an emergency.',
                                   style: AppText.body,
                                 ),
                               ),

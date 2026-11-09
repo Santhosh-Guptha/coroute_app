@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme applied to the Android Window while the process is starting -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+    <!-- Theme applied to the Android Window while the process is starting.
+         Light phone theme: the warm off-white v3.55 background with dark system-bar icons. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
-    <!-- Theme applied as soon as the process has started; CoRoute is a dark app so the window matches. -->
-    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+    <!-- Theme applied as soon as the process has started; matches the Flutter background. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@color/splash_background</item>
     </style>
 </resources>

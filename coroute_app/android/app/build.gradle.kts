@@ -152,4 +152,6 @@ dependencies {
     // 3.55 push notifications: FCM only (no Analytics). Configured at build time, see above.
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging")
+    // 3.55 coupon QR: reads the Play Install Referrer once on first launch (InstallReferrerChannel.kt).
+    implementation("com.android.installreferrer:installreferrer:2.2")
 }

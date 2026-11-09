@@ -111,7 +111,7 @@ class RideAlert extends StatelessWidget {
                         title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w800),
+                        style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w600),
                       ),
                       if (m != null && m.isNotEmpty)
                         Padding(
@@ -142,7 +142,7 @@ class RideAlert extends StatelessWidget {
                                     minimumSize: const Size(48, 44),
                                     padding: const EdgeInsets.symmetric(horizontal: Space.s12),
                                     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
-                                    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                                    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                                   ),
                                   child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
                                 ),

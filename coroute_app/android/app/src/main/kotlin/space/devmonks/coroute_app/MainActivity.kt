@@ -58,6 +58,10 @@ class MainActivity : FlutterActivity() {
         push.register()
         pushChannel = push
         pushMethods.setMethodCallHandler(push)
+
+        // 3.55 coupon QR: the Play Install Referrer ("coupon=CODE"), read once by Dart on first launch.
+        MethodChannel(messenger, "coroute/install_referrer")
+            .setMethodCallHandler(InstallReferrerChannel(applicationContext))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,6 +112,7 @@ class MainActivity : FlutterActivity() {
         pushChannel?.dispose()
         pushChannel = null
         MethodChannel(messenger, "coroute/push").setMethodCallHandler(null)
+        MethodChannel(messenger, "coroute/install_referrer").setMethodCallHandler(null)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

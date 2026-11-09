@@ -13,7 +13,11 @@ import '../admin/master_admin_dashboard.dart';
 import '../rider/rider_home_screen.dart';
 import 'complete_profile_screen.dart';
 
-/// Clean, modern, minimal dark-mode login & auth screen for CoRoute riders.
+/// Sign in and create account: one calm screen, one primary button.
+///
+/// Design system v3.55: small logo mark, one short line, light text, plenty
+/// of space, secondary actions as plain text links. The backend calls and
+/// the validation are unchanged.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -21,9 +25,9 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _LoginScreenState extends State<LoginScreen> {
+  /// false: sign in, true: create account.
+  bool _register = false;
 
   // Sign In Controllers
   final _loginIdentifierController = TextEditingController();
@@ -66,12 +70,6 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    // A form error from one tab means nothing on the other one.
-    _tabController.addListener(() {
-      if (_tabController.indexIsChanging || !mounted) return;
-      if (_errorMessage != null) setState(() => _errorMessage = null);
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       try {
@@ -89,7 +87,6 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   void dispose() {
-    _tabController.dispose();
     _loginIdentifierController.dispose();
     _loginPasswordController.dispose();
     _regNameController.dispose();
@@ -137,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen>
       title: 'Forgot your password?',
       builder: (ctx) => SingleChildScrollView(
         child: Text(
-          'If you registered with Google, use "Sign In with Google".\n\n'
+          'If you registered with Google, use "Continue with Google".\n\n'
           'Otherwise e-mail ${support.isNotEmpty ? support : 'the CoRoute team'} from the address you registered with. '
           'An admin will give you a temporary password. You set a new one when you sign in.',
           style: AppText.body.copyWith(color: AppTheme.text2),
@@ -252,10 +249,7 @@ class _LoginScreenState extends State<LoginScreen>
     if (res['success'] == true) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Welcome to CoRoute, $name. Your account is ready.'),
-          backgroundColor: AppTheme.brand,
-        ),
+        SnackBar(content: Text('Welcome to CoRoute, $name.')),
       );
       _enter(res['isAdmin'] == true);
     } else {
@@ -297,6 +291,16 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  /// Switches between sign in and create account. A form error from one
+  /// mode means nothing in the other one.
+  void _setMode(bool register) {
+    if (register == _register) return;
+    setState(() {
+      _register = register;
+      _errorMessage = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -304,48 +308,16 @@ class _LoginScreenState extends State<LoginScreen>
       backgroundColor: AppTheme.bg,
       body: SafeArea(
         child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+          padding: const EdgeInsets.fromLTRB(24, 40, 24, 24),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
+              constraints: const BoxConstraints(maxWidth: 420),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Sleek CoRoute Logo with friendly subtitle
-                  _buildHeaderLogo(),
-                  const SizedBox(height: 16),
-
-                  // Tab Selector: Sign In vs Register Account
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.soft,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: TabBar(
-                      controller: _tabController,
-                      dividerColor: Colors.transparent,
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      indicator: BoxDecoration(
-                        color: AppTheme.card,
-                        borderRadius: BorderRadius.circular(11),
-                        boxShadow: dsFloatingShadow(),
-                      ),
-                      labelColor: AppTheme.text,
-                      unselectedLabelColor: AppTheme.muted,
-                      labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-                      unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-                      tabs: const [
-                        Tab(height: 52, icon: Icon(Icons.login_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Sign In'),
-                        Tab(height: 52, icon: Icon(Icons.person_add_alt_1_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Register Account'),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
+                  _buildHeader(),
+                  const SizedBox(height: 36),
 
                   // Previous session ended (stale token on launch, block, delete):
                   // neutral and dismissible, so a fresh launch does not open on an error.
@@ -353,32 +325,29 @@ class _LoginScreenState extends State<LoginScreen>
                     RideAlert(
                       tier: AlertTier.normal,
                       title: _sessionNotice!,
-                      message: 'You were signed out. Sign in or create an account to continue.',
+                      message: 'You were signed out. Sign in to continue.',
                       onDismiss: () => setState(() => _sessionNotice = null),
                     ),
-                    const SizedBox(height: Space.s12),
+                    const SizedBox(height: Space.s16),
                   ],
 
-                  // Error Display Banner
                   if (_errorMessage != null) ...[
                     RideAlert(tier: AlertTier.important, title: _errorMessage!),
-                    const SizedBox(height: Space.s12),
+                    const SizedBox(height: Space.s16),
                   ],
 
-                  // Form Container Card
-                  DsCard(
-                    radius: Radii.xl,
-                    padding: const EdgeInsets.all(18),
-                    child: AnimatedBuilder(
-                      animation: _tabController,
-                      builder: (context, _) {
-                        return _tabController.index == 0 ? _buildSignInForm() : _buildRegistrationForm();
-                      },
+                  // A gentle fade between the two modes, nothing more.
+                  AnimatedSwitcher(
+                    duration: Motion.tab,
+                    switchInCurve: Motion.curve,
+                    switchOutCurve: Motion.curve,
+                    child: KeyedSubtree(
+                      key: ValueKey<bool>(_register),
+                      child: _register ? _buildRegistrationForm() : _buildSignInForm(),
                     ),
                   ),
 
-                  // Streamlined, minimal legal footer
-                  _buildLegalFooter(),
+                  if (!_register) _buildLegalFooter(),
                 ],
               ),
             ),
@@ -388,130 +357,112 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  /// Sleek, modern logo header with friendly subtitle
-  Widget _buildHeaderLogo() {
+  /// Small logo mark, the name and one short line.
+  Widget _buildHeader() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: AppTheme.card,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.border.withOpacity(0.8), width: 1.5),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.brand.withOpacity(0.18),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(6),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(9),
-            child: Image.asset(
-              'assets/branding/coroute_icon.png',
-              width: 38,
-              height: 38,
-              filterQuality: FilterQuality.medium,
-              errorBuilder: (context, error, stackTrace) => Icon(Icons.two_wheeler_rounded, color: AppTheme.brand, size: 28),
-            ),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.asset(
+            'assets/branding/coroute_icon.png',
+            width: 44,
+            height: 44,
+            cacheWidth: 132,
+            filterQuality: FilterQuality.medium,
+            errorBuilder: (context, error, stackTrace) => Icon(Icons.two_wheeler_outlined, color: AppTheme.primary, size: 32),
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          AppConstants.appName,
-          style: TextStyle(
-            color: AppTheme.text,
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.4,
-          ),
+        const SizedBox(height: Space.s16),
+        Semantics(
+          header: true,
+          child: Text(AppConstants.appName, textAlign: TextAlign.center, style: AppText.headline.copyWith(fontSize: 24)),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: Space.s4),
         Text(
-          'Ride together. Ride safe.',
+          'Ride together, safely.',
           textAlign: TextAlign.center,
-          style: AppText.label.copyWith(color: AppTheme.muted, fontSize: 12),
+          style: AppText.body.copyWith(color: AppTheme.textMuted),
         ),
       ],
     );
   }
 
-  /// Friendly sentence-case input field label
-  Widget _fieldLabel(String text, {Color? color}) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(
-          text,
-          style: AppText.label.copyWith(
-            color: color ?? AppTheme.text,
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-          ),
-        ),
-      );
-
-  InputDecoration _dec({required String hint, IconData? icon, Widget? suffix, Color? iconColor}) => InputDecoration(
+  /// Floating-label field: the label sits inside the box, so no extra
+  /// label line above it.
+  InputDecoration _dec(String label, {IconData? icon, Widget? suffix, String? hint}) => InputDecoration(
+        labelText: label,
         hintText: hint,
-        hintStyle: AppText.caption.copyWith(color: AppTheme.muted),
-        prefixIcon: icon == null ? null : Icon(icon, color: iconColor ?? AppTheme.accentText, size: 20),
+        prefixIcon: icon == null ? null : Icon(icon, size: 22),
         suffixIcon: suffix,
       );
 
   Widget _eye(bool obscure, VoidCallback onTap) => IconButton(
         tooltip: obscure ? 'Show password' : 'Hide password',
-        icon: Icon(obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.muted, size: 20),
+        icon: Icon(obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 22),
         onPressed: onTap,
       );
 
   Widget _or() => Row(
         children: [
-          Expanded(child: Divider(color: AppTheme.border, thickness: 1)),
+          Expanded(child: Divider(color: AppTheme.border)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text('OR', style: AppText.caption.copyWith(fontWeight: FontWeight.w700, color: AppTheme.muted)),
+            child: Text('or', style: AppText.caption.copyWith(color: AppTheme.textFaint)),
           ),
-          Expanded(child: Divider(color: AppTheme.border, thickness: 1)),
+          Expanded(child: Divider(color: AppTheme.border)),
         ],
       );
 
-  Widget _googleButton(String label) => DsButton(
-        label: label,
+  Widget _googleButton() => DsButton(
+        label: 'Continue with Google',
         icon: Icons.g_mobiledata_rounded,
         tone: DsButtonTone.outline,
         fontSize: 15,
         onPressed: _isLoading ? null : _handleGoogleSignIn,
       );
 
+  /// "New here?  Create account" as plain text with one link.
+  Widget _switchLink(String lead, String action, VoidCallback onTap) => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(child: Text(lead, style: AppText.body.copyWith(color: AppTheme.textMuted))),
+          TextButton(
+            onPressed: onTap,
+            style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+            child: Text(action),
+          ),
+        ],
+      );
+
+  /// Small sentence-case group label inside the long form.
+  Widget _group(String text, IconData icon, {Color? color}) => Padding(
+        padding: const EdgeInsets.only(top: Space.s24, bottom: Space.s12),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color ?? AppTheme.textMuted),
+            const SizedBox(width: Space.s8),
+            Expanded(child: Text(text, style: AppText.overline.copyWith(color: color ?? AppTheme.textMuted))),
+          ],
+        ),
+      );
+
   // --- SIGN IN FORM ---
   Widget _buildSignInForm() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Welcome back', style: AppText.title.copyWith(fontSize: 18)),
-        const SizedBox(height: 2),
-        Text('Sign in to ride with your group.', style: AppText.label),
-
-        const SizedBox(height: 18),
-
-        // Friendly label for callsign/email
-        _fieldLabel('Rider Callsign or Email'),
         TextField(
           controller: _loginIdentifierController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
           textInputAction: TextInputAction.next,
+          keyboardType: TextInputType.emailAddress,
           autofillHints: const [AutofillHints.username, AutofillHints.email],
           autocorrect: false,
           style: AppText.body,
-          decoration: _dec(hint: 'e.g. Maverick or rider@example.com', icon: Icons.person_outline_rounded),
+          decoration: _dec('Email or callsign', icon: Icons.person_outline_rounded),
         ),
-
-        const SizedBox(height: 14),
-
-        // Friendly label for password
-        _fieldLabel('Password'),
+        const SizedBox(height: Space.s12),
         TextField(
           controller: _loginPasswordController,
           obscureText: _obscureLoginPassword,
@@ -522,55 +473,30 @@ class _LoginScreenState extends State<LoginScreen>
           },
           style: AppText.body,
           decoration: _dec(
-            hint: 'Enter your password',
+            'Password',
             icon: Icons.lock_outline_rounded,
             suffix: _eye(_obscureLoginPassword, () => setState(() => _obscureLoginPassword = !_obscureLoginPassword)),
           ),
         ),
-
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
             onPressed: _showForgotPassword,
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              minimumSize: const Size(48, 48),
-            ),
-            child: Text('Forgot password?', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700)),
+            style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4)),
+            child: Text('Forgot password?', style: AppText.label.copyWith(color: AppTheme.primary)),
           ),
         ),
-
-        const SizedBox(height: 10),
-
-        // Prominent Primary Action Button
+        const SizedBox(height: Space.s8),
         DsButton(
-          label: 'Continue',
-          icon: _isLoading ? null : Icons.arrow_forward_rounded,
+          label: _isLoading ? 'Signing in…' : 'Sign in',
           onPressed: _isLoading ? null : _handleSignIn,
         ),
-
-        const SizedBox(height: 16),
+        const SizedBox(height: Space.s24),
         _or(),
-        const SizedBox(height: 16),
-
-        // Clean Google Sign-In Button (zero visual noise)
-        _googleButton('Sign In with Google'),
-
-        const SizedBox(height: 16),
-
-        const SizedBox(height: 14),
-
-        Center(
-          child: TextButton(
-            onPressed: () => _tabController.animateTo(1),
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-            child: Text(
-              "Don't have an account? Register as New Rider",
-              textAlign: TextAlign.center,
-              style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ),
+        const SizedBox(height: Space.s24),
+        _googleButton(),
+        const SizedBox(height: Space.s32),
+        _switchLink('New here?', 'Create account', () => _setMode(true)),
       ],
     );
   }
@@ -578,281 +504,187 @@ class _LoginScreenState extends State<LoginScreen>
   // --- REGISTRATION FORM ---
   Widget _buildRegistrationForm() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Icon(Icons.badge_rounded, color: AppTheme.accentText, size: 22),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text('Create your account', style: AppText.title.copyWith(fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text('Used by your group and in emergencies.', style: AppText.label),
+        Text('Your details', style: AppText.title.copyWith(fontSize: 18)),
+        const SizedBox(height: Space.s4),
+        Text('Your group sees these. Kept for emergencies.', style: AppText.label),
+        const SizedBox(height: Space.s16),
 
-        const SizedBox(height: 16),
-
-        _fieldLabel('Callsign or Full Name *'),
+        // Field order is unchanged: name, email, phone, password, confirm.
         TextField(
           controller: _regNameController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxCallsignLength)],
+          textInputAction: TextInputAction.next,
           style: AppText.body,
-          decoration: _dec(hint: 'e.g. Phoenix, GhostRider, Santhosh', icon: Icons.person_rounded),
+          decoration: _dec('Name or callsign', icon: Icons.person_outline_rounded),
         ),
-
-        const SizedBox(height: 12),
-
-        _fieldLabel('Email Address *'),
+        const SizedBox(height: Space.s12),
         TextField(
           controller: _regEmailController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
           keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          autocorrect: false,
           style: AppText.body,
-          decoration: _dec(hint: 'e.g. rider@example.com', icon: Icons.email_rounded),
+          decoration: _dec('Email', icon: Icons.mail_outline_rounded),
         ),
-
-        const SizedBox(height: 12),
-
-        _fieldLabel('Mobile Phone Number *'),
+        const SizedBox(height: Space.s12),
         TextField(
           controller: _regPhoneController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
           keyboardType: TextInputType.phone,
+          textInputAction: TextInputAction.next,
           style: AppText.body,
-          decoration: _dec(hint: 'e.g. +91 98765 43210', icon: Icons.phone_android_rounded),
+          decoration: _dec('Phone', icon: Icons.phone_outlined),
+        ),
+        const SizedBox(height: Space.s12),
+        TextField(
+          controller: _regPasswordController,
+          obscureText: _obscureRegPassword,
+          textInputAction: TextInputAction.next,
+          style: AppText.body,
+          decoration: _dec(
+            'Password',
+            hint: 'At least 8 characters',
+            icon: Icons.lock_outline_rounded,
+            suffix: _eye(_obscureRegPassword, () => setState(() => _obscureRegPassword = !_obscureRegPassword)),
+          ),
+        ),
+        const SizedBox(height: Space.s12),
+        TextField(
+          controller: _regConfirmPasswordController,
+          obscureText: _obscureRegConfirmPassword,
+          textInputAction: TextInputAction.next,
+          style: AppText.body,
+          decoration: _dec(
+            'Confirm password',
+            icon: Icons.lock_outline_rounded,
+            suffix: _eye(_obscureRegConfirmPassword, () => setState(() => _obscureRegConfirmPassword = !_obscureRegConfirmPassword)),
+          ),
         ),
 
-        const SizedBox(height: 12),
-
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Password *'),
-                  TextField(
-                    controller: _regPasswordController,
-                    obscureText: _obscureRegPassword,
-                    style: AppText.body,
-                    decoration: _dec(
-                      hint: 'Min 8 chars',
-                      suffix: _eye(_obscureRegPassword, () => setState(() => _obscureRegPassword = !_obscureRegPassword)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _fieldLabel('Confirm *'),
-                  TextField(
-                    controller: _regConfirmPasswordController,
-                    obscureText: _obscureRegConfirmPassword,
-                    style: AppText.body,
-                    decoration: _dec(
-                      hint: 'Repeat pass',
-                      suffix: _eye(_obscureRegConfirmPassword, () => setState(() => _obscureRegConfirmPassword = !_obscureRegConfirmPassword)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 16),
-
-        _fieldLabel('Rider Role & Vehicle *'),
+        _group('Your ride', Icons.two_wheeler_outlined),
         DsSegment<bool>(
           values: const [false, true],
           selected: _isRegPillion,
-          label: (pillion) => pillion ? 'Pillion Rider' : 'Bike Rider',
+          label: (pillion) => pillion ? 'Pillion' : 'Rider',
           onChanged: (pillion) => setState(() => _isRegPillion = pillion),
         ),
-
-        const SizedBox(height: 12),
-
-        if (!_isRegPillion)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('Vehicle Type'),
-                    InputDecorator(
-                      decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _selectedVehicle,
-                          dropdownColor: AppTheme.card,
-                          isExpanded: true,
-                          isDense: true,
-                          style: AppText.body.copyWith(fontSize: 13, fontWeight: FontWeight.w700),
-                          items: _vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
-                          onChanged: (val) {
-                            if (val != null) setState(() => _selectedVehicle = val);
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+        const SizedBox(height: Space.s12),
+        if (!_isRegPillion) ...[
+          InputDecorator(
+            decoration: _dec('Vehicle type').copyWith(contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedVehicle,
+                dropdownColor: AppTheme.card,
+                isExpanded: true,
+                isDense: true,
+                style: AppText.body,
+                items: _vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => _selectedVehicle = val);
+                },
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('Bike / Reg No *'),
-                    TextField(
-                      controller: _regVehicleNoController,
-                      inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
-                      textCapitalization: TextCapitalization.characters,
-                      style: AppText.body.copyWith(letterSpacing: 1.1),
-                      decoration: _dec(hint: 'e.g. KA 01 AB 1234'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          )
-        else
-          DsCard(
-            warning: true,
-            color: AppTheme.warnTint,
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle_outline_rounded, color: AppTheme.warnText, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Pillion: you ride along, no bike number needed.',
-                    style: AppText.caption.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
             ),
           ),
+          const SizedBox(height: Space.s12),
+          TextField(
+            controller: _regVehicleNoController,
+            inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
+            textCapitalization: TextCapitalization.characters,
+            textInputAction: TextInputAction.next,
+            style: AppText.body,
+            decoration: _dec('Bike number', hint: 'KA 01 AB 1234'),
+          ),
+        ] else
+          Row(
+            children: [
+              Icon(Icons.check_circle_outline_rounded, size: 20, color: AppTheme.success),
+              const SizedBox(width: Space.s8),
+              Expanded(child: Text('No bike number needed.', style: AppText.label)),
+            ],
+          ),
 
-        const SizedBox(height: 16),
-
-        _fieldLabel('Emergency Contact *', color: AppTheme.sos),
-        // Stacked (same field order as before) so name and number are each
-        // full width and readable at 360 dp and large text sizes.
+        _group('Emergency contact', Icons.emergency_outlined, color: AppTheme.sos),
         TextField(
           controller: _regEmergencyNameController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.next,
           style: AppText.body,
-          decoration: _dec(hint: 'Name (e.g. Brother)', icon: Icons.person_pin_rounded, iconColor: AppTheme.sos),
+          decoration: _dec('Contact name', icon: Icons.person_outline_rounded),
         ),
-        const SizedBox(height: Space.s8),
+        const SizedBox(height: Space.s12),
         TextField(
           controller: _regEmergencyPhoneController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
           keyboardType: TextInputType.phone,
           textInputAction: TextInputAction.done,
           style: AppText.body,
-          decoration: _dec(hint: 'Emergency Phone', icon: Icons.phone_in_talk_rounded, iconColor: AppTheme.sos),
+          decoration: _dec('Contact phone', icon: Icons.phone_outlined),
         ),
 
-        const SizedBox(height: 14),
-
-        // Streamlined terms checkbox
+        const SizedBox(height: Space.s16),
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Checkbox(
               value: _acceptedTerms,
-              activeColor: AppTheme.brand,
               onChanged: (v) => setState(() => _acceptedTerms = v ?? false),
             ),
             Expanded(
               child: Wrap(
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Text('I accept the ', style: AppText.caption),
-                  InkWell(
-                    onTap: () => _openUrl(_termsUrl),
-                    child: Text('Terms of Use', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800, decoration: TextDecoration.underline)),
-                  ),
-                  Text(' and ', style: AppText.caption),
-                  InkWell(
-                    onTap: () => _openUrl(_privacyUrl),
-                    child: Text('Privacy Policy', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800, decoration: TextDecoration.underline)),
-                  ),
+                  Text('I accept the ', style: AppText.label),
+                  _link('Terms', _termsUrl),
+                  Text(' and ', style: AppText.label),
+                  _link('Privacy Policy', _privacyUrl),
                 ],
               ),
             ),
           ],
         ),
-
-        const SizedBox(height: 12),
-
+        const SizedBox(height: Space.s16),
         DsButton(
-          label: 'Register Rider Account',
-          icon: _isLoading ? null : Icons.person_add_alt_1_rounded,
-          fontSize: 15,
+          label: _isLoading ? 'Creating account…' : 'Create account',
           onPressed: _isLoading ? null : _handleRegistration,
         ),
-
-        const SizedBox(height: 14),
+        const SizedBox(height: Space.s24),
         _or(),
-        const SizedBox(height: 14),
-        _googleButton('Sign Up with Google'),
-
-        const SizedBox(height: 12),
-
-        Center(
-          child: TextButton(
-            onPressed: () => _tabController.animateTo(0),
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-            child: Text('Already have an account? Sign In', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700)),
-          ),
-        ),
+        const SizedBox(height: Space.s24),
+        _googleButton(),
+        const SizedBox(height: Space.s24),
+        _switchLink('Have an account?', 'Sign in', () => _setMode(false)),
       ],
     );
   }
 
-  /// Minimal, non-intrusive legal footer
-  Widget _buildLegalFooter() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 4),
-      child: Center(
-        child: Wrap(
-          alignment: WrapAlignment.center,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text('By signing in, you agree to our ', style: AppText.caption),
-            InkWell(
-              onTap: () => _openUrl(_termsUrl),
-              child: Text(
-                'Terms',
-                style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700, decoration: TextDecoration.underline),
-              ),
-            ),
-            Text(' & ', style: AppText.caption),
-            InkWell(
-              onTap: () => _openUrl(_privacyUrl),
-              child: Text(
-                'Privacy Policy',
-                style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700, decoration: TextDecoration.underline),
-              ),
-            ),
-            Text('.', style: AppText.caption),
-          ],
+  Widget _link(String text, String url) => InkWell(
+        onTap: () => _openUrl(url),
+        child: Text(
+          text,
+          style: AppText.label.copyWith(color: AppTheme.primary, decoration: TextDecoration.underline, decorationColor: AppTheme.primary),
         ),
+      );
+
+  /// One faint line at the bottom.
+  Widget _buildLegalFooter() {
+    final faint = AppText.caption.copyWith(color: AppTheme.textMuted);
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.s24),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('By continuing you agree to the ', style: faint),
+          InkWell(onTap: () => _openUrl(_termsUrl), child: Text('Terms', style: faint.copyWith(decoration: TextDecoration.underline))),
+          Text(' and ', style: faint),
+          InkWell(onTap: () => _openUrl(_privacyUrl), child: Text('Privacy Policy', style: faint.copyWith(decoration: TextDecoration.underline))),
+          Text('.', style: faint),
+        ],
       ),
     );
   }

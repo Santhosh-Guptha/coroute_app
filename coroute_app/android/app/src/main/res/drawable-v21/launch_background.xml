@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Native launch screen shown while the Flutter engine starts: brand-dark ground with the CoRoute mark centred. -->
+<!-- Native launch screen shown while the Flutter engine starts: theme background (light or dark) with the CoRoute mark centred. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/splash_background" />
     <item>

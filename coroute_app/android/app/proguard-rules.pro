@@ -50,3 +50,7 @@
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.lang.model.**
 -dontwarn org.conscrypt.**
+
+# 3.55 coupon QR: Play Install Referrer (AIDL binder to the Play Store)
+-keep class com.android.installreferrer.** { *; }
+-dontwarn com.android.installreferrer.**
