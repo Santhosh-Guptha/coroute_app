@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/username_rules.dart';
 import 'alarm_notifier.dart';
 import 'api_client.dart';
@@ -259,6 +260,11 @@ class FriendsService extends ChangeNotifier {
     _sub = _rt?.events.listen((msg) {
       final type = msg['type'];
       if (type != 'FRIEND_REQUEST' && type != 'FRIEND_ACCEPTED') return;
+      // 3.55 follow-up: the same event already shown (its push arrived first): refresh only.
+      if (!NoticeDedupe.shared.firstTime(msg['eventId'])) {
+        refreshFriends();
+        return;
+      }
       final who = msg['username']?.toString() ?? 'A rider';
       final line = type == 'FRIEND_REQUEST' ? '$who wants to be friends' : '$who accepted your friend request';
       // 3.55: in the background a system notification; in the foreground FriendNoticeHost shows

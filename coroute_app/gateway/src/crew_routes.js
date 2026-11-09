@@ -21,6 +21,7 @@ const F = require('./friends');
 const A = require('./avatars');
 const CR = require('./crews');
 const { firstNameOf } = require('./social_routes');
+const { stampEvent } = require('./push');
 
 const FEATURE_OFF = { error: 'This feature is turned off for now.', code: 'FEATURE_OFF' };
 const NOT_FOUND = { error: 'Crew not found.', code: 'CREW_NOT_FOUND' };
@@ -46,6 +47,9 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
   };
   const notify = (userId, payload) => {
     let delivered = 0;
+    // One eventId for the socket message and the push (the app shows one notice per id). A copy per
+    // member: toMembers() passes the same object to everyone.
+    payload = stampEvent({ ...payload });
     try { if (hub) delivered = hub.sendToUser(userId, payload) || 0; } catch { /* best effort */ }
     // 3.55 push (src/push.js): CREW_INVITE / POLL_CREATED reach a phone with the app closed.
     try { if (hub && hub.push) hub.push.onSocketEvent(userId, payload, { delivered }).catch(() => {}); } catch { /* best effort */ }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/crew_rules.dart';
 import 'api_client.dart';
 import 'feature_flags_service.dart';
@@ -341,7 +342,9 @@ class CrewsService extends ChangeNotifier {
     final crewId = msg['crewId']?.toString() ?? '';
     final who = msg['username']?.toString() ?? 'A rider';
     final crew = msg['crewName']?.toString() ?? 'a crew';
-    switch (type) {
+    // 3.55 follow-up: the same event already shown (its push arrived first): refresh only.
+    final fresh = NoticeDedupe.shared.firstTime(msg['eventId']);
+    switch (fresh ? type : '') {
       case 'CREW_INVITE':
         _lastNotice = '$who invited you to $crew';
       case 'POLL_CREATED':

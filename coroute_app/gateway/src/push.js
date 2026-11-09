@@ -23,8 +23,14 @@
  *
  * Event hook used by social_routes.js / crew_routes.js: push.onSocketEvent(userId, payload, {delivered})
  * after hub.sendToUser(); FRIEND_REQUEST / FRIEND_ACCEPTED / CREW_INVITE / POLL_CREATED are pushed
- * only when no socket of this gateway received them (a live app already showed it). RIDE_INVITE
- * always pushes.
+ * only when no socket received them (a live app already showed it): neither a socket of this gateway
+ * nor one on the peer node of the two-node mirror (mirror.userOnPeer, from the peer's LU list; the
+ * hub forwards the socket message there). RIDE_INVITE always pushes. `skipConnected` checks both
+ * nodes too.
+ *
+ * Dedupe (app safety net): stampEvent(payload) gives every notice a stable `eventId`
+ * (TYPE:requestId / inviteId / pollId); callers stamp the payload BEFORE hub.sendToUser so the socket
+ * message and the push data carry the same id, and the app shows one notice per eventId in 10 min.
  *
  * Configuration (env, never in code):
  *   FCM_SERVICE_ACCOUNT_JSON   the service account key JSON (or FCM_SERVICE_ACCOUNT_FILE = its path)
@@ -82,6 +88,23 @@ const EMAIL_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const PHONE_VALUE = /(?:\+?\d[\s-]?){9,}/;
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const cleanText = (v, n) => clip(String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim(), n);
+
+const EVENT_REF_KEYS = ['requestId', 'inviteId', 'pollId'];
+let eventSeq = 0;
+/**
+ * Gives a notice payload a stable `eventId` (kept when already set): `TYPE:<requestId|inviteId|pollId>`,
+ * or `TYPE:<time><seq>` when it has no such id. Mutates and returns the payload. Call it before
+ * hub.sendToUser so the socket message and the push carry the same id (app dedupe, 10 minutes).
+ */
+function stampEvent(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (typeof payload.eventId === 'string' && /^[A-Za-z0-9_\-:.]{1,80}$/.test(payload.eventId)) return payload;
+  const type = String(payload.type || 'EVENT').replace(/[^A-Z_]/g, '').slice(0, 31) || 'EVENT';
+  const refKey = EVENT_REF_KEYS.find((k) => typeof payload[k] === 'string' && /^[A-Za-z0-9_\-.]{1,40}$/.test(payload[k]));
+  const ref = refKey ? payload[refKey] : `${Date.now().toString(36)}${(eventSeq = (eventSeq + 1) % 1e6).toString(36)}`;
+  payload.eventId = `${type}:${ref}`.slice(0, 80);
+  return payload;
+}
 
 /** Data-only payload with nothing sensitive: string values, short, at most 10 keys. */
 function safeData(data) {
@@ -266,9 +289,14 @@ class PushService {
 
   _connected(userId) {
     const set = this.hub && this.hub.byUser && this.hub.byUser.get(userId);
-    if (!set) return false;
-    for (const ws of set) if (ws.allowed && ws.readyState === 1) return true;
-    return false;
+    if (set) for (const ws of set) if (ws.allowed && ws.readyState === 1) return true;
+    return this._onPeer(userId);
+  }
+
+  /** The rider has an open socket on the OTHER node of the two-node mirror (cheap: the peer's LU set). */
+  _onPeer(userId) {
+    const m = this.hub && this.hub.mirror;
+    try { return !!(m && typeof m.userOnPeer === 'function' && m.userOnPeer(userId)); } catch { return false; }
   }
 
   /** One message with retries on 429 / 5xx / network errors. Returns 'sent' | 'pruned' | 'failed'. */
@@ -337,8 +365,10 @@ class PushService {
     const make = payload && SOCKET_EVENTS[payload.type];
     if (!make || !userId) return Promise.resolve(null);
     const m = make(payload);
-    if (!m.always && delivered > 0) return Promise.resolve(null);
-    return this.notifyUsers([userId], { type: payload.type, title: m.title, body: m.body, data: m.data, collapseKey: m.collapse, skipConnected: false });
+    // Shown by a socket here, or by one on the peer node (the hub forwarded it there): no push.
+    if (!m.always && (delivered > 0 || this._onPeer(userId))) return Promise.resolve(null);
+    const eventId = stampEvent(payload).eventId;
+    return this.notifyUsers([userId], { type: payload.type, title: m.title, body: m.body, data: { ...m.data, eventId }, collapseKey: m.collapse, skipConnected: false });
   }
 }
 
@@ -386,4 +416,4 @@ function attachPush({ app = null, repo, hub = null, convoys = null, featureFlags
   return push;
 }
 
-module.exports = { PushService, attachPush, registerPushRoutes, buildMessage, safeData, fcmErrorCode, serviceAccountFromEnv, COLLECTION, MAX_TOKENS_PER_USER, SOCKET_EVENTS, HOSTS };
+module.exports = { PushService, attachPush, registerPushRoutes, buildMessage, safeData, stampEvent, fcmErrorCode, serviceAccountFromEnv, COLLECTION, MAX_TOKENS_PER_USER, SOCKET_EVENTS, HOSTS };

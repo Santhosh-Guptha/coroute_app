@@ -357,7 +357,13 @@ class Hub {
     for (const set of this.rooms.values()) for (const ws of set) if (ws.readyState === WebSocket.OPEN && ws.user) out.add(ws.user.userId);
     return out;
   }
-  /** Tells a socket to reconnect (through the load balancer) after delayMs; closed by us if it has not gone after a grace. */
+  /** Distinct riders with an open, signed-in (allowed) socket on this node, in a room or not. */
+  onlineUsers() {
+    const out = new Set();
+    for (const [uid, set] of this.byUser) for (const ws of set) if (ws.allowed && ws.readyState === WebSocket.OPEN) { out.add(uid); break; }
+    return out;
+  }
+    /** Tells a socket to reconnect (through the load balancer) after delayMs; closed by us if it has not gone after a grace. */
   requestReconnect(ws, delayMs, reason, graceMs = 10000) {
     if (ws.readyState !== WebSocket.OPEN || ws.reconnectAt) return false;
     ws.reconnectAt = Date.now();

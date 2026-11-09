@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/ride_invite_rules.dart';
 import 'api_client.dart';
 import 'feature_flags_service.dart';
@@ -133,7 +134,8 @@ class RideInvitesService extends ChangeNotifier {
       );
       // The banner offers it now: not shown again by itself on the next resume.
       markShown(id);
-      if (!_arrived.isClosed) _arrived.add(inv);
+      // 3.55 follow-up: one banner per invite even when its push arrived too (same eventId).
+      if (!_arrived.isClosed && NoticeDedupe.shared.firstTime(msg['eventId'] ?? 'RIDE_INVITE:$id')) _arrived.add(inv);
       refresh(autoCheck: false);
     } else if (type == 'RIDE_INVITE_UPDATE') {
       final status = msg['status']?.toString() ?? '';

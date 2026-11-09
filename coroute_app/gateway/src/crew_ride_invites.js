@@ -248,6 +248,8 @@ function registerCrewRideInviteRoutes({ r, repo, hub = null, convoys, wrap, flag
       socket(tid, {
         type: 'RIDE_INVITE', inviteId: invite.inviteId, crewId, crewName: crew.name, rideName: meta.name || '',
         username: (host && host.username) || '', expiresAt: invite.expiresAt,
+        // Same id in the push below: the app shows one notice per eventId (push.stampEvent format).
+        eventId: `RIDE_INVITE:${invite.inviteId}`,
       });
     }
     const p = pushOf();
@@ -255,7 +257,7 @@ function registerCrewRideInviteRoutes({ r, repo, hub = null, convoys, wrap, flag
       // One push per invite (each carries its own inviteId). notifyUsers never throws; not awaited.
       for (const { tid, invite } of notified) {
         try {
-          Promise.resolve(p.notifyUsers([tid], { type: 'RIDE_INVITE', title: text.title, body: text.body, data: { inviteId: invite.inviteId }, priority: 'high', ttlSec: 1800 })).catch(() => {});
+          Promise.resolve(p.notifyUsers([tid], { type: 'RIDE_INVITE', title: text.title, body: text.body, data: { inviteId: invite.inviteId, eventId: `RIDE_INVITE:${invite.inviteId}` }, priority: 'high', ttlSec: 1800 })).catch(() => {});
         } catch { /* never breaks the request */ }
       }
     }

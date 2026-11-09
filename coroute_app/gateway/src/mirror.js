@@ -24,7 +24,8 @@
  *                 { room | meta, riders, gone, msgs, alerts, regroup, cids, unsaved, saved, ended }, the room
  *                 message w (or wc = {cap, payload}) for the peer's own sockets, a = 1 when an ack is wanted
  *   EA            ack of one EV                P  position (coalesced to 1/s per rider, droppable)
- *   HB / HBA      heartbeat / its echo         LU  riders with a live socket here (on change)
+ *   HB / HBA      heartbeat / its echo         LU  riders with a live socket here (on change): u = in a room,
+ *                                              o = any open signed-in socket (home screen too; push dedupe)
  *   U             personal message for a rider whose socket is on the peer
  *   binary 0x02   voice START/FRAME/END (frames only while the peer has sockets in that room)
  *   XS            state of a registered extension (src/public_ride.js 'pr'), after the rooms, before SNAP_END;
@@ -333,9 +334,10 @@ class Mirror {
     this.lastLU = '';
     this.log.info?.(`[mirror] ${this.node} linked to ${link.peerNode}`);
     const live = this.hub ? [...this.hub.liveUsers()] : [];
+    const online = this.hub && typeof this.hub.onlineUsers === 'function' ? [...this.hub.onlineUsers()] : live;
     this._json(link, {
       t: 'HELLO', node: this.node, role: this.role, boot: this.bootId, state: this.state,
-      seen: Object.fromEntries(this.lastSeen), live, rooms: this._localRooms(),
+      seen: Object.fromEntries(this.lastSeen), live, online, rooms: this._localRooms(),
     });
   }
 
@@ -347,7 +349,7 @@ class Mirror {
     this.link = null;
     for (const [s, p] of this.acks) { clearTimeout(p.timer); p.res(false); this.acks.delete(s); }
     const peer = this.peer;
-    if (peer) { peer.rooms = new Set(); peer.live = new Set(); peer.servingSince = 0; peer.state = 'down'; }
+    if (peer) { peer.rooms = new Set(); peer.live = new Set(); peer.online = new Set(); peer.servingSince = 0; peer.state = 'down'; }
     if (!this.stopped) {
       this.log.warn(`[mirror] ${this.node} lost the link to ${link.peerNode}`);
       // This node now runs every room alone: open alerts of mirrored rooms get their safety-network incident.
@@ -451,8 +453,18 @@ class Mirror {
 
   /** A personal message for a rider with no socket here. */
   user(userId, payload, cap) {
-    if (!this.linked() || !this.peer || !this.peer.live.has(userId)) return;
+    if (!this.userOnPeer(userId)) return;
     this._json(this.link, { t: 'U', u: userId, p: payload, c: cap || null }, payload && CRITICAL.has(payload.type) ? 0 : 1);
+  }
+
+  /**
+   * True when the peer node holds an open signed-in socket of the rider (in a room or not), as of its
+   * last LU (sent on change, at most once per heartbeat). Push uses it so a rider connected to the
+   * OTHER node does not get a push for a notice its socket already shows.
+   */
+  userOnPeer(userId) {
+    if (!this.linked() || !this.peer || !userId) return false;
+    return this.peer.live.has(userId) || (!!this.peer.online && this.peer.online.has(userId));
   }
 
   /** A position from a local socket: to the peer at most once a second per rider (latest wins). */
@@ -569,7 +581,12 @@ class Mirror {
       case 'HELLO': return this._onHello(link, m);
       case 'HB': return this._onHeartbeat(link, m);
       case 'HBA': this.lagMs = Math.max(0, now() - Number(m.at || 0)); return;
-      case 'LU': if (this.peer) this.peer.live = new Set(Array.isArray(m.u) ? m.u : []); return;
+      case 'LU':
+        if (this.peer) {
+          this.peer.live = new Set(Array.isArray(m.u) ? m.u : []);
+          this.peer.online = new Set(Array.isArray(m.o) ? m.o : []);
+        }
+        return;
       case 'SNAP': for (const r of m.rooms || []) { try { this._mergeRoom(r); } catch (e) { this.log.warn('[mirror] snapshot room failed', e.message); } } return;
       case 'XS': { const h = this.exts.get(m.k); if (h) { try { h.importState(m.s); } catch (e) { this.log.warn('[mirror] extension state failed', e.message); } } return; }
       case 'SNAP_END':
@@ -590,6 +607,7 @@ class Mirror {
     this.peer = {
       node: String(m.node), role: ROLES.has(m.role) ? m.role : 'all', boot: String(m.boot), state: m.state,
       live: new Set(Array.isArray(m.live) ? m.live : []), rooms: new Set(Array.isArray(m.rooms) ? m.rooms : []),
+      online: new Set(Array.isArray(m.online) ? m.online : []),
       servingSince: m.state === 'serving' ? now() : 0, hbAt: now(),
     };
     // Events the same peer process has not seen (sent while the link was down), then our whole state. A peer
@@ -820,8 +838,9 @@ class Mirror {
       const peerOrigin = this.peer ? `${this.peer.node}#${this.peer.boot}` : '';
       const live = this.hub ? [...this.hub.liveUsers()] : [];
       this._json(link, { t: 'HB', at: now(), st: this.state, role: this.role, rooms: this._localRooms(), n: live.length, ack: this.lastSeen.get(peerOrigin) || 0 }, 0);
-      const lu = live.sort().join(',');
-      if (lu !== this.lastLU) { this.lastLU = lu; this._json(link, { t: 'LU', u: live }, 0); }
+      const online = this.hub && typeof this.hub.onlineUsers === 'function' ? [...this.hub.onlineUsers()] : live;
+      const lu = `${live.sort().join(',')}|${online.sort().join(',')}`;
+      if (lu !== this.lastLU) { this.lastLU = lu; this._json(link, { t: 'LU', u: live, o: online }, 0); }
       this._handback();
     } else if (!this.dialing && !this.dialTimer) {
       this._dial();

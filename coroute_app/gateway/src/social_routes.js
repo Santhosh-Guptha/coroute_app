@@ -24,6 +24,7 @@ const config = require('./config');
 const U = require('./usernames');
 const F = require('./friends');
 const A = require('./avatars');
+const { stampEvent } = require('./push');
 
 const FEATURE_OFF = { error: 'This feature is turned off for now.', code: 'FEATURE_OFF' };
 const DAY = 86400000;
@@ -120,7 +121,7 @@ function attachSocial({ app, repo, auth, hub = null, lease = null, featureFlags 
         if (inviterId && inviterId !== u.userId) {
           const out = await F.sendRequest(soda, u.userId, inviterId, { via: 'invite' });
           if (out.created && !out.edge.shadow && hub) {
-            const ev = { type: 'FRIEND_REQUEST', requestId: out.edge.requestId, username: u.username, via: 'invite' };
+            const ev = stampEvent({ type: 'FRIEND_REQUEST', requestId: out.edge.requestId, username: u.username, via: 'invite' });
             const delivered = hub.sendToUser(inviterId, ev) || 0;
             if (hub.push) hub.push.onSocketEvent(inviterId, ev, { delivered }).catch(() => {});
           }
@@ -207,6 +208,8 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
   };
   const notify = (userId, payload) => {
     let delivered = 0;
+    // One eventId for the socket message and the push (the app shows one notice per id).
+    stampEvent(payload);
     try { if (hub) delivered = hub.sendToUser(userId, payload) || 0; } catch { /* best effort */ }
     // 3.55 push (src/push.js): a phone with the app closed still hears about it.
     try { if (hub && hub.push) hub.push.onSocketEvent(userId, payload, { delivered }).catch(() => {}); } catch { /* best effort */ }
@@ -442,7 +445,7 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
     if (!e) return res.status(404).json({ error: 'This request is no longer waiting.', code: 'NOT_FOUND' });
     if (yes) {
       const mine = await me(req);
-      notify(e.from, { type: 'FRIEND_ACCEPTED', username: mine.username });
+      notify(e.from, { type: 'FRIEND_ACCEPTED', requestId: e.requestId, username: mine.username });
     }
     res.json({ ok: true, status: yes ? 'FRIENDS' : 'DECLINED' });
   });

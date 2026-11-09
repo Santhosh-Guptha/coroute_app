@@ -112,11 +112,22 @@ class PlaceReviewsPage {
 ///   [ApiException] with the gateway's friendly message.
 class PlaceReviewService extends ChangeNotifier {
   PlaceReviewService(this._api, {int Function()? clock, bool loadPrefs = true}) : _clock = clock ?? _wall {
-    if (loadPrefs) unawaited(_loadAsked());
+    if (loadPrefs) {
+      unawaited(_loadAsked());
+      restored = _loadPending();
+    } else {
+      restored = Future<void>.value();
+    }
   }
+
+  /// Done once the stored after-ride questions were read (await before [takeOpenPrompt]).
+  late final Future<void> restored;
 
   static int _wall() => DateTime.now().millisecondsSinceEpoch;
   static const String prefsKey = 'place_review_asked_v1';
+
+  /// The after-ride questions not answered yet (survive an app restart, 7 days, at most 2).
+  static const String pendingKey = 'place_review_after_ride_v1';
   static const int maxTextChars = 300;
 
   /// Places further than this are not looked at for a dwell (cheap box filter first).
@@ -144,6 +155,15 @@ class PlaceReviewService extends ChangeNotifier {
 
   /// 3.55 follow-up: places worth asking about after the ride (not answered in the cockpit).
   final RideEndReviews _rideEnd = RideEndReviews();
+
+  /// The same questions kept on the phone with their ride id (restored on start).
+  PendingPlaceReviews _pending = PendingPlaceReviews();
+
+  /// The id of the ride on now (ConvoyService.activeConvoy.groupId; set in main.dart).
+  String? Function()? rideIdSource;
+
+  /// True once after a start that restored unanswered after-ride questions.
+  bool _openPromptDue = false;
   bool _rideWasActive = false;
   double _lastSpeed = double.nan;
   bool _disposed = false;
@@ -169,6 +189,7 @@ class PlaceReviewService extends ChangeNotifier {
     final p = _prompt;
     if (p == null) return;
     _rideEnd.answered(p.placeId);
+    if (_pending.remove(p.placeId)) unawaited(_savePending());
     _prompt = null;
     notifyListeners();
   }
@@ -179,12 +200,23 @@ class PlaceReviewService extends ChangeNotifier {
   /// during the ride and did not answer the cockpit question, longest stay first, at most 2.
   /// Empty when [enabled] is false (admin switches `placeReviews` and `reviewPrompt`, checked by
   /// the caller) or while an SOS / crash alarm is open.
-  List<PlaceReviewPrompt> afterRidePrompts({required bool enabled}) {
+  ///
+  /// Also the questions kept on the phone from an earlier ride (an app restart, 7 days): with
+  /// [rideId] only those of that ride (the trip report of that ride).
+  List<PlaceReviewPrompt> afterRidePrompts({required bool enabled, String? rideId}) {
     if (!enabled || (emergencyOpen?.call() ?? false)) return const [];
+    final now = _clock();
     // A dwell that qualified but never had a stopped moment is still in the tracker.
     final r = _tracker.pending;
-    if (r != null) _rideEnd.note(r);
-    return _rideEnd.pick(nowMs: _clock());
+    if (r != null) _noteRideEnd(r);
+    final live = rideId == null || rideId == _currentRideId ? _rideEnd.pick(nowMs: now) : const <PlaceReviewPrompt>[];
+    final out = <PlaceReviewPrompt>[...live];
+    for (final e in _pending.live(nowMs: now, rideId: rideId)) {
+      if (out.any((p) => p.placeId == e.placeId)) continue;
+      out.add(e.toPrompt());
+    }
+    if (out.length <= RideEndReviews.maxPlaces) return out;
+    return out.take(RideEndReviews.maxPlaces).toList();
   }
 
   /// One after-ride place was rated (or its question closed): not asked again.
@@ -192,13 +224,43 @@ class PlaceReviewService extends ChangeNotifier {
     _rideEnd.answered(placeId);
     _tracker.markAsked(placeId, _clock());
     unawaited(_saveAsked());
+    if (_pending.remove(placeId)) unawaited(_savePending());
     notifyListeners();
   }
 
-  /// "Skip" on the after-ride question: nothing more about this ride.
-  void skipAfterRide() {
-    _rideEnd.skipAll();
+  /// "Skip" on the after-ride question: nothing more about this ride (with [rideId] only that
+  /// ride's stored questions; without, all of them).
+  void skipAfterRide({String? rideId}) {
+    if (rideId == null || rideId == _currentRideId) _rideEnd.skipAll();
+    if (_pending.skip(rideId: rideId)) unawaited(_savePending());
     notifyListeners();
+  }
+
+  /// The next app open after a start that restored unanswered after-ride questions: true once
+  /// (not during a ride, not during an SOS), then false. The caller then shows
+  /// [afterRidePrompts].
+  bool takeOpenPrompt({required bool enabled}) {
+    if (!_openPromptDue || !enabled) return false;
+    if ((rideActive?.call() ?? false) || (emergencyOpen?.call() ?? false)) return false;
+    _openPromptDue = false;
+    return _pending.live(nowMs: _clock()).isNotEmpty;
+  }
+
+  String _lastRideId = '';
+  String get _currentRideId {
+    final id = rideIdSource?.call();
+    if (id != null && id.isNotEmpty) _lastRideId = id;
+    return _lastRideId;
+  }
+
+  /// One dwell for the after-ride list, kept on the phone too (with the ride id).
+  void _noteRideEnd(PlaceReviewPrompt p, {String? rideId}) {
+    _rideEnd.note(p);
+    // Answered in the cockpit (or skipped already): the live list did not take it.
+    if (!_rideEnd.has(p.placeId)) return;
+    if (_pending.add(PendingPlaceReview.fromPrompt(p, rideId: rideId ?? _currentRideId), nowMs: _clock())) {
+      unawaited(_savePending());
+    }
   }
 
   void onFix(TrackPoint f) {
@@ -213,15 +275,22 @@ class PlaceReviewService extends ChangeNotifier {
     final nearby = f.speedKmh > 25 ? const <PlacePoi>[] : _nearby(f.lat, f.lng);
     _tracker.onFix(lat: f.lat, lng: f.lng, tMs: now, nearby: nearby);
     final pending = _tracker.pending;
-    if (pending != null && active) _rideEnd.note(pending);
+    if (pending != null && active) _noteRideEnd(pending);
     _evaluate(now);
   }
 
   /// The ride ended: a cockpit question still open closes unanswered (the ride summary asks
   /// instead, [afterRidePrompts]).
-  void onRideEnded() {
+  ///
+  /// [rideId] (the ride's group id) is stored with the questions so the trip report of that ride
+  /// can ask too, and the list survives an app restart.
+  void onRideEnded({String? rideId}) {
+    if (rideId != null && rideId.isNotEmpty) _lastRideId = rideId;
     final r = _tracker.pending;
-    if (r != null) _rideEnd.note(r);
+    if (r != null) _noteRideEnd(r, rideId: rideId);
+    for (final p in _rideEnd.pick(nowMs: _clock())) {
+      _noteRideEnd(p, rideId: rideId);
+    }
     if (_prompt == null) return;
     _prompt = null;
     notifyListeners();
@@ -275,6 +344,35 @@ class PlaceReviewService extends ChangeNotifier {
       });
     } catch (_) {}
   }
+
+  Future<void> _loadPending() async {
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(pendingKey);
+      final loaded = PendingPlaceReviews.decode(raw, nowMs: _clock());
+      // Anything noted before the read finished stays too.
+      for (final e in _pending.items) {
+        loaded.add(e, nowMs: _clock());
+      }
+      _pending = loaded;
+      _openPromptDue = !loaded.isEmpty;
+      if (!_disposed && !loaded.isEmpty) notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _savePending() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_pending.isEmpty) {
+        await prefs.remove(pendingKey);
+      } else {
+        await prefs.setString(pendingKey, _pending.encode());
+      }
+    } catch (_) {}
+  }
+
+  /// Restores the stored after-ride questions (tests; the constructor does it on start).
+  @visibleForTesting
+  Future<void> reloadPending() => _loadPending();
 
   Future<void> _saveAsked() async {
     try {
