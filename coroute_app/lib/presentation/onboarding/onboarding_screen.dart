@@ -6,7 +6,7 @@ import '../../core/ui/ui.dart';
 import '../auth/access_gate_screen.dart';
 
 /// Three short pages shown once, on the first launch, before sign-in.
-/// Every page can be skipped. No illustrations and no animation at rest.
+/// Every page can be skipped. One idea per page: an icon, a title, one line.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -15,19 +15,19 @@ class OnboardingScreen extends StatefulWidget {
 
   static const List<OnboardingPage> pages = [
     OnboardingPage(
-      icon: Icons.groups_rounded,
-      title: 'Ride Together',
-      line: 'Start a ride, share the code, and see your whole group on one map.',
+      icon: Icons.groups_outlined,
+      title: 'Ride together',
+      line: 'Your whole group on one map.',
     ),
     OnboardingPage(
-      icon: Icons.record_voice_over_rounded,
-      title: 'Stay Connected',
-      line: 'Talk while you ride and know when someone stops or falls behind.',
+      icon: Icons.headset_mic_outlined,
+      title: 'Stay connected',
+      line: 'Talk on the move. See who stopped.',
     ),
     OnboardingPage(
-      icon: Icons.health_and_safety_rounded,
-      title: 'Reach Safely',
-      line: 'Hold SOS to alert your group and your emergency contact.',
+      icon: Icons.health_and_safety_outlined,
+      title: 'Reach safely',
+      line: 'Hold SOS to alert your group and family.',
     ),
   ];
 
@@ -134,11 +134,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         for (var i = 0; i < pages.length; i++)
                           Container(
                             margin: const EdgeInsets.symmetric(horizontal: Space.s4),
-                            width: i == _page ? 24 : 8,
-                            height: 8,
+                            width: i == _page ? 20 : 6,
+                            height: 6,
                             decoration: BoxDecoration(
-                              color: i == _page ? AppTheme.brand : AppTheme.border2,
-                              borderRadius: Radii.smAll,
+                              color: i == _page ? AppTheme.primary : AppTheme.border2,
+                              borderRadius: BorderRadius.circular(999),
                             ),
                           ),
                       ],
@@ -149,7 +149,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   padding: const EdgeInsets.fromLTRB(20, Space.s24, 20, 28),
                   child: DsButton(
                     label: last ? 'Get started' : 'Next',
-                    icon: last ? Icons.two_wheeler_rounded : Icons.arrow_forward_rounded,
                     onPressed: _next,
                   ),
                 ),
@@ -175,23 +174,23 @@ class _PageBody extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Canvas: a big teal icon on the pale teal tint.
+            // One outline icon on a soft teal circle.
             Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(Radii.xl + 10)),
-              child: Icon(page.icon, size: 60, color: AppTheme.accentText),
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(color: AppTheme.primarySoft, shape: BoxShape.circle),
+              child: Icon(page.icon, size: 44, color: AppTheme.primary),
             ),
-            const SizedBox(height: Space.s24),
+            const SizedBox(height: Space.s32),
             Semantics(
               header: true,
               child: Text(page.title, textAlign: TextAlign.center, style: AppText.headline),
             ),
-            const SizedBox(height: Space.s12),
+            const SizedBox(height: Space.s8),
             Text(
               page.line,
               textAlign: TextAlign.center,
-              style: AppText.body.copyWith(color: AppTheme.text2),
+              style: AppText.body.copyWith(color: AppTheme.textMuted, fontSize: 16),
             ),
           ],
         ),

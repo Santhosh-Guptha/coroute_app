@@ -136,7 +136,7 @@ Future<void> showPlacesSheet(BuildContext context, MapPlacesService service, {do
           shrinkWrap: true,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: [
-            Text('Places on map', style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.w800)),
+            Text('Places on map', style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
             Text('Icons show from closer zoom; names when zoomed in further. Choices are saved.',
                 style: TextStyle(color: AppTheme.muted, fontSize: 12)),

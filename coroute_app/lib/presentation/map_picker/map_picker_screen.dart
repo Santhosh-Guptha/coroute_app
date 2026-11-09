@@ -61,7 +61,7 @@ class StopKindChoices extends StatelessWidget {
             onSelected: (_) => onSelected(k),
             selectedColor: AppTheme.brand,
             backgroundColor: AppTheme.card,
-            labelStyle: TextStyle(color: selected == k ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w800),
+            labelStyle: TextStyle(color: selected == k ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w600),
             side: BorderSide(color: selected == k ? AppTheme.brand : AppTheme.border, width: 2),
             showCheckmark: false,
             materialTapTargetSize: MaterialTapTargetSize.padded,
@@ -619,7 +619,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                             onPressed: _dwell <= 0 ? null : () => setState(() => _dwell = (_dwell - 5).clamp(0, 600).toInt()),
                             icon: Icon(Icons.remove_circle_outline_rounded, color: _dwell <= 0 ? AppTheme.muted : AppTheme.accentText),
                           ),
-                          Text(_dwell == 0 ? 'Not set' : '$_dwell min', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                          Text(_dwell == 0 ? 'Not set' : '$_dwell min', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                           IconButton(
                             tooltip: 'Longer stay',
                             onPressed: () => setState(() => _dwell = (_dwell + 5).clamp(0, 600).toInt()),

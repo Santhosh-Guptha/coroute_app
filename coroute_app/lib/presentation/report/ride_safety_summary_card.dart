@@ -29,7 +29,7 @@ class RideSafetySummaryCard extends StatelessWidget {
               Expanded(
                 child: Semantics(
                   header: true,
-                  child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                  child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                 ),
               ),
             ],

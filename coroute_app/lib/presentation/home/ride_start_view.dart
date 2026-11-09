@@ -251,7 +251,7 @@ class RideStartView extends StatelessWidget {
                         child: _ActionTile(
                           icon: Icons.map_outlined,
                           title: 'Plan a route',
-                          caption: 'Stops, pace and a code to share',
+                          caption: 'Stops and pace',
                           onTap: () => startRide(context),
                         ),
                       ),
@@ -260,7 +260,7 @@ class RideStartView extends StatelessWidget {
                         child: _ActionTile(
                           icon: Icons.key_rounded,
                           title: 'Join Ride',
-                          caption: 'Enter the code from your group',
+                          caption: 'Use a group code',
                           onTap: () => showJoinRideSheet(context),
                         ),
                       ),
@@ -343,7 +343,7 @@ class _Greeting extends StatelessWidget {
                     style: TextStyle(
                       color: AppTheme.accentText,
                       fontSize: 15,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -371,12 +371,11 @@ class _NoRideHero extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'NEXT RIDE',
+            'Next ride',
             style: TextStyle(
               color: DsHeroCard.overline,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(height: 4),
@@ -388,21 +387,21 @@ class _NoRideHero extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 22,
-                fontWeight: FontWeight.w800,
-                height: 1.2,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
               ),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             hostsGroup
-                ? 'Start a ride and share the code, or join with a code from your group.'
-                : 'Start a solo ride for free, or join with a code from your group.',
+                ? 'Start one and share the code.'
+                : 'Start a solo ride for free.',
             style: const TextStyle(
               color: DsHeroCard.secondary,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              height: 1.35,
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              height: 1.45,
             ),
           ),
           const SizedBox(height: 16),
@@ -903,12 +902,12 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
               minimumSize: const Size.fromHeight(56),
             ),
             child: _busy
-                ? const SizedBox(
+                ? SizedBox(
                     width: 24,
                     height: 24,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.5,
-                      color: Colors.white,
+                      color: AppTheme.primary,
                     ),
                   )
                 : Text(_serverBusy && err != null ? 'Try again' : 'Join'),

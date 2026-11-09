@@ -231,7 +231,7 @@ class PoiMarker extends StatelessWidget {
                   ),
                   child: Text(
                     '★${rating!.toStringAsFixed(1)}',
-                    style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: AppTheme.text, height: 1.1),
+                    style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: AppTheme.text, height: 1.1),
                   ),
                 ),
               ),

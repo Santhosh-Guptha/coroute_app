@@ -196,11 +196,11 @@ class _PlaceRiderReviewsState extends State<PlaceRiderReviews> {
       padding: const EdgeInsets.only(top: Space.s16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Flexible(child: Semantics(header: true, child: Text('CoRoute rider reviews', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(fontWeight: FontWeight.w800)))),
+          Flexible(child: Semantics(header: true, child: Text('CoRoute rider reviews', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(fontWeight: FontWeight.w600)))),
           const SizedBox(width: Space.s8),
           if (s != null) ...[
             Icon(Icons.star_rounded, size: 18, color: AppTheme.hyperAmber),
-            Text(' ${s.avg.toStringAsFixed(1)}', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
+            Text(' ${s.avg.toStringAsFixed(1)}', style: AppText.label.copyWith(fontWeight: FontWeight.w600)),
             Text('  ·  ${s.count} rating${s.count == 1 ? '' : 's'}', style: AppText.caption.copyWith(color: AppTheme.muted)),
           ],
         ]),

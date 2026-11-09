@@ -61,7 +61,7 @@ class FuelAheadList extends StatelessWidget {
                     '${s.offM > 300 ? ' · ${(s.offM / 1000).toStringAsFixed(1)} km off it' : ''}'
                     '${s.match == FuelMatch.unknown ? ' · fuel type unknown' : ''}',
                   ),
-                  trailing: Text(s.reach.label, style: AppText.caption.copyWith(color: _reachColor(s.reach), fontWeight: FontWeight.w800)),
+                  trailing: Text(s.reach.label, style: AppText.caption.copyWith(color: _reachColor(s.reach), fontWeight: FontWeight.w600)),
                   onTap: () => showPlaceCard(context, s.poi, service),
                 ),
             ],

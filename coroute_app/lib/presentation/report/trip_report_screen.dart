@@ -21,6 +21,8 @@ import '../timeline/timeline_list.dart';
 import 'replay_screen.dart';
 import '../rider/ride_replay_screen.dart';
 import '../../data/services/gpx_service.dart';
+import '../../data/services/place_review_service.dart';
+import '../map_places/after_ride_place_reviews.dart';
 import 'ride_share_card.dart';
 import 'trip_route_map.dart';
 import '../trip/trip_feedback_sheet.dart';
@@ -406,7 +408,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           dividerColor: AppTheme.border,
           labelColor: AppTheme.accentText,
           unselectedLabelColor: AppTheme.muted,
-          labelStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 14, fontWeight: FontWeight.w800),
+          labelStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 14, fontWeight: FontWeight.w600),
           unselectedLabelStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 14, fontWeight: FontWeight.w700),
           tabs: const [Tab(text: 'Summary'), Tab(text: 'Route')],
         ),
@@ -435,6 +437,21 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           ],
         ),
       ),
+    );
+  }
+
+  Widget _afterRidePlaces(String groupId) {
+    final places = Provider.of<PlaceReviewService?>(context, listen: false);
+    final on = context.featureOn('placeReviews') && context.featureOn('reviewPrompt');
+    if (places == null || !on) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: places,
+      builder: (context, _) => places.afterRidePrompts(enabled: on, rideId: groupId).isEmpty
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: DsCard(child: AfterRidePlaceReviews(service: places, enabled: on, rideId: groupId)),
+            ),
     );
   }
 
@@ -552,6 +569,9 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                   child: Text('From your phone. The full report is ready a minute after the ride.', style: AppText.caption),
                 ),
             ],
+            // 3.55 follow-up: the place questions of this ride not answered yet (kept on the phone
+            // for 7 days, at most 2; admin switches placeReviews and reviewPrompt).
+            if (!widget.adminView && t.groupId.isNotEmpty) _afterRidePlaces(t.groupId),
             if (!widget.adminView && r != null && others.isNotEmpty) ...[
               const SizedBox(height: 20),
               Semantics(header: true, child: DsSectionHeader('Rode with')),
@@ -611,7 +631,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(rv == null ? 'Rate this ride' : 'Your review', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                Text(rv == null ? 'Rate this ride' : 'Your review', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                 const SizedBox(height: Space.s4),
                 if (rv == null)
                   Text('Tell other riders about it. Shown after a quick check.', style: AppText.caption)
@@ -689,7 +709,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
         shape: const Border(),
         collapsedShape: const Border(),
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        title: Text('More details', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+        title: Text('More details', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
         subtitle: Text(widget.adminView ? 'The group and every rider' : 'Top speed, the group and every rider', style: AppText.caption),
         iconColor: AppTheme.accentText,
         collapsedIconColor: AppTheme.muted,
@@ -716,7 +736,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingTextStyle: AppText.label.copyWith(fontWeight: FontWeight.w800),
+          headingTextStyle: AppText.label.copyWith(fontWeight: FontWeight.w600),
           dataTextStyle: AppText.body.copyWith(fontSize: 14),
           dividerThickness: 1,
           columnSpacing: Space.s16,
@@ -812,7 +832,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             const SizedBox(width: Space.s8),
             Expanded(
               child: Text(m.userId == myId ? '${m.name} (you)' : m.name,
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
             ),
             if (m.reachedDestination) const DsChip('Arrived'),
           ]),
@@ -880,7 +900,7 @@ class _HeroStat extends StatelessWidget {
             style: const TextStyle(
               color: Colors.white,
               fontSize: 24,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
               height: 1.15,
               fontFeatures: [FontFeature.tabularFigures()],
             ),
@@ -998,7 +1018,7 @@ class _RodeWithCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(names.isEmpty ? '${members.length} riders' : names, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                Text(names.isEmpty ? '${members.length} riders' : names, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                 const SizedBox(height: 1),
                 Text(line, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
               ],

@@ -247,7 +247,7 @@ class _CardStat extends StatelessWidget {
               maxLines: 1,
               style: AppText.title.copyWith(
                 color: _p.text,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
                 fontSize: 22,
                 fontFeatures: const [ui.FontFeature.tabularFigures()],
               ),

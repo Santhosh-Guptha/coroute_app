@@ -14,10 +14,14 @@ import 'place_style.dart';
 /// The caller passes [enabled] from the admin switches `placeReviews` and `reviewPrompt`. Shows
 /// nothing when there is nothing to ask.
 class AfterRidePlaceReviews extends StatelessWidget {
-  const AfterRidePlaceReviews({super.key, required this.service, required this.enabled, this.onDone});
+  const AfterRidePlaceReviews({super.key, required this.service, required this.enabled, this.onDone, this.rideId});
 
   final PlaceReviewService service;
   final bool enabled;
+
+  /// Only the questions of this ride (its group id: the ride end screen, the trip report of that
+  /// ride); null shows any stored ones (the next app open).
+  final String? rideId;
 
   /// After "Skip" or once every place was rated (the sheet closes itself).
   final VoidCallback? onDone;
@@ -31,8 +35,8 @@ class AfterRidePlaceReviews extends StatelessWidget {
 
   /// Opens the question as a bottom sheet on [context] when there is something to ask. Closing it
   /// any other way counts as "Skip".
-  static Future<void> show(BuildContext context, {required PlaceReviewService service, required bool enabled}) async {
-    if (service.afterRidePrompts(enabled: enabled).isEmpty) return;
+  static Future<void> show(BuildContext context, {required PlaceReviewService service, required bool enabled, String? rideId}) async {
+    if (service.afterRidePrompts(enabled: enabled, rideId: rideId).isEmpty) return;
     var done = false;
     await showModalBottomSheet<void>(
       context: context,
@@ -46,6 +50,7 @@ class AfterRidePlaceReviews extends StatelessWidget {
         child: AfterRidePlaceReviews(
           service: service,
           enabled: enabled,
+          rideId: rideId,
           onDone: () {
             done = true;
             Navigator.of(ctx).maybePop();
@@ -53,13 +58,13 @@ class AfterRidePlaceReviews extends StatelessWidget {
         ),
       ),
     );
-    if (!done) service.skipAfterRide();
+    if (!done) service.skipAfterRide(rideId: rideId);
   }
 
   Future<void> _rate(BuildContext context, PlaceReviewPrompt p) async {
     await showPlaceReviewSheet(context, place: p.place, service: service, dwellMin: p.dwellMin);
     service.answerAfterRide(p.placeId);
-    if (service.afterRidePrompts(enabled: enabled).isEmpty) onDone?.call();
+    if (service.afterRidePrompts(enabled: enabled, rideId: rideId).isEmpty) onDone?.call();
   }
 
   @override
@@ -67,7 +72,7 @@ class AfterRidePlaceReviews extends StatelessWidget {
     return ListenableBuilder(
       listenable: service,
       builder: (context, _) {
-        final list = service.afterRidePrompts(enabled: enabled);
+        final list = service.afterRidePrompts(enabled: enabled, rideId: rideId);
         if (list.isEmpty) return const SizedBox.shrink();
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -83,7 +88,7 @@ class AfterRidePlaceReviews extends StatelessWidget {
                   const SizedBox(width: Space.s12),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(p.place.displayName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                      Text(p.place.displayName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                       Text(subtitle(p), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text2)),
                     ]),
                   ),
@@ -102,7 +107,7 @@ class AfterRidePlaceReviews extends StatelessWidget {
               child: TextButton(
                 key: const ValueKey('afterRideSkip'),
                 onPressed: () {
-                  service.skipAfterRide();
+                  service.skipAfterRide(rideId: rideId);
                   onDone?.call();
                 },
                 style: TextButton.styleFrom(minimumSize: const Size(88, 48)),

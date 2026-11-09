@@ -8,6 +8,8 @@ import '../../core/ui/ui.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_plan_model.dart';
 import '../../data/services/api_client.dart';
+import '../../data/services/convoy_service.dart';
+import '../../domain/ride/bike_markers.dart';
 import '../../domain/tracking/replay_math.dart';
 import '../timeline/member_colors.dart';
 import 'trip_route_map.dart';
@@ -140,6 +142,19 @@ class _ReplayScreenState extends State<ReplayScreen> {
     setState(() {});
   }
 
+  /// 3.55 follow-up: seated pillions of this ride when the phone holds it (a live ride, the admin
+  /// inspector): a pillion is drawn on their rider's two-up bike. A ride no longer held: empty
+  /// (the stored tracks have no pillion links), one marker each.
+  Map<String, String> _pillionOf() {
+    try {
+      final c = Provider.of<ConvoyService?>(context, listen: false);
+      final convoy = c?.allConvoys[widget.groupId] ?? (c?.activeConvoy?.groupId == widget.groupId ? c?.activeConvoy : null);
+      return convoy == null ? const {} : BikeMarkerPlan.seatedPairs(convoy.riders);
+    } catch (_) {
+      return const {};
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -160,6 +175,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
             timeMs: _tracks.isEmpty ? null : _t,
             focusUserId: widget.focusUserId,
             pin: widget.pin,
+            pillionOf: _pillionOf(),
           ),
         );
         final panel = _panel();

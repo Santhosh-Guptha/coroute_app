@@ -7,6 +7,7 @@ import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_plan_model.dart';
+import '../../domain/ride/bike_markers.dart';
 import '../../domain/tracking/replay_math.dart';
 import '../rider/widgets/bike_rider_marker.dart';
 
@@ -56,6 +57,11 @@ class TripRouteMap extends StatefulWidget {
   /// Shortest wait drawn on the map (shorter ones stay on the timeline).
   final Duration minWait;
 
+  /// 3.55 follow-up: seated pillions (pillion id -> rider id) from the ride snapshot the phone holds
+  /// (the tracks carry no pillion links): a pillion riding with their rider is drawn on the rider's
+  /// two-up bike, not as a marker of their own ([BikeMarkerPlan.replayBikes]). Empty: one each.
+  final Map<String, String> pillionOf;
+
   /// Waits at least this long are drawn as a long rest.
   final Duration longRest;
 
@@ -79,6 +85,7 @@ class TripRouteMap extends StatefulWidget {
     this.onRiderEndTap,
     this.minWait = const Duration(minutes: 2),
     this.longRest = RideThresholds.restingAfter,
+    this.pillionOf = const {},
   });
 
   /// "12m", "1h 05m": short enough for a map label.
@@ -116,6 +123,9 @@ class _Prepared {
 }
 
 class TripRouteMapState extends State<TripRouteMap> {
+  /// 3.56 the replay's 3D bikes face the way they rode (the last heading while standing).
+  final HeadingHold _headingHold = HeadingHold();
+
   final MapController _map = MapController();
   List<_Prepared> _prepared = [];
   LatLngBounds? _bounds;
@@ -284,7 +294,7 @@ class TripRouteMapState extends State<TripRouteMap> {
               child: Semantics(label: 'Selected place', child: Icon(Icons.location_on_rounded, color: AppTheme.warnText, size: 34)),
             ),
           if (replay) ..._riderNow(shown, widget.timeMs!, widget.focusUserId),
-          for (final (p, at) in hRiders) _riderMarker(p, at, true),
+          ..._onePerBike(hRiders, null, focusedAll: true),
           if (h != null && hPoint != null) _highlightMarker(h, hPoint),
         ]),
       ],
@@ -520,24 +530,38 @@ class TripRouteMapState extends State<TripRouteMap> {
     );
   }
 
-  Marker _riderMarker(_Prepared p, ReplayPoint at, bool focused) {
+  Marker _riderMarker(_Prepared p, ReplayPoint at, bool focused, {bool twoUp = false}) {
     return Marker(
       point: LatLng(at.lat, at.lng),
-      width: 44,
-      height: 36,
+      width: 48,
+      height: 48,
       // 3.55: a bike in the rider's colour (the track carries no bike details) instead of a round avatar.
-      child: StatusBikeMarker(name: p.track.name, color: _color(p.track.userId), height: focused ? 28 : 24),
+      child: StatusBikeMarker(
+        name: twoUp ? '${p.track.name} with pillion' : p.track.name,
+        color: _color(p.track.userId),
+        twoUp: twoUp,
+        height: focused ? 28 : 24,
+        heading: _headingHold.update(p.track.userId, p.track.headingAt(at.ts) ?? -1, at.kmh.isFinite && at.kmh > 0 ? at.kmh : 3),
+      ),
     );
   }
 
   List<Marker> _riderNow(List<_Prepared> shown, int ts, String? focus) {
-    final out = <Marker>[];
+    final now = <(_Prepared, ReplayPoint)>[];
     for (final p in shown) {
       final at = p.track.positionAt(ts);
-      if (at == null) continue;
-      out.add(_riderMarker(p, at, p.track.userId == focus));
+      if (at != null) now.add((p, at));
     }
-    return out;
+    return _onePerBike(now, focus);
+  }
+
+  /// One marker per bike: a seated pillion next to their rider rides on the two-up bike.
+  List<Marker> _onePerBike(List<(_Prepared, ReplayPoint)> now, String? focus, {bool focusedAll = false}) {
+    final plan = BikeMarkerPlan.replayBikes({for (final (p, at) in now) p.track.userId: (at.lat, at.lng)}, widget.pillionOf);
+    return [
+      for (final (p, at) in now)
+        if (plan[p.track.userId] case final twoUp?) _riderMarker(p, at, focusedAll || p.track.userId == focus, twoUp: twoUp),
+    ];
   }
 }
 

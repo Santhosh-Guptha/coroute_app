@@ -99,23 +99,15 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
                 children: [
                   DsScreenHeader(
                     title: 'Permissions',
-                    subtitle: 'Used only during an active ride',
+                    subtitle: 'Used only during a ride',
                     onBack: widget.gate ? null : () => Navigator.maybePop(context),
                   ),
-                  const SizedBox(height: 18),
-                  Text(
-                    widget.gate
-                        ? 'CoRoute needs a few permissions. Each is used only during a ride.'
-                        : 'Each permission is used only during an active ride.',
-                    style: AppText.body.copyWith(color: AppTheme.text2),
-                  ),
-                  const SizedBox(height: Space.s16),
+                  const SizedBox(height: Space.s24),
                   for (final p in _items) _PermissionRow(item: p, onAllow: () => _request(p)),
                   const SizedBox(height: Space.s12),
                   if (widget.gate)
                     DsButton(
-                      label: requiredOk ? 'Continue' : 'Allow the required permissions to continue',
-                      fontSize: requiredOk ? 16 : 14,
+                      label: requiredOk ? 'Continue' : 'Allow required to continue',
                       onPressed: (requiredOk && !_isContinuing)
                           ? () async {
                               setState(() => _isContinuing = true);
@@ -143,27 +135,38 @@ class _PermissionRow extends StatelessWidget {
   final VoidCallback onAllow;
   const _PermissionRow({required this.item, required this.onAllow});
 
+  /// One outline icon per permission, so the list reads at a glance.
+  static IconData iconFor(String key) => switch (key) {
+        'location' => Icons.location_on_outlined,
+        'locationAlways' => Icons.my_location_outlined,
+        'microphone' => Icons.mic_none_outlined,
+        'bluetooth' => Icons.bluetooth_outlined,
+        'notification' => Icons.notifications_none_outlined,
+        'battery' => Icons.battery_std_outlined,
+        'fullScreen' => Icons.lock_open_outlined,
+        _ => Icons.shield_outlined,
+      };
+
   @override
   Widget build(BuildContext context) {
     final p = item;
     final statusText = p.granted ? 'Allowed' : (p.required ? 'Required' : 'Optional');
     final attention = !p.granted && p.required;
-    final Color statusColor = p.granted ? AppTheme.accentText : (attention ? AppTheme.warnText : AppTheme.muted);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: Space.s12),
       child: DsCard(
         warning: attention,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 44,
-              height: 44,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                color: p.granted ? AppTheme.tint : (attention ? AppTheme.warnTint : AppTheme.soft),
-                borderRadius: BorderRadius.circular(14),
+                color: p.granted ? AppTheme.primarySoft : (attention ? AppTheme.warnTint : AppTheme.soft),
+                shape: BoxShape.circle,
               ),
-              child: Icon(p.granted ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, size: 22, color: statusColor),
+              child: Icon(iconFor(p.key), size: 22, color: p.granted ? AppTheme.primary : (attention ? AppTheme.warnText : AppTheme.muted)),
             ),
             const SizedBox(width: Space.s12),
             Expanded(
@@ -175,16 +178,21 @@ class _PermissionRow extends StatelessWidget {
                     children: [
                       Expanded(child: Text(p.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15))),
                       const SizedBox(width: 8),
-                      DsChip(statusText, warning: attention, color: p.granted ? null : (attention ? null : AppTheme.muted), background: p.granted ? null : (attention ? null : AppTheme.soft)),
+                      if (p.granted)
+                        Icon(Icons.check_circle_outline_rounded, size: 22, color: AppTheme.success, semanticLabel: statusText)
+                      else
+                        DsChip(statusText, warning: attention, color: attention ? null : AppTheme.muted, background: attention ? null : AppTheme.soft),
                     ],
                   ),
-                  const SizedBox(height: Space.s4),
-                  Text(p.reason, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label),
+                  // Shown in full: the background-location line is the
+                  // required prominent disclosure.
                   if (!p.granted) ...[
+                    const SizedBox(height: Space.s4),
+                    Text(p.reason, style: AppText.label),
                     const SizedBox(height: Space.s12),
                     SizedBox(
                       width: 160,
-                      child: DsButton(label: 'Fix Permission', height: 48, fontSize: 14, onPressed: onAllow),
+                      child: DsButton(label: 'Fix Permission', height: 44, fontSize: 14, onPressed: onAllow),
                     ),
                   ],
                 ],
