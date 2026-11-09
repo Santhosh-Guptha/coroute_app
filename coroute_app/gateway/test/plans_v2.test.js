@@ -112,6 +112,38 @@ test('downgrade: no credit or refund, starts when the current paid period ends; 
   assert.deepEqual([back.kind, back.creditAvailableInr], ['renewal', Math.round((12 * 99) / 30 + 49)]);
 });
 
+test('plan changes (3.55): only a bigger plan while a paid plan runs; any plan once it ends', () => {
+  assert.deepEqual(pricing.PLAN_ORDER, ['community', 'individual', 'group_small', 'group_large']);
+  const block = (planId, m) => pricing.changeBlock({ membership: m, planId, now: NOW });
+  // Mid-period downgrade and same tier are refused with one clear code.
+  const down = block('group_small', mem('group_large', 12 * DAY));
+  assert.deepEqual([down.status, down.reason, down.code, down.currentPlan], [409, 'DOWNGRADE_NOT_ALLOWED', 'DOWNGRADE_NOT_ALLOWED', 'group_large']);
+  assert.equal(down.error, pricing.DOWNGRADE_MESSAGE);
+  assert.equal(block('group_large', mem('group_large', 12 * DAY)).reason, 'DOWNGRADE_NOT_ALLOWED');
+  assert.equal(block('group_small', mem('group_small', 3 * DAY)).reason, 'DOWNGRADE_NOT_ALLOWED');
+  // Upgrades are allowed (also from the retired Individual).
+  assert.equal(block('group_large', mem('group_small', 12 * DAY)), null);
+  assert.equal(block('group_small', mem('individual', 12 * DAY, { capacity: 1, priceInr: 9 })), null);
+  // No paid plan, or it has ended: anything goes.
+  assert.equal(block('group_small', null), null);
+  assert.equal(block('group_small', mem('group_large', -HOUR)), null);
+  assert.equal(block('group_small', mem('group_large', 5 * DAY, { status: 'CANCELLED' })), null);
+});
+
+test('upgrade credit is capped at the new price (after the coupon); nothing is carried over', () => {
+  // A Small period bought at an old, higher price (₹120): credit round(30 x 120 / 30) = 120 > ₹99.
+  const dear = quote('group_large', mem('group_small', 30 * DAY - HOUR, { priceInr: 120 }));
+  assert.equal(dear.kind, 'upgrade');
+  assert.deepEqual([dear.creditAvailableInr, dear.creditInr, dear.payableInr, dear.extraDays], [120, 99, 0, 0]);
+  assert.equal(dear.endsAt, NOW + 30 * DAY, 'a normal period, no extra days');
+  assert.ok(dear.creditInr <= dear.basePriceInr);
+  // Coupons still apply to upgrades: 60% off ₹99 = ₹59 off, ₹40 left; credit ₹49 is capped at ₹40.
+  const coupon = { code: 'UP60', discountType: 'percentage', discountValue: 60 };
+  const c = quote('group_large', mem('group_small', 30 * DAY - HOUR), { coupon });
+  assert.deepEqual([c.couponDiscountInr, c.creditAvailableInr, c.creditInr, c.payableInr, c.extraDays], [59, 49, 40, 0, 0]);
+  assert.equal(c.couponCode, 'UP60');
+});
+
 test('coupon rules: plan ids in any spelling, retired Individual binding, minimum order, first purchase', () => {
   assert.deepEqual(['Group_Small ', 'small group', 'GROUP-LARGE', 'individual', 'roadCaptain', 'all', ''].map(normalizePlanId), ['group_small', 'group_small', 'group_large', 'group_small', null, 'all', null]);
   const base = { code: 'C', status: 'ACTIVE', discountType: 'percentage', discountValue: 50, maxUsagePerUser: 1, usages: [] };
@@ -234,18 +266,50 @@ test('plans v2 over HTTP and WebSocket', async (t) => {
     assert.equal(my.json.plan.category, 'group_large');
     assert.ok(Math.abs(my.json.plan.validUntil - (Date.now() + 30 * DAY)) < 60000, 'a full period from now');
 
-    // Downgrade to Small: paid now, starts when Large ends.
+    // 3.55: no downgrade while Large runs (quote, coupon check, order and free activation refuse it).
     const d = await env.api('GET', '/membership/quote?plan=group_small', null, r.token);
-    assert.deepEqual([d.json.kind, d.json.creditInr, d.json.payableInr], ['downgrade', 0, 49]);
-    await pay(r.token, 'group_small');
+    assert.deepEqual([d.status, d.json.reason], [409, 'DOWNGRADE_NOT_ALLOWED']);
+    assert.equal(d.json.error, 'You can move to a bigger plan anytime. Smaller plans can be chosen when your current plan ends.');
+    const dOrder = await env.api('POST', '/membership/order', { category: 'group_small' }, r.token);
+    assert.deepEqual([dOrder.status, dOrder.json.code], [409, 'DOWNGRADE_NOT_ALLOWED']);
+    const dCoupon = await env.api('POST', '/membership/validate-coupon', { code: 'WELCOME50', category: 'group_small' }, r.token);
+    assert.deepEqual([dCoupon.status, dCoupon.json.valid, dCoupon.json.reason], [409, false, 'DOWNGRADE_NOT_ALLOWED']);
+    const dFree = await env.api('POST', '/membership/activate-free', { category: 'group_small', couponCode: 'RIDERFREE' }, r.token);
+    assert.deepEqual([dFree.status, dFree.json.reason], [409, 'DOWNGRADE_NOT_ALLOWED']);
     const after = await env.api('GET', '/membership/my', null, r.token);
-    assert.deepEqual([after.json.plan.category, after.json.plan.seats, after.json.plan.nextPlan.category], ['group_large', 12, 'group_small']);
-    assert.equal(after.json.plan.validUntil, after.json.plan.nextPlan.startsAt);
+    assert.deepEqual([after.json.plan.category, after.json.plan.seats], ['group_large', 12]);
 
-    // Large again (cancels the downgrade): the unused Large days and the prepaid Small cover it all.
-    const back = await env.api('POST', '/membership/order', { category: 'group_large' }, r.token);
-    assert.equal(back.status, 200, JSON.stringify(back.json));
-    assert.equal(back.json.isAlreadyActive, true, 'nothing to pay for the plan already held');
+    // The same plan again: a repeat tap with nothing to pay is "already active"; paying again is refused.
+    const same = await env.api('GET', '/membership/quote?plan=group_large', null, r.token);
+    assert.deepEqual([same.status, same.json.reason], [409, 'DOWNGRADE_NOT_ALLOWED']);
+    const sameTap = await env.api('POST', '/membership/order', { category: 'group_large' }, r.token);
+    assert.deepEqual([sameTap.status, sameTap.json.isAlreadyActive], [200, true], 'credit covers it: nothing bought');
+    const m1 = await repo.findMembershipByOwner(r.user.userId);
+    m1.validUntil = Date.now() + 5 * DAY;
+    await repo.saveMembership(m1);
+    const sameOrder = await env.api('POST', '/membership/order', { category: 'group_large' }, r.token);
+    assert.deepEqual([sameOrder.status, sameOrder.json.reason], [409, 'DOWNGRADE_NOT_ALLOWED']);
+
+    // After the plan ends, any plan can be chosen (Small at full price).
+    const m2 = await repo.findMembershipByOwner(r.user.userId);
+    m2.validUntil = Date.now() - 1000;
+    await repo.saveMembership(m2);
+    const ended = await env.api('GET', '/membership/quote?plan=group_small', null, r.token);
+    assert.deepEqual([ended.status, ended.json.kind, ended.json.payableInr], [200, 'new', 49]);
+    await pay(r.token, 'group_small');
+    const small = await env.api('GET', '/membership/my', null, r.token);
+    assert.equal(small.json.plan.category, 'group_small');
+  });
+
+  await t.test('admin "Change plan" is exempt: an admin may move a rider to a smaller plan mid-period', async () => {
+    const r = await env.register('Admin Moved', 'admin.moved@coroute.test');
+    await pay(r.token, 'group_large');
+    const refused = await env.api('POST', '/membership/order', { category: 'group_small' }, r.token);
+    assert.equal(refused.status, 409);
+    const g = await env.api('POST', `/admin/subscription/users/${r.user.userId}/grant`, { planTier: 'group_small', days: 30, reason: 'club request' }, admin.token);
+    assert.equal(g.status, 200, JSON.stringify(g.json));
+    const my = await env.api('GET', '/membership/my', null, r.token);
+    assert.deepEqual([my.json.plan.category, my.json.plan.seats], ['group_small', 6]);
   });
 
   await t.test('Community rides solo: nobody joins, talk / messages / regroup / roles refused with SOLO_RIDE; a group ride gives every rider the group features', async () => {

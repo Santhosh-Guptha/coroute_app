@@ -71,9 +71,11 @@ test('with an iOS link the real download shows and the coming-soon state is gone
 });
 
 test('without PLAY_STORE_URL the site asks for a story in the app instead of a Google Play rating', async () => {
+  const about = await (await fetch(base + '/about')).text();
+  assert.ok(!about.includes('Rate CoRoute on Google Play'), 'no Play rating button');
+  assert.ok(!about.includes('__PLAY_STORE_URL__') && !/<!--\/?(no-)?play-->/.test(about), 'no placeholder or block markers left');
+  assert.ok(about.includes('Share your story after a ride in the app.'));
+  assert.ok(about.includes('Rate us in the app'));
   const home = await (await fetch(base + '/')).text();
-  assert.ok(!home.includes('Rate CoRoute on Google Play'), 'no Play rating button');
-  assert.ok(!home.includes('__PLAY_STORE_URL__') && !/<!--\/?(no-)?play-->/.test(home), 'no placeholder or block markers left');
-  assert.ok(home.includes('Share your story after a ride in the app.'));
-  assert.ok(home.includes('Rate us in the app'));
+  assert.ok(!home.includes('__PLAY_STORE_URL__') && !/<!--\/?(no-)?play-->/.test(home), 'home: no placeholder or block markers');
 });

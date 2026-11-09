@@ -79,26 +79,22 @@ void main() {
     await tester.tap(find.text('Open Settings Modal'));
     await tester.pumpAndSettle();
 
-    // The 4 in-ride quick settings: voice, night map, battery saver, screen on
+    // 3.55: the 3 in-ride quick settings: voice, night map, battery saver (the screen always stays on).
     expect(find.byKey(const Key('quick_setting_voice_alerts')), findsOneWidget);
     expect(find.byKey(const Key('quick_setting_night_map')), findsOneWidget);
     expect(find.byKey(const Key('quick_setting_battery_saver')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_screen_always_on')), findsOneWidget);
+    expect(find.byKey(const Key('quick_setting_screen_always_on')), findsNothing);
 
-    // Verify touch target dimensions are glove-friendly (>= 56 dp)
+    // Verify touch target dimensions are glove-friendly (big tiles, >= 96 dp tall)
     final voiceCardSize = tester.getSize(find.byKey(const Key('quick_setting_voice_alerts')));
-    expect(voiceCardSize.height, greaterThanOrEqualTo(56.0));
+    expect(voiceCardSize.height, greaterThanOrEqualTo(96.0));
+    expect(voiceCardSize.width, greaterThanOrEqualTo(80.0));
 
     // Toggle Voice Alerts
     await tester.tap(find.byKey(const Key('quick_setting_voice_alerts')));
     await tester.pump();
     expect(toggles['Voice'], isFalse);
     expect(settings.voiceWarnings, isFalse);
-
-    // Toggle Screen Always On
-    await tester.tap(find.byKey(const Key('quick_setting_screen_always_on')));
-    await tester.pump();
-    expect(screenOn, isTrue);
 
     // Toggle Battery saver (the same switch as in Settings)
     await tester.tap(find.byKey(const Key('quick_setting_battery_saver')));

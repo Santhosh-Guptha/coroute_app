@@ -209,8 +209,8 @@ void main() {
     });
   });
 
-  group('break reminder switched off', () {
-    testWidgets('no 2 h break prompt or voice while the reminder is off; it comes back when switched on', (tester) async {
+  group('break reminder is always on (3.55)', () {
+    testWidgets('switching it off is ignored: the 2 h break prompt still comes', (tester) async {
       SharedPreferences.setMockInitialValues({});
       final settings = SettingsService();
       await settings.load();
@@ -235,7 +235,8 @@ void main() {
       });
       bool prompted() => safety.prompts.any((p) => p.key == SafetyConstants.promptFatigue);
 
-      await settings.setFatigueReminder(false); // switched off during the ride
+      await settings.setFatigueReminder(false); // tried during the ride: ignored
+      expect(settings.fatigueReminder, isTrue);
       port.emitFix(TrackPoint(lat: 17.4, lng: 78.4, speedKmh: 50, ts: now));
       await tester.pump();
       for (var i = 1; i <= 26; i++) {
@@ -244,18 +245,7 @@ void main() {
         await tester.pump();
       }
       await tester.pump(const Duration(milliseconds: 20));
-      expect(prompted(), isFalse, reason: 'reminder off: no break prompt after 2 h 10 min');
-      expect(engine.spokenList.any((t) => t.$1.contains('Time for a break')), isFalse);
-
-      // Switched back on: the 2 h rule speaks again on the next reminder.
-      await settings.setFatigueReminder(true);
-      for (var i = 1; i <= 26; i++) {
-        now += 5 * 60 * 1000;
-        port.emitFix(TrackPoint(lat: 17.6 + i * 0.005, lng: 78.4, speedKmh: 55, ts: now));
-        await tester.pump();
-      }
-      await tester.pump(const Duration(milliseconds: 20));
-      expect(prompted(), isTrue);
+      expect(prompted(), isTrue, reason: 'break prompt after 2 h 10 min');
       safety.answerPrompt(SafetyConstants.promptFatigue, primary: true);
       await tester.pump(const Duration(seconds: 1));
     });
@@ -284,7 +274,7 @@ void main() {
       await tester.tap(find.byKey(const Key('quick_setting_voice_alerts')));
       await tester.pump();
       expect(settings.voiceWarnings, isFalse);
-      expect(find.text('Muted. Emergencies are still spoken.'), findsOneWidget);
+      expect(find.text('Muted'), findsOneWidget);
       await tester.tap(find.byKey(const Key('quick_setting_voice_alerts')));
       await tester.pump();
       expect(settings.voiceWarnings, isTrue, reason: 'second tap turns it back on');
@@ -292,15 +282,14 @@ void main() {
       await tester.tap(find.byKey(const Key('quick_setting_battery_saver')));
       await tester.pump();
       expect(settings.batterySaver, isTrue);
-      expect(find.text('Gentler GPS and a lighter map'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('quick_setting_battery_saver')), matching: find.text('On')), findsOneWidget);
       await tester.tap(find.byKey(const Key('quick_setting_battery_saver')));
       await tester.pump();
       expect(settings.batterySaver, isFalse);
 
-      await tester.tap(find.byKey(const Key('quick_setting_screen_always_on')));
-      await tester.pump();
-      expect(screenOn, isFalse);
-      expect(find.text("Follows the phone's sleep time"), findsOneWidget);
+      // 3.55: the screen always stays on while riding: no toggle here.
+      expect(find.byKey(const Key('quick_setting_screen_always_on')), findsNothing);
+      expect(screenOn, isTrue);
     });
   });
 }

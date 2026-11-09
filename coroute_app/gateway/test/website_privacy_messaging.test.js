@@ -137,39 +137,24 @@ test('home: Community, solo riding is always free (hero, pricing, FAQ)', async (
   assert.ok(pricing.includes('id="community-free"'), 'Community banner inside pricing');
   assert.ok(textOf(pricing).includes('Solo riding is always free.') && textOf(pricing).includes('free for solo riders, forever'), 'pricing: free forever');
   assert.ok(!/\d/.test(textOf(pricing)), 'pricing: still no number written into the page');
-  const faq = sectionOf(html, 'faq');
+  // 3.56: the FAQ moved to /how-it-works (short home page).
+  const how = await (await fetch(base + '/how-it-works')).text();
+  const faq = sectionOf(how, 'faq');
   assert.ok(/Is it free\?[\s\S]*Yes for solo riders, always/.test(textOf(faq)), 'FAQ answer');
   assert.ok(textOf(faq).includes('What do the numbers on this site say about me?'), 'FAQ: numbers and privacy');
 });
 
-test('home: group rides section explains what a plan adds, prices only from the catalog', async () => {
+test('home: the plans strip says what a plan is for, prices only from the catalog', async () => {
   const html = await (await fetch(base + '/')).text();
-  const g = sectionOf(html, 'group-rides');
-  assert.ok(textOf(g).includes('Get safety for your group rides.'));
-  for (const f of ['Live group map', 'Push-to-talk', 'Group SOS', 'Regroup', 'Lead and sweep', 'Public ride sharing']) assert.ok(g.includes(`<h3>${f}</h3>`), f);
-  assert.ok(/<ul class="gx-plans" id="group-plans"[^>]*hidden>/.test(g), 'price chips hidden until the catalog loads');
-  assert.ok(!/\d/.test(textOf(g)), 'no price or number in the page');
-  assert.ok(g.includes('href="/get"') && g.includes('href="#pricing"'), 'CTAs');
+  const px = sectionOf(html, 'pricing');
+  assert.ok(textOf(px).includes('Only the host of a group ride needs a plan'));
+  assert.ok(px.includes('id="pricing-list"') && px.includes('data-pricing'), 'filled by home.js from the catalog');
+  assert.ok(!/\d/.test(textOf(px)), 'no price or number in the page');
+  assert.ok(html.includes('href="/get"'), 'CTA');
 });
 
-test('home: ride analytics card shows live community totals, never sample numbers (3.55)', async () => {
-  const html = await (await fetch(base + '/')).text();
-  const ra = sectionOf(html, 'ride-analytics');
-  const t = textOf(ra);
-  for (const w of ['Distance and rides', 'Hours in the saddle', 'Top speed', 'Safety stats', 'private to you']) assert.ok(t.includes(w), w);
-  assert.ok(ra.includes('data-ride-analytics'), 'filled from /api/public/usage-stats by site.js');
-  assert.ok(!/Sample|made-up|1,240/.test(ra), 'no sample badge and no made-up numbers');
-  assert.ok(t.includes('at least 10 rides'), 'caption explains the privacy floor');
-  const js = await (await fetch(base + '/assets/site.js')).text();
-  assert.ok(js.includes('renderRideAnalytics') && js.includes('weeklyKm'));
-});
-
-test('home: how-we-count note under the numbers, help-us-build with ratings and safety ideas', async () => {
-  const html = await (await fetch(base + '/')).text();
-  const numbers = html.slice(html.indexOf('id="numbers"'), html.indexOf('<!-- /numbers -->'));
-  assert.ok(numbers.includes('id="how-we-count"'));
-  const t = textOf(numbers);
-  for (const w of ['How we count', 'Totals only', 'Never per city, per route or per rider', 'Rounded down', 'No cookies, no trackers']) assert.ok(t.includes(w), w);
+test('about: help-us-build with ratings and safety ideas next to the feedback form', async () => {
+  const html = await (await fetch(base + '/about')).text();
   const hb = sectionOf(html, 'help-build');
   assert.ok(textOf(hb).includes('Help us build the future of rider safety.'));
   assert.ok(hb.includes('href="#feedback" data-fb-topic="safety-idea"'), 'safety idea link preselects the topic');
@@ -177,7 +162,7 @@ test('home: how-we-count note under the numbers, help-us-build with ratings and 
 });
 
 test('feedback form: topics match the server, safety ideas are stored with their topic', async () => {
-  const html = await (await fetch(base + '/')).text();
+  const html = await (await fetch(base + '/about')).text();
   const sel = html.slice(html.indexOf('<select'), html.indexOf('</select>'));
   const values = [...sel.matchAll(/<option value="([a-z-]+)"/g)].map((m) => m[1]);
   assert.deepEqual(values, ['general', 'safety-idea', 'bug', 'story', 'other']);

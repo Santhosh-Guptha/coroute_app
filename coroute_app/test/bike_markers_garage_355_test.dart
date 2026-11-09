@@ -8,6 +8,7 @@ import 'package:coroute_app/domain/garage/bike_type.dart';
 import 'package:coroute_app/domain/places/fuel_match.dart';
 import 'package:coroute_app/domain/ride/bike_markers.dart';
 import 'package:coroute_app/domain/ride/pillion_seat.dart';
+import 'package:coroute_app/domain/tracking/replay_math.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 RiderModel _r(String id, {String name = '', double lat = 17.4, double lng = 78.4, bool coRiding = false, String withId = '', String no = 'TS09AB1234',
@@ -232,7 +233,7 @@ void main() {
       expect(k() == k(cue: BikeMarkerCue.sos), isFalse);
       expect(k(kind: '').type, BikeType.commuter);
       expect(k(colour: 'Stardust').argb, 0xFF0E7C86, reason: 'unknown colour: the member colour');
-      expect(k().id, 'retro|ffd32f2f|1|normal|48|');
+      expect(k().id, 'retro|ffd32f2f|1|normal|48||h0');
       expect(BikeMarkerKey.bucket(2), 8);
       expect(BikeMarkerKey.bucket(999), 256);
 
@@ -335,6 +336,93 @@ void main() {
       expect(RiderVehicle.message(me: me, colour: 'Red', model: 'Classic 350', kind: 'commuter', complete: false), isNull);
       expect(RiderVehicle.message(me: me, colour: 'Red', model: 'Classic 350'), isNull, reason: 'older callers unchanged');
       expect(RiderModel.fromJson({'userId': 'u', 'name': 'n', 'vehicleKind': 'scooter', 'bikeComplete': true, 'pillionSeatAt': 7}).vehicleKind, 'scooter');
+    });
+  });
+
+  group('3D bike markers (3.56)', () {
+    test('asset paths per type and riders; garage heroes with no rider or two', () {
+      expect(BikeSprites.map(BikeType.sport, 1, BikeLayer.paint), 'assets/map_bikes/sport_1_paint.png');
+      expect(BikeSprites.map(BikeType.cruiser, 2, BikeLayer.shadow), 'assets/map_bikes/cruiser_2_shadow.png');
+      expect(BikeSprites.map(BikeType.scooter, 0, BikeLayer.base), 'assets/map_bikes/scooter_1_base.png', reason: 'a map bike always has its rider');
+      expect(BikeSprites.map(BikeType.retro, 3, BikeLayer.gloss), 'assets/map_bikes/retro_2_gloss.png');
+      expect(BikeSprites.hero(BikeType.adventure, 0, BikeLayer.base), 'assets/garage_bikes/adventure_0_base.png');
+      expect(BikeSprites.hero(BikeType.adventure, 1, BikeLayer.paint), 'assets/garage_bikes/adventure_0_paint.png');
+      expect(BikeSprites.hero(BikeType.offroad, 2, BikeLayer.gloss), 'assets/garage_bikes/offroad_2_gloss.png');
+      expect(BikeSprites.hero(BikeType.electric, 2, BikeLayer.shadow), 'assets/garage_bikes/electric_2_base.png', reason: 'hero shadow is in base');
+      final all = BikeSprites.allMap();
+      expect(all.length, BikeType.values.length * 2 * 4);
+      expect(all.toSet().length, all.length);
+      // Unknown kinds draw the commuter (as before).
+      final k = BikeMarkerKey.of(vehicleKind: 'hoverbike', vehicleColor: 'Red', fallbackArgb: 0, twoUp: true, cue: BikeMarkerCue.normal, size: 192);
+      expect(BikeSprites.map(k.type, 2, BikeLayer.base), 'assets/map_bikes/commuter_2_base.png');
+    });
+
+    test('cache key carries a heading bucket only when asked', () {
+      BikeMarkerKey k({double? h, int step = 10}) =>
+          BikeMarkerKey.of(vehicleKind: 'sport', vehicleColor: 'Kaza Brown', fallbackArgb: 0, twoUp: false, cue: BikeMarkerCue.normal, size: 64, heading: h, headingStep: step);
+      expect(k().heading, 0);
+      expect(k(h: 4), k(h: -4), reason: 'both round to north');
+      expect(k(h: 6).heading, 10);
+      expect(k(h: 355).heading, 0);
+      expect(k(h: 44).id, endsWith('|h40'));
+      expect(k(h: 44) == k(h: 46), isFalse);
+      expect(k(h: 44, step: 30).heading, 30);
+      expect(k().argb, 0xFF6D4C41, reason: '"Kaza Brown" is brown');
+      expect(headingBucket(-20), 340);
+      expect(headingBucket(722), 0);
+      expect(headingBucket(double.nan), 0);
+      expect(headingBucket(181, step: 45), 180);
+    });
+
+    test('colour names the garage uses', () {
+      expect(BikeColours.parse('Kaza Brown'), 0xFF6D4C41);
+      expect(BikeColours.parse('Pearl White'), 0xFFF4F4F4);
+      expect(BikeColours.parse('Racing Red'), 0xFFD32F2F);
+      expect(BikeColours.parse('Matte Silver'), 0xFFC0C0C0);
+      expect(BikeColours.parse('Desert Storm'), 0xFFC2A36B);
+      expect(BikeColours.parse('#1E63D6'), 0xFF1E63D6);
+    });
+
+    test('paint tint: dark paints are lifted, light ones kept, always opaque', () {
+      expect(BikeSprites.paintArgb(0xFF000000), 0xFF262626);
+      expect(BikeSprites.paintArgb(0xFFFFFFFF), 0xFFFFFFFF);
+      expect(BikeSprites.paintArgb(0x00D32F2F) >>> 24, 0xFF);
+      final black = BikeSprites.paintArgb(0xFF1B1B1B) & 0xFF;
+      expect(black, 0x3D);
+      final red = BikeSprites.paintArgb(0xFFD32F2F);
+      expect((red >> 16) & 0xFF, greaterThan(0xD0));
+    });
+
+    test('heading hold: standing riders keep the last heading; bad courses ignored', () {
+      final h = HeadingHold();
+      expect(h.update('a', 90, 30), 90);
+      expect(h.update('a', 0, 0), 90, reason: 'stopped: GPS course is noise');
+      expect(h.update('a', 200, 2), 90, reason: 'below walking speed');
+      expect(h.update('a', double.nan, 40), 90);
+      expect(h.update('a', -1, 40), 90, reason: 'no course');
+      expect(h.update('a', 370, 40), 10);
+      expect(h.update('b', 45, 0), 45, reason: 'first sight: use what we have');
+      expect(h.update('c', -1, 0), 0);
+      h.forget(['a']);
+      expect(h.lastOf('b'), isNull);
+      expect(h.lastOf('a'), 10);
+    });
+
+    test('replay heading: bearing of the ridden stretch, null when standing or across a gap', () {
+      final t = ReplayTrack(userId: 'u', name: 'U', points: const [
+        ReplayPoint(0, 17.0, 78.0, 40),
+        ReplayPoint(10000, 17.001, 78.0, 40), // north
+        ReplayPoint(20000, 17.001, 78.001, 40), // east
+        ReplayPoint(30000, 17.001, 78.001, 0), // standing
+        ReplayPoint(40000, 17.0010001, 78.001, 0), // jitter
+        ReplayPoint(50000, 17.002, 78.001, 30, true), // after a gap
+      ]);
+      expect(t.headingAt(5000)!, closeTo(0, 1));
+      expect(t.headingAt(15000)!, closeTo(90, 1));
+      expect(t.headingAt(35000)!, closeTo(90, 1), reason: 'standing: looks back to the last move');
+      expect(t.headingAt(45000), isNull, reason: 'signal gap');
+      expect(t.headingAt(-1), isNull);
+      expect(t.headingAt(60000), isNull);
     });
   });
 }

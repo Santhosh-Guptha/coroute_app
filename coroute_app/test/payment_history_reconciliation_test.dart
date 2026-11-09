@@ -133,7 +133,7 @@ void main() {
       // Verify Authoritative Membership is displayed in Current Plan Card
       expect(find.text('Current plan'), findsOneWidget);
       expect(find.text('Group Membership (2–6)'), findsOneWidget);
-      expect(find.text('ACTIVE'), findsWidgets);
+      expect(find.text('Active'), findsWidgets);
     });
 
     testWidgets('Inspects participating membership status if owned membership is absent', (tester) async {
@@ -177,7 +177,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Group Membership (7–12)'), findsOneWidget);
-      expect(find.text('ACTIVE (MEMBER)'), findsOneWidget);
+      expect(find.text('Active (Member)'), findsOneWidget);
     });
 
     testWidgets('Calculates daysRemaining and validUntil accurately in Asia/Kolkata timezone', (tester) async {
@@ -229,7 +229,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('10'), findsOneWidget); // Days left: 10
-      expect(find.text('ACTIVE'), findsWidgets);
+      expect(find.text('Active'), findsWidgets);
       expect(find.text('Individual Solo'), findsOneWidget);
     });
   });

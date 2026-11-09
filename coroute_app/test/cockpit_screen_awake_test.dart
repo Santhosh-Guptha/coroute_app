@@ -118,16 +118,16 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
   @override
   bool get supportsPillionSeat => false;
 
-  @override
+  // (not on ConvoyService: plain stub)
   bool get isAutomaticLead => false;
 
-  @override
+  // (not on ConvoyService: plain stub)
   bool get pillionWaitPromptOpen => false;
 
   @override
   bool get supportsRideRoles => true;
 
-  @override
+  // (not on ConvoyService: plain stub)
   bool get supportsRiderVehicles => false;
 
   @override

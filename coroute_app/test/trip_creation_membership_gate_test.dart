@@ -602,8 +602,9 @@ void main() {
       await tester.pumpAndSettle();
 
       // The retired ₹9 Individual is honoured until it ends but not offered again; Community shows free.
-      expect(find.text('Your plan · tap to extend'), findsNothing);
-      expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
+      expect(find.text('Your plan'), findsNothing);
+      // 3.55: upgrade only while a paid plan runs: Community (smaller) is hidden.
+      expect(find.byKey(const Key('membership_community_card')), findsNothing);
       expect(find.text('Upgrade to Group Membership (2–6) (₹49)'), findsOneWidget);
       expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
     });

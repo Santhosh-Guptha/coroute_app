@@ -196,7 +196,7 @@ void main() {
     port.dispose();
   });
 
-  testWidgets('3.55: crash detection switched off during the countdown keeps the alarm and says how to cancel it', (tester) async {
+  testWidgets('3.55: crash detection cannot be switched off during the countdown; the alarm keeps running', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final settings = SettingsService();
     await settings.load();
@@ -219,11 +219,12 @@ void main() {
     expect(safety.alarmRunsWithDetectionOff, isFalse);
     expect(find.byKey(const ValueKey('crashDetectionOffNote')), findsNothing);
 
-    await settings.setCrashDetection(false);
+    await settings.setCrashDetection(false); // always on (3.55): ignored
     await tester.pump();
+    expect(settings.crashDetection, isTrue);
     expect(safety.alarm, isNotNull, reason: 'never cancelled behind the rider');
-    expect(safety.alarmRunsWithDetectionOff, isTrue);
-    expect(find.text(SafetyService.crashAlarmStillRunning), findsOneWidget);
+    expect(safety.alarmRunsWithDetectionOff, isFalse);
+    expect(find.text(SafetyService.crashAlarmStillRunning), findsNothing);
     expect(find.text(CrashAlarmView.title), findsOneWidget);
 
     await tester.tap(find.text('I\'m OK'));
@@ -238,60 +239,31 @@ void main() {
     port.dispose();
   });
 
-  // The one Settings screen replaced the safety settings sheet and the glove settings screen.
-  testWidgets('Settings: safety switches; SMS asks for the permission first; crash detection off asks first', (tester) async {
-    SharedPreferences.setMockInitialValues({});
+  // 3.55 minimal settings: safety has no switches; one row lists what is always on.
+  testWidgets('Settings: no safety switches; "Safety is always on" lists them; crash detection stays on', (tester) async {
+    SharedPreferences.setMockInitialValues({SafetyConstants.keyCrashDetection: false, SafetyConstants.keySmsFallback: false});
     final settings = SettingsService();
     await settings.load();
     await screen(tester, const Size(320, 640));
-    final asked = <String>[];
-    var grant = false;
     await tester.pumpWidget(ChangeNotifierProvider<SettingsService>.value(
       value: settings,
-      child: host(
-        Scaffold(
-          body: SettingsScreen(requestPermission: (key) async {
-            asked.add(key);
-            return grant;
-          }),
-        ),
-        AppPalette.dark,
-      ),
+      child: host(const Scaffold(body: SettingsScreen()), AppPalette.dark),
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(find.byType(Switch), findsAtLeastNWidgets(4));
-    await tester.scrollUntilVisible(find.text(SafetyTexts.smsTitle), 150);
-    expect(find.text(SafetyTexts.smsTitle), findsOneWidget);
-    await tester.tap(find.text(SafetyTexts.smsTitle));
-    await tester.pump();
-    expect(asked, ['sms']);
-    expect(settings.smsFallback, isFalse, reason: 'permission refused');
-    expect(find.text(SafetyTexts.smsDenied), findsOneWidget);
-    grant = true;
-    await tester.tap(find.text(SafetyTexts.smsTitle));
-    await tester.pump();
+    expect(settings.crashDetection, isTrue, reason: 'a stored "off" is ignored');
     expect(settings.smsFallback, isTrue);
+    expect(find.byKey(const ValueKey('settings_crash')), findsNothing);
+    expect(find.byKey(const ValueKey('settings_sms')), findsNothing);
+    expect(find.text(SafetyTexts.smsTitle), findsNothing);
     expect(SettingsScreen.summary(settings), '${SafetyTexts.crashTitle} on');
 
-    // Crash detection: turning it off asks first; Cancel keeps it on.
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_crash')), -150);
-    await tester.tap(find.byKey(const ValueKey('settings_crash')));
+    await tester.tap(find.byKey(const ValueKey('settings_always_on')));
     await tester.pumpAndSettle();
-    expect(find.text('Turn off crash detection?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(settings.crashDetection, isTrue);
-    await tester.tap(find.byKey(const ValueKey('settings_crash')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Turn off'));
-    await tester.pumpAndSettle();
-    expect(settings.crashDetection, isFalse);
-    expect(SettingsScreen.summary(settings), '${SafetyTexts.crashTitle} off');
-    // Turning it back on is instant.
-    await tester.tap(find.byKey(const ValueKey('settings_crash')));
-    await tester.pump();
-    expect(settings.crashDetection, isTrue);
+    expect(find.byKey(const ValueKey('settings_always_on_list')), findsOneWidget);
+    expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
+    expect(find.text('Emergency texts'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   for (final lang in [AppLanguage.hi, AppLanguage.te]) {

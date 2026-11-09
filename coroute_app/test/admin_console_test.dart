@@ -185,20 +185,18 @@ void main() {
       expect(find.text('Emergencies (1)'), findsOneWidget);
       expect(find.text('SOS: Asha needs help'), findsOneWidget);
       expect(find.text('1 account on hold'), findsOneWidget);
-      expect(find.text('Riders online'), findsOneWidget);
-      expect(find.text('Open SOS'), findsOneWidget);
-      // Riders from the server's account list: the admin (staff) and nobody else is left out.
-      expect(find.text('Riders (excl. staff)'), findsOneWidget);
+      expect(find.text('Active today'), findsOneWidget);
+      expect(find.text('Open SOS'), findsWidgets);
       expect(find.text('Emergency, 1 SOS'), findsOneWidget); // status in words on the ride row
 
-      // What needs attention comes first.
+      // What needs attention comes first: emergencies at the very top before Overview.
       final sosY = top(tester, find.text('SOS: Asha needs help'));
-      final ridesY = top(tester, find.text('Live rides'));
-      final holdY = top(tester, find.text('1 account on hold'));
       final statsY = top(tester, find.text('Overview'));
-      expect(sosY < ridesY, isTrue);
-      expect(ridesY < holdY, isTrue);
-      expect(holdY < statsY, isTrue);
+      final holdY = top(tester, find.text('1 account on hold'));
+      final ridesY = top(tester, find.text('Live rides'));
+      expect(sosY < statsY, isTrue);
+      expect(statsY < holdY, isTrue);
+      expect(holdY < ridesY, isTrue);
 
       // No text below 12 sp (before the 1.3x scale).
       for (final t in tester.widgetList<Text>(find.byType(Text))) {
@@ -370,6 +368,8 @@ void main() {
     );
     // Bala is on hold: releasing needs no form.
     await tester.scrollUntilVisible(find.text('Release hold'), 250, scrollable: find.byType(Scrollable).first);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     expect(find.text('Release hold'), findsOneWidget);
     await tester.tap(find.text('Release hold'));
     await tester.pump(const Duration(milliseconds: 300));

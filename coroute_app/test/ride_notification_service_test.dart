@@ -370,7 +370,8 @@ void main() {
   // The "Large ride notification" switch was removed: the large notification is always
   // used when the phone supports it (the plain one remains the fallback).
 
-  testWidgets('lock screen setting reaches the native side', (tester) async {
+  // 3.55: the ride and its SOS button are always on the lock screen (no switch).
+  testWidgets('lock screen is always public to the native side; "off" is ignored', (tester) async {
     await setUp0(tester);
     port.convoy = ride();
     port.changed();
@@ -378,7 +379,8 @@ void main() {
     expect(channel.shows.last['lockScreenPublic'], isTrue);
     await settings.setRideOnLockScreen(false);
     await advance(tester, const Duration(seconds: 10));
-    expect(channel.shows.last['lockScreenPublic'], isFalse);
+    expect(settings.rideOnLockScreen, isTrue);
+    expect(channel.shows.last['lockScreenPublic'], isTrue);
     await tearDown0();
   });
 

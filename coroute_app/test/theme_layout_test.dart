@@ -123,7 +123,7 @@ void main() {
               await render(tester, entry.value, scale, p, const SingleChildScrollView(child: AppearanceSheet()),
                   providers: [ChangeNotifierProvider<ThemeController>.value(value: t)]);
               expect(tester.takeException(), isNull);
-              expect(find.text('Automatic'), findsOneWidget);
+              expect(find.text('System'), findsOneWidget);
             } finally {
               t.dispose();
             }

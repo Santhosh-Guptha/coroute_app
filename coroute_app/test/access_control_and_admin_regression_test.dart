@@ -294,8 +294,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify Admin tile is present for Master Admin
-      expect(find.text('Admin'), findsOneWidget);
+      // Verify Admin tile is present for Master Admin (badge + settings row)
+      expect(find.text('Admin'), findsNWidgets(2));
       expect(find.text('Live rides, history and users'), findsOneWidget);
 
       // Still no legacy Fleet Matrix tile
@@ -405,17 +405,24 @@ void main() {
       // One shell on phones too (the old separate phone dashboard with sample numbers is gone).
       expect(find.byType(AdminShell), findsOneWidget);
       expect(calls.any((r) => r.url.path.endsWith('/admin/analytics/overview')), isTrue);
-      // Totals come from the server answer.
-      await tester.ensureVisible(find.text('Km ridden'));
+      expect(calls.any((r) => r.url.path.endsWith('/admin/analytics/trends')), isTrue);
+      // Totals come from the server answer, folded under "More numbers".
+      await tester.ensureVisible(find.text('More numbers'));
+      await tester.tap(find.text('More numbers'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Avg group'));
       expect(find.text('846'), findsOneWidget);
       expect(find.text('2107 all time'), findsOneWidget);
       expect(find.text('42'), findsOneWidget);
       expect(find.text('3.5'), findsOneWidget);
-      // Every section is one tap away.
-      for (final label in ['Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Settings']) {
+      // Every section is one tap away in the menu.
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      for (final label in ['Overview', 'Riders', 'Rides & safety', 'Plans & payments', 'Content', 'System']) {
         expect(find.text(label), findsWidgets, reason: label);
       }
-      // Merged away: plans and coupons are tabs of Payments, phone reports are in Insights.
+      // Merged away: plans and coupons are tabs of Payments, phone reports are in Usage.
       for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides']) {
         expect(find.text(gone), findsNothing, reason: gone);
       }
@@ -482,10 +489,10 @@ void main() {
 
       // Verification: On wide screen, MasterAdminDashboard retains AdminShell
       expect(find.byType(AdminShell), findsOneWidget);
-      // Verification: On wide screen, MasterAdminDashboard retains AdminTwoUp split layout
-      expect(find.byType(AdminTwoUp), findsOneWidget);
-      // Verification: Desktop nav rail items are present (the rail and the Sections list share labels)
-      for (final label in ['Overview', 'Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Settings']) {
+      // Verification: On wide screen, MasterAdminDashboard lays its charts out two by two
+      expect(find.byType(AdminTwoUp), findsWidgets);
+      // Verification: Desktop nav rail items are present
+      for (final label in ['Overview', 'Riders', 'Rides & safety', 'Plans & payments', 'Content', 'System']) {
         expect(find.text(label), findsWidgets, reason: label);
       }
       for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides']) {

@@ -8,6 +8,7 @@ import 'package:coroute_app/data/models/membership_model.dart';
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/auth_service.dart';
 import 'package:coroute_app/data/services/membership_service.dart';
+import 'package:coroute_app/domain/membership/plan_change_rules.dart';
 import 'package:coroute_app/presentation/subscription/membership_dashboard_screen.dart';
 
 class FakeMembershipService extends MembershipService {
@@ -211,10 +212,44 @@ void main() {
       await tester.pumpAndSettle();
 
       // After expanding, options appear
-      expect(find.text('Your plan · tap to extend'), findsOneWidget);
-      expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
+      // 3.55: upgrade only while the plan runs. The current plan cannot be bought again; smaller
+      // plans (Community) are hidden, with one line saying when they can be chosen.
+      expect(find.text('Your plan'), findsOneWidget);
+      expect(find.byKey(const Key('membership_community_card')), findsNothing);
+      expect(find.byKey(const Key('membership_upgrade_only_note')), findsOneWidget);
       expect(find.textContaining('₹9)'), findsNothing, reason: 'the retired ₹9 Individual plan is not offered');
       expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
+    });
+
+    testWidgets('Upgrade only: on Large Group the smaller plans are hidden until the plan ends', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      membershipService.fakeOverview = MyMembershipOverview(
+        ownedMembership: UserMembership(
+          membershipId: 'mem_large',
+          ownerUserId: 'user_001',
+          category: 'group_large',
+          categoryName: 'Extended Group (7–12)',
+          capacity: 12,
+          priceRupees: 99,
+          status: 'ACTIVE',
+          validUntil: now + 10 * 86400000,
+          members: const [],
+        ),
+      );
+      await tester.pumpWidget(buildTestHost(const MembershipDashboardScreen()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('upgrade_capacity_expansion_tile')));
+      await tester.pumpAndSettle();
+      expect(find.text('Your plan'), findsOneWidget);
+      expect(find.textContaining('Group Membership (2–6)'), findsNothing, reason: 'smaller plan hidden');
+      expect(find.byKey(const Key('membership_community_card')), findsNothing);
+      expect(find.text(PlanChangeRules.note), findsOneWidget);
+      final button = tester.widget<ElevatedButton>(find.ancestor(of: find.text('Your plan'), matching: find.byType(ElevatedButton)));
+      expect(button.onPressed, isNull, reason: 'the same plan cannot be bought again while it runs');
     });
 
     testWidgets('State 2: Active Solo Membership shows solo details and capacity', (tester) async {

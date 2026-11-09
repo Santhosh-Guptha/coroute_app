@@ -281,22 +281,16 @@ void main() {
       expect(accel.running, isFalse);
       expect(safety.detectorArmed, isFalse);
 
-      // Setting off: never subscribed, even when fast.
+      // 3.55: crash detection is always on; "off" is ignored, the sensor stays armed when fast.
       await settings.setCrashDetection(false);
-      port.fixes.add(fix(40, 70));
-      await tester.pump();
-      expect(accel.running, isFalse);
-      await settings.setCrashDetection(true);
-      port.fixes.add(fix(41, 70));
+      expect(settings.crashDetection, isTrue);
+      port.fixes.add(fix(200, 70));
       await tester.pump();
       expect(accel.running, isTrue);
-      await settings.setCrashDetection(false);
-      await tester.pump();
-      expect(accel.running, isFalse, reason: 'switching off unregisters at once');
 
       // Ride ends: off.
       await settings.setCrashDetection(true);
-      port.fixes.add(fix(42, 70));
+      port.fixes.add(fix(202, 70));
       await tester.pump();
       expect(accel.running, isTrue);
       port.convoy = null;
@@ -354,7 +348,7 @@ void main() {
   // and the SOS goes to the emergency contact by text (or the messages app) with call / 112 on screen.
   group('offline solo ride (3.54)', () {
     testWidgets('no convoy: a fall is detected on the solo fixes; no answer texts the emergency contact', (tester) async {
-      await setUp0(tester); // "Text the group" is not opted in: the solo SOS does not need it
+      await setUp0(tester); // the solo SOS texts the contact (emergency texts are always on since 3.55)
       expect(safety.startOfflineSoloRide(), isTrue);
       expect(safety.offlineSoloActive, isTrue);
       expect(accel.running, isFalse, reason: 'not riding yet: sensor off');
@@ -516,13 +510,14 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('crash detection off: no alarm', (tester) async {
-      await setUp0(tester);
+    testWidgets('3.55: crash detection cannot be switched off: the alarm still opens', (tester) async {
+      await setUp0(tester, prefs: {SafetyConstants.keyCrashDetection: false});
+      expect(settings.crashDetection, isTrue, reason: 'a stored "off" is ignored');
       port.convoy = convoyWith({});
       port.changed();
       await settings.setCrashDetection(false);
       safety.debugRaiseCrash(crash);
-      expect(safety.alarm, isNull);
+      expect(safety.alarm, isNotNull);
       await tearDown0(tester);
     });
   });
@@ -553,12 +548,16 @@ void main() {
       port.changed();
     }
 
-    testWidgets('not opted in: nothing is texted', (tester) async {
-      await setUp0(tester);
+    testWidgets('3.55: always on, also with a stored "off": the round still runs after 45 s', (tester) async {
+      await setUp0(tester, prefs: {SafetyConstants.keySmsFallback: false});
+      expect(settings.smsFallback, isTrue);
+      await settings.setSmsFallback(false);
+      expect(settings.smsFallback, isTrue, reason: '"off" is ignored');
       await startRide(tester);
       sosWaiting();
       await wait(tester, const Duration(seconds: 60));
-      expect(sms.sent, isEmpty);
+      await tester.pump();
+      expect(sms.sent, isNotEmpty);
       await tearDown0(tester);
     });
 
@@ -776,11 +775,12 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('switched off: never asks', (tester) async {
+    testWidgets('3.55: always on: a stored "off" still asks', (tester) async {
       await setUp0(tester, prefs: {SafetyConstants.keySoloCheckIn: false});
+      expect(settings.soloCheckIn, isTrue);
       await farRide(tester);
       await tick(tester, 70);
-      expect(safety.prompts, isEmpty);
+      expect(safety.prompts, isNotEmpty);
       await tearDown0(tester);
     });
   });

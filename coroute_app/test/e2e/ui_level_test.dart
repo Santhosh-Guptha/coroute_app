@@ -76,7 +76,7 @@ void main() {
   }
 
   group('UI Level E2E: AccessGateScreen Form & Interaction Flows', () {
-    testWidgets('AccessGateScreen renders tabs and switches between Sign In and Register', (tester) async {
+    testWidgets('AccessGateScreen shows sign in and switches to create account', (tester) async {
       final mockHttp = MockClient((req) async => http.Response('{}', 200));
       final api = ApiClient(httpClient: mockHttp, storage: const FlutterSecureStorage());
       final auth = AuthService(api);
@@ -102,35 +102,35 @@ void main() {
       ));
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Sign In Tab Active by default
-      expect(find.widgetWithText(Tab, 'Sign In'), findsOneWidget);
-      expect(find.widgetWithText(Tab, 'Register Account'), findsOneWidget);
-      expect(find.textContaining('Rider Callsign or Email'), findsOneWidget);
-      expect(find.widgetWithText(DsButton, 'Continue'), findsOneWidget);
+      // Sign in is shown by default: one field pair, one primary button.
+      expect(find.widgetWithText(DsButton, 'Sign in'), findsOneWidget);
+      expect(find.text('Create account'), findsOneWidget);
+      expect(find.text('Email or callsign'), findsOneWidget);
 
       // Validate Sign In Empty fields
-      await tester.ensureVisible(find.widgetWithText(DsButton, 'Continue'));
-      await tester.tap(find.widgetWithText(DsButton, 'Continue'));
+      await tester.ensureVisible(find.widgetWithText(DsButton, 'Sign in'));
+      await tester.tap(find.widgetWithText(DsButton, 'Sign in'));
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.textContaining('Please enter your email or callsign'), findsOneWidget);
 
-      // Switch to Register Account Tab
-      await tester.ensureVisible(find.widgetWithText(Tab, 'Register Account'));
-      await tester.tap(find.widgetWithText(Tab, 'Register Account'));
+      // Switch to create account
+      await tester.ensureVisible(find.text('Create account'));
+      await tester.tap(find.text('Create account'));
       await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(); // the fade-out of the sign-in form has finished: it leaves the tree
 
       // Verify registration fields
-      expect(find.textContaining('Callsign or Full Name'), findsOneWidget);
-      expect(find.textContaining('Email Address'), findsOneWidget);
-      expect(find.textContaining('Mobile Phone Number'), findsOneWidget);
-      expect(find.textContaining('Vehicle Type'), findsOneWidget);
-      expect(find.textContaining('Emergency Contact'), findsOneWidget);
+      expect(find.text('Name or callsign'), findsOneWidget);
+      expect(find.text('Email'), findsOneWidget);
+      expect(find.text('Phone'), findsOneWidget);
+      expect(find.text('Vehicle type'), findsOneWidget);
+      expect(find.text('Emergency contact'), findsOneWidget);
       expect(find.textContaining('I accept the '), findsOneWidget);
-      expect(find.text('Register Rider Account'), findsOneWidget);
+      expect(find.widgetWithText(DsButton, 'Create account'), findsOneWidget);
 
       // Try creating account with empty fields
-      await tester.ensureVisible(find.text('Register Rider Account'));
-      await tester.tap(find.text('Register Rider Account'));
+      await tester.ensureVisible(find.widgetWithText(DsButton, 'Create account'));
+      await tester.tap(find.widgetWithText(DsButton, 'Create account'));
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.textContaining('Please enter your callsign or full name'), findsOneWidget);
     });
@@ -161,21 +161,19 @@ void main() {
       ));
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Switch to Register
-      await tester.tap(find.text('Register Account'));
-      await tester.pump(const Duration(milliseconds: 300));
+      // Switch to create account
+      await tester.ensureVisible(find.text('Create account'));
+      await tester.tap(find.text('Create account'));
+      await tester.pumpAndSettle();
 
-      // In registration form:
-      // index 0: Name, index 1: Email, index 2: Password, index 3: Confirm Password
-      final textFields = find.byType(TextField);
-      await tester.enterText(textFields.at(0), 'Maverick');
-      await tester.enterText(textFields.at(1), 'mav@coroute.app');
-      await tester.enterText(textFields.at(2), 'SecretPassword123');
-      await tester.enterText(textFields.at(3), 'MismatchPassword999');
+      await tester.enterText(find.widgetWithText(TextField, 'Name or callsign'), 'Maverick');
+      await tester.enterText(find.widgetWithText(TextField, 'Email'), 'mav@coroute.app');
+      await tester.enterText(find.widgetWithText(TextField, 'Password'), 'SecretPassword123');
+      await tester.enterText(find.widgetWithText(TextField, 'Confirm password'), 'MismatchPassword999');
 
-      await tester.ensureVisible(find.text('Register Rider Account'));
-      await tester.tap(find.text('Register Rider Account'));
-      await tester.pump(const Duration(milliseconds: 200));
+      await tester.ensureVisible(find.widgetWithText(DsButton, 'Create account'));
+      await tester.tap(find.widgetWithText(DsButton, 'Create account'));
+      await tester.pumpAndSettle();
 
       expect(find.textContaining('Passwords do not match'), findsOneWidget);
     });
@@ -319,7 +317,7 @@ void main() {
       // 3.13 admin home: labels changed with the admin console redesign (WP-ADM).
       expect(find.text('Admin'), findsOneWidget);
       expect(find.text('Live rides'), findsWidgets);
-      expect(find.text('Riders online'), findsOneWidget);
+      expect(find.text('Active today'), findsOneWidget);
       expect(find.text('Open SOS'), findsOneWidget);
 
       // Open the safety broadcast sheet

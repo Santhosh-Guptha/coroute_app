@@ -404,7 +404,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Automatic'), findsOneWidget);
+      expect(find.text('System'), findsOneWidget);
       expect(find.text('MAP HUD & ALERTS'), findsNothing);
       expect(find.text('3s'), findsNothing);
     });

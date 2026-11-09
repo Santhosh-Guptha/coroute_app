@@ -114,7 +114,10 @@ test('host invites chosen crew members: socket + push (no sensitive data), invit
   assert.equal(pushes[0].opts.type, 'RIDE_INVITE');
   assert.equal(pushes[0].opts.title, 'Ride invitation');
   assert.equal(pushes[0].opts.body, `${host.user.username} invited you to Sunrise Loop with Ghat Crew`);
-  assert.deepEqual(Object.keys(pushes[0].opts.data), ['inviteId']);
+  assert.deepEqual(Object.keys(pushes[0].opts.data), ['inviteId', 'eventId']);
+  // Same eventId as the socket message: the app shows one notice (3.55 follow-up dedupe).
+  assert.equal(pushes[0].opts.data.eventId, `RIDE_INVITE:${pushes[0].opts.data.inviteId}`);
+  assert.equal(msg.eventId, pushes[0].opts.data.eventId);
   assert.equal(pushes[0].opts.priority, 'high');
   assert.equal(pushes[0].opts.ttlSec, 1800);
   const pushText = JSON.stringify(pushes[0].opts);

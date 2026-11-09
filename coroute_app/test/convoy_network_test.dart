@@ -307,7 +307,7 @@ void main() {
   });
 
   group('Hazards and discovery', () {
-    test('HAZARD upserts, HAZARD_CLEAR removes, stale ones drop, the setting hides them', () async {
+    test('HAZARD upserts, HAZARD_CLEAR removes, stale ones drop; road warnings cannot be hidden', () async {
       var now = 1800000000000;
       final settings = SettingsService();
       await settings.load();
@@ -319,10 +319,8 @@ void main() {
       rt.emit({'type': 'HAZARD', 'hazardId': inc, 'lat': 12.96, 'lng': 77.5, 'level': 'ON_SCENE'});
       await settle();
       expect(c.hazards.single.level, HazardLevel.onScene);
-      await settings.setHazardAlerts(false);
-      expect(c.hazards, isEmpty);
-      await settings.setHazardAlerts(true);
-      expect(c.hazards.length, 1, reason: 'kept while hidden');
+      await settings.setHazardAlerts(false); // 3.55: always on, "off" is ignored
+      expect(c.hazards.length, 1);
       now += const Duration(hours: 3, minutes: 1).inMilliseconds;
       expect(c.hazards, isEmpty);
       now -= const Duration(hours: 3, minutes: 1).inMilliseconds;

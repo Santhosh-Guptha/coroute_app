@@ -111,8 +111,8 @@ void main() {
 
       // Navigated to AccessGateScreen
       expect(find.byType(AccessGateScreen), findsOneWidget);
-      expect(find.text('Sign In'), findsOneWidget);
-      expect(find.text('Register Account'), findsOneWidget);
+      expect(find.text('Sign in'), findsOneWidget);
+      expect(find.text('Create account'), findsOneWidget);
     });
 
     testWidgets('First launch shows the three onboarding pages once, then sign-in', (tester) async {
@@ -145,13 +145,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(OnboardingScreen), findsOneWidget);
-      expect(find.text('Ride Together'), findsOneWidget);
+      expect(find.text('Ride together'), findsOneWidget);
       expect(find.text('Skip'), findsOneWidget);
       expect(OnboardingScreen.pages.length, 3);
 
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
-      expect(find.text('Stay Connected'), findsOneWidget);
+      expect(find.text('Stay connected'), findsOneWidget);
 
       await tester.tap(find.text('Skip'));
       await tester.pumpAndSettle();

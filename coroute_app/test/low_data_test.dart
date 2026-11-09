@@ -67,33 +67,33 @@ void main() {
     expect(p(null).sampleRate, 16000);
   });
 
-  test('ride safety settings: defaults (texts off until opted in) and they survive a restart', () async {
+  test('ride safety settings: always on (3.55), "off" is ignored, and they survive a restart', () async {
     SharedPreferences.setMockInitialValues({});
     final s = SettingsService();
     await s.load();
     expect(s.crashDetection, isTrue);
-    expect(s.smsFallback, isFalse);
+    expect(s.smsFallback, isTrue);
     expect(s.fatigueReminder, isTrue);
     expect(s.soloCheckIn, isTrue);
     expect(s.oemGuideSeen, isFalse);
     var notified = 0;
     s.addListener(() => notified++);
     await s.setCrashDetection(false);
-    await s.setSmsFallback(true);
+    await s.setSmsFallback(false);
     await s.setFatigueReminder(false);
     await s.setSoloCheckIn(false);
     await s.markOemGuideSeen();
     await s.markOemGuideSeen();
-    expect(notified, 5, reason: 'no notification when nothing changes');
+    expect(notified, 1, reason: 'only the guide mark changed something');
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool(SafetyConstants.keySmsFallback), isTrue);
 
     final again = SettingsService();
     await again.load();
-    expect(again.crashDetection, isFalse);
+    expect(again.crashDetection, isTrue);
     expect(again.smsFallback, isTrue);
-    expect(again.fatigueReminder, isFalse);
-    expect(again.soloCheckIn, isFalse);
+    expect(again.fatigueReminder, isTrue);
+    expect(again.soloCheckIn, isTrue);
     expect(again.oemGuideSeen, isTrue);
     expect(again.lowData, isFalse);
   });

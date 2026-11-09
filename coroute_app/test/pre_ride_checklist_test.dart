@@ -168,9 +168,8 @@ void main() {
     expect(line, lessThan(firstCheck));
   });
 
-  // Crash detection shows its state here and can be turned on; turning it off (with a
-  // confirmation) and emergency texts are in Settings (see crash_alarm_screen_test).
-  testWidgets('crash detection: shown as on; when off, one tap turns it on; no switches here', (tester) async {
+  // Crash detection shows its state here; since 3.55 it is always on (no switch anywhere).
+  testWidgets('crash detection: shown as on; cannot be turned off; no switches here', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await smallPhone(tester);
     final settings = SettingsService();
@@ -190,13 +189,11 @@ void main() {
     expect(find.text(SafetyTexts.smsTitle), findsNothing);
     expect(find.byKey(const ValueKey('checklist_crash_on')), findsNothing);
 
+    // 3.55: crash detection is always on; "off" is ignored, so the turn-on button never shows.
     await settings.setCrashDetection(false);
     await tester.pump();
-    expect(find.text(PreRideChecklistSheet.crashOffLine), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const ValueKey('checklist_crash_on')));
-    await tester.tap(find.byKey(const ValueKey('checklist_crash_on')));
-    await tester.pump();
     expect(settings.crashDetection, isTrue);
+    expect(find.text(PreRideChecklistSheet.crashOffLine), findsNothing);
     expect(find.byKey(const ValueKey('checklist_crash_on')), findsNothing);
     expect(tester.takeException(), isNull);
   });

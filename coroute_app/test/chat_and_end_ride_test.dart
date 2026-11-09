@@ -137,7 +137,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('Messages'), findsNothing); // Sheet header is outside MessagesView
-      expect(find.text('QUICK REPLIES'), findsOneWidget);
+      expect(find.text('Quick replies'), findsOneWidget);
       expect(find.text('No messages yet.'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
 

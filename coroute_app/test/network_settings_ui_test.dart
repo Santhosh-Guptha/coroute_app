@@ -73,17 +73,35 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('Settings: nearby riders switches write the profile, the others the phone settings', (tester) async {
+  Future<void> openMore(WidgetTester tester) async {
+    final list = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_more')), 80, scrollable: list);
+    await tester.tap(find.byKey(const ValueKey('settings_more')));
+    await tester.pump();
+  }
+
+  testWidgets('Settings (3.55 minimal): a few main switches; nearby riders under More write the profile', (tester) async {
     final settings = SettingsService();
     await settings.load();
     final (auth, patches) = authWithPatches();
     await host(tester, const SettingsScreen(), settings: settings, auth: auth);
     expect(tester.takeException(), isNull);
-    // 3.55: the list grew (sound rows, some hidden by admin switches) and is built lazily, so only
-    // check that the switches render; the rows below are checked one by one.
-    expect(find.byType(Switch), findsWidgets);
+    // Main screen: voice alerts, siren alerts, battery saver and data saver (push and leaderboard
+    // need their services). Safety switches are gone: they are always on.
+    expect(find.byType(Switch), findsNWidgets(4));
+    expect(find.text(SafetyTexts.hazardTitle), findsNothing);
+    expect(find.text(SafetyTexts.lockTitle), findsNothing);
+    expect(find.text(SafetyTexts.crashTitle), findsNothing);
+    // Nearby riders help is collapsed under More.
+    expect(find.text(SafetyTexts.helpTitle), findsNothing);
     final list = find.byType(Scrollable).first;
 
+    await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_spoken_alerts')), 80, scrollable: list);
+    await tester.tap(find.byKey(const ValueKey('settings_spoken_alerts')));
+    await tester.pump();
+    expect(settings.voiceWarnings, isFalse);
+
+    await openMore(tester);
     await tester.scrollUntilVisible(find.text(SafetyTexts.helpTitle), 80, scrollable: list);
     expect(auth.assistHelp, isTrue, reason: 'default on');
     await tester.tap(find.text(SafetyTexts.helpTitle));
@@ -94,23 +112,8 @@ void main() {
 
     // Medical info has no sharing switch anywhere (always shared with responders in an emergency).
     expect(find.text(SafetyTexts.medicalTitle), findsNothing);
-
-    await tester.scrollUntilVisible(find.text(SafetyTexts.hazardTitle), 80, scrollable: list);
     expect(settings.hazardAlerts, isTrue);
-    await tester.tap(find.text(SafetyTexts.hazardTitle));
-    await tester.pump();
-    expect(settings.hazardAlerts, isFalse);
-
-    await tester.scrollUntilVisible(find.text(SafetyTexts.voiceWarningsTitle), 80, scrollable: list);
-    await tester.tap(find.text(SafetyTexts.voiceWarningsTitle));
-    await tester.pump();
-    expect(settings.voiceWarnings, isFalse);
-
-    await tester.scrollUntilVisible(find.text(SafetyTexts.lockTitle), 80, scrollable: list);
     expect(settings.rideOnLockScreen, isTrue);
-    await tester.tap(find.text(SafetyTexts.lockTitle));
-    await tester.pump();
-    expect(settings.rideOnLockScreen, isFalse);
     expect(patches, hasLength(1), reason: 'phone-only settings never call the server');
     expect(tester.takeException(), isNull);
   });
@@ -121,6 +124,7 @@ void main() {
     final (auth, _) = authWithPatches(fail: true);
     await host(tester, const SettingsScreen(), settings: settings, auth: auth);
     final list = find.byType(Scrollable).first;
+    await openMore(tester);
     await tester.scrollUntilVisible(find.text(SafetyTexts.askTitle), 80, scrollable: list);
     await tester.tap(find.text(SafetyTexts.askTitle));
     await tester.pump();

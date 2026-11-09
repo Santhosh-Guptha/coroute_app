@@ -148,10 +148,11 @@ void main() {
     expect(back.validUntil, r.validUntil);
   });
 
-  test('not fetched while the SMS fallback is off', () async {
+  test('fetched by default: emergency texts are always on (3.55)', () async {
     final h = await start();
-    expect(h.hits, isEmpty);
-    expect(h.convoys.emergencyRoster, isNull);
+    expect(h.settings.smsFallback, isTrue);
+    expect(h.hits.length, 1);
+    expect(h.convoys.emergencyRoster, isNotNull);
     h.convoys.dispose();
   });
 
@@ -168,20 +169,16 @@ void main() {
     planning.convoys.dispose();
   });
 
-  test('fetched on activate when opted in, kept encrypted, cleared when the setting goes off', () async {
+  test('fetched on activate, kept encrypted; emergency texts cannot be switched off (3.55)', () async {
     final h = await start(smsOn: true);
     expect(h.hits.length, 1);
     expect(h.convoys.emergencyRoster?.members.length, 2);
     expect(await RosterStore().load(), isNotNull);
     await h.settings.setSmsFallback(false);
     await settle();
-    expect(h.convoys.emergencyRoster, isNull);
-    expect(await RosterStore().load(), isNull);
-    // Turning it on again fetches at once.
-    await h.settings.setSmsFallback(true);
-    await settle();
-    expect(h.hits.length, 2);
-    expect(h.convoys.emergencyRoster, isNotNull);
+    expect(h.settings.smsFallback, isTrue);
+    expect(h.convoys.emergencyRoster, isNotNull, reason: '"off" is ignored, the roster stays');
+    expect(await RosterStore().load(), isNotNull);
     h.convoys.dispose();
   });
 

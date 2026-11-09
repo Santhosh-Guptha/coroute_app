@@ -21,11 +21,9 @@ class SessionApi extends ApiClient {
 }
 
 void main() {
-  setUp(() {
-  });
+  setUp(() {});
 
-  tearDown(() {
-  });
+  tearDown(() {});
 
   Future<void> open(
     WidgetTester tester,
@@ -85,15 +83,15 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('guardianPin')), 'abc');
       await tester.ensureVisible(find.byType(CheckboxListTile));
       await tester.tap(find.byType(CheckboxListTile));
-      await tester.pump();
-      await tester.ensureVisible(find.text('Create Guardian link'));
-      await tester.tap(find.text('Create Guardian link'));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(creates, 0);
       expect(find.text('Use a PIN of 4 to 8 digits.'), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('guardianPin')), '1234');
-      await tester.ensureVisible(find.text('Create Guardian link'));
-      await tester.tap(find.text('Create Guardian link'));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(creates, 1);
       expect(find.text('Share link'), findsOneWidget);

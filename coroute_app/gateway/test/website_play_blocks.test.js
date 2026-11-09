@@ -18,8 +18,8 @@ before(async () => {
 });
 after(async () => { await gw.shutdown(); });
 
-test('with PLAY_STORE_URL the home page links the Google Play rating to it', async () => {
-  const home = await (await fetch(base + '/')).text();
+test('with PLAY_STORE_URL the about page links the Google Play rating to it', async () => {
+  const home = await (await fetch(base + '/about')).text();
   const card = home.slice(home.indexOf('id="rate"'), home.indexOf('</li>', home.indexOf('id="rate"')));
   assert.ok(card.includes('Love riding safer? Rate CoRoute on Google Play.'), 'rating heading');
   assert.ok(card.includes('href="https://play.google.com/store/apps/details?id=space.devmonks.coroute&amp;hl=en_IN"'), 'configured link, escaped');
@@ -28,7 +28,7 @@ test('with PLAY_STORE_URL the home page links the Google Play rating to it', asy
   assert.ok(!home.includes('Share your story after a ride in the app.'), 'the no-play text is left out');
   assert.ok(!home.includes('__PLAY_STORE_URL__') && !/<!--\/?(no-)?play-->/.test(home), 'no placeholder or block markers left');
   // Other pages are unaffected and never carry the placeholder.
-  for (const p of ['/features', '/get', '/about']) {
+  for (const p of ['/', '/features', '/get']) {
     const html = await (await fetch(base + p)).text();
     assert.ok(!html.includes('__PLAY_STORE_URL__'), p);
   }

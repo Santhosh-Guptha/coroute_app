@@ -102,7 +102,7 @@ void main() {
       testWidgets('onboarding: $label', (tester) async {
         await render(tester, const OnboardingScreen(), p);
         expect(tester.takeException(), isNull);
-        expect(find.text('Ride Together'), findsOneWidget);
+        expect(find.text('Ride together'), findsOneWidget);
         expect(find.text('Skip'), findsOneWidget);
         expect(find.text('Next'), findsOneWidget);
       });

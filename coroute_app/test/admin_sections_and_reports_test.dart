@@ -14,7 +14,7 @@ import 'package:coroute_app/presentation/admin/admin_ride_reports.dart';
 import 'package:coroute_app/presentation/admin/admin_ui.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 
-/// Admin console simplification (B2): nine top-level sections (3.55: Features) with short plain names, and the
+/// Admin console simplification: six top-level sections (each with its pages as tabs) with short plain names, and the
 /// public ride reports under Safety (list, conversation, dismiss / warn / suspend) against a fake API.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -26,25 +26,40 @@ void main() {
   tearDown(() => AppTheme.use(AppPalette.dark));
 
   group('Admin sections', () {
-    testWidgets('nine sections with short plain names; plans and devices are merged away', (tester) async {
+    testWidgets('six sections with short plain names; every earlier screen is a tab inside one', (tester) async {
       late List<AdminNavItem> nav;
       late List<AdminNavItem> withSignOut;
+      late List<AdminNavItem> safetyTabs;
+      late List<AdminNavItem> riderTabs;
       await tester.pumpWidget(MaterialApp(
         home: Builder(builder: (context) {
-          nav = adminNavItems(context, AdminSection.dashboard);
-          withSignOut = adminNavItems(context, AdminSection.safety, onSignOut: () {});
+          nav = adminNavItems(context, AdminPage.overview);
+          withSignOut = adminNavItems(context, AdminPage.safety, onSignOut: () {});
+          safetyTabs = adminSectionTabs(context, AdminPage.safety);
+          riderTabs = adminSectionTabs(context, AdminPage.riders);
           return const SizedBox();
         }),
       ));
-      expect(nav.map((n) => n.label).toList(), ['Overview', 'Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Features', 'Settings']);
+      expect(nav.map((n) => n.label).toList(), ['Overview', 'Riders', 'Rides & safety', 'Plans & payments', 'Content', 'System']);
       expect(AdminSection.values.length, lessThanOrEqualTo(9));
       expect(AdminSection.values.length, nav.length);
       for (final n in nav) {
-        expect(n.label.split(' ').length, lessThanOrEqualTo(2), reason: 'short label: ${n.label}');
+        expect(n.label.replaceAll(' & ', ' ').split(' ').length, lessThanOrEqualTo(2), reason: 'short label: ${n.label}');
       }
       expect(nav.where((n) => n.selected).single.label, 'Overview');
       expect(withSignOut.last.label, 'Sign out');
-      expect(withSignOut.where((n) => n.selected).single.label, 'Safety');
+      expect(withSignOut.where((n) => n.selected).single.label, 'Rides & safety');
+      // Rides and Safety are the two tabs of "Rides & safety"; a one-page section has no tabs.
+      expect(safetyTabs.map((t) => t.label).toList(), ['Rides', 'Safety']);
+      expect(safetyTabs.where((t) => t.selected).single.label, 'Safety');
+      expect(riderTabs, isEmpty);
+      // Every page belongs to exactly one section, and every section has a page.
+      for (final s in AdminSection.values) {
+        expect(s.pages, isNotEmpty, reason: s.label);
+      }
+      expect(AdminSection.values.expand((s) => s.pages).length, AdminPage.values.length);
+      // The screens that used to be top level (or hidden in a menu) are all still reachable.
+      expect(AdminPage.values.map((p) => p.label), containsAll(['Riders', 'Rides', 'Safety', 'Payments', 'Marketing', 'Ride reviews', 'Place photos', 'Crews', 'Features', 'Usage', 'Settings']));
     });
   });
 

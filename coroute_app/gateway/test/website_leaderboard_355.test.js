@@ -176,7 +176,7 @@ test('render: clean usernames as text, highest first, invalid rows dropped, empt
   assert.match(r.upd.textContent, /^Updated /);
   assert.deepEqual(r.rows.map((x) => x.name), ['<img src=x onerror=alert(1)>', 'ridge_runner', 'ghostrider', 'y'.repeat(32)], 'text only, duplicates and junk dropped, cut to 32');
   assert.deepEqual(r.rows.map((x) => x.rank), ['1', '2', '3', '4']);
-  assert.equal(r.rows[0].value, '990 pts');
+  assert.equal(r.rows[0].value, '990 / 100');
   assert.equal(r.rows[1].sub, '41 rides');
   assert.equal(r.rows[2].sub, '1 ride');
   assert.equal(r.rows[0].bar, '100%');

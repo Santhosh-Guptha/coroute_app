@@ -598,8 +598,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(s.language, AppLanguage.hi);
       expect(L10n.current, 'hi');
-      expect(find.text(L10n.t('settings.crash', const {}, 'hi')), findsOneWidget);
-      expect(find.text('Crash detection'), findsNothing);
+      expect(find.text(L10n.t('settings.language', const {}, 'hi')), findsOneWidget);
+      expect(find.text('Language'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('language')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('English').last);
@@ -620,6 +620,10 @@ void main() {
 
     testWidgets('Settings opens the same simple fuel setup', (tester) async {
       await settingsFor(tester);
+      // 3.55: Fuel is under "More settings".
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_more')), 200, scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.byKey(const ValueKey('settings_more')));
+      await tester.pump();
       await tester.scrollUntilVisible(find.text('Fuel'), 200, scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text('Fuel')); await tester.pumpAndSettle();
       expect(find.text('How far does a full tank take you?'), findsOneWidget);

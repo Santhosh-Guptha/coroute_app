@@ -341,7 +341,7 @@ void main() {
     expect(find.byType(CockpitSpeedometer), findsOneWidget);
     expect(find.text('85'), findsOneWidget);
     expect(find.text('km/h'), findsOneWidget);
-    expect(find.text('OVER 80'), findsOneWidget);
+    expect(find.text('Over 80'), findsOneWidget);
     expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
 
     final textWidget = tester.widget<Text>(find.text('85'));

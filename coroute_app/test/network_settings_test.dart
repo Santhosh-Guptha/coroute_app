@@ -81,36 +81,36 @@ void main() {
     },
   );
 
-  test('every switch is saved and read back', () async {
+  test('every switch is saved and read back; always-on ones ignore "off" (3.55)', () async {
     SharedPreferences.setMockInitialValues({});
     final s = SettingsService();
     await s.load();
     var notified = 0;
     s.addListener(() => notified++);
     await s.setVoiceWarnings(false);
-    await s.setHazardAlerts(false);
-    await s.setRideOnLockScreen(false);
-    await s.setAutoReroute(false);
+    await s.setHazardAlerts(false); // always on: ignored
+    await s.setRideOnLockScreen(false); // always on: ignored
+    await s.setAutoReroute(false); // always on: ignored
     await s.setHardwarePtt(true);
     await s.markNetConsentSeen();
     await s.bumpNetConsentPrompts();
     await s.bumpNetConsentPrompts();
-    expect(notified, 8);
+    expect(notified, 5);
     await s.setVoiceWarnings(false); // no change: no notification
-    expect(notified, 8);
+    expect(notified, 5);
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool(NetworkConstants.keyVoiceWarnings), isFalse);
-    expect(prefs.getBool(SettingsService.keyAutoReroute), isFalse);
+    expect(prefs.getBool(SettingsService.keyAutoReroute), isTrue);
     expect(prefs.getBool(SettingsService.keyHardwarePtt), isTrue);
     expect(prefs.getInt(NetworkConstants.keyNetConsentPrompts), 2);
 
     final again = SettingsService();
     await again.load();
     expect(again.voiceWarnings, isFalse);
-    expect(again.hazardAlerts, isFalse);
-    expect(again.rideOnLockScreen, isFalse);
-    expect(again.autoReroute, isFalse);
+    expect(again.hazardAlerts, isTrue);
+    expect(again.rideOnLockScreen, isTrue);
+    expect(again.autoReroute, isTrue);
     expect(again.hardwarePtt, isTrue);
     expect(again.netConsentSeen, isTrue);
     expect(again.netConsentPrompts, 2);
