@@ -1,9 +1,9 @@
 # CoRoute — Google Play Store Release Checklist & Launch Runbook
 
 > **Target App:** CoRoute: Group Ride Convoy (`space.devmonks.coroute_app`)  
-> **Production API:** `https://coroute.duckdns.org` (Oracle Cloud VM `<vm-public-ip>`)  
+> **Production API:** `https://coroute.devmonks.space` (fallback `https://coroute.duckdns.org`)  
 > **Maintainer Contact:** `santhoshbukka5@gmail.com`  
-> **Current Version:** `3.8.0+68`
+> **Current Version:** `3.55.0+10019`
 
 ---
 
@@ -34,10 +34,10 @@
 ## 🛡️ Phase 2: Mandatory Policy & Data Safety Declarations
 
 ### 2.1 URLs & Contact Information
-- [ ] **Privacy Policy URL:** `https://coroute.duckdns.org/privacy` *(Hosted on VM, HTTPS validated)*
-- [ ] **Terms of Use URL:** `https://coroute.duckdns.org/terms` *(Hosted on VM, HTTPS validated)*
+- [ ] **Privacy Policy URL:** `https://coroute.devmonks.space/privacy` *(Hosted on VM, HTTPS validated)*
+- [ ] **Terms of Use URL:** `https://coroute.devmonks.space/terms` *(Hosted on VM, HTTPS validated)*
 - [ ] **Support Email:** `santhoshbukka5@gmail.com`
-- [ ] **Website:** `https://coroute.duckdns.org`
+- [ ] **Website:** `https://coroute.devmonks.space`
 
 ### 2.2 App Content Declarations
 - [ ] **App Access:** *All functionality is available without special access restrictions.* Provide a demo test account (e.g. `rider_demo@coroute.test` / `Password#123`).
