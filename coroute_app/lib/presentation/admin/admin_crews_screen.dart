@@ -5,6 +5,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import 'admin_ui.dart';
+import 'admin_nav.dart';
 
 /// 3.55 admin: rider crews and their polls, for moderation (docs/features_355/crews_polls.md).
 /// Lists crews (search by name), shows one crew's members and polls, deletes a poll or a whole
@@ -78,6 +79,8 @@ class _AdminCrewsScreenState extends State<AdminCrewsScreen> {
       title: 'Crews',
       subtitle: '$_total crews · polls only, no chat',
       onBack: () => Navigator.maybePop(context),
+      nav: adminNavItems(context, AdminPage.crews),
+      tabs: adminSectionTabs(context, AdminPage.crews),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
       body: Center(
         child: ConstrainedBox(

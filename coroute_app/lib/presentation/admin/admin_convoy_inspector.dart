@@ -14,12 +14,14 @@ import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/convoy_service.dart';
 import '../../domain/timeline/timeline_text.dart';
+import '../../domain/ride/bike_markers.dart';
 import '../report/replay_screen.dart';
 import '../ride/riders_ladder.dart';
 import '../timeline/live_timeline_screen.dart';
 import '../timeline/member_colors.dart';
 import 'admin_ui.dart';
 import '../rider/widgets/bike_rider_marker.dart';
+import '../widgets/feature_switch.dart';
 
 /// Master admin: one live ride. Open SOS first, then the map, the group
 /// numbers and every rider with their status. Tapping a rider (row or map
@@ -207,6 +209,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final metrics = TelemetryUtils.calculateConvoyMetrics(riders);
 
     final located = riders.where((r) => r.lat != 0 || r.lng != 0).toList();
+    final bikes = BikeMarkerPlan.forViewer(current.riders, mergePillions: context.featureOn('pillionSeat'));
     final LatLng center;
     if (located.isNotEmpty) {
       center = LatLng(located.first.lat, located.first.lng);
@@ -253,27 +256,31 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
             appTileLayer(),
             MarkerLayer(
               markers: [
-                for (final r in located)
-                  Marker(
-                    point: LatLng(r.lat, r.lng),
-                    width: 48,
-                    height: 48,
-                    // 3.55: the rider's bike (shape and colour) instead of a round avatar.
-                    child: StatusBikeMarker(
-                      name: r.name,
-                      color: colors[r.userId] ?? AppTheme.accentText,
-                      vehicleKind: r.vehicleKind,
-                      vehicleColor: r.vehicleColor,
-                      status: status[r.userId],
-                      heading: r.heading,
-                      height: 30,
-                      onTap: () => _showRider(
-                        r,
-                        status[r.userId] ?? RiderStatus.offline,
-                        colors[r.userId],
+                // 3.55 follow-up: one marker per bike, as in the cockpit; a seated pillion rides
+                // on their rider's two-up bike (admin switch pillionSeat off: one each).
+                for (final e in bikes.values)
+                  if (current.riders[e.markerId] case final r?)
+                    Marker(
+                      point: LatLng(r.lat, r.lng),
+                      width: 48,
+                      height: 48,
+                      // 3.55: the rider's bike (shape and colour) instead of a round avatar.
+                      child: StatusBikeMarker(
+                        name: BikeMarkerPlan.nameOf(e),
+                        color: colors[e.bikeRider.userId] ?? AppTheme.accentText,
+                        vehicleKind: e.bikeRider.vehicleKind,
+                        vehicleColor: e.bikeRider.vehicleColor,
+                        status: status[r.userId],
+                        heading: r.heading,
+                        twoUp: e.twoUp,
+                        height: 30,
+                        onTap: () => _showRider(
+                          e.bikeRider,
+                          status[e.bikeRider.userId] ?? RiderStatus.offline,
+                          colors[e.bikeRider.userId],
+                        ),
                       ),
                     ),
-                  ),
               ],
             ),
           ],
@@ -391,7 +398,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
       color: AppTheme.card,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: AppTheme.border, width: 2),
+        side: BorderSide(color: AppTheme.border),
       ),
       onSelected: (v) {
         if (v == 'end') _confirmDissolveConvoy(context, convoyService, current);
@@ -409,7 +416,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
                   'End ride for everyone',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -422,7 +429,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: AppTheme.card,
-          border: Border.all(color: AppTheme.border, width: 2),
+          border: Border.all(color: AppTheme.border),
         ),
         child: Icon(Icons.more_horiz_rounded, color: AppTheme.text, size: 22),
       ),

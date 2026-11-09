@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../data/models/device_diagnostic_report.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
+import '../../core/theme/app_theme.dart';
 import 'admin_ui.dart';
 
 /// Admin Device Compatibility Dashboard (FEAT-DIAG-03).
@@ -92,30 +93,30 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
   Color _overallColor(String overall) {
     switch (overall) {
       case DiagnosticOverallResult.fullySupported:
-        return const Color(0xFF10B981);
+        return AppTheme.palette.success;
       case DiagnosticOverallResult.supportedWithLimitations:
-        return const Color(0xFFF59E0B);
+        return AppTheme.palette.warning;
       case DiagnosticOverallResult.limitedCompatibility:
-        return Colors.orangeAccent;
+        return AppTheme.palette.accentStrong;
       case DiagnosticOverallResult.criticalIssueDetected:
-        return const Color(0xFFEF4444);
+        return AppTheme.palette.danger;
       default:
-        return const Color(0xFF6B7280);
+        return AppTheme.palette.textMuted;
     }
   }
 
   Color _statusColor(String status) {
     switch (status) {
       case DiagnosticLifecycleStatus.submitted:
-        return const Color(0xFF3B82F6);
+        return AppTheme.palette.primary;
       case DiagnosticLifecycleStatus.reviewed:
-        return const Color(0xFF8B5CF6);
+        return AppTheme.palette.accent;
       case DiagnosticLifecycleStatus.resolved:
-        return const Color(0xFF10B981);
+        return AppTheme.palette.success;
       case DiagnosticLifecycleStatus.failed:
-        return const Color(0xFFEF4444);
+        return AppTheme.palette.danger;
       default:
-        return const Color(0xFF9CA3AF);
+        return AppTheme.palette.textFaint;
     }
   }
 
@@ -124,33 +125,33 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
     final auth = context.watch<AuthService>();
     if (!auth.isMasterAdmin) {
       return Scaffold(
-        backgroundColor: const Color(0xFF0D1117),
+        backgroundColor: AppTheme.palette.background,
         appBar: AppBar(
-          backgroundColor: const Color(0xFF0D1117),
-          title: const Text('Access denied', style: TextStyle(color: Colors.white)),
+          backgroundColor: AppTheme.palette.background,
+          title: Text('Access denied', style: TextStyle(color: AppTheme.palette.text)),
         ),
-        body: const Center(
+        body: Center(
           child: Text(
             'Master administrator privileges required to view device compatibility diagnostics.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+            style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 14),
           ),
         ),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
+      backgroundColor: AppTheme.palette.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D1117),
+        backgroundColor: AppTheme.palette.background,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Phone compatibility',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+          style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 18),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            icon: Icon(Icons.refresh_rounded, color: AppTheme.palette.text),
             tooltip: 'Refresh',
             onPressed: () => _loadDashboardData(page: _page),
           ),
@@ -158,9 +159,9 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
       ),
       body: SafeArea(
         child: _loading
-            ? const Center(child: CircularProgressIndicator(color: Colors.tealAccent))
+            ? Center(child: CircularProgressIndicator(color: AppTheme.palette.primary))
             : RefreshIndicator(
-                color: Colors.tealAccent,
+                color: AppTheme.palette.primary,
                 onRefresh: () => _loadDashboardData(page: 1),
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -170,11 +171,11 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.15),
+                          color: AppTheme.palette.danger.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                          border: Border.all(color: AppTheme.palette.danger.withValues(alpha: 0.3)),
                         ),
-                        child: Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+                        child: Text(_error!, style: TextStyle(color: AppTheme.palette.danger, fontSize: 13)),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -192,13 +193,13 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                       children: [
                         Text(
                           'Reports ($_totalCount)',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                          style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 15),
                         ),
                         const Spacer(),
                         if (_totalPages > 1)
                           Text(
                             'Page $_page of $_totalPages',
-                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12),
                           ),
                       ],
                     ),
@@ -207,16 +208,16 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                     // Reports List
                     if (_reports.isEmpty)
                       Container(
-                        padding: const EdgeInsets.all(32),
+                        padding: EdgeInsets.all(32),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF161B22),
+                          color: AppTheme.palette.surface,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white12),
+                          border: Border.all(color: AppTheme.palette.border),
                         ),
-                        child: const Center(
+                        child: Center(
                           child: Text(
                             'No diagnostic reports matching current criteria.',
-                            style: TextStyle(color: Colors.white54, fontSize: 13),
+                            style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 13),
                           ),
                         ),
                       )
@@ -242,22 +243,22 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
     final topFailures = (stats['topFailureCategories'] as List<dynamic>? ?? []);
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: AppTheme.palette.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppTheme.palette.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.analytics_rounded, color: Colors.tealAccent, size: 20),
+              Icon(Icons.analytics_rounded, color: AppTheme.palette.primary, size: 20),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'Overview',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 15),
               ),
             ],
           ),
@@ -271,16 +272,16 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                   title: '$total',
                   subtitle: 'Total Reports',
                   icon: Icons.assignment_rounded,
-                  color: Colors.blueAccent,
+                  color: AppTheme.palette.primary,
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Expanded(
                 child: _buildMetricTile(
                   title: '$fullySupportedPct%',
                   subtitle: 'Fully Supported',
                   icon: Icons.check_circle_rounded,
-                  color: const Color(0xFF10B981),
+                  color: AppTheme.palette.success,
                 ),
               ),
               const SizedBox(width: 8),
@@ -289,7 +290,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                   title: topMfg.isNotEmpty ? (topMfg.first['manufacturer']?.toString() ?? 'N/A') : 'N/A',
                   subtitle: 'Top Hardware',
                   icon: Icons.phone_android_rounded,
-                  color: Colors.purpleAccent,
+                  color: AppTheme.palette.accent,
                 ),
               ),
             ],
@@ -297,9 +298,9 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
 
           if (topFailures.isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Top Failure / Limitation Categories:',
-              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -311,13 +312,13 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.amber.withOpacity(0.12),
+                    color: AppTheme.palette.accentSoft,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                    border: Border.all(color: AppTheme.palette.accentBorder),
                   ),
                   child: Text(
                     '$cat: $count',
-                    style: const TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.w500),
+                    style: TextStyle(color: AppTheme.palette.accentStrong, fontSize: 11, fontWeight: FontWeight.w500),
                   ),
                 );
               }).toList(),
@@ -335,11 +336,11 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D1117),
+        color: AppTheme.palette.background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: AppTheme.palette.surfaceAlt),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -350,14 +351,14 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 16),
           ),
-          const SizedBox(height: 2),
+          SizedBox(height: 2),
           Text(
             subtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white54, fontSize: 11),
+            style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 11),
           ),
         ],
       ),
@@ -366,25 +367,25 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
 
   Widget _buildFilterSection() {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: AppTheme.palette.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppTheme.palette.border),
       ),
       child: Column(
         children: [
           // Search box
           TextField(
             controller: _searchCtrl,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+            style: TextStyle(color: AppTheme.palette.text, fontSize: 13),
             decoration: InputDecoration(
               hintText: 'Search model, manufacturer, email...',
-              hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-              prefixIcon: const Icon(Icons.search_rounded, color: Colors.white38, size: 20),
+              hintStyle: TextStyle(color: AppTheme.palette.textFaint, fontSize: 13),
+              prefixIcon: Icon(Icons.search_rounded, color: AppTheme.palette.textFaint, size: 20),
               suffixIcon: _searchCtrl.text.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear_rounded, color: Colors.white38, size: 18),
+                      icon: Icon(Icons.clear_rounded, color: AppTheme.palette.textFaint, size: 18),
                       onPressed: () {
                         _searchCtrl.clear();
                         _loadDashboardData(page: 1);
@@ -392,7 +393,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                     )
                   : null,
               filled: true,
-              fillColor: const Color(0xFF0D1117),
+              fillColor: AppTheme.palette.background,
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
             ),
@@ -477,18 +478,18 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
       child: GestureDetector(
         onTap: onSelected,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.tealAccent.withOpacity(0.2) : const Color(0xFF0D1117),
+            color: isSelected ? AppTheme.palette.primarySoft : AppTheme.palette.background,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: isSelected ? Colors.tealAccent : Colors.white12),
+            border: Border.all(color: isSelected ? AppTheme.palette.primary : AppTheme.palette.border),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.tealAccent : Colors.white70,
+              color: isSelected ? AppTheme.palette.primary : AppTheme.palette.textMuted,
               fontSize: 11,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
         ),
@@ -513,11 +514,11 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
     final lifeCol = _statusColor(lifecycle);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: AppTheme.palette.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppTheme.palette.border),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -525,7 +526,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
           children: [
             Text(
               '$mfg $model',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 14),
             ),
             const SizedBox(width: 8),
             Container(
@@ -536,7 +537,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
               ),
               child: Text(
                 lifecycle,
-                style: TextStyle(color: lifeCol, fontSize: 10, fontWeight: FontWeight.bold),
+                style: TextStyle(color: lifeCol, fontSize: 10, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -560,15 +561,15 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
+              SizedBox(height: 2),
               Text(
                 'Rider: $riderEmail • $dateStr',
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
+                style: TextStyle(color: AppTheme.palette.textFaint, fontSize: 11),
               ),
             ],
           ),
         ),
-        trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+        trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.palette.textFaint),
         onTap: () => _openReportDetailModal(diagnosticId),
       ),
     );
@@ -579,15 +580,15 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, size: 16, color: Colors.white70),
+          icon: Icon(Icons.arrow_back_ios_rounded, size: 16, color: AppTheme.palette.textMuted),
           onPressed: _page > 1 ? () => _loadDashboardData(page: _page - 1) : null,
         ),
         Text(
           '$_page / $_totalPages',
-          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.palette.text, fontSize: 13, fontWeight: FontWeight.w600),
         ),
         IconButton(
-          icon: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.white70),
+          icon: Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppTheme.palette.textMuted),
           onPressed: _page < _totalPages ? () => _loadDashboardData(page: _page + 1) : null,
         ),
       ],
@@ -598,7 +599,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: AppTheme.palette.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => _ReportDetailSheet(
         diagnosticId: diagnosticId,
@@ -688,17 +689,17 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const SizedBox(
+      return SizedBox(
         height: 350,
-        child: Center(child: CircularProgressIndicator(color: Colors.tealAccent)),
+        child: Center(child: CircularProgressIndicator(color: AppTheme.palette.primary)),
       );
     }
 
     final r = _report;
     if (r == null) {
-      return const SizedBox(
+      return SizedBox(
         height: 250,
-        child: Center(child: Text('Report details unavailable.', style: TextStyle(color: Colors.white70))),
+        child: Center(child: Text('Report details unavailable.', style: TextStyle(color: AppTheme.palette.textMuted))),
       );
     }
 
@@ -721,7 +722,7 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
               child: Container(
                 width: 40,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(color: AppTheme.palette.borderStrong, borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 14),
@@ -732,42 +733,42 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                 Expanded(
                   child: Text(
                     '${dev['manufacturer'] ?? ''} ${dev['model'] ?? 'Device'}',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                    style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 18),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                  icon: Icon(Icons.close_rounded, color: AppTheme.palette.textMuted),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
             ),
             Text(
               'Report ID: ${r['diagnosticId'] ?? widget.diagnosticId}',
-              style: const TextStyle(color: Colors.white38, fontSize: 11),
+              style: TextStyle(color: AppTheme.palette.textFaint, fontSize: 11),
             ),
             const SizedBox(height: 12),
 
             // Overall Summary
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFF0D1117),
+                color: AppTheme.palette.background,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white10),
+                border: Border.all(color: AppTheme.palette.border),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      const Text('Overall Compatibility: ', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                      Text(overall, style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                      Text('Overall Compatibility: ', style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12)),
+                      Text(overall, style: TextStyle(color: AppTheme.palette.primary, fontWeight: FontWeight.w600, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
                     r['overallSummary']?.toString() ?? '',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                    style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12),
                   ),
                 ],
               ),
@@ -775,7 +776,7 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
             const SizedBox(height: 14),
 
             // Hardware Specs
-            const Text('Hardware & OS Specifications', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+            Text('Hardware & OS Specifications', style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 14)),
             const SizedBox(height: 8),
             _specRow('Operating System', '${dev['osVersion'] ?? 'Android'} (API ${dev['apiLevel'] ?? ''})'),
             _specRow('App Version', 'v${dev['appVersion'] ?? ''}+${dev['buildNumber'] ?? ''}'),
@@ -783,7 +784,7 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
             _specRow('Battery Optimization', dev['batteryOptimizationStatus']?.toString() ?? 'Unknown'),
 
             const SizedBox(height: 16),
-            const Text('Categories & Sensors', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+            Text('Categories & Sensors', style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 14)),
             const SizedBox(height: 8),
 
             ...categories.entries.map((e) {
@@ -794,9 +795,9 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
+                padding: EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0D1117),
+                  color: AppTheme.palette.background,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -805,32 +806,32 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(title, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                          Text(title, style: TextStyle(color: AppTheme.palette.text, fontSize: 13, fontWeight: FontWeight.w600)),
                           if (summary.isNotEmpty)
-                            Text(summary, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                            Text(summary, style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 11)),
                         ],
                       ),
                     ),
-                    Text(status, style: TextStyle(color: _statusColor(status), fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text(status, style: TextStyle(color: _statusColor(status), fontSize: 11, fontWeight: FontWeight.w600)),
                   ],
                 ),
               );
             }),
 
-            const SizedBox(height: 16),
-            const Text('Admin Lifecycle Review & Notes', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 10),
+            SizedBox(height: 16),
+            Text('Admin Lifecycle Review & Notes', style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 14)),
+            SizedBox(height: 10),
 
             // Status Selector Dropdown
             DropdownButtonFormField<String>(
               value: _selectedStatus,
-              dropdownColor: const Color(0xFF1E293B),
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              dropdownColor: AppTheme.palette.surface,
+              style: TextStyle(color: AppTheme.palette.text, fontSize: 13),
               decoration: InputDecoration(
                 labelText: 'Lifecycle Status',
-                labelStyle: const TextStyle(color: Colors.white54),
+                labelStyle: TextStyle(color: AppTheme.palette.textMuted),
                 filled: true,
-                fillColor: const Color(0xFF0D1117),
+                fillColor: AppTheme.palette.background,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
@@ -841,18 +842,18 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                 if (v != null) setState(() => _selectedStatus = v);
               },
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: 10),
 
             // Admin Notes Field
             TextField(
               controller: _notesCtrl,
               maxLines: 3,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: AppTheme.palette.text, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Add internal engineering or support review notes...',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                hintStyle: TextStyle(color: AppTheme.palette.textFaint, fontSize: 12),
                 filled: true,
-                fillColor: const Color(0xFF0D1117),
+                fillColor: AppTheme.palette.background,
                 contentPadding: const EdgeInsets.all(12),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
               ),
@@ -864,12 +865,12 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: _updating
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                    ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.palette.onPrimary))
                     : const Icon(Icons.check_circle_outline_rounded, size: 18),
                 label: Text(_updating ? 'Saving...' : 'Update Report Status & Notes'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.tealAccent,
-                  foregroundColor: Colors.black,
+                  backgroundColor: AppTheme.palette.primary,
+                  foregroundColor: AppTheme.palette.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: _updating ? null : _submitStatusUpdate,
@@ -878,7 +879,7 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
 
             if (reviewHistory.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const Text('Audit & Review History', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+              Text('Audit & Review History', style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12, fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               ...reviewHistory.map((h) {
                 final action = h['action']?.toString() ?? '';
@@ -888,15 +889,15 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                 final notes = h['adminNotes']?.toString() ?? '';
 
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: EdgeInsets.symmetric(vertical: 4),
                   child: Text(
                     '• [$action] by $by at $atStr ${notes.isNotEmpty ? "- $notes" : ""}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                    style: TextStyle(color: AppTheme.palette.textFaint, fontSize: 11),
                   ),
                 );
               }),
             ],
-            const SizedBox(height: 24),
+            SizedBox(height: 24),
           ],
         ),
       ),
@@ -905,12 +906,12 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
 
   Widget _specRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
-          const Spacer(),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+          Text(label, style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12)),
+          Spacer(),
+          Text(value, style: TextStyle(color: AppTheme.palette.text, fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -920,15 +921,15 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
     switch (status) {
       case DiagnosticStatus.ready:
       case DiagnosticStatus.supported:
-        return const Color(0xFF10B981);
+        return AppTheme.palette.success;
       case DiagnosticStatus.limited:
       case DiagnosticStatus.permissionRequired:
-        return const Color(0xFFF59E0B);
+        return AppTheme.palette.warning;
       case DiagnosticStatus.failed:
       case DiagnosticStatus.unsupported:
-        return const Color(0xFFEF4444);
+        return AppTheme.palette.danger;
       default:
-        return const Color(0xFF6B7280);
+        return AppTheme.palette.textMuted;
     }
   }
 }

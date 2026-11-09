@@ -274,7 +274,7 @@ class _AdminRideReportSheetState extends State<AdminRideReportSheet> {
                         TextSpan(children: [
                           TextSpan(
                             text: l['from'] == 'REPORTER' ? 'Reporter: ' : 'Reported rider: ',
-                            style: AppText.label.copyWith(fontWeight: FontWeight.w800, color: l['from'] == 'REPORTER' ? AppTheme.text2 : AppTheme.text),
+                            style: AppText.label.copyWith(fontWeight: FontWeight.w600, color: l['from'] == 'REPORTER' ? AppTheme.text2 : AppTheme.text),
                           ),
                           TextSpan(text: adminReportLine(l), style: AppText.body),
                         ]),
@@ -305,7 +305,7 @@ class _AdminRideReportSheetState extends State<AdminRideReportSheet> {
           TextButton.icon(
             onPressed: _riderId.isEmpty ? null : _openRider,
             icon: Icon(Icons.person_search_rounded, color: AppTheme.accentText),
-            label: Text('Open rider details', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+            label: Text('Open rider details', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
           ),
         ],
       ),

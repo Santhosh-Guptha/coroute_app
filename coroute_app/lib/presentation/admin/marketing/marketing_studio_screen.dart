@@ -14,6 +14,7 @@ import '../admin_ui.dart';
 import 'marketing_api.dart';
 import 'marketing_editor_screen.dart';
 import 'marketing_painter.dart';
+import '../admin_nav.dart';
 
 /// 3.55 Marketing studio (admin console): saved offer-image templates, starter templates and the
 /// editor. Templates live on the gateway (/api/admin/marketing/templates); while the admin switch
@@ -110,6 +111,8 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
       title: 'Marketing studio',
       subtitle: 'Offer and coupon images to share',
       onBack: () => Navigator.maybePop(context),
+      nav: adminNavItems(context, AdminPage.marketing),
+      tabs: adminSectionTabs(context, AdminPage.marketing),
       actions: [AdminIconAction(icon: Icons.add_rounded, label: 'New image', onTap: _new)],
       body: AdminTabBody(
         loading: _loading,
@@ -137,7 +140,7 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
             trailing: TextButton.icon(
               onPressed: _new,
               icon: Icon(Icons.add_rounded, color: AppTheme.accentText),
-              label: Text('New image', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+              label: Text('New image', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
             ),
             rows: [
               for (var i = 0; i < _templates.length; i++) _row(_templates[i], i == _templates.length - 1),

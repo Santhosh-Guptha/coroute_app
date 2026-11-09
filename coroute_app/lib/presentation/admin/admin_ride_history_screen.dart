@@ -209,7 +209,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
             title: _filterLabel(_filter),
             trailing: Text(
               '${display.length} ${display.length == 1 ? 'ride' : 'rides'}',
-              style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
+              style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600),
             ),
             columns: const ['Ride', 'Status'],
             rows: [
@@ -237,7 +237,8 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
       subtitle: 'Live and finished rides. Tap a ride for its numbers.',
       onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
-      nav: adminNavItems(context, AdminSection.rides),
+      nav: adminNavItems(context, AdminPage.rides),
+      tabs: adminSectionTabs(context, AdminPage.rides),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
@@ -260,13 +261,13 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
       tooltip: 'Period',
       initialValue: _days,
       color: AppTheme.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border)),
       onSelected: (v) {
         _days = v;
         _load();
       },
       itemBuilder: (_) => [
-        for (final (d, label) in _periods) PopupMenuItem<int>(value: d, height: 48, child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+        for (final (d, label) in _periods) PopupMenuItem<int>(value: d, height: 48, child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
       ],
       child: Container(
         height: 40,
@@ -275,7 +276,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_periodLabel(_days), style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
+            Text(_periodLabel(_days), style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600)),
             Icon(Icons.arrow_drop_down_rounded, color: AppTheme.accentText),
           ],
         ),
@@ -313,7 +314,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                 'All time: ${_n2(s, 'rides', 'all')} rides, ${formatDistance(_n2(s, 'distanceM', 'all'))}, '
                 '${formatDuration(Duration(milliseconds: _n2(s, 'rideMs', 'all').toInt()))} on the road. '
                 '${adminNum(s, 'riders')} riders registered.',
-                style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700),
+                style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 4),
               Text(
@@ -408,7 +409,7 @@ class _RideRow extends StatelessWidget {
       trailing: PopupMenuButton<String>(
         tooltip: 'More options',
         color: AppTheme.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border)),
         onSelected: (v) {
           if (v == 'delete') onDelete();
         },
@@ -419,14 +420,14 @@ class _RideRow extends StatelessWidget {
             child: Row(children: [
               Icon(Icons.delete_outline_rounded, color: AppTheme.sos),
               const SizedBox(width: 12),
-              Flexible(child: Text('Delete ride', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+              Flexible(child: Text('Delete ride', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
             ]),
           ),
         ],
         child: Container(
           width: 44,
           height: 44,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.card, border: Border.all(color: AppTheme.border, width: 2)),
+          decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.card, border: Border.all(color: AppTheme.border)),
           child: Icon(Icons.more_horiz_rounded, color: AppTheme.text, size: 22),
         ),
       ),

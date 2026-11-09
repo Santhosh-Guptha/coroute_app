@@ -150,7 +150,7 @@ class _FeatureAnalyticsViewState extends State<FeatureAnalyticsView> {
                 const SizedBox(height: 6),
                 Text(
                   'Updated ${DateTime.fromMillisecondsSinceEpoch(stamp).toLocal()}',
-                  style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
+                  style: AppText.caption.copyWith(fontWeight: FontWeight.w600),
                 ),
               ],
               if (error != null) ...[

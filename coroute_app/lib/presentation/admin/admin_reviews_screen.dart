@@ -6,7 +6,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../trip/trip_feedback_sheet.dart';
-import 'admin_place_reviews_screen.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
 
@@ -193,15 +192,10 @@ class _AdminReviewsScreenState extends State<AdminReviewsScreen> {
       title: 'Reviews',
       subtitle: _loaded ? '$pending waiting for approval' : 'Post-trip reviews',
       actions: [
-        // 3.55: CoRoute rider place reviews (photos waiting for a quick check).
-        AdminIconAction(
-          icon: Icons.place_outlined,
-          label: 'Place reviews',
-          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AdminPlaceReviewsScreen())),
-        ),
         AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load),
       ],
-      nav: adminNavItems(context, AdminSection.reviews),
+      nav: adminNavItems(context, AdminPage.reviews),
+      tabs: adminSectionTabs(context, AdminPage.reviews),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
@@ -557,7 +551,7 @@ class _AdminReviewDetailScreenState extends State<AdminReviewDetailScreen> {
                             contentPadding: EdgeInsets.zero,
                             value: _showTripDetails,
                             onChanged: _busy ? null : (v) => setState(() => _showTripDetails = v),
-                            title: Text('Show trip details', style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w700)),
+                            title: Text('Show trip details', style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w600)),
                             subtitle: Text('Trip name, distance, days and place names.', style: AppText.caption),
                           ),
                         if (_photoItems.isNotEmpty) ...[
@@ -867,11 +861,11 @@ class ReviewStoryPreview extends StatelessWidget {
             runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text('Rider #1', style: AppText.caption.copyWith(fontWeight: FontWeight.w700, color: AppTheme.text)),
+              Text('Rider #1', style: AppText.caption.copyWith(fontWeight: FontWeight.w600, color: AppTheme.text)),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(99)),
-                child: Text('Completed trip, approved', style: AppText.caption.copyWith(color: AppTheme.brand, fontWeight: FontWeight.w700)),
+                child: Text('Completed trip, approved', style: AppText.caption.copyWith(color: AppTheme.brand, fontWeight: FontWeight.w600)),
               ),
             ],
           ),

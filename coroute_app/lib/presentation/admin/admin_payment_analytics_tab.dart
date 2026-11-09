@@ -158,7 +158,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
         children: [
           Icon(Icons.calendar_month_outlined, size: 20, color: AppTheme.accentText),
           const SizedBox(width: 10),
-          Text('Period', style: AppText.caption.copyWith(fontWeight: FontWeight.w800)),
+          Text('Period', style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(width: 12),
           Expanded(
             child: SingleChildScrollView(

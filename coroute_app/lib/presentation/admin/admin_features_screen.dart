@@ -206,7 +206,8 @@ class _AdminFeaturesScreenState extends State<AdminFeaturesScreen> {
       title: 'Feature switches',
       subtitle: 'Turn a feature off for every rider',
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
-      nav: adminNavItems(context, AdminSection.features),
+      nav: adminNavItems(context, AdminPage.features),
+      tabs: adminSectionTabs(context, AdminPage.features),
       body: LoadingState(
         loading: _loading && !_loaded,
         child: !_loaded && e != null
@@ -325,7 +326,7 @@ class _FeatureRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(f.label, style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text(f.label, style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
                 if (f.description.isNotEmpty) Text(f.description, style: AppText.caption),
                 if (!f.locked && !f.enabled)
                   Padding(

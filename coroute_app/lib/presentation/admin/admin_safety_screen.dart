@@ -128,7 +128,8 @@ class _AdminSafetyScreenState extends State<AdminSafetyScreen> {
         AdminIconAction(icon: Icons.campaign_rounded, label: 'Safety broadcast', onTap: _broadcast),
         AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _refresh),
       ],
-      nav: adminNavItems(context, AdminSection.safety),
+      nav: adminNavItems(context, AdminPage.safety),
+      tabs: adminSectionTabs(context, AdminPage.safety),
       body: LoadingState(
         loading: _loading,
         child: adminRefresh(

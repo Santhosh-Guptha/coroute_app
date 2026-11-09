@@ -202,6 +202,121 @@ async function overview({ repo, convoys }, { days = 30, now = Date.now() } = {})
   };
 }
 
+// ---------------------------------------------------------------- trends (charts)
+
+/** Day index of `ms` in the rider's local calendar (`tzMin` minutes east of UTC). */
+const localDay = (ms, tzMin) => Math.floor((num(ms) + tzMin * 60000) / DAY);
+/** `YYYY-MM-DD` of a local day index. */
+const dayLabel = (d) => new Date(d * DAY).toISOString().slice(0, 10);
+
+/**
+ * Pure: buckets timestamps into `days` local days ending today (inclusive), oldest first.
+ * `items` are `{ at, value?, key? }`; with `distinct` a key counts once per day.
+ */
+function bucketDays(items, { days, now, tzMin = 0, distinct = false }) {
+  const today = localDay(now, tzMin);
+  const first = today - days + 1;
+  const out = new Array(days).fill(0);
+  const seen = distinct ? Array.from({ length: days }, () => new Set()) : null;
+  for (const it of items) {
+    const at = num(it.at);
+    if (at <= 0) continue;
+    const i = localDay(at, tzMin) - first;
+    if (i < 0 || i >= days) continue;
+    if (seen) {
+      if (it.key == null || seen[i].has(it.key)) continue;
+      seen[i].add(it.key);
+      out[i] += 1;
+    } else {
+      out[i] += it.value === undefined ? 1 : num(it.value);
+    }
+  }
+  return out;
+}
+
+/**
+ * Daily series for the admin overview charts: the last `days` local days and the
+ * same number of days before them (for the "vs previous period" arrows), the plan
+ * mix of riders, and what needs an admin's attention. Staff are never riders here.
+ * Read-only; every number is counted from stored documents.
+ */
+async function trends({ repo, convoys, publicRideReports = null }, { days = 30, now = Date.now(), tzMin = 0 } = {}) {
+  const soda = repo.soda;
+  const [users, trips, ended, alerts, memberships] = await Promise.all([
+    scan(soda, C.users), scan(soda, C.trips), scan(soda, C.convoys, { tripStatus: 'ENDED' }), scan(soda, C.alerts),
+    scan(soda, C.memberships, {}, { cap: 20000 }),
+  ]);
+  const staffIds = staffSet(users.rows);
+  const riders = users.rows.filter((u) => !isGuest(u) && !staffIds.has(u.userId));
+  const riderTrips = trips.rows.filter((t) => !staffIds.has(t.userId));
+  const span = days * 2; // current period + the one before it
+  const split = (arr) => ({ current: arr.slice(days), previous: arr.slice(0, days) });
+  const series = (items, opts = {}) => split(bucketDays(items, { days: span, now, tzMin, ...opts }));
+
+  const rides = series(ended.rows.map((c) => ({ at: c.endedAtEpochMs || c.updatedAt })));
+  const km = series(riderTrips.map((t) => ({ at: t.endTimeEpochMs, value: tripKm(t) })));
+  const active = series(riderTrips.map((t) => ({ at: t.endTimeEpochMs, key: t.userId })), { distinct: true });
+  const signups = series(riders.map((u) => ({ at: u.createdAt })));
+  const sos = series(alerts.rows.map((a) => ({ at: a.timestamp || a.occurredAt })));
+  const today = localDay(now, tzMin);
+  const firstDay = today - days + 1;
+
+  // Plan mix: the plan each rider has now (an owner's membership or legacy tier; a member counts under the group's plan).
+  const owned = new Map();
+  const memberOf = new Map();
+  for (const m of memberships.rows) {
+    if (m.status !== 'ACTIVE' || num(m.validUntil) <= now) continue;
+    if (m.ownerUserId) owned.set(m.ownerUserId, m);
+    for (const [uid, mem] of Object.entries(m.members || {})) if (uid !== m.ownerUserId && (!mem || mem.status !== 'REMOVED')) memberOf.set(uid, m.category);
+  }
+  const planCounts = new Map();
+  for (const u of riders) {
+    let id = adminPlanId(planFrom({ membership: owned.get(u.userId) || null, userDoc: u, now }).category) || 'community';
+    if (id === 'community' && memberOf.has(u.userId)) id = adminPlanId(memberOf.get(u.userId)) || 'community';
+    planCounts.set(id, (planCounts.get(id) || 0) + 1);
+  }
+  const plans = [...planCounts.entries()].map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count);
+
+  // Riders seen today (local day) and yesterday, from their last activity.
+  const seenDay = (u) => localDay(u.lastActiveAt || u.lastLoginAt, tzMin);
+  const activeToday = riders.filter((u) => seenDay(u) === today).length;
+
+  // What needs attention: each count is independent, null when its source is unavailable.
+  const safe = async (fn) => { try { return await fn(); } catch { return null; } };
+  const [reviewsPending, photosPending, reportsOpen] = await Promise.all([
+    safe(async () => (typeof repo.listTripFeedback === 'function' ? (await repo.listTripFeedback(500, 'PENDING_REVIEW')).length : null)),
+    safe(async () => (typeof repo.listPlaceReviews === 'function'
+      ? (await repo.listPlaceReviews({ limit: 300 })).reduce((n, x) => n + (x.uploads || []).filter((p) => p && p.approved !== true && !p.rejected).length, 0)
+      : null)),
+    safe(async () => (publicRideReports ? (await publicRideReports('OPEN')).length : null)),
+  ]);
+
+  return {
+    ok: true,
+    generatedAt: now,
+    days,
+    tzMin,
+    truncated: [users, trips, ended, alerts, memberships].some((s) => s.truncated),
+    labels: Array.from({ length: days }, (_, i) => dayLabel(firstDay + i)),
+    series: {
+      rides: rides.current, km: km.current.map(Math.round), activeRiders: active.current, signups: signups.current, sos: sos.current,
+    },
+    previous: {
+      rides: rides.previous, km: km.previous.map(Math.round), activeRiders: active.previous, signups: signups.previous, sos: sos.previous,
+    },
+    riders: { total: riders.length, activeToday, activeYesterday: riders.filter((u) => seenDay(u) === today - 1).length },
+    plans,
+    attention: {
+      openSos: alerts.rows.filter((a) => a.resolved !== true).length,
+      liveRides: convoys?.rooms ? convoys.rooms.size : 0,
+      reviewsPending,
+      photosPending,
+      reportsOpen,
+      onHold: riders.filter((u) => u.status === 'ON_HOLD').length,
+    },
+  };
+}
+
 /** Per-rider totals for every rider (one pass over trips and alerts). */
 async function riderTotals(repo) {
   const soda = repo.soda;
@@ -611,6 +726,15 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     res.set('Cache-Control', 'no-store').json(await cache.get(`overview:${days}`, () => overview({ repo, convoys }, { days })));
   }));
 
+  // Daily series for the overview charts. ?days=7|30|90&tz=<minutes east of UTC>
+  r.get('/admin/analytics/trends', requireAdmin, wrap(async (req, res) => {
+    const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+    const tzMin = clampInt(req.query.tz, -840, 840, 330);
+    if (fresh(req)) cache.clear();
+    const publicRideReports = async (status) => (await repo.soda.query('public_ride', { k: 'report', status }, { limit: 500 })).map((x) => x.value);
+    res.set('Cache-Control', 'no-store').json(await cache.get(`trends:${days}:${tzMin}`, () => trends({ repo, convoys, publicRideReports }, { days, tzMin })));
+  }));
+
   // ?q=&status=ACTIVE|ON_HOLD|BLOCKED&tier=&riding=1&staff=1|all&sort=lastSeen|joined|trips|km|sos|name&limit=&cursor=
   // Staff accounts are left out of the list and its total unless staff=1 (only staff) or staff=all (everyone).
   r.get('/admin/analytics/riders', requireAdmin, wrap(async (req, res) => {
@@ -779,5 +903,5 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
 }
 
 module.exports = {
-  registerAdminAnalyticsRoutes, registerPublicUsageRoutes, overview, riderDetail, groupDetail, publicUsage, publicImpact, communityTotals, maxTripsFor, scan, median,
+  registerAdminAnalyticsRoutes, registerPublicUsageRoutes, overview, trends, bucketDays, riderDetail, groupDetail, publicUsage, publicImpact, communityTotals, maxTripsFor, scan, median,
 };

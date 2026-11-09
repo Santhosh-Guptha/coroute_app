@@ -80,7 +80,7 @@ class AdminModeBadge extends StatelessWidget {
 
 /// Outlined field decoration of the admin forms.
 InputDecoration adminInput(String label, {String? hint, String? helper, String? prefix, String? suffix}) {
-  final side = BorderSide(color: AppTheme.border, width: 2);
+  final side = BorderSide(color: AppTheme.border);
   return InputDecoration(
     labelText: label,
     hintText: hint,
@@ -93,7 +93,7 @@ InputDecoration adminInput(String label, {String? hint, String? helper, String? 
     fillColor: AppTheme.card,
     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: side),
     enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: side),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.accentText, width: 1.5)),
   );
 }
 
@@ -112,12 +112,12 @@ class AdminDetailLine extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 128, child: Text(label, style: AppText.caption.copyWith(fontWeight: FontWeight.w700))),
+          SizedBox(width: 128, child: Text(label, style: AppText.caption.copyWith(fontWeight: FontWeight.w600))),
           const SizedBox(width: 8),
           Expanded(
             child: SelectableText(
               value,
-              style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w700, color: color ?? AppTheme.text),
+              style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: color ?? AppTheme.text),
             ),
           ),
         ],
@@ -250,8 +250,8 @@ class AdminAmount extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(value, style: AppText.label.copyWith(color: color ?? AppTheme.text, fontWeight: FontWeight.w800)),
-          if (c != null) Text(c, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+          Text(value, style: AppText.label.copyWith(color: color ?? AppTheme.text, fontWeight: FontWeight.w600)),
+          if (c != null) Text(c, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
         ],
       ),
     );

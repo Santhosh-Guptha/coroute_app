@@ -124,7 +124,8 @@ class _AdminPlaceReviewsScreenState extends State<AdminPlaceReviewsScreen> {
       subtitle: _loaded ? '${_reviews.length} ${_pendingOnly ? 'with a photo waiting' : 'reviews'}' : 'CoRoute rider ratings of places',
       onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
-      nav: adminNavItems(context, AdminSection.reviews),
+      nav: adminNavItems(context, AdminPage.places),
+      tabs: adminSectionTabs(context, AdminPage.places),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),
@@ -219,7 +220,7 @@ class _PlaceReviewCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   if (u['approved'] == true)
-                    Text('Approved', textAlign: TextAlign.center, style: AppText.caption.copyWith(color: AppTheme.emeraldSafe, fontWeight: FontWeight.w700))
+                    Text('Approved', textAlign: TextAlign.center, style: AppText.caption.copyWith(color: AppTheme.emeraldSafe, fontWeight: FontWeight.w600))
                   else
                     Row(children: [
                       Expanded(

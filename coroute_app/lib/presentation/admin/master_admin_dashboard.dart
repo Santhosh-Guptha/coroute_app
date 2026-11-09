@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,86 +14,44 @@ import '../../data/models/sos_alert_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../../domain/analytics/chart_math.dart';
 import '../auth/access_gate_screen.dart';
 import '../ride/riders_ladder.dart';
 import '../timeline/member_colors.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_emergencies_panel.dart';
-import 'admin_features_screen.dart';
-import 'admin_insights_screen.dart';
+import 'admin_nav.dart';
 import 'admin_payments_logic.dart';
-import 'admin_plans_pricing_screen.dart';
-import 'admin_reviews_screen.dart';
+import 'admin_rider_insights.dart' show adminCount;
 import 'admin_ride_history_screen.dart';
-import 'admin_rider_insights.dart';
-import 'admin_safety_screen.dart';
-import 'admin_settings_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
-import 'marketing/marketing_studio_screen.dart';
-import 'admin_crews_screen.dart';
+import 'charts/charts.dart';
 import '../rider/widgets/bike_rider_marker.dart';
+import '../../domain/ride/bike_markers.dart';
+import '../widgets/feature_switch.dart';
 
-/// The sections of the one admin console (rail on wide screens, drawer on phones): nine, each
-/// with a short plain name. Plans and coupons are tabs of Payments; phone reports are in Insights.
-/// 3.55: Features (the admin feature switches) before Settings.
-enum AdminSection { dashboard, users, rides, safety, payments, reviews, insights, features, settings }
+export 'admin_nav.dart';
 
-/// The nav items for an admin screen that shows [current]. From the
-/// overview a section is pushed; from another section it replaces that
-/// section, so "Overview" is always one pop away.
-List<AdminNavItem> adminNavItems(BuildContext context, AdminSection current, {int emergencies = 0, VoidCallback? onSignOut}) {
-  void go(AdminSection s, Widget Function() screen) {
-    if (s == current) return;
-    final route = MaterialPageRoute<void>(builder: (_) => screen());
-    if (current == AdminSection.dashboard) {
-      Navigator.push(context, route);
-    } else {
-      Navigator.pushReplacement(context, route);
-    }
-  }
+/// The periods of the Overview.
+const List<int> adminOverviewPeriods = [7, 30, 90];
 
-  AdminNavItem item(AdminSection s, IconData icon, String label, Widget Function() screen, {int badge = 0}) => AdminNavItem(
-        icon: icon,
-        label: label,
-        selected: current == s,
-        badge: badge,
-        onTap: () => go(s, screen),
-      );
-
-  return [
-    AdminNavItem(
-      icon: Icons.space_dashboard_outlined,
-      label: 'Overview',
-      selected: current == AdminSection.dashboard,
-      badge: emergencies,
-      onTap: current == AdminSection.dashboard ? null : () => Navigator.maybePop(context),
-    ),
-    item(AdminSection.users, Icons.people_alt_outlined, 'Riders', () => const AdminUsersScreen()),
-    item(AdminSection.rides, Icons.alt_route_rounded, 'Rides', () => const AdminRideHistoryScreen()),
-    item(AdminSection.safety, Icons.sos_rounded, 'Safety', () => const AdminSafetyScreen()),
-    item(AdminSection.payments, Icons.payments_outlined, 'Payments', () => const AdminPlansPricingScreen()),
-    item(AdminSection.reviews, Icons.rate_review_outlined, 'Reviews', () => const AdminReviewsScreen()),
-    item(AdminSection.insights, Icons.insights_rounded, 'Insights', () => const AdminInsightsScreen()),
-    item(AdminSection.features, Icons.toggle_on_outlined, 'Features', () => const AdminFeaturesScreen()),
-    item(AdminSection.settings, Icons.settings_outlined, 'Settings', () => const AdminSettingsScreen()),
-    if (onSignOut != null) AdminNavItem(icon: Icons.logout_rounded, label: 'Sign out', danger: true, onTap: onSignOut),
-  ];
-}
-
-/// The admin console home (Overview), the one entry point of the admin app on
-/// phones and tablets: what needs attention first (the Emergencies panel with
-/// every open SOS and crash and its alarm, live rides, accounts on hold), then
-/// the live numbers, the totals from /admin/analytics/overview, the sections
-/// and the fleet map. Every number comes from the server (live fleet over the
-/// socket, accounts from /admin/users, totals from the analytics endpoint);
-/// nothing is estimated. Pull down to refresh; what is on screen stays while
-/// it reloads.
+/// The admin console home (Overview): calm and short. Any open emergency first
+/// (the Emergencies panel with its alarm), then four numbers with a trend
+/// (active today, rides, km, open SOS), two charts (rides per day, active
+/// riders against the period before), the plan mix, what needs attention with
+/// one-tap actions, the live rides and the fleet map. Every number comes from
+/// the server (`/admin/analytics/trends`, `/admin/users`, the live fleet);
+/// nothing is estimated. Refreshes itself every minute while it is on screen
+/// and the app is open; pull down to refresh by hand.
 class MasterAdminDashboard extends StatefulWidget {
   /// The emergency alarm sound; tests pass a fake.
   final AdminAlarm? alarm;
 
-  const MasterAdminDashboard({super.key, this.alarm});
+  /// How often the Overview refreshes itself while visible.
+  final Duration autoRefresh;
+
+  const MasterAdminDashboard({super.key, this.alarm, this.autoRefresh = const Duration(seconds: 60)});
 
   /// Riders, staff and accounts on hold from `GET /admin/users`: the server's `counts` (staff
   /// and guests are not riders). An older gateway without `counts` is counted the same way.
@@ -113,21 +73,99 @@ class MasterAdminDashboard extends StatefulWidget {
   State<MasterAdminDashboard> createState() => _MasterAdminDashboardState();
 }
 
+/// The parsed answer of `GET /admin/analytics/trends`.
+class AdminTrends {
+  final int days;
+  final List<String> labels;
+  final Map<String, List<num>> series;
+  final Map<String, List<num>> previous;
+  final int activeToday;
+  final int activeYesterday;
+  final List<({String id, int count})> plans;
+  final Map<String, int?> attention;
+
+  const AdminTrends({
+    required this.days,
+    required this.labels,
+    required this.series,
+    required this.previous,
+    required this.activeToday,
+    required this.activeYesterday,
+    required this.plans,
+    required this.attention,
+  });
+
+  static AdminTrends? fromJson(Object? res) {
+    if (res is! Map || res['series'] is! Map) return null;
+    List<num> nums(Object? v) => v is List ? [for (final x in v) x is num ? x : 0] : const [];
+    Map<String, List<num>> part(Object? m) => m is Map ? {for (final e in m.entries) e.key.toString(): nums(e.value)} : {};
+    int n(Object? v) => v is num ? v.toInt() : 0;
+    final riders = res['riders'] is Map ? res['riders'] as Map : const {};
+    final att = res['attention'] is Map ? res['attention'] as Map : const {};
+    return AdminTrends(
+      days: n(res['days']),
+      labels: res['labels'] is List ? [for (final l in res['labels'] as List) l.toString()] : const [],
+      series: part(res['series']),
+      previous: part(res['previous']),
+      activeToday: n(riders['activeToday']),
+      activeYesterday: n(riders['activeYesterday']),
+      plans: [
+        for (final p in adminMapList(res['plans']))
+          if (p['id'] != null) (id: p['id'].toString(), count: n(p['count'])),
+      ],
+      attention: {for (final e in att.entries) e.key.toString(): e.value is num ? (e.value as num).toInt() : null},
+    );
+  }
+
+  List<num> s(String k) => series[k] ?? const [];
+  List<num> p(String k) => previous[k] ?? const [];
+}
+
+/// A plan id in plain words.
+String adminPlanLabel(String id) {
+  switch (id) {
+    case 'community':
+      return 'Community (free)';
+    case 'group_small':
+      return 'Small group';
+    case 'group_large':
+      return 'Large group';
+    default:
+      return adminCapitalize(id.replaceAll('_', ' '));
+  }
+}
+
 class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
   /// Rider / staff / on-hold counts from /admin/users, null until the first answer.
   ({int riders, int staff, int onHold})? _userCounts;
   bool _loadingUsers = false;
   final GlobalKey<AdminEmergenciesPanelState> _emergencies = GlobalKey<AdminEmergenciesPanelState>();
 
-  /// Totals from /admin/analytics/overview (null until the first answer).
+  /// Daily series from /admin/analytics/trends (null until the first answer).
+  AdminTrends? _trends;
+  String? _trendsError;
+  int _trendsSeq = 0;
+
+  /// Totals from /admin/analytics/overview, shown under "More numbers".
   Map<String, dynamic>? _overview;
-  String? _overviewError;
-  int _days = 30;
   int _overviewSeq = 0;
+  bool _moreOpen = false;
+
+  int _days = 30;
+  Timer? _timer;
+  late final AppLifecycleListener _life;
+  bool _foreground = true;
 
   @override
   void initState() {
     super.initState();
+    _life = AppLifecycleListener(onStateChange: (s) {
+      final fg = s == AppLifecycleState.resumed;
+      if (fg == _foreground) return;
+      _foreground = fg;
+      // Back in front after a while: catch up at once.
+      if (fg && mounted) _refresh(auto: true);
+    });
     // Live fleet overview is pushed by the gateway (read-only, no audio).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -135,26 +173,57 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
       if (auth.isAuthenticated && !auth.isMasterAdmin) return;
       context.read<ConvoyService>().startAdminFleetWatch();
       _loadUsers();
+      _loadTrends();
       _loadOverview();
+      _timer = Timer.periodic(widget.autoRefresh, (_) => _tick());
     });
   }
 
-  /// Loads the totals for the last [_days] days. Only the newest answer counts.
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _life.dispose();
+    super.dispose();
+  }
+
+  /// One auto-refresh: only while the app is open and the Overview is the screen on top.
+  void _tick() {
+    if (!mounted || !_foreground) return;
+    if (ModalRoute.of(context)?.isCurrent == false) return;
+    _refresh(auto: true);
+  }
+
+  int get _tzMin => DateTime.now().timeZoneOffset.inMinutes;
+
+  /// Loads the charts for the last [_days] days. Only the newest answer counts.
+  Future<void> _loadTrends({bool fresh = false}) async {
+    final seq = ++_trendsSeq;
+    AdminTrends? data;
+    String? error;
+    try {
+      final res = await context.read<ApiClient>().get('/admin/analytics/trends?days=$_days&tz=$_tzMin${fresh ? '&fresh=1' : ''}', timeout: const Duration(seconds: 25));
+      data = AdminTrends.fromJson(res);
+    } catch (e) {
+      error = e is ApiException ? e.message : 'Could not load the charts.';
+    }
+    if (!mounted || seq != _trendsSeq) return;
+    setState(() {
+      if (data != null) _trends = data;
+      _trendsError = error ?? (data == null ? 'Charts are not available from the server yet.' : null);
+    });
+  }
+
   Future<void> _loadOverview({bool fresh = false}) async {
     final seq = ++_overviewSeq;
-    String? error;
     Map<String, dynamic>? data;
     try {
       final res = await context.read<ApiClient>().get('/admin/analytics/overview?days=$_days${fresh ? '&fresh=1' : ''}', timeout: const Duration(seconds: 25));
       if (res is Map && res['riders'] is Map) data = Map<String, dynamic>.from(res);
-    } catch (e) {
-      error = e is ApiException ? e.message : 'Could not load the totals.';
+    } catch (_) {
+      // "More numbers" keeps its last answer.
     }
     if (!mounted || seq != _overviewSeq) return;
-    setState(() {
-      if (data != null) _overview = data;
-      _overviewError = error ?? (data == null ? 'Totals are not available from the server yet.' : null);
-    });
+    if (data != null) setState(() => _overview = data);
   }
 
   Future<void> _loadUsers() async {
@@ -169,12 +238,28 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     if (mounted) setState(() => _loadingUsers = false);
   }
 
-  Future<void> _refresh() async {
-    context.read<ConvoyService>().startAdminFleetWatch();
-    await Future.wait([_loadUsers(), _loadOverview(fresh: true), _emergencies.currentState?.reload() ?? Future<void>.value()]);
+  /// Reloads everything; what is on screen stays while it loads. The minute timer uses the
+  /// server's short cache ([auto]); a pull or the Refresh button asks for fresh numbers.
+  Future<void> _refresh({bool auto = false}) async {
+    if (!auto) context.read<ConvoyService>().startAdminFleetWatch();
+    await Future.wait([
+      _loadUsers(),
+      _loadTrends(fresh: !auto),
+      _loadOverview(fresh: !auto),
+      _emergencies.currentState?.reload() ?? Future<void>.value(),
+    ]);
+  }
+
+  void _setDays(int d) {
+    if (d == _days) return;
+    setState(() => _days = d);
+    _loadTrends();
+    _loadOverview();
   }
 
   void _push(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+
+  void _open(AdminPage page) => adminGo(context, AdminPage.overview, page);
 
   void _openConvoy(ConvoyModel convoy) => _push(AdminConvoyInspector(convoy: convoy));
 
@@ -262,221 +347,201 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     });
     final totalRiders = convoys.fold<int>(0, (n, c) => n + c.riders.length);
 
-    final counts = _userCounts;
-    final onHold = counts?.onHold;
+    final tr = _trends;
+    final loading = tr == null && _trendsError == null;
+    final period = 'last $_days days';
+    final onHold = tr?.attention['onHold'] ?? _userCounts?.onHold;
+    final openSos = [sos.length, tr?.attention['openSos'] ?? 0].reduce((a, b) => a > b ? a : b);
 
     // 1. Emergencies: every open SOS and crash, with the alarm while the console is open.
-    final sosSection = <Widget>[
-      AdminEmergenciesPanel(
-        key: _emergencies,
-        alarm: widget.alarm ?? const NotifierAdminAlarm(),
-        onOpenConvoy: _openConvoy,
-      ),
-    ];
+    final sosSection = AdminEmergenciesPanel(
+      key: _emergencies,
+      alarm: widget.alarm ?? const NotifierAdminAlarm(),
+      onOpenConvoy: _openConvoy,
+    );
 
-    // 2. Live rides: a table card, one row per ride, with its spread at the right.
-    final ridesSection = <Widget>[
-      const SizedBox(height: 20),
-      AdminTable(
-        title: 'Live rides',
-        trailing: convoys.isEmpty
-            ? null
-            : Text(
-                '${convoys.length} riding now',
-                style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
+    // 2. Four numbers with a trend.
+    final rides = tr?.s('rides') ?? const <num>[];
+    final km = tr?.s('km') ?? const <num>[];
+    final active = tr?.s('activeRiders') ?? const <num>[];
+    final compare = 'previous $_days days';
+    final kpis = AdminKpiGrid(
+      minTileWidth: 150,
+      tiles: [
+        AdminTrendTile(
+          label: 'Active today',
+          value: compactNumber(tr?.activeToday ?? 0),
+          current: tr?.activeToday ?? 0,
+          previous: tr?.activeYesterday,
+          compareText: 'day before',
+          spark: active,
+          loading: loading,
+        ),
+        AdminTrendTile(
+          label: 'Rides',
+          value: compactNumber(sumOf(rides)),
+          current: sumOf(rides),
+          previous: tr == null ? null : sumOf(tr.p('rides')),
+          compareText: compare,
+          spark: rides,
+          loading: loading,
+        ),
+        AdminTrendTile(
+          label: 'Km ridden',
+          value: compactNumber(sumOf(km)),
+          current: sumOf(km),
+          previous: tr == null ? null : sumOf(tr.p('km')),
+          compareText: compare,
+          spark: km,
+          loading: loading,
+        ),
+        AdminTrendTile(
+          label: 'Open SOS',
+          value: '$openSos',
+          current: openSos,
+          note: openSos > 0 ? 'Needs attention' : 'All clear',
+          spark: tr?.s('sos') ?? const [],
+          upIsGood: false,
+          valueColor: openSos > 0 ? AppTheme.palette.danger : null,
+          sparkColor: AppTheme.palette.textFaint,
+        ),
+      ],
+    );
+
+    final header = Padding(
+      padding: const EdgeInsets.fromLTRB(2, 18, 0, 12),
+      child: Row(
+        children: [
+          Expanded(child: Semantics(header: true, child: Text('Overview', style: AppText.title))),
+          const _InfoDot(
+            message: 'Active today: riders who opened the app today.\n'
+                'Rides: group rides finished. Km: distance riders recorded.\n'
+                'Arrows compare with the period before. Staff accounts are never counted.',
+          ),
+          const SizedBox(width: 8),
+          _PeriodSelector(value: _days, onChanged: _setDays),
+        ],
+      ),
+    );
+
+    // 3. Charts. 90 days are shown per week so the bars stay readable.
+    final weekly = _days > 30;
+    final labels = tr?.labels ?? const <String>[];
+    final barValues = weekly ? rollup(rides, 7) : rides;
+    final barLabels = weekly ? [for (var i = labels.length % 7 == 0 ? 0 : labels.length % 7 - 7; i < labels.length; i += 7) labels[i < 0 ? 0 : i]] : labels;
+    final ridesChart = AdminTitledCard(
+      title: weekly ? 'Rides per week' : 'Rides per day',
+      child: AdminBarChart(
+        values: barValues,
+        labels: barLabels,
+        title: weekly ? 'Rides per week' : 'Rides per day',
+        period: period,
+        unit: 'rides',
+        emptyText: 'No rides yet',
+        loading: loading,
+      ),
+    );
+    final activeChart = AdminTitledCard(
+      title: 'Active riders',
+      trailing: const _Legend(),
+      child: AdminLineChart(
+        values: active,
+        previous: tr?.p('activeRiders'),
+        labels: labels,
+        title: 'Riders who rode, per day',
+        period: period,
+        unit: 'riders',
+        emptyText: 'No riders out yet',
+        loading: loading,
+      ),
+    );
+    final plans = tr?.plans ?? const <({String id, int count})>[];
+    final plansCard = AdminTitledCard(
+      title: 'Plans',
+      child: AdminHorizontalBars(
+        title: 'Riders per plan',
+        loading: loading,
+        emptyText: 'No riders yet',
+        items: [for (final p in plans) HBarItem(adminPlanLabel(p.id), p.count, highlight: p.id != 'community')],
+      ),
+    );
+    final chartsError = _trendsError != null && tr == null
+        ? Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: AdminCard(
+              child: Row(
+                children: [
+                  Expanded(child: StatusLine(icon: Icons.cloud_off_rounded, text: _trendsError!, color: AppTheme.palette.danger)),
+                  TextButton(onPressed: () => _loadTrends(fresh: true), child: const Text('Try again')),
+                ],
               ),
-        rows: [
-          if (convoys.isEmpty)
-            AdminRow(
-              leading: const AdminRowIcon(Icons.two_wheeler_rounded),
-              title: 'No live rides right now',
-              subtitle: 'Finished rides are in Rides.',
-              divider: false,
-              onTap: () => _push(const AdminRideHistoryScreen()),
+            ),
+          )
+        : null;
+
+    // 4. Needs attention, with one tap to act.
+    int? att(String k) => tr?.attention[k];
+    final attention = <_Attention>[
+      if (openSos > 0)
+        _Attention(Icons.sos_rounded, openSos == 1 ? '1 open emergency' : '$openSos open emergencies', 'View', AppTheme.palette.danger, () => _open(AdminPage.safety)),
+      if ((att('reportsOpen') ?? 0) > 0)
+        _Attention(Icons.flag_outlined, _plural(att('reportsOpen')!, 'ride report', 'ride reports', ' to check'), 'Check', AppTheme.palette.warning, () => _open(AdminPage.safety)),
+      if ((att('reviewsPending') ?? 0) > 0)
+        _Attention(Icons.rate_review_outlined, _plural(att('reviewsPending')!, 'review', 'reviews', ' waiting'), 'Approve', AppTheme.palette.primary, () => _open(AdminPage.reviews)),
+      if ((att('photosPending') ?? 0) > 0)
+        _Attention(Icons.photo_outlined, _plural(att('photosPending')!, 'photo', 'photos', ' to check'), 'Check', AppTheme.palette.primary, () => _open(AdminPage.places)),
+      if ((onHold ?? 0) > 0)
+        _Attention(Icons.pause_circle_outline_rounded, onHold == 1 ? '1 account on hold' : '$onHold accounts on hold', 'Review', AppTheme.palette.warning,
+            () => _push(const AdminUsersScreen(initialFilter: AdminUserFilter.onHold))),
+    ];
+    final attentionCard = AdminTitledCard(
+      title: 'Needs attention',
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (attention.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  AdminRowIcon(Icons.check_circle_outline_rounded, color: AppTheme.palette.success),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text('All clear', style: AppText.body)),
+                ],
+              ),
             )
           else
-            for (var i = 0; i < convoys.length; i++)
-              _ConvoyRow(
-                key: ValueKey(convoys[i].groupId),
-                convoy: convoys[i],
-                sosCount: sos.where((s) => s.$1.groupId == convoys[i].groupId).length,
-                last: i == convoys.length - 1,
-                onTap: () => _openConvoy(convoys[i]),
-              ),
+            for (var i = 0; i < attention.length; i++) _AttentionRow(item: attention[i], divider: i < attention.length - 1),
         ],
       ),
-    ];
+    );
 
-    // 3. Accounts on hold.
-    final holdSection = <Widget>[
-      if (onHold != null && onHold > 0)
-        Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: RideAlert(
-            tier: AlertTier.important,
-            title: onHold == 1 ? '1 account on hold' : '$onHold accounts on hold',
-            message: 'They cannot sign in until you release the hold.',
-            actionLabel: 'Review',
-            onAction: () => _push(const AdminUsersScreen(initialFilter: AdminUserFilter.onHold)),
-          ),
-        ),
-    ];
-
-    // 4. Numbers: the KPI tiles of the canvas.
-    final kpis = <Widget>[
-      AdminKpiTile(
-        label: 'Live rides',
-        value: '${convoys.length}',
-        delta: convoys.isEmpty ? 'Nobody out riding' : (sosGroups.isEmpty ? 'All clear' : '${sosGroups.length} with an open SOS'),
-        deltaColor: sosGroups.isEmpty ? null : AppTheme.sos,
-      ),
-      AdminKpiTile(
-        label: 'Riders online',
-        value: '$totalRiders',
-        delta: convoys.isEmpty ? 'In live rides' : 'Across ${convoys.length} ${convoys.length == 1 ? 'ride' : 'rides'}',
-      ),
-      AdminKpiTile(
-        label: 'Open SOS',
-        value: '${sos.length}',
-        valueColor: sos.isEmpty ? null : AppTheme.sos,
-        delta: sos.isEmpty ? 'None open' : 'Needs attention',
-        deltaColor: sos.isEmpty ? null : AppTheme.sos,
-      ),
-      if (counts != null)
-        AdminKpiTile(
-          label: 'Riders (excl. staff)',
-          value: '${counts.riders}',
-          delta: (onHold ?? 0) > 0 ? '$onHold on hold' : (counts.staff > 0 ? '${counts.staff} staff not counted' : 'All in good standing'),
-          deltaColor: (onHold ?? 0) > 0 ? AppTheme.warnText : null,
-        ),
-    ];
-    final stats = <Widget>[
-      const AdminSectionLabel('Overview'),
-      AdminKpiGrid(tiles: kpis),
-    ];
-
-    // 5. Totals from the server for the chosen period.
-    final ov = _overview;
-    Map<String, dynamic> part(String k) => ov != null && ov[k] is Map ? Map<String, dynamic>.from(ov[k] as Map) : <String, dynamic>{};
-    final riders = part('riders');
-    final rides = part('rides');
-    final safety = part('safety');
-    final pay = part('payments');
-    final response = adminNumOrNull(safety['medianResponseSec']);
-    final totals = <Widget>[
-      AdminSectionLabel(
-        'Totals',
-        trailing: AdminFilterButton<int>(
-          value: _days,
-          label: 'Last $_days days',
-          options: const [(7, 'Last 7 days'), (30, 'Last 30 days'), (90, 'Last 90 days'), (365, 'Last year')],
-          onSelected: (d) {
-            setState(() => _days = d);
-            _loadOverview();
-          },
-        ),
-      ),
-      if (ov == null)
-        AdminCard(
-          child: Text(
-            _overviewError ?? 'Loading totals...',
-            style: AppText.body.copyWith(color: _overviewError == null ? AppTheme.text2 : AppTheme.sos),
-          ),
-        )
-      else ...[
-        AdminKpiGrid(tiles: [
-          AdminKpiTile(label: 'Riders', value: adminCount(riders['total']), delta: '${adminCount(riders['newInPeriod'])} new, excl. staff'),
-          AdminKpiTile(label: 'Active 7 days', value: adminCount(riders['active7d']), delta: '${adminCount(riders['active30d'])} in 30 days'),
-          AdminKpiTile(label: 'Rides finished', value: adminCount(rides['groupsInPeriod']), delta: '${adminCount(rides['groupsCompleted'])} all time'),
-          AdminKpiTile(label: 'Rider trips', value: adminCount(rides['tripsInPeriod']), delta: '${adminCount(rides['completedTrips'])} all time'),
-          AdminKpiTile(label: 'Km ridden', value: adminCount(rides['kmInPeriod']), delta: '${adminCount(rides['kmRidden'])} all time'),
-          AdminKpiTile(label: 'Avg group', value: adminCount(rides['avgGroupSize']), delta: 'Riders per ride'),
-          AdminKpiTile(
-            label: 'SOS',
-            value: adminCount(safety['sosInPeriod']),
-            delta: '${adminCount(safety['resolved'])} resolved, ${adminCount(safety['falseAlarms'])} false',
-          ),
-          AdminKpiTile(
-            label: 'SOS answered',
-            value: response == null ? '—' : formatDuration(Duration(seconds: response.round())),
-            delta: 'Median first response',
-          ),
-          AdminKpiTile(label: 'Paying riders', value: adminCount(riders['paying']), delta: '${adminCount(riders['conversionPct'])}% of riders'),
-          AdminKpiTile(label: 'Revenue', value: adminInr(adminNum(pay, 'revenueInPeriodInr')), delta: '${adminInr(adminNum(pay, 'revenueInr'))} all time'),
-        ]),
-        if (ov['truncated'] == true)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: StatusLine(icon: Icons.info_outline_rounded, text: 'Some totals stop at the scan limit and may be higher.', color: AppTheme.warnText),
-          ),
-      ],
-    ];
-
-    // 6. Every section of the console, one tap away.
-    final sectionsSection = <Widget>[
-      const AdminSectionLabel('Sections'),
-      AdminTable(
-        rows: [
+    // 5. Live rides: one compact row per ride, its spread at the right.
+    final ridesSection = AdminTable(
+      title: 'Live rides',
+      trailing: convoys.isEmpty
+          ? null
+          : Text('${convoys.length} out · $totalRiders riders', style: AppText.label.copyWith(color: AppTheme.accentText)),
+      rows: [
+        if (convoys.isEmpty)
           AdminRow(
-            leading: const AdminRowIcon(Icons.people_alt_outlined),
-            title: 'Riders',
-            subtitle: 'Accounts, riding numbers, plan, role and limits',
-            onTap: () => _push(const AdminUsersScreen()),
-          ),
-          AdminRow(
-            leading: const AdminRowIcon(Icons.alt_route_rounded),
-            title: 'Rides',
-            subtitle: 'Live and finished rides, with each ride\'s numbers',
-            onTap: () => _push(const AdminRideHistoryScreen()),
-          ),
-          AdminRow(
-            leading: AdminRowIcon(Icons.sos_rounded, color: sos.isEmpty ? null : AppTheme.sos),
-            title: 'Safety',
-            subtitle: 'Emergencies, false alarms, public ride reports',
-            onTap: () => _push(const AdminSafetyScreen()),
-          ),
-          AdminRow(
-            leading: const AdminRowIcon(Icons.payments_outlined),
-            title: 'Payments',
-            subtitle: 'Payments, revenue, plans and coupons',
-            onTap: () => _push(const AdminPlansPricingScreen()),
-          ),
-          AdminRow(
-            leading: const AdminRowIcon(Icons.rate_review_outlined),
-            title: 'Reviews',
-            subtitle: 'Rider reviews waiting for a decision',
-            onTap: () => _push(const AdminReviewsScreen()),
-          ),
-          AdminRow(
-            leading: const AdminRowIcon(Icons.insights_rounded),
-            title: 'Insights',
-            subtitle: 'Feedback, website visits, app versions, phones',
-            onTap: () => _push(const AdminInsightsScreen()),
-          ),
-          // 3.55: offer / coupon images to share (admin switch marketingStudio); opened from here and Coupons.
-          AdminRow(
-            leading: const AdminRowIcon(Icons.campaign_outlined),
-            title: 'Marketing studio',
-            subtitle: 'Coupon and special-offer images to share',
-            onTap: () => _push(const MarketingStudioScreen()),
-          ),
-          // 3.55 crews and crew polls: moderation (list, delete a poll or a crew).
-          AdminRow(
-            leading: const AdminRowIcon(Icons.groups_2_outlined),
-            title: 'Crews',
-            subtitle: 'Rider crews and their polls',
-            onTap: () => _push(const AdminCrewsScreen()),
-          ),
-          AdminRow(
-            leading: const AdminRowIcon(Icons.settings_outlined),
-            title: 'Settings',
-            subtitle: 'Website, payment gateway, audit log',
-            onTap: () => _push(const AdminSettingsScreen()),
+            leading: const AdminRowIcon(Icons.two_wheeler_rounded),
+            title: 'No live rides right now',
             divider: false,
-          ),
-        ],
-      ),
-    ];
+            onTap: () => _push(const AdminRideHistoryScreen()),
+          )
+        else
+          for (var i = 0; i < convoys.length; i++)
+            _ConvoyRow(
+              key: ValueKey(convoys[i].groupId),
+              convoy: convoys[i],
+              sosCount: sos.where((s) => s.$1.groupId == convoys[i].groupId).length,
+              last: i == convoys.length - 1,
+              onTap: () => _openConvoy(convoys[i]),
+            ),
+      ],
+    );
 
     // Fleet map, only when someone is out riding.
     final points = <LatLng>[
@@ -484,112 +549,114 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         for (final r in c.riders.values)
           if (r.lat != 0.0 || r.lng != 0.0) LatLng(r.lat, r.lng),
     ];
-    final mapSection = <Widget>[
-      if (points.isNotEmpty) ...[
-        const AdminSectionLabel('Fleet map'),
-        SizedBox(height: 280, child: _fleetMap(convoys, points, now)),
-      ],
-    ];
+    final map = points.isEmpty ? null : SizedBox(height: 280, child: _fleetMap(convoys, points, now));
 
+    // 6. Everything else from the server, folded away.
+    final more = _MoreNumbers(overview: _overview, days: _days, open: _moreOpen, onToggle: () => setState(() => _moreOpen = !_moreOpen));
+
+    const gap = SizedBox(height: 16);
     return AdminShell(
       title: 'Admin',
-      subtitle: 'Live status and totals',
+      subtitle: convoys.isEmpty ? 'No live rides' : '${convoys.length} live ${convoys.length == 1 ? 'ride' : 'rides'}',
       actions: [
         AdminIconAction(icon: Icons.campaign_rounded, label: 'Safety broadcast', onTap: () => _showBroadcastSheet(convoyService)),
         AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _refresh),
       ],
       // The badge is the open SOS count of the live fleet.
-      nav: adminNavItems(context, AdminSection.dashboard, emergencies: sos.length, onSignOut: _signOut),
-      railFooter: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+      nav: adminNavItems(context, AdminPage.overview, emergencies: sos.length, onSignOut: _signOut),
+      railFooter: Row(
         children: [
-          Text('Live fleet', style: AppText.caption.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(
-            convoys.isEmpty ? 'No rides in progress' : '${convoys.length} ${convoys.length == 1 ? 'ride' : 'rides'} · $totalRiders riders online',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: AppText.caption.copyWith(color: AppTheme.accentText),
+          Icon(Icons.circle, size: 8, color: convoys.isEmpty ? AppTheme.palette.textFaint : AppTheme.palette.success),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              convoys.isEmpty ? 'No rides out' : '$totalRiders riding now',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.label.copyWith(color: AppTheme.text),
+            ),
           ),
         ],
       ),
-      body: LoadingState(
-        loading: _loadingUsers,
-        child: adminRefresh(
-          onRefresh: _refresh,
-          child: LayoutBuilder(builder: (context, c) {
-            final wide = c.maxWidth >= adminWideBreakpoint;
-            final Widget body;
-            if (wide) {
-              // Canvas order: numbers on top, then configuration beside operations and map.
-              body = Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ...stats,
-                  ...totals,
-                  const SizedBox(height: 16),
-                  AdminTwoUp(
-                    left: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [...holdSection, ...sectionsSection],
-                    ),
-                    right: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        ...sosSection,
-                        ...ridesSection,
-                        if (mapSection.isNotEmpty) ...mapSection,
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            } else {
-              // Phone: SOS emergencies (if any), live rides, holds, live numbers, totals, sections, map.
-              body = Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ...sosSection,
-                  ...ridesSection,
-                  ...holdSection,
-                  const SizedBox(height: 16),
-                  ...stats,
-                  ...totals,
-                  ...sectionsSection,
-                  const SizedBox(height: 16),
-                  ...mapSection,
-                ],
-              );
-            }
-            return SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              child: AdminContent(wide: wide, child: body),
+      body: adminRefresh(
+        onRefresh: _refresh,
+        child: LayoutBuilder(builder: (context, c) {
+          final wide = c.maxWidth >= adminWideBreakpoint;
+          final Widget body;
+          if (wide) {
+            body = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                sosSection,
+                header,
+                ?chartsError,
+                kpis,
+                gap,
+                AdminTwoUp(left: ridesChart, right: activeChart),
+                gap,
+                AdminTwoUp(left: attentionCard, right: plansCard),
+                gap,
+                if (map != null) AdminTwoUp(left: ridesSection, right: map) else ridesSection,
+                gap,
+                more,
+              ],
             );
-          }),
-        ),
+          } else {
+            body = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                sosSection,
+                header,
+                ?chartsError,
+                kpis,
+                gap,
+                ridesChart,
+                gap,
+                activeChart,
+                gap,
+                attentionCard,
+                gap,
+                plansCard,
+                gap,
+                ridesSection,
+                if (map != null) ...[gap, map],
+                gap,
+                more,
+              ],
+            );
+          }
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: AdminContent(wide: wide, child: body),
+          );
+        }),
       ),
     );
   }
+
+  static String _plural(int n, String one, String many, String tail) => '$n ${n == 1 ? one : many}$tail';
 
   Widget _fleetMap(List<ConvoyModel> convoys, List<LatLng> points, int now) {
     final markers = <Marker>[];
     for (final c in convoys) {
       final colors = MemberColors.assign(c.riders.keys);
-      for (final r in c.riders.values) {
-        if (r.lat == 0.0 && r.lng == 0.0) continue;
+      // 3.55 follow-up: one marker per bike (a seated pillion rides on the two-up bike).
+      for (final e in BikeMarkerPlan.forViewer(c.riders, mergePillions: context.featureOn('pillionSeat')).values) {
+        final r = c.riders[e.markerId];
+        if (r == null) continue;
         markers.add(Marker(
           point: LatLng(r.lat, r.lng),
           width: 48,
           height: 48,
           // 3.55: the rider's bike (shape and colour) instead of a round avatar.
           child: StatusBikeMarker(
-            name: r.name,
-            color: colors[r.userId] ?? AppTheme.accentText,
-            vehicleKind: r.vehicleKind,
-            vehicleColor: r.vehicleColor,
+            name: BikeMarkerPlan.nameOf(e),
+            color: colors[e.bikeRider.userId] ?? AppTheme.accentText,
+            vehicleKind: e.bikeRider.vehicleKind,
+            vehicleColor: e.bikeRider.vehicleColor,
             status: riderStatusOf(r, c, isMe: false, nowMs: now),
             heading: r.heading,
+            twoUp: e.twoUp,
             height: 26,
             onTap: () => _openConvoy(c),
           ),
@@ -660,8 +727,8 @@ class _ConvoyRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(formatDistance(metrics.spreadKm * 1000), style: AppText.label.copyWith(color: spreadColor, fontWeight: FontWeight.w800)),
-                  Text('spread', style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                  Text(formatDistance(metrics.spreadKm * 1000), style: AppText.label.copyWith(color: spreadColor, fontWeight: FontWeight.w600)),
+                  Text('spread', style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -726,9 +793,9 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
               hintText: 'Heavy rain on NH 48. Reduce speed and regroup.',
               filled: true,
               fillColor: AppTheme.card,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.border, width: 2)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.border, width: 2)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 1.5)),
             ),
           ),
           const SizedBox(height: 8),
@@ -737,6 +804,234 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
             icon: Icons.campaign_rounded,
             onPressed: ready ? _send : null,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 7d / 30d / 90d as one small segmented control.
+class _PeriodSelector extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _PeriodSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = AppTheme.palette;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: p.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final d in adminOverviewPeriods)
+            Semantics(
+              button: true,
+              selected: d == value,
+              label: 'Last $d days',
+              excludeSemantics: true,
+              child: GestureDetector(
+                onTap: () => onChanged(d),
+                child: AnimatedContainer(
+                  duration: Motion.tab,
+                  curve: Motion.curve,
+                  constraints: const BoxConstraints(minHeight: 34, minWidth: 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: d == value ? p.surface : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                    boxShadow: d == value ? [BoxShadow(color: p.shadow, blurRadius: 4, offset: const Offset(0, 1))] : null,
+                  ),
+                  child: Text(
+                    '${d}d',
+                    style: AppText.label.copyWith(color: d == value ? p.text : p.textMuted, fontWeight: d == value ? FontWeight.w600 : FontWeight.w500),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A small (i): the longer explanation stays out of the way until asked for.
+class _InfoDot extends StatelessWidget {
+  final String message;
+  const _InfoDot({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: message,
+      triggerMode: TooltipTriggerMode.tap,
+      showDuration: const Duration(seconds: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Icon(Icons.info_outline_rounded, size: 18, color: AppTheme.palette.textMuted),
+      ),
+    );
+  }
+}
+
+/// "This period" (teal line) and "Before" (dashed amber) under the active-riders title.
+class _Legend extends StatelessWidget {
+  const _Legend();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = AppTheme.palette;
+    Widget key(Color c, String t, {bool dashed = false}) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 2,
+              child: dashed
+                  ? Row(children: [Expanded(child: ColoredBox(color: c)), const SizedBox(width: 3), Expanded(child: ColoredBox(color: c))])
+                  : ColoredBox(color: c),
+            ),
+            const SizedBox(width: 5),
+            Text(t, style: AppText.caption),
+          ],
+        );
+    return ExcludeSemantics(
+      child: Wrap(spacing: 10, children: [key(p.primary, 'Now'), key(p.accent, 'Before', dashed: true)]),
+    );
+  }
+}
+
+/// One thing that needs an admin, with its action.
+class _Attention {
+  final IconData icon;
+  final String title;
+  final String action;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _Attention(this.icon, this.title, this.action, this.color, this.onTap);
+}
+
+class _AttentionRow extends StatelessWidget {
+  final _Attention item;
+  final bool divider;
+
+  const _AttentionRow({required this.item, required this.divider});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '${item.title}. ${item.action}',
+      excludeSemantics: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: item.onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 52),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
+          child: Row(
+            children: [
+              AdminRowIcon(item.icon, color: item.color),
+              const SizedBox(width: 12),
+              Expanded(child: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontSize: 14))),
+              const SizedBox(width: 8),
+              Text(item.action, style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
+              Icon(Icons.chevron_right_rounded, size: 20, color: AppTheme.palette.textMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The rest of the server totals for the period, folded away under "More numbers".
+class _MoreNumbers extends StatelessWidget {
+  final Map<String, dynamic>? overview;
+  final int days;
+  final bool open;
+  final VoidCallback onToggle;
+
+  const _MoreNumbers({required this.overview, required this.days, required this.open, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    final ov = overview;
+    Map<String, dynamic> part(String k) => ov != null && ov[k] is Map ? Map<String, dynamic>.from(ov[k] as Map) : <String, dynamic>{};
+    final riders = part('riders');
+    final rides = part('rides');
+    final safety = part('safety');
+    final pay = part('payments');
+    final response = adminNumOrNull(safety['medianResponseSec']);
+    final rows = <(String, String, String)>[
+      ('Riders', adminCount(riders['total']), '${adminCount(riders['newInPeriod'])} new'),
+      ('Active 7 days', adminCount(riders['active7d']), '${adminCount(riders['active30d'])} in 30 days'),
+      ('Rides finished', adminCount(rides['groupsInPeriod']), '${adminCount(rides['groupsCompleted'])} all time'),
+      ('Rider trips', adminCount(rides['tripsInPeriod']), '${adminCount(rides['completedTrips'])} all time'),
+      ('Km ridden', adminCount(rides['kmInPeriod']), '${adminCount(rides['kmRidden'])} all time'),
+      ('Avg group', adminCount(rides['avgGroupSize']), 'riders per ride'),
+      ('SOS', adminCount(safety['sosInPeriod']), '${adminCount(safety['resolved'])} resolved, ${adminCount(safety['falseAlarms'])} false'),
+      ('SOS answered', response == null ? '—' : formatDuration(Duration(seconds: response.round())), 'median first response'),
+      ('Paying riders', adminCount(riders['paying']), '${adminCount(riders['conversionPct'])}% of riders'),
+      ('Revenue', adminInr(adminNum(pay, 'revenueInPeriodInr')), '${adminInr(adminNum(pay, 'revenueInr'))} all time'),
+    ];
+    return DsCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+              child: Row(
+                children: [
+                  Expanded(child: Text('More numbers', style: AppText.title)),
+                  Text('Last $days days', style: AppText.caption),
+                  const SizedBox(width: 4),
+                  AnimatedRotation(
+                    turns: open ? 0.5 : 0,
+                    duration: Motion.tab,
+                    child: Icon(Icons.expand_more_rounded, color: AppTheme.palette.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: ov == null
+                  ? Text('Loading…', style: AppText.label)
+                  : Column(
+                      children: [
+                        for (final (label, value, note) in rows)
+                          Container(
+                            padding: const EdgeInsets.symmetric(vertical: 9),
+                            decoration: BoxDecoration(border: Border(top: BorderSide(color: AppTheme.border))),
+                            child: Row(
+                              children: [
+                                Expanded(child: Text(label, style: AppText.label.copyWith(color: AppTheme.text))),
+                                Text(value, style: AppText.body.copyWith(fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()])),
+                                const SizedBox(width: 10),
+                                SizedBox(width: 132, child: Text(note, textAlign: TextAlign.end, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption)),
+                              ],
+                            ),
+                          ),
+                        if (ov['truncated'] == true)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: StatusLine(icon: Icons.info_outline_rounded, text: 'Some totals stop at the scan limit and may be higher.', color: AppTheme.warnText),
+                          ),
+                      ],
+                    ),
+            ),
         ],
       ),
     );

@@ -126,7 +126,8 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       title: 'Settings',
       subtitle: 'Website, payments and tools',
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
-      nav: adminNavItems(context, AdminSection.settings),
+      nav: adminNavItems(context, AdminPage.settings),
+      tabs: adminSectionTabs(context, AdminPage.settings),
       body: LoadingState(
         loading: _loading,
         child: adminRefresh(
@@ -254,7 +255,7 @@ class _SettingsPage extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       onBack: () => Navigator.maybePop(context),
-      nav: adminNavItems(context, AdminSection.settings),
+      nav: adminNavItems(context, AdminPage.settings),
       body: child,
     );
   }

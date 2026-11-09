@@ -287,7 +287,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         Row(
           children: [
             Expanded(child: Text(c.name.text.isEmpty ? 'Community' : c.name.text, style: AppText.title)),
-            Text('Free · solo rides', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+            Text('Free · solo rides', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 4),
@@ -599,7 +599,7 @@ class _AdminGatewayTabState extends State<AdminGatewayTab> with AutomaticKeepAli
           AdminDetailLine('Webhook secret', saved(v['webhookSecretSet']), color: v['webhookSecretSet'] == true ? null : AppTheme.warnText),
           if (source.isNotEmpty) AdminDetailLine('Source', source),
           const SizedBox(height: 12),
-          Text('Change keys (blank keeps what is saved)', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
+          Text('Change keys (blank keeps what is saved)', style: AppText.label.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           TextField(
             controller: k.keyId,

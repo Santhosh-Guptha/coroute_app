@@ -51,7 +51,8 @@ class _AdminPlansPricingScreenState extends State<AdminPlansPricingScreen> with 
     return AdminShell(
       title: 'Payments',
       subtitle: 'Payments, revenue, plans and coupons',
-      nav: adminNavItems(context, AdminSection.payments),
+      nav: adminNavItems(context, AdminPage.payments),
+      tabs: adminSectionTabs(context, AdminPage.payments),
       body: AdminTabbedBody(
         controller: _tabs,
         labels: [for (final t in AdminPaymentsTab.values) t.label],

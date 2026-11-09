@@ -314,7 +314,7 @@ class _RefundDialogState extends State<_RefundDialog> {
               _full
                   ? 'Refunds ${adminInrPaise(widget.remainingPaise)} and ends the ${widget.plan} right away.'
                   : 'Refunds part of the payment. The plan stays active.',
-              style: AppText.caption.copyWith(color: _full ? AppTheme.sos : AppTheme.text2, fontWeight: FontWeight.w700),
+              style: AppText.caption.copyWith(color: _full ? AppTheme.sos : AppTheme.text2, fontWeight: FontWeight.w600),
             ),
             if (!_full) ...[
               const SizedBox(height: 10),
@@ -328,7 +328,7 @@ class _RefundDialogState extends State<_RefundDialog> {
             TextField(controller: _reason, decoration: adminInput('Reason')),
             if (p != null) ...[
               const SizedBox(height: 8),
-              Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
+              Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w600)),
             ],
           ],
         ),
@@ -547,7 +547,7 @@ class _AdminPaymentsListTabState extends State<AdminPaymentsListTab> with Automa
             icon: _exporting
                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                 : Icon(Icons.download_rounded, color: AppTheme.accentText),
-            label: Text('Export CSV', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+            label: Text('Export CSV', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
           ),
           rows: [
             for (var i = 0; i < _rows.length; i++)

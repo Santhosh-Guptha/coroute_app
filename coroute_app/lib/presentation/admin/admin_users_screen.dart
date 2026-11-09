@@ -333,7 +333,8 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
           : (_filter == AdminUserFilter.staff ? '$total staff' : '$total ${total == 1 ? 'rider' : 'riders'} (excl. staff)'),
       onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
-      nav: adminNavItems(context, AdminSection.users),
+      nav: adminNavItems(context, AdminPage.riders),
+      tabs: adminSectionTabs(context, AdminPage.riders),
       body: LayoutBuilder(builder: (context, c) {
         final wide = c.maxWidth >= adminWideBreakpoint;
         final list = _buildList(visible, total, hasMore, me, wide, filter);

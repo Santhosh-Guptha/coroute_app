@@ -90,7 +90,8 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
       title: 'Insights',
       subtitle: 'Last 30 days',
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
-      nav: adminNavItems(context, AdminSection.insights),
+      nav: adminNavItems(context, AdminPage.usage),
+      tabs: adminSectionTabs(context, AdminPage.usage),
       body: AdminTabbedBody(
         controller: _tabs,
         labels: [_loaded ? 'Feedback (${_feedback.length})' : 'Feedback', 'Visits', 'App versions', 'Feature use'],
@@ -135,7 +136,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(from.isEmpty ? 'Anonymous' : from, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                          Text(from.isEmpty ? 'Anonymous' : from, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                           if (ts > 0) Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)), style: AppText.caption),
                         ],
                       ),
@@ -154,7 +155,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(color: AppTheme.soft, borderRadius: BorderRadius.circular(7)),
-                          child: Text(m, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                          child: Text(m, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
                         ),
                     ],
                   ),
@@ -307,7 +308,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(count, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()])),
+            Text(count, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()])),
             const SizedBox(height: 4),
             SizedBox(width: 72, child: AdminMiniBar(value: share, height: 6, color: c)),
           ],
@@ -349,7 +350,7 @@ class _DayChart extends StatelessWidget {
           children: [
             Container(width: 10, height: 10, decoration: BoxDecoration(color: AppTheme.brand, borderRadius: BorderRadius.circular(3))),
             const SizedBox(width: 5),
-            Text('Page views', style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+            Text('Page views', style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
           ],
         ),
         child: SizedBox(
@@ -382,7 +383,7 @@ class _DayChart extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Text(label(shown[i].key), maxLines: 1, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                        Text(label(shown[i].key), maxLines: 1, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),

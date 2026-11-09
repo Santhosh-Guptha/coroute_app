@@ -145,7 +145,7 @@ class _AdminOffersTabState extends State<AdminOffersTab> with AutomaticKeepAlive
           trailing: TextButton.icon(
             onPressed: () => _edit(),
             icon: Icon(Icons.add_rounded, color: AppTheme.accentText),
-            label: Text('New offer', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+            label: Text('New offer', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
           ),
           rows: [
             for (var i = 0; i < _offers.length; i++) _offerRow(_offers[i], i == _offers.length - 1),
@@ -419,7 +419,7 @@ class _OfferEditorState extends State<_OfferEditor> {
           ),
           if (p != null) ...[
             const SizedBox(height: 4),
-            Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
+            Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w600)),
           ],
           const SizedBox(height: 12),
           DsButton(label: _busy ? 'Saving…' : (_isNew ? 'Create offer' : 'Save offer'), icon: Icons.save_rounded, onPressed: _busy ? null : _save),
@@ -508,7 +508,7 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
           trailing: TextButton.icon(
             onPressed: () => _edit(),
             icon: Icon(Icons.add_rounded, color: AppTheme.accentText),
-            label: Text('New coupon', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+            label: Text('New coupon', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
           ),
           rows: [
             for (var i = 0; i < _coupons.length; i++) _couponRow(_coupons[i], i == _coupons.length - 1),
@@ -755,7 +755,7 @@ class _CouponEditorState extends State<_CouponEditor> {
             children: [
               Icon(Icons.calculate_outlined, size: 16, color: AppTheme.accentText),
               const SizedBox(width: 6),
-              Text('WHAT RIDERS PAY (MONTHLY)', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.accentText)),
+              Text('WHAT RIDERS PAY (MONTHLY)', style: AppText.caption.copyWith(fontWeight: FontWeight.w600, color: AppTheme.accentText)),
             ],
           ),
           const SizedBox(height: 6),
@@ -941,7 +941,7 @@ class _CouponEditorState extends State<_CouponEditor> {
 
           _buildLivePreview(),
 
-          Text('Valid for these plans', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
+          Text('Valid for these plans', style: AppText.label.copyWith(fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           Text(
             !_plansLoaded ? 'Loading plans...' : (_plansError ?? 'Checkout refuses this coupon for any other plan.'),
@@ -1054,7 +1054,7 @@ class _CouponEditorState extends State<_CouponEditor> {
 
           if (p != null) ...[
             const SizedBox(height: 4),
-            Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
+            Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w600)),
           ],
           const SizedBox(height: 16),
           DsButton(

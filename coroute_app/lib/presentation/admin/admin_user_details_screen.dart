@@ -263,7 +263,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                                       '${m['name'] ?? 'Rider'}${m['userId'] == widget.userId ? ' (this user)' : ''}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                                      style: AppText.body.copyWith(fontWeight: FontWeight.w600),
                                     ),
                                     Text(
                                       [adminRoleLabel(m['role']), if ((m['vehicleType'] ?? '').toString().isNotEmpty) m['vehicleType'].toString()].join(', '),
@@ -440,9 +440,9 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(rows[i].$1, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                  Text(rows[i].$1, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
-                  SelectableText(rows[i].$2, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                  SelectableText(rows[i].$2, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -587,7 +587,7 @@ class _ActionButton extends StatelessWidget {
                 Icon(icon, size: 20, color: fg),
                 const SizedBox(width: 8),
                 Flexible(
-                  child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w800)),
+                  child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
@@ -622,7 +622,7 @@ class _ReasonSheetState extends State<_ReasonSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final side = BorderSide(color: AppTheme.border, width: 2);
+    final side = BorderSide(color: AppTheme.border);
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -644,7 +644,7 @@ class _ReasonSheetState extends State<_ReasonSheet> {
               fillColor: AppTheme.card,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 1.5)),
             ),
           ),
           const SizedBox(height: 16),

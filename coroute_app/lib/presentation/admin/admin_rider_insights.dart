@@ -398,7 +398,7 @@ class _PlanDialogState extends State<_PlanDialog> {
             TextField(controller: _note, decoration: adminInput('Note (optional)', hint: 'Why')),
             if (p != null) ...[
               const SizedBox(height: 8),
-              Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
+              Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w600)),
             ],
           ],
         ),

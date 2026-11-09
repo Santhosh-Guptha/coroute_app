@@ -124,7 +124,7 @@ class StatusTextChip extends StatelessWidget {
       maxLines: 1,
       softWrap: false,
       overflow: TextOverflow.ellipsis,
-      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800, height: 1.2),
+      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600, height: 1.2),
     );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -177,7 +177,7 @@ class StatusLine extends StatelessWidget {
             Icon(icon, size: iconSize, color: c),
             if (gap > 0) SizedBox(width: gap),
             Flexible(
-              child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)),
+              child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w600)),
             ),
           ],
         );
@@ -214,7 +214,7 @@ class AdminSectionLabel extends StatelessWidget {
   }
 }
 
-/// Uppercase 12/800 muted header, used for the column row of a table card
+/// Small muted header (sentence case), used for the column row of a table card
 /// and the small label above a KPI value.
 class AdminOverline extends StatelessWidget {
   final String text;
@@ -226,7 +226,7 @@ class AdminOverline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(
-      text.toUpperCase(),
+      text,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       textAlign: align,
@@ -235,7 +235,7 @@ class AdminOverline extends StatelessWidget {
   }
 }
 
-/// Plain surface for a group of content: card fill, 2 px border, 18 px corners.
+/// Plain surface for a group of content: card fill, hairline border, 14 px corners.
 class AdminCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -305,7 +305,7 @@ class AdminKpiTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+            Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -318,7 +318,7 @@ class AdminKpiTile extends StatelessWidget {
                 d,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.caption.copyWith(color: deltaColor ?? AppTheme.accentText, fontWeight: FontWeight.w700),
+                style: AppText.caption.copyWith(color: deltaColor ?? AppTheme.accentText, fontWeight: FontWeight.w600),
               ),
             ],
           ],
@@ -394,7 +394,7 @@ class AdminTwoUp extends StatelessWidget {
   }
 }
 
-/// Table card of the canvas: 2 px border, an optional title row, an
+/// Table card of the canvas: hairline border, an optional title row, an
 /// optional uppercase column header, then [rows] (usually [AdminRow]s)
 /// separated by hairlines. The last row gets no divider.
 class AdminTable extends StatelessWidget {
@@ -421,12 +421,15 @@ class AdminTable extends StatelessWidget {
           if (t != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  Expanded(child: Semantics(header: true, child: Text(t, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title))),
-                  ?tr,
-                ],
-              ),
+              child: Builder(builder: (context) {
+                // debug
+                return Row(
+                  children: [
+                    Expanded(child: Semantics(header: true, child: Text(t, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title))),
+                    if (tr != null) Flexible(child: tr),
+                  ],
+                );
+              }),
             ),
           if (cols != null && cols.isNotEmpty)
             Container(
@@ -501,7 +504,7 @@ class AdminRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w800)),
+                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w600)),
                 if (sub != null && sub.isNotEmpty) Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
                 if (det != null && det.isNotEmpty)
                   Padding(
@@ -565,9 +568,9 @@ class AdminBarRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700))),
+              Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600))),
               const SizedBox(width: 8),
-              Text(value, style: AppText.label.copyWith(fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()])),
+              Text(value, style: AppText.label.copyWith(fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()])),
             ],
           ),
           const SizedBox(height: 5),
@@ -653,7 +656,7 @@ class AdminFilterButton<T> extends StatelessWidget {
       initialValue: value,
       onSelected: onSelected,
       color: AppTheme.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border)),
       itemBuilder: (_) => [
         for (final (v, text) in options)
           PopupMenuItem<T>(
@@ -665,7 +668,7 @@ class AdminFilterButton<T> extends StatelessWidget {
                   width: 28,
                   child: v == value ? Icon(Icons.check_rounded, size: 20, color: AppTheme.accentText) : null,
                 ),
-                Flexible(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+                Flexible(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
               ],
             ),
           ),
@@ -680,7 +683,7 @@ class AdminFilterButton<T> extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppTheme.card,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.border, width: 2),
+            border: Border.all(color: AppTheme.border),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -689,7 +692,7 @@ class AdminFilterButton<T> extends StatelessWidget {
               const SizedBox(width: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 112),
-                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
+                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -729,7 +732,7 @@ class _AdminSearchRowState extends State<AdminSearchRow> {
   @override
   Widget build(BuildContext context) {
     final f = widget.filter;
-    final side = BorderSide(color: AppTheme.border, width: 2);
+    final side = BorderSide(color: AppTheme.border);
     return Row(
       children: [
         Expanded(
@@ -751,7 +754,7 @@ class _AdminSearchRowState extends State<AdminSearchRow> {
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 1.5)),
               prefixIcon: Icon(Icons.search_rounded, color: AppTheme.muted),
               suffixIcon: _ctrl.text.isEmpty
                   ? null
@@ -794,6 +797,9 @@ class AdminShell extends StatelessWidget {
   final Widget? railFooter;
   final Widget body;
 
+  /// The pages of the current section as a row of tabs under the title (see adminSectionTabs).
+  final List<AdminNavItem> tabs;
+
   /// False when the shell is embedded in another scaffold (no SafeArea top).
   final bool primary;
 
@@ -806,6 +812,7 @@ class AdminShell extends StatelessWidget {
     this.nav = const [],
     this.railFooter,
     required this.body,
+    this.tabs = const [],
     this.primary = true,
   });
 
@@ -830,6 +837,7 @@ class AdminShell extends StatelessWidget {
             hasNav: nav.isNotEmpty && !wide && onBack == null,
             badge: badge,
           );
+          final t = tabs.length > 1 ? _SectionTabs(tabs: tabs) : null;
           if (wide) {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -840,6 +848,11 @@ class AdminShell extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(padding: const EdgeInsets.fromLTRB(24, 20, 24, 4), child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: adminMaxContentWidth), child: header))),
+                      if (t != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
+                          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: adminMaxContentWidth), child: t)),
+                        ),
                       Expanded(child: body),
                     ],
                   ),
@@ -851,10 +864,59 @@ class AdminShell extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 10), child: header),
+              if (t != null) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 6), child: t),
               Expanded(child: body),
             ],
           );
         }),
+      ),
+    );
+  }
+}
+
+/// The pages of one section as quiet pills: the current one tinted, the rest plain.
+/// Scrolls sideways when it does not fit.
+class _SectionTabs extends StatelessWidget {
+  final List<AdminNavItem> tabs;
+  const _SectionTabs({required this.tabs});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (var i = 0; i < tabs.length; i++) ...[
+              if (i > 0) const SizedBox(width: 6),
+              Semantics(
+                button: true,
+                selected: tabs[i].selected,
+                child: Material(
+                  color: tabs[i].selected ? AppTheme.tint : Colors.transparent,
+                  shape: StadiumBorder(side: BorderSide(color: tabs[i].selected ? Colors.transparent : AppTheme.border)),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: tabs[i].onTap,
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      alignment: Alignment.center,
+                      child: Text(
+                        tabs[i].label,
+                        style: AppText.label.copyWith(
+                          color: tabs[i].selected ? AppTheme.accentText : AppTheme.text,
+                          fontWeight: tabs[i].selected ? FontWeight.w600 : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -944,7 +1006,7 @@ class _Header extends StatelessWidget {
                       ),
                       child: Text(
                         '$badge',
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800),
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -1006,8 +1068,8 @@ class _AdminDrawer extends StatelessWidget {
                         Text('CoRoute Ops', style: AppText.title.copyWith(fontSize: 18, color: AppTheme.text)),
                         const SizedBox(height: 2),
                         Text(
-                          'Operations & Config Console',
-                          style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
+                          'Admin console',
+                          style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
@@ -1024,8 +1086,8 @@ class _AdminDrawer extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
               child: Text(
-                'CONSOLE MODULES',
-                style: AppText.overline.copyWith(color: AppTheme.muted, letterSpacing: 1.2),
+                'Sections',
+                style: AppText.overline,
               ),
             ),
             const SizedBox(height: 4),
@@ -1094,8 +1156,8 @@ class _Rail extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('CoRoute Ops', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
-                      Text('Admin console', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                      Text('CoRoute Ops', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                      Text('Admin console', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
@@ -1149,7 +1211,7 @@ class _NavTile extends StatelessWidget {
                   n.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: fg, fontSize: 14, fontWeight: n.selected ? FontWeight.w800 : FontWeight.w700),
+                  style: TextStyle(color: fg, fontSize: 14, fontWeight: n.selected ? FontWeight.w600 : FontWeight.w600),
                 ),
               ),
               if (n.badge > 0) _Badge(n.badge),
@@ -1170,7 +1232,7 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(color: AppTheme.sos, borderRadius: BorderRadius.circular(8)),
-      child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800)),
+      child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
     );
   }
 }
@@ -1264,8 +1326,8 @@ class AdminTabbedBody extends StatelessWidget {
                 dividerColor: Colors.transparent,
                 labelColor: AppTheme.accentText,
                 unselectedLabelColor: AppTheme.muted,
-                labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-                unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
                 padding: const EdgeInsets.symmetric(horizontal: 8),

@@ -501,7 +501,7 @@ class AdminEmergenciesPanelState extends State<AdminEmergenciesPanel> {
                     'No open SOS or crash alerts',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800),
+                    style: AppText.body.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
@@ -664,7 +664,7 @@ class _EmergencyCard extends StatelessWidget {
                       children: [
                         Text(
                           '${kind.toUpperCase()}${silenced ? '' : ' · OPEN'}',
-                          style: TextStyle(color: fg.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5),
+                          style: TextStyle(color: fg.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1.5),
                         ),
                         const SizedBox(height: 2),
                         Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg)),
@@ -708,7 +708,7 @@ class _EmergencyCard extends StatelessWidget {
                     children: [
                       Icon(Icons.volume_off_rounded, size: 16, color: fg),
                       const SizedBox(width: 5),
-                      Flexible(child: Text('Alarm silenced', style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w700))),
+                      Flexible(child: Text('Alarm silenced', style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w600))),
                     ],
                   ),
                 ),
@@ -752,7 +752,7 @@ class _OnRedButton extends StatelessWidget {
               Icon(icon, size: 18, color: fg),
               const SizedBox(width: 8),
               Flexible(
-                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800)),
+                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w600)),
               ),
             ],
           ),
