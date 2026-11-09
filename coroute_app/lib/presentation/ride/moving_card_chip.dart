@@ -42,7 +42,7 @@ class MovingCardChip extends StatelessWidget {
                   text,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w800),
+                  style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w600),
                 ),
               ),
             ]),

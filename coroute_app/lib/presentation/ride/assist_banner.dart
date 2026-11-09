@@ -126,7 +126,7 @@ class FarByRoadChip extends StatelessWidget {
         children: [
           const Icon(Icons.alt_route_rounded, size: 14, color: fg),
           const SizedBox(width: Space.s4),
-          Flexible(child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w800, fontSize: 10, letterSpacing: 1))),
+          Flexible(child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w600, fontSize: 10, letterSpacing: 1))),
         ],
       ),
     );
@@ -245,7 +245,7 @@ class AssistBanner extends StatelessWidget {
       minimumSize: const Size.fromHeight(48),
       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w600),
     );
     final ButtonStyle primary = FilledButton.styleFrom(
       backgroundColor: fg,
@@ -253,7 +253,7 @@ class AssistBanner extends StatelessWidget {
       minimumSize: const Size.fromHeight(56),
       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 16, fontWeight: FontWeight.w800),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 16, fontWeight: FontWeight.w600),
     );
     Widget filled(IconData icon, String label, VoidCallback onTap, {ButtonStyle? style}) => FilledButton.icon(
           onPressed: onTap,

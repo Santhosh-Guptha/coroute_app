@@ -203,19 +203,19 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.greenAccent.withValues(alpha: 0.15),
+              color: AppTheme.success.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.6)),
+              border: Border.all(color: AppTheme.success.withValues(alpha: 0.6)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 20),
+                Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Membership Activated Successfully',
                     style: TextStyle(
-                      color: Colors.greenAccent.shade100,
+                      color: AppTheme.success,
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
                     ),
@@ -285,7 +285,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                   Expanded(
                     child: Text('Group speed limit', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title),
                   ),
-                  Text(_limit > 0 ? '$_limit km/h' : 'Off', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                  Text(_limit > 0 ? '$_limit km/h' : 'Off', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
                 ],
               ),
               const SizedBox(height: 10),
@@ -300,7 +300,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                       onSelected: (_) => setState(() => _limit = v),
                       selectedColor: AppTheme.brand,
                       backgroundColor: AppTheme.card,
-                      labelStyle: TextStyle(color: _limit == v ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w800),
+                      labelStyle: TextStyle(color: _limit == v ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w600),
                       side: BorderSide(color: _limit == v ? AppTheme.brand : AppTheme.border, width: 2),
                       showCheckmark: false,
                       materialTapTargetSize: MaterialTapTargetSize.padded,
@@ -336,7 +336,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
               : const Icon(Icons.play_arrow_rounded),
           label: Text(
             _isStarting ? 'Preparing your trip...' : widget.confirmLabel,
-            style: const TextStyle(fontWeight: FontWeight.w800),
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(56),

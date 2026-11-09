@@ -29,6 +29,9 @@ import 'data/services/rider_score_service.dart'; // 3.55 rider score sync at rid
 import 'presentation/social/friend_notice_host.dart'; // 3.55 friend request notices
 import 'presentation/social/ride_invite_screen.dart'; // 3.55 crew ride invites
 import 'domain/social/username_rules.dart' show InviteCodes;
+import 'domain/marketing/pending_coupon.dart'; // 3.55 coupon QR / link
+import 'data/services/pending_coupon_store.dart';
+import 'presentation/subscription/membership_dashboard_screen.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
 import 'data/services/alarm_notifier.dart'; // 3.55 siren / horn lock-screen heads-up
@@ -407,6 +410,7 @@ class CoRouteApp extends StatelessWidget {
               ..emergencyOpen = (() => SosBatteryReserve.isActive /* 3.55: no review prompts on SOS reserve */ || safety.alarm != null || convoys.pendingSos != null || convoys.myOpenSosAlertId != null ||
                   (convoys.activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false))
               ..rideActive = (() => convoys.activeConvoy != null && convoys.activeConvoy!.tripStatus != 'ENDED')
+              ..rideIdSource = (() => convoys.activeConvoy?.groupId) // after-ride questions kept per ride
               ..attachFixes(convoys.myFixes);
             return reviews;
           },
@@ -688,6 +692,27 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
       if (uri != null) _handle(uri);
     }).catchError((_) {});
     _sub = _appLinks.uriLinkStream.listen(_handle, onError: (_) {});
+    // 3.55 coupon QR: a code passed through the Play Store install (Install Referrer), first launch only.
+    PendingCouponStore.checkInstallReferrerOnce().ignore();
+  }
+
+  /// 3.55 coupon QR / link: keeps the code for the plan payment screen (prefilled, never bought).
+  Future<void> _saveCoupon(String code) async {
+    final saved = await PendingCouponStore.save(code);
+    if (saved == null || !mounted) return;
+    final loggedIn = context.read<AuthService>().isAuthenticated;
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(SnackBar(
+      content: Text('Code $saved will be applied when you choose a plan.'),
+      action: loggedIn
+          ? SnackBarAction(
+              label: 'Plans',
+              onPressed: () => appNavigatorKey.currentState
+                  ?.push(MaterialPageRoute<void>(builder: (_) => const MembershipDashboardScreen())),
+            )
+          : null,
+    ));
   }
 
   void _handle(Uri uri) {
@@ -698,6 +723,12 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
     if (uri.scheme == 'coroute' && uri.host == 'subscription') {
       // Back from the website checkout: re-read the membership (the single source of the plan).
       context.read<MembershipService>().fetchMyMembership().ignore();
+      return;
+    }
+    // 3.55 coupon QR / link (https://<site>/get?coupon=CODE).
+    final coupon = PendingCoupon.fromUri(uri);
+    if (coupon != null) {
+      _saveCoupon(coupon).ignore();
       return;
     }
     // 3.55 friend invite link (https://<site>/join/friend/<CODE>, coroute://join/friend/<CODE>).

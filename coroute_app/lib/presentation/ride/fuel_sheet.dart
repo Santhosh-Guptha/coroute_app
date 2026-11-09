@@ -247,14 +247,14 @@ class _FuelSheetState extends State<_FuelSheet> {
                           style: TextStyle(
                             color: AppTheme.accentText,
                             fontSize: 44,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w600,
                             height: 1,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                           children: [
                             TextSpan(
                               text: 'km',
-                              style: TextStyle(color: AppTheme.muted, fontSize: 18, fontWeight: FontWeight.w800),
+                              style: TextStyle(color: AppTheme.muted, fontSize: 18, fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),

@@ -189,7 +189,7 @@ class _SuggestFeatureFormState extends State<SuggestFeatureForm> {
         const SizedBox(height: Space.s16),
         Semantics(
           header: true,
-          child: Text('Topic', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+          child: Text('Topic', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
         ),
         const SizedBox(height: Space.s8),
         Wrap(

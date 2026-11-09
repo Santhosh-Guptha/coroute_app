@@ -190,7 +190,7 @@ class PublicRideChip extends StatelessWidget {
               children: [
                 Icon(ride.riders > 1 ? Icons.groups_rounded : Icons.two_wheeler_rounded, size: 16, color: Colors.white),
                 const SizedBox(width: 4),
-                Text('${ride.distanceKm} km', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                Text('${ride.distanceKm} km', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
               ],
             ),
           ),

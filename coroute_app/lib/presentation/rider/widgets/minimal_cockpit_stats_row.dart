@@ -68,7 +68,7 @@ class MinimalCockpitStatsRow extends StatelessWidget {
                 TextSpan(
                   text: 'ETA $eta',
                   style: AppText.label.copyWith(
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     color: AppTheme.text,
                     fontSize: 13,
                   ),

@@ -55,6 +55,35 @@ class ReplayTrack {
     return ReplayPoint(ts, a.lat + (b.lat - a.lat) * f, a.lng + (b.lng - a.lng) * f, a.kmh + (b.kmh - a.kmh) * f);
   }
 
+  /// 3.56 the direction of travel at [ts] (degrees from north, 0..360) for the replay's 3D bike:
+  /// the bearing of the stretch around [ts], looking back / ahead up to 5 points for one longer
+  /// than [minMoveM] (a standing rider's GPS jitter never turns the bike). Null outside the track,
+  /// across a signal gap, or when the rider did not move (the map keeps the last heading).
+  double? headingAt(int ts, {double minMoveM = 3, Duration maxGap = const Duration(minutes: 10)}) {
+    if (points.length < 2 || ts < points.first.ts || ts > points.last.ts) return null;
+    var lo = 0, hi = points.length - 1;
+    while (hi - lo > 1) {
+      final mid = (lo + hi) >> 1;
+      if (points[mid].ts <= ts) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    if (points[hi].brk || points[hi].ts - points[lo].ts > maxGap.inMilliseconds) return null;
+    var a = lo, b = hi;
+    for (var i = 0; i < 5; i++) {
+      final pa = points[a], pb = points[b];
+      if (GeoMath.haversine(pa.lat, pa.lng, pb.lat, pb.lng) >= minMoveM) {
+        final h = GeoMath.bearing(pa.lat, pa.lng, pb.lat, pb.lng);
+        return ((h % 360) + 360) % 360;
+      }
+      if (a > 0 && !points[a].brk) a--;
+      if (b < points.length - 1 && !points[b + 1].brk) b++;
+    }
+    return null;
+  }
+
   /// The route cut where the phone had no signal. A [segmented] track is cut
   /// where the gateway marked it (no fix for over 2 minutes while moving, or a
   /// jump: see TrackRules) and at impossible jumps; an older unmarked one at a

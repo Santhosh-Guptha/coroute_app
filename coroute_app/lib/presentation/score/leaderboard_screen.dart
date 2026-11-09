@@ -196,7 +196,7 @@ class _Row extends StatelessWidget {
             Expanded(
               child: Text(
                 mine ? '${row.username} (you)' : row.username,
-                style: AppText.body.copyWith(fontWeight: mine ? FontWeight.w900 : FontWeight.w600),
+                style: AppText.body.copyWith(fontWeight: mine ? FontWeight.w700 : FontWeight.w600),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),

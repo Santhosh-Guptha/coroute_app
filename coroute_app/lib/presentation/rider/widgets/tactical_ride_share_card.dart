@@ -80,7 +80,7 @@ class TacticalRideShareCard extends StatelessWidget {
                     style: TextStyle(
                       color: AppTheme.neonCyan,
                       fontSize: 13,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 1.5,
                     ),
                   ),
@@ -124,7 +124,7 @@ class TacticalRideShareCard extends StatelessWidget {
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 20,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: -0.3,
                   ),
                 ),
@@ -343,7 +343,7 @@ class _StatTile extends StatelessWidget {
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 22,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     fontFamily: 'monospace',
                   ),
                 ),

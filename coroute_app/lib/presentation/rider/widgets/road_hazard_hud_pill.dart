@@ -97,7 +97,7 @@ class RoadHazardHudPill extends StatelessWidget {
                         style: TextStyle(
                           color: accent,
                           fontSize: 13,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w700,
                           letterSpacing: 0.5,
                         ),
                       ),
@@ -112,7 +112,7 @@ class RoadHazardHudPill extends StatelessWidget {
                               style: TextStyle(
                                 color: AppTheme.text,
                                 fontSize: 15,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -130,7 +130,7 @@ class RoadHazardHudPill extends StatelessWidget {
                       key: const ValueKey('roadHazardFixed'),
                       onPressed: onFixed,
                       style: TextButton.styleFrom(minimumSize: const Size(56, 48), padding: const EdgeInsets.symmetric(horizontal: 8)),
-                      child: Text('Fixed?', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                      child: Text('Fixed?', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
                     ),
                   ),
                 if (onDismiss != null)

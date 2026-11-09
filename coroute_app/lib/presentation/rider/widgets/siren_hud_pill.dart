@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/ui/design_kit.dart';
 import '../../../data/services/siren_acoustic_detector.dart';
 
 /// High-visibility emergency HUD pill displayed when an approaching emergency siren is detected.
@@ -70,19 +71,13 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
               constraints: const BoxConstraints(minHeight: 52, maxWidth: 520),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: AppTheme.isLight ? const Color(0xFFFFF2F2) : const Color(0xFF261012),
+                color: AppTheme.isLight ? const Color(0xFFFBEBE8) : const Color(0xFF351F1E),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: AppTheme.sos.withOpacity(0.85),
                   width: 2.0,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.sos.withOpacity(0.30),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                boxShadow: dsFloatingShadow(),
               ),
               child: Row(
                 children: [
@@ -115,7 +110,7 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
                           style: TextStyle(
                             color: AppTheme.sos,
                             fontSize: 13,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w700,
                             letterSpacing: 0.6,
                           ),
                           maxLines: 1,
@@ -135,7 +130,7 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 10,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w600,
                                   letterSpacing: 0.5,
                                 ),
                               ),
@@ -208,7 +203,7 @@ class HornHudPill extends StatelessWidget {
           color: AppTheme.warnTint,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: amber.withOpacity(0.85), width: 2.0),
-          boxShadow: [BoxShadow(color: amber.withOpacity(0.25), blurRadius: 14, offset: const Offset(0, 4))],
+          boxShadow: dsFloatingShadow(),
         ),
         child: Row(
           children: [
@@ -226,7 +221,7 @@ class HornHudPill extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: TextStyle(color: AppTheme.warnText, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                    style: TextStyle(color: AppTheme.warnText, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.6),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),

@@ -8,6 +8,7 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/crews_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/push_service.dart';
+import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/notify/push_routing.dart';
 import '../social/crew_detail_screen.dart';
 import '../social/crews_screen.dart';
@@ -152,6 +153,9 @@ class _PushRouterHostState extends State<PushRouterHost> {
     // 3.55: ride invites in the foreground get their own banner from the socket message
     // (RideInvitesService), so no second snackbar here.
     if (route.destination == PushDestination.rideInvite) return;
+    // 3.55 follow-up: the socket already showed this event (a rider connected to the other gateway
+    // node may get both): no second snackbar. The push's eventId matches the socket message's.
+    if (!NoticeDedupe.shared.firstTime(m.payload['eventId'])) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
     messenger.showSnackBar(SnackBar(

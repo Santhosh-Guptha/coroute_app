@@ -9,18 +9,19 @@ import '../../../data/services/settings_service.dart';
 import '../../ride/fuel_sheet.dart';
 import '../../ride/guardian_sheet.dart';
 
-/// The cockpit's quick settings: only in-ride toggles, sized for gloves
-/// (>= 64 dp rows; the whole row toggles). Everything else is in Settings.
+/// The cockpit's quick settings: three big in-ride toggles, sized for gloves
+/// (tiles >= 96 dp tall; the whole tile toggles). Everything else is in Settings.
 ///   1. Voice: mute or unmute spoken alerts and the intercom (emergencies always speak).
 ///   2. Night map: dark map now, or back to automatic.
 ///   3. Battery saver: the same switch as in Settings.
-///   4. Screen always on while the phone is mounted.
+/// 3.55 minimal settings: the screen always stays on while riding (battery saver may dim it),
+/// so it has no toggle here; [keepScreenOn] / [onToggleKeepScreenOn] are kept for callers.
 /// Quick actions: Guardian link, Fuel and (when given) offline voice navigation.
 class GloveQuickSettingsModal extends StatefulWidget {
   final SettingsService? settingsService;
   final IntercomService? intercomService;
   final bool keepScreenOn;
-  final VoidCallback onToggleKeepScreenOn;
+  final VoidCallback? onToggleKeepScreenOn;
   final void Function(String name, bool isEnabled)? onSettingToggled;
   final String? groupId;
   final VoidCallback? onOpenGuardian;
@@ -31,8 +32,8 @@ class GloveQuickSettingsModal extends StatefulWidget {
     super.key,
     this.settingsService,
     this.intercomService,
-    required this.keepScreenOn,
-    required this.onToggleKeepScreenOn,
+    this.keepScreenOn = true,
+    this.onToggleKeepScreenOn,
     this.onSettingToggled,
     this.groupId,
     this.onOpenGuardian,
@@ -46,8 +47,8 @@ class GloveQuickSettingsModal extends StatefulWidget {
     BuildContext context, {
     SettingsService? settingsService,
     IntercomService? intercomService,
-    required bool keepScreenOn,
-    required VoidCallback onToggleKeepScreenOn,
+    bool keepScreenOn = true,
+    VoidCallback? onToggleKeepScreenOn,
     void Function(String name, bool isEnabled)? onSettingToggled,
     String? groupId,
     VoidCallback? onOpenGuardian,
@@ -103,7 +104,8 @@ class GloveQuickSettingsModal extends StatefulWidget {
 }
 
 class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
-  late bool _keepScreenOn = widget.keepScreenOn;
+  /// Under the tiles: what muting never silences.
+  static const String emergencyNote = 'Emergencies are always spoken.';
 
   @override
   Widget build(BuildContext context) {
@@ -137,7 +139,7 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
       _QuickSettingItem(
         key: const Key('quick_setting_voice_alerts'),
         label: 'Voice',
-        subtitle: isVoiceOn ? 'Spoken alerts and talk on' : 'Muted. Emergencies are still spoken.',
+        subtitle: isVoiceOn ? 'On' : 'Muted',
         icon: isVoiceOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
         isActive: isVoiceOn,
         onToggle: () {
@@ -153,7 +155,7 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
       _QuickSettingItem(
         key: const Key('quick_setting_night_map'),
         label: 'Night map',
-        subtitle: isNightMap ? 'Dark map on' : 'Automatic by sunrise and sunset',
+        subtitle: isNightMap ? 'On' : 'Auto',
         icon: Icons.dark_mode_rounded,
         isActive: isNightMap,
         onToggle: () {
@@ -165,27 +167,13 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
       _QuickSettingItem(
         key: const Key('quick_setting_battery_saver'),
         label: 'Battery saver',
-        subtitle: batterySaverOn ? 'Gentler GPS and a lighter map' : 'Turns on by itself when battery is low',
+        subtitle: batterySaverOn ? 'On' : 'Auto',
         icon: Icons.battery_saver_rounded,
         isActive: batterySaverOn,
         onToggle: () {
           final next = !batterySaverOn;
           settings?.setBatterySaver(next);
           widget.onSettingToggled?.call('Battery saver', next);
-        },
-      ),
-      _QuickSettingItem(
-        key: const Key('quick_setting_screen_always_on'),
-        label: 'Screen always on',
-        subtitle: _keepScreenOn ? 'The screen stays awake while mounted' : 'Follows the phone\'s sleep time',
-        icon: Icons.screen_lock_portrait_rounded,
-        isActive: _keepScreenOn,
-        onToggle: () {
-          final next = !_keepScreenOn;
-          widget.onToggleKeepScreenOn();
-          // 3.55 fix: the cockpit owns the switch; this copy keeps the row in step with it.
-          setState(() => _keepScreenOn = next);
-          widget.onSettingToggled?.call('Screen always on', next);
         },
       ),
     ];
@@ -242,7 +230,7 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
                           style: AppText.headline.copyWith(fontSize: 18)),
                       const SizedBox(height: 2),
                       Text(
-                        'In-ride switches. Everything else is in Settings.',
+                        'More in Settings',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppText.label,
@@ -262,24 +250,26 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
               ],
             ),
             const SizedBox(height: 18),
-            DsCard(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var i = 0; i < toggles.length; i++)
-                    _GloveSettingRow(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < toggles.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  Expanded(
+                    child: _GloveSettingTile(
                       key: toggles[i].key,
                       label: toggles[i].label,
-                      subtitle: toggles[i].subtitle,
+                      state: toggles[i].subtitle,
                       icon: toggles[i].icon,
                       isActive: toggles[i].isActive,
-                      divider: i < toggles.length - 1,
                       onToggle: toggles[i].onToggle,
                     ),
+                  ),
                 ],
-              ),
+              ],
             ),
+            const SizedBox(height: 10),
+            Text(emergencyNote, textAlign: TextAlign.center, style: AppText.caption),
             const SizedBox(height: 18),
             // Minimal in-flight quick actions: Fuel and Ride Guardian (strictly gated)
             Row(
@@ -369,76 +359,62 @@ class _QuickSettingItem {
   });
 }
 
-/// One oversized glove-friendly switch row.
-/// The entire 64 dp row is clickable so thick motorcycle leather gloves never miss.
-class _GloveSettingRow extends StatelessWidget {
+/// One big glove-friendly toggle tile: icon, 1-2 word label and its state ("On", "Auto",
+/// "Muted"). The whole tile (>= 96 dp tall) toggles; filled with the tint when on.
+class _GloveSettingTile extends StatelessWidget {
   final String label;
-  final String subtitle;
+  final String state;
   final IconData icon;
   final bool isActive;
-  final bool divider;
   final VoidCallback onToggle;
 
-  const _GloveSettingRow({
+  const _GloveSettingTile({
     super.key,
     required this.label,
-    required this.subtitle,
+    required this.state,
     required this.icon,
     required this.isActive,
-    required this.divider,
     required this.onToggle,
   });
 
   @override
   Widget build(BuildContext context) {
-    return MergeSemantics(
-      child: InkWell(
-        onTap: onToggle,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 64),
-          decoration: BoxDecoration(
-            border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null,
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: isActive ? AppTheme.tint : AppTheme.soft,
-                  borderRadius: BorderRadius.circular(10),
+    final fg = isActive ? AppTheme.accentText : AppTheme.text2;
+    return Semantics(
+      button: true,
+      toggled: isActive,
+      label: label,
+      value: state,
+      excludeSemantics: true,
+      child: Material(
+        color: isActive ? AppTheme.tint : AppTheme.soft,
+        shape: RoundedRectangleBorder(
+          borderRadius: Radii.lgAll,
+          side: BorderSide(color: isActive ? AppTheme.accentText : AppTheme.border, width: isActive ? 1.5 : 1),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onToggle,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 96),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 30, color: fg),
+                const SizedBox(height: 8),
+                Text(
+                  label,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w600, color: AppTheme.text, height: 1.2),
                 ),
-                child: Icon(icon, size: 20, color: isActive ? AppTheme.accentText : AppTheme.muted),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: AppText.body.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.text),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.caption.copyWith(color: AppTheme.text2, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Switch(
-                value: isActive,
-                onChanged: (_) => onToggle(),
-                activeColor: AppTheme.brand,
-              ),
-            ],
+                const SizedBox(height: 2),
+                Text(state, maxLines: 1, style: AppText.label.copyWith(color: fg)),
+              ],
+            ),
           ),
         ),
       ),

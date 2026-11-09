@@ -10,6 +10,9 @@ import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
 import '../../core/ui/ride_alert.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/place_review_service.dart';
+import '../map_places/after_ride_place_reviews.dart';
+import '../widgets/feature_switch.dart';
 import '../../data/services/ride_notification_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/timeline_service.dart';
@@ -111,7 +114,24 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       _rideNotif = rn;
       rn?.pendingUiAction.addListener(_onRideNotifAction);
       _onRideNotifAction();
+      _offerStoredPlaceReviews();
     });
+  }
+
+  /// 3.55 follow-up: after-ride place questions kept from an earlier ride (the app was closed
+  /// before they were answered): asked once on this app open, not during a ride or an SOS.
+  Future<void> _offerStoredPlaceReviews() async {
+    final places = Provider.of<PlaceReviewService?>(context, listen: false);
+    if (places == null) return;
+    await places.restored;
+    // Let the home screen settle first (deep links, the join sheet).
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    final on = context.featureOnNow('placeReviews') && context.featureOnNow('reviewPrompt');
+    if (!places.takeOpenPrompt(enabled: on)) return;
+    final nav = Navigator.maybeOf(context, rootNavigator: true);
+    if (nav == null || !nav.mounted) return;
+    await AfterRidePlaceReviews.show(nav.context, service: places, enabled: on);
   }
 
   /// A tap on the ride notification: show the ride map; SOS opens the hold

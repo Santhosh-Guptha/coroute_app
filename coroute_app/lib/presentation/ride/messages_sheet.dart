@@ -170,7 +170,7 @@ class _QuickChip extends StatelessWidget {
                     message.text,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body.copyWith(fontWeight: FontWeight.w800),
+                    style: AppText.body.copyWith(fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
@@ -310,7 +310,7 @@ class _MessagesViewState extends State<MessagesView> {
                               if (!mine)
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 2),
-                                  child: Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                                  child: Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
                                 ),
                               Text(text, style: AppText.body),
                               if (item != null) QueuedLine(failed: item.state == OutboxState.failed, sending: service.isOnline),

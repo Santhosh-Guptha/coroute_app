@@ -55,7 +55,7 @@ class ForceUpdateScreen extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: AppTheme.text,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         fontSize: 20,
                         letterSpacing: 0.8,
                       ),
@@ -121,7 +121,7 @@ class ForceUpdateScreen extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: AppTheme.warnText,
-                                    fontWeight: FontWeight.w800,
+                                    fontWeight: FontWeight.w600,
                                     fontSize: 13,
                                   ),
                                 ),
@@ -133,7 +133,7 @@ class ForceUpdateScreen extends StatelessWidget {
                             'Why is this update required?',
                             style: TextStyle(
                               color: AppTheme.text,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w600,
                               fontSize: 12,
                             ),
                           ),
@@ -171,7 +171,7 @@ class ForceUpdateScreen extends StatelessWidget {
                               'UPDATE NOW',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontWeight: FontWeight.w900,
+                                fontWeight: FontWeight.w700,
                                 fontSize: 15,
                                 letterSpacing: 0.5,
                               ),

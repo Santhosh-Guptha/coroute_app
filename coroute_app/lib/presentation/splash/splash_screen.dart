@@ -118,36 +118,28 @@ class _SplashScreenState extends State<SplashScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: AppTheme.card,
-                            borderRadius: BorderRadius.circular(Radii.xl + 4),
-                            border: Border.all(color: AppTheme.border, width: 2),
-                            boxShadow: dsFloatingShadow(),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: Radii.xlAll,
-                            child: Image.asset(
-                              'assets/branding/coroute_icon.png',
-                              width: 88,
-                              height: 88,
-                              cacheWidth: 264,
-                              filterQuality: FilterQuality.medium,
-                            ),
+                        // Calm: the logo mark, the name, one line. No frame, no shadow.
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Image.asset(
+                            'assets/branding/coroute_icon.png',
+                            width: 72,
+                            height: 72,
+                            cacheWidth: 216,
+                            filterQuality: FilterQuality.medium,
                           ),
                         ),
                         const SizedBox(height: Space.s24),
                         Text(
                           AppConstants.appName,
                           textAlign: TextAlign.center,
-                          style: AppText.metric,
+                          style: AppText.headline.copyWith(fontSize: 26),
                         ),
-                        const SizedBox(height: Space.s8),
+                        const SizedBox(height: Space.s4),
                         Text(
                           AppConstants.appTagline,
                           textAlign: TextAlign.center,
-                          style: AppText.label.copyWith(fontWeight: FontWeight.w700),
+                          style: AppText.body.copyWith(color: AppTheme.textMuted),
                         ),
                       ],
                     ),

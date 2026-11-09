@@ -85,15 +85,16 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
     // Background color
     final Color bgColor;
     if (tx) {
-      bgColor = private ? AppTheme.infoBlue : AppTheme.warnText;
+      // Deep fills that always carry the white label (light and dark).
+      bgColor = private ? (AppTheme.isLight ? AppTheme.infoBlue : const Color(0xFF35679F)) : (AppTheme.isLight ? AppTheme.warnText : const Color(0xFF8A5A1C));
     } else if (rx) {
-      bgColor = const Color(0xFF0F766E);
+      bgColor = AppTheme.brand;
     } else if (muted) {
       bgColor = AppTheme.card;
     } else if (vox) {
-      bgColor = const Color(0xFF0F766E);
+      bgColor = AppTheme.brand;
     } else if (leadChannel) {
-      bgColor = AppTheme.warnText;
+      bgColor = AppTheme.isLight ? AppTheme.warnText : const Color(0xFF8A5A1C);
     } else {
       bgColor = AppTheme.brand;
     }
@@ -214,15 +215,7 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
                 : (tx
                     ? Border.all(color: Colors.white.withOpacity(0.4), width: 1.5)
                     : null),
-            boxShadow: tx
-                ? [
-                    BoxShadow(
-                      color: AppTheme.warnText.withOpacity(0.4),
-                      blurRadius: 16,
-                      spreadRadius: 2,
-                    )
-                  ]
-                : (muted ? null : dsFloatingShadow()),
+            boxShadow: muted ? null : dsFloatingShadow(),
           ),
           child: Row(
             children: [
@@ -235,7 +228,7 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: muted ? AppTheme.warnText : Colors.white,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     fontSize: 15,
                     letterSpacing: 0.5,
                   ),
@@ -260,7 +253,7 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
                       'DISABLE',
                       style: TextStyle(
                         color: Colors.white,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         fontSize: 12,
                         letterSpacing: 0.5,
                       ),

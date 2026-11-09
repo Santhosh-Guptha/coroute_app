@@ -112,7 +112,7 @@ class CockpitDualStateBanner extends StatelessWidget {
                   style: TextStyle(
                     color: AppTheme.neonCyan,
                     fontSize: 13,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                     letterSpacing: 0.8,
                     fontFamily: AppTheme.fontFamily,
                   ),
@@ -154,7 +154,7 @@ class CockpitDualStateBanner extends StatelessWidget {
                   style: TextStyle(
                     color: AppTheme.text,
                     fontSize: 13,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 0.4,
                     fontFamily: AppTheme.fontFamily,
                   ),
@@ -187,7 +187,7 @@ class CockpitDualStateBanner extends StatelessWidget {
             style: TextStyle(
               color: AppTheme.hyperAmber,
               fontSize: 13,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w700,
               letterSpacing: 0.8,
               fontFamily: AppTheme.fontFamily,
             ),
@@ -208,7 +208,7 @@ class CockpitDualStateBanner extends StatelessWidget {
               style: TextStyle(
                 color: AppTheme.hyperAmber,
                 fontSize: 11,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w700,
                 letterSpacing: 0.6,
               ),
             ),

@@ -357,7 +357,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                   pack.highDetail ? 'HIGH DETAIL' : 'STANDARD',
                   style: AppText.caption.copyWith(
                     color: pack.highDetail ? AppTheme.brand : AppTheme.accentText,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     fontSize: 10,
                   ),
                 ),

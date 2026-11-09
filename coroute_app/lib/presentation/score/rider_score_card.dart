@@ -175,7 +175,7 @@ class ScoreComponentRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: Text(component.title, style: AppText.body.copyWith(fontWeight: FontWeight.w800))),
+              Expanded(child: Text(component.title, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
               Text(v == null ? '–' : '$v', style: AppText.title.copyWith(color: scoreColor(v))),
             ],
           ),

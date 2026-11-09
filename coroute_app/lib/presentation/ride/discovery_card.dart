@@ -73,7 +73,7 @@ class DiscoveryCard extends StatelessWidget {
           minimumSize: const Size(48, 48),
           foregroundColor: accent ? AppTheme.accentText : AppTheme.text,
           padding: const EdgeInsets.symmetric(horizontal: Space.s12),
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         );
     return Semantics(
       container: true,
@@ -104,7 +104,7 @@ class DiscoveryCard extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(DiscoveryTexts.title(e), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                          Text(DiscoveryTexts.title(e), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                           Text(lines.join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
                         ],
                       ),

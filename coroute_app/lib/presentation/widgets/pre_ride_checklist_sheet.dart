@@ -492,7 +492,7 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> with Widg
                     child: Center(
                       child: Text(
                         'Fix Permission',
-                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800),
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),

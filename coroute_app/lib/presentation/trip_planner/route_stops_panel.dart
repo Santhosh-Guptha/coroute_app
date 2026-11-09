@@ -420,7 +420,7 @@ class _TimelineRow extends StatelessWidget {
                           title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: titleColor ?? AppTheme.text, fontSize: 15, fontWeight: FontWeight.w800, height: 1.25),
+                          style: TextStyle(color: titleColor ?? AppTheme.text, fontSize: 15, fontWeight: FontWeight.w600, height: 1.25),
                         ),
                       ),
                       if (c != null) ...[const SizedBox(width: 8), c],

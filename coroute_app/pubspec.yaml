@@ -90,6 +90,9 @@ flutter:
 
   assets:
     - assets/branding/
+    # 3.56 3D bike images (tool/map_bikes); 2.0x/ and 3.0x/ variants are picked by pixel ratio.
+    - assets/map_bikes/
+    - assets/garage_bikes/
 
   fonts:
     - family: Manrope

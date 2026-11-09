@@ -132,7 +132,7 @@ class GroupSettingsView extends StatelessWidget {
               children: [
                 Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
                 const SizedBox(width: 8),
-                Text(value, style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: AppTheme.accentText, fontFeatures: const [FontFeature.tabularFigures()])),
+                Text(value, style: AppText.body.copyWith(fontWeight: FontWeight.w600, color: AppTheme.accentText, fontFeatures: const [FontFeature.tabularFigures()])),
               ],
             ),
             control,
@@ -198,7 +198,7 @@ class GroupSettingsView extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text('Ride Guardian', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                            const Text('Ride Guardian', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
                             const SizedBox(height: 2),
                             Text(
                               !convoy.featurePolicy.guardianEnabled

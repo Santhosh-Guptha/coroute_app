@@ -607,7 +607,7 @@ class _SuggestCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Suggest a safety feature', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                Text('Suggest a safety feature', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                 Text('Got an idea for safer rides? Tell us.', style: AppText.caption),
               ],
             ),

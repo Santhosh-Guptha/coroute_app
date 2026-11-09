@@ -213,7 +213,7 @@ class TripReviewStatusChip extends StatelessWidget {
         children: [
           Icon(TripReview.iconOf(status), size: 14, color: c),
           const SizedBox(width: 5),
-          Text(TripReview.labelOf(status), style: TextStyle(color: c, fontSize: 12, fontWeight: FontWeight.w800, height: 1.2)),
+          Text(TripReview.labelOf(status), style: TextStyle(color: c, fontSize: 12, fontWeight: FontWeight.w600, height: 1.2)),
         ],
       ),
     );
@@ -710,7 +710,7 @@ class _TripFeedbackSheetState extends State<TripFeedbackSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Group photo (optional)', style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w800)),
+        Text('Group photo (optional)', style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w600)),
         const SizedBox(height: 2),
         Text('Up to ${TripFeedbackSheet.maxPhotos} photos of your group\'s best moment. Location data is removed.', style: AppText.caption),
         CheckboxListTile(

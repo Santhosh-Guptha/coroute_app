@@ -215,7 +215,7 @@ class _FilterPill extends StatelessWidget {
                   Icon(icon, size: 18, color: fg),
                   const SizedBox(width: 6),
                 ],
-                Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800)),
+                Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -515,7 +515,7 @@ class _AlertCard extends StatelessWidget {
                   ? Text(
                       _initials(name).toUpperCase(),
                       textScaler: TextScaler.noScaling,
-                      style: TextStyle(color: badgeFg, fontSize: 13, fontWeight: FontWeight.w800),
+                      style: TextStyle(color: badgeFg, fontSize: 13, fontWeight: FontWeight.w600),
                     )
                   : Icon(tier.icon, size: 22, color: badgeFg),
             ),
@@ -549,7 +549,7 @@ class _AlertCard extends StatelessWidget {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           if (action != null)
-                            Text(action, style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w800)),
+                            Text(action, style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w600)),
                           if (call != null && onCall != null)
                             TextButton.icon(
                               onPressed: onCall,

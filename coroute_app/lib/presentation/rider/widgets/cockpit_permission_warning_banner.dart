@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/ui/design_kit.dart';
 import '../../../../core/ui/ui_tokens.dart';
 import '../../../../data/services/permission_revocation_safety_service.dart';
 
@@ -57,9 +58,6 @@ class CockpitPermissionWarningBanner extends StatelessWidget {
 
         // Styling based on essential vs optional distinction
         final borderColor = isEssential ? AppTheme.sos : AppTheme.hyperAmber;
-        final glowColor = isEssential
-            ? AppTheme.sos.withValues(alpha: 0.35)
-            : AppTheme.hyperAmber.withValues(alpha: 0.28);
         final badgeBg = isEssential
             ? AppTheme.sos.withValues(alpha: 0.20)
             : AppTheme.hyperAmber.withValues(alpha: 0.18);
@@ -85,14 +83,7 @@ class CockpitPermissionWarningBanner extends StatelessWidget {
               color: AppTheme.card.withValues(alpha: 0.98),
               borderRadius: BorderRadius.circular(Radii.md),
               border: Border.all(color: borderColor, width: 2.0),
-              boxShadow: [
-                BoxShadow(
-                  color: glowColor,
-                  blurRadius: 12,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              boxShadow: dsFloatingShadow(),
             ),
             child: Padding(
               padding: const EdgeInsets.all(Space.s12),
@@ -125,7 +116,7 @@ class CockpitPermissionWarningBanner extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: AppText.caption.copyWith(
                                   color: badgeTextColor,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w600,
                                   letterSpacing: 0.4,
                                 ),
                               ),
@@ -161,7 +152,7 @@ class CockpitPermissionWarningBanner extends StatelessWidget {
                     feature,
                     style: AppText.title.copyWith(
                       color: AppTheme.accentText,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0.1,
                     ),
                   ),

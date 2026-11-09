@@ -578,7 +578,7 @@ class _HudItem extends StatelessWidget {
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 18,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     fontFamily: 'monospace',
                   ),
                 ),

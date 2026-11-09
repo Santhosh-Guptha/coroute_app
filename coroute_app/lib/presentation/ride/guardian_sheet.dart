@@ -197,7 +197,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
                 const Text(
                   'Guardian links',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.2),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, height: 1.2),
                 ),
                 const SizedBox(height: 8),
                 const Text(

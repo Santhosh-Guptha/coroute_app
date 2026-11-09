@@ -183,7 +183,7 @@ class RiderManagementSheet extends StatelessWidget {
                       isAtCapacity ? 'CAPACITY REACHED' : 'OPEN FOR RIDERS',
                       style: TextStyle(
                         fontSize: 10,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         color: isAtCapacity ? AppTheme.warnText : AppTheme.accentText,
                       ),
                     ),
@@ -198,7 +198,7 @@ class RiderManagementSheet extends StatelessWidget {
                       convoy.joinCode,
                       style: AppText.headline.copyWith(
                         letterSpacing: 4,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w700,
                         color: AppTheme.brand,
                       ),
                     ),
@@ -311,7 +311,7 @@ class RiderManagementSheet extends StatelessWidget {
                                 roleBadge,
                                 style: TextStyle(
                                   fontSize: 9,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w600,
                                   color: roleBadgeColor,
                                 ),
                               ),

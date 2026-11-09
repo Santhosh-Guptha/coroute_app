@@ -54,7 +54,7 @@ class CockpitHudToast extends StatelessWidget {
                 style: TextStyle(
                   color: AppTheme.text,
                   fontSize: 15,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w600,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

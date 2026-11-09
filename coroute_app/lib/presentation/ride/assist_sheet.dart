@@ -115,7 +115,7 @@ class AssistSheetBody extends StatelessWidget {
           minimumSize: Size.fromHeight(height),
           padding: const EdgeInsets.symmetric(horizontal: 8),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          textStyle: TextStyle(fontFamily: AppTheme.fontFamily, fontWeight: FontWeight.w800, fontSize: fontSize),
+          textStyle: TextStyle(fontFamily: AppTheme.fontFamily, fontWeight: FontWeight.w600, fontSize: fontSize),
         );
 
     final List<Widget> actions;

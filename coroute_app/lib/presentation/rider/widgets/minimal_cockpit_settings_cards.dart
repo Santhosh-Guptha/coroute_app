@@ -146,7 +146,7 @@ class GloveActionTile extends StatelessWidget {
                         style: TextStyle(
                           color: badgeColor ?? AppTheme.brand,
                           fontSize: 10,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -160,7 +160,7 @@ class GloveActionTile extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.title.copyWith(fontSize: 14, fontWeight: FontWeight.w800),
+                    style: AppText.title.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -498,7 +498,7 @@ class CompactConvoyRoster extends StatelessWidget {
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 7,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
@@ -512,7 +512,7 @@ class CompactConvoyRoster extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 11,
-                            fontWeight: isMe ? FontWeight.w800 : FontWeight.w600,
+                            fontWeight: isMe ? FontWeight.w600 : FontWeight.w600,
                             color: AppTheme.text,
                           ),
                         ),

@@ -117,7 +117,7 @@ class SmartAirbagHudPill extends StatelessWidget {
                     style: TextStyle(
                       fontFamily: AppTheme.fontFamily,
                       fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0.6,
                       color: color,
                     ),

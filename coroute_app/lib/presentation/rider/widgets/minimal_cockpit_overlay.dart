@@ -175,10 +175,8 @@ class MinimalCockpitTopBar extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppText.title.copyWith(
-                        fontWeight: FontWeight.w800,
                         fontSize: 15,
-                        letterSpacing: -0.2,
-                        height: 1.15,
+                        height: 1.25,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -239,7 +237,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
                           Flexible(
                             child: _StatusPill(
                               key: const Key('cockpit_pill_live_riders'),
-                              iconDot: connection != null ? const Color(0xFFFF9100) : const Color(0xFF00E676),
+                              iconDot: connection != null ? AppTheme.accent : AppTheme.success,
                               label: connection != null
                                   ? connection!
                                   : '${riderCount ?? 1} Riders',
@@ -250,7 +248,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
                           Flexible(
                             child: _StatusPill(
                               key: const Key('cockpit_pill_live_riders'),
-                              iconDot: const Color(0xFFFF9100),
+                              iconDot: AppTheme.accent,
                               label: connection!,
                               ellipsize: true,
                             ),
@@ -311,9 +309,8 @@ class MinimalCockpitTopBar extends StatelessWidget {
                     _StatusPill(
                       key: const Key('cockpit_pill_airbag'),
                       icon: Icons.shield_rounded,
-                      iconColor: const Color(0xFFFF9100),
+                      iconColor: AppTheme.accent,
                       label: 'Airbag',
-                      accentColor: const Color(0xFFFF9100).withValues(alpha: 0.4),
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -321,9 +318,8 @@ class MinimalCockpitTopBar extends StatelessWidget {
                     _StatusPill(
                       key: const Key('cockpit_pill_remote'),
                       icon: Icons.radio_button_checked_rounded,
-                      iconColor: const Color(0xFF00E5FF),
+                      iconColor: AppTheme.primary,
                       label: 'Remote',
-                      accentColor: const Color(0xFF00E5FF).withValues(alpha: 0.4),
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -331,9 +327,9 @@ class MinimalCockpitTopBar extends StatelessWidget {
                     _StatusPill(
                       key: const Key('cockpit_pill_tunnel_mode'),
                       icon: Icons.alt_route_rounded,
-                      iconColor: const Color(0xFFFFB300),
+                      iconColor: AppTheme.warning,
                       label: 'Tunnel Mode',
-                      accentColor: const Color(0xFFFFB300).withValues(alpha: 0.5),
+                      accentColor: AppTheme.warnBorder,
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -341,9 +337,9 @@ class MinimalCockpitTopBar extends StatelessWidget {
                     _StatusPill(
                       key: const Key('cockpit_pill_offline_mode'),
                       icon: Icons.cloud_off_rounded,
-                      iconColor: const Color(0xFFFFB300),
+                      iconColor: AppTheme.warning,
                       label: 'Offline Mode',
-                      accentColor: const Color(0xFFFFB300).withValues(alpha: 0.5),
+                      accentColor: AppTheme.warnBorder,
                       onTap: onOfflineModeTap,
                     ),
                     const SizedBox(width: 6),
@@ -457,12 +453,11 @@ class _StatusPill extends StatelessWidget {
     this.ellipsize = false,
   });
 
-  static const TextStyle _labelStyle = TextStyle(
-    color: Colors.white,
-    fontSize: 11,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 0.2,
-  );
+  static TextStyle get _labelStyle => TextStyle(
+        color: AppTheme.text,
+        fontSize: 11,
+        fontWeight: FontWeight.w500,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -474,10 +469,10 @@ class _StatusPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: const Color(0xFF131722),
-            borderRadius: BorderRadius.circular(10),
+            color: AppTheme.card,
+            borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: accentColor ?? AppTheme.border.withOpacity(0.6),
+              color: accentColor ?? AppTheme.border,
               width: 1,
             ),
           ),
@@ -491,13 +486,6 @@ class _StatusPill extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: iconDot,
                     shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: iconDot!.withOpacity(0.6),
-                        blurRadius: 4,
-                        spreadRadius: 1,
-                      ),
-                    ],
                   ),
                 ),
                 const SizedBox(width: 5),
@@ -566,12 +554,12 @@ class MinimalSpeedAlert extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               '${speedKmh.round()} km/h',
-              style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 13),
+              style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13),
             ),
             const SizedBox(width: 6),
             Text(
               'LIMIT $limitKmh',
-              style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.5),
+              style: TextStyle(color: fg, fontWeight: FontWeight.w500, fontSize: 11),
             ),
           ],
         ),
@@ -616,8 +604,8 @@ class CockpitSpeedometer extends StatelessWidget {
     final overLimit = limit > 0 && speedKmh > limit;
     final isNearLimit = limit > 0 && speedKmh >= (limit - 5) && !overLimit;
     final Color speedColor = overLimit
-        ? const Color(0xFFFF3D00)
-        : (isNearLimit ? const Color(0xFFFF9100) : (AppTheme.isLight ? AppTheme.text : const Color(0xFFFFFFFF)));
+        ? AppTheme.danger
+        : (isNearLimit ? AppTheme.warnText : AppTheme.text);
 
     final crossAxis = alignment == Alignment.center
         ? CrossAxisAlignment.center
@@ -635,15 +623,12 @@ class CockpitSpeedometer extends StatelessWidget {
             style: TextStyle(
               color: speedColor,
               fontSize: fontSize,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -1.2,
+              fontWeight: FontWeight.w700,
               height: 1.0,
               fontFeatures: const [FontFeature.tabularFigures()],
+              // A faint legibility halo over the map, not a glow.
               shadows: [
-                Shadow(
-                  color: speedColor.withOpacity(overLimit || isNearLimit ? 0.6 : 0.25),
-                  blurRadius: overLimit || isNearLimit ? 10 : 4,
-                ),
+                Shadow(color: AppTheme.bg.withValues(alpha: 0.6), blurRadius: 3),
               ],
             ),
           ),
@@ -651,12 +636,9 @@ class CockpitSpeedometer extends StatelessWidget {
             Text(
               'km/h',
               style: TextStyle(
-                color: overLimit
-                    ? const Color(0xFFFF6E40)
-                    : (isNearLimit ? const Color(0xFFFFB74D) : const Color(0xFFB0BEC5)),
+                color: overLimit ? AppTheme.danger : (isNearLimit ? AppTheme.warnText : AppTheme.textMuted),
                 fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
+                fontWeight: FontWeight.w500,
               ),
             ),
           if (showLimitBadge && limit > 0) ...[
@@ -664,14 +646,10 @@ class CockpitSpeedometer extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: overLimit
-                    ? const Color(0xFFFF3D00)
-                    : (isNearLimit ? const Color(0xFFFF9100).withOpacity(0.25) : AppTheme.tint),
-                borderRadius: BorderRadius.circular(6),
+                color: overLimit ? AppTheme.danger : (isNearLimit ? AppTheme.warnTint : AppTheme.tint),
+                borderRadius: BorderRadius.circular(999),
                 border: Border.all(
-                  color: overLimit
-                      ? Colors.white
-                      : (isNearLimit ? const Color(0xFFFF9100) : AppTheme.accentText.withOpacity(0.3)),
+                  color: overLimit ? AppTheme.danger : (isNearLimit ? AppTheme.warnBorder : Colors.transparent),
                   width: 1,
                 ),
               ),
@@ -683,14 +661,11 @@ class CockpitSpeedometer extends StatelessWidget {
                     const SizedBox(width: 3),
                   ],
                   Text(
-                    overLimit ? 'OVER $limit' : 'LIMIT $limit',
+                    overLimit ? 'Over $limit' : 'Limit $limit',
                     style: TextStyle(
-                      color: overLimit
-                          ? Colors.white
-                          : (isNearLimit ? const Color(0xFFFF9100) : AppTheme.accentText),
+                      color: overLimit ? Colors.white : (isNearLimit ? AppTheme.warnText : AppTheme.accentText),
                       fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -822,12 +797,9 @@ class _CockpitSosButtonState extends State<CockpitSosButton> with SingleTickerPr
                     color: Colors.white,
                     width: isSunlightHud ? 2.5 : 2.0,
                   ),
+                  // Strong red stays; the soft shadow only lifts it off the map.
                   boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.sos.withOpacity(0.5),
-                      blurRadius: isSunlightHud ? 14 : 10,
-                      spreadRadius: 2,
-                    ),
+                    BoxShadow(color: AppTheme.shadow, blurRadius: 8, offset: const Offset(0, 2)),
                   ],
                 ),
                 child: Column(
@@ -845,8 +817,7 @@ class _CockpitSosButtonState extends State<CockpitSosButton> with SingleTickerPr
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.5,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],

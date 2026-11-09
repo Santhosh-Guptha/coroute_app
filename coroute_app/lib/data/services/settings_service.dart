@@ -17,21 +17,25 @@ import '../../core/l10n/l10n.dart';
 /// position every 5 seconds instead of every 2.5, loads fewer map tiles and
 /// downloads a past trip's route only when asked. GPS settings do not change.
 ///
-/// Ride safety: crash detection (on by default), emergency texts when there is
-/// no internet (off until the rider opts in and allows SMS), the break reminder
-/// and the "Are you OK?" check-in (both on), and whether the brand battery
-/// guide was seen.
+/// Ride safety: crash detection, emergency texts when there is no internet, the
+/// break reminder and the "Are you OK?" check-in (all always on since 3.55), and
+/// whether the brand battery guide was seen.
 ///
 /// 3.16: language (safety screens and spoken alerts) and the tank range for the
 /// fuel reminder. Medical ID is always on the lock screen during an SOS (riders
 /// control it by editing their medical info).
+///
+/// 3.55 minimal settings (docs/SETTINGS_MINIMAL_v3.55.md): the safety features in
+/// [alwaysOnKeys] are always on and have no switch. Their getters return true, a stored
+/// "off" from an older version is ignored, [load] rewrites them to on once
+/// ([keySafetyDefaultsVersion]), and their setters refuse "off".
 class SettingsService extends ChangeNotifier {
   SettingsService([this._prefs]);
 
   SharedPreferences? _prefs;
   bool _lowData = false;
   bool _crashDetection = true;
-  bool _smsFallback = false;
+  bool _smsFallback = true; // always on (3.55)
   bool _fatigueReminder = true;
   bool _soloCheckIn = true;
   // 3.55 solo check-in by ETA and no-signal ahead (on by default; docs/features_355/solo_guardian.md).
@@ -135,15 +139,25 @@ class SettingsService extends ChangeNotifier {
   bool _autoReroute = true;
 
   bool get lowData => _lowData;
+  /// Always on (3.55): crash detection.
   bool get crashDetection => _crashDetection;
+
+  /// Always on (3.55): emergency texts when an SOS cannot go online. Without the SMS permission
+  /// (the Play build) the texts open in the messages app, ready to send.
   bool get smsFallback => _smsFallback;
+
+  /// Always on (3.55): the break reminder.
   bool get fatigueReminder => _fatigueReminder;
+
+  /// Always on (3.55): the "Are you OK?" check-in when far from the group.
   bool get soloCheckIn => _soloCheckIn;
 
   /// 3.55: text my emergency contact when a solo ride with a destination is overdue and I do not answer.
+  /// Always on (needs an emergency contact; admin switch `soloCheckIn`).
   bool get etaCheckIn => _etaCheckIn;
 
   /// 3.55: tell my group and guardians before a stretch that had no signal on my earlier rides.
+  /// Always on (admin switch `noSignalAhead`).
   bool get noSignalAhead => _noSignalAhead;
   bool get oemGuideSeen => _oemGuideSeen;
   bool get isLoaded => _loaded;
@@ -156,10 +170,10 @@ class SettingsService extends ChangeNotifier {
   /// instead of ducking (lowering volume).
   bool get pauseOtherAudio => _pauseOtherAudio;
 
-  /// Accident warnings on my route (on by default).
+  /// Accident warnings on my route (always on, 3.55).
   bool get hazardAlerts => _hazardAlerts;
 
-  /// Show the ride on the lock screen (on by default).
+  /// Show the ride and the SOS button on the lock screen (always on, 3.55).
   bool get rideOnLockScreen => _rideOnLockScreen;
 
   /// The nearby riders consent sheet was answered with Continue.
@@ -183,7 +197,7 @@ class SettingsService extends ChangeNotifier {
   /// My own speed warning in km/h (0 = use the group limit, off if none).
   int get speedLimitWarningKmh => _speedLimitWarningKmh;
 
-  /// Auto re-route: a new route from where I am when I leave the planned one (on by default).
+  /// Auto re-route: a new route from where I am when I leave the planned one (always on, 3.55).
   bool get autoReroute => _autoReroute;
 
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
@@ -193,17 +207,18 @@ class SettingsService extends ChangeNotifier {
     try {
       final prefs = await _p();
       _lowData = prefs.getBool(AppConstants.keyLowData) ?? false;
-      _crashDetection = prefs.getBool(SafetyConstants.keyCrashDetection) ?? true;
-      _smsFallback = prefs.getBool(SafetyConstants.keySmsFallback) ?? false;
-      _fatigueReminder = prefs.getBool(SafetyConstants.keyFatigueReminder) ?? true;
-      _soloCheckIn = prefs.getBool(SafetyConstants.keySoloCheckIn) ?? true;
-      _etaCheckIn = prefs.getBool(keyEtaCheckIn) ?? true;
-      _noSignalAhead = prefs.getBool(keyNoSignalAhead) ?? true;
+      // 3.55: always-on safety settings ignore a stored "off" (see [alwaysOnKeys]).
+      _crashDetection = true;
+      _smsFallback = true;
+      _fatigueReminder = true;
+      _soloCheckIn = true;
+      _etaCheckIn = true;
+      _noSignalAhead = true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
       _pauseOtherAudio = prefs.getBool(NetworkConstants.keyPauseOtherAudio) ?? false;
-      _hazardAlerts = prefs.getBool(NetworkConstants.keyHazardAlerts) ?? true;
-      _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
+      _hazardAlerts = true;
+      _rideOnLockScreen = true;
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
@@ -220,7 +235,8 @@ class SettingsService extends ChangeNotifier {
       _batterySaver = prefs.getBool(keyBatterySaver) ?? false;
       _hardwarePtt = prefs.getBool(keyHardwarePtt) ?? false;
       _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
-      _autoReroute = prefs.getBool(keyAutoReroute) ?? true;
+      _autoReroute = true;
+      await _migrateSafetyDefaults(prefs);
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -247,50 +263,90 @@ class SettingsService extends ChangeNotifier {
     await _save(AppConstants.keyLowData, value);
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setCrashDetection(bool value) async {
-    if (value == _crashDetection) return;
-    _crashDetection = value;
+    if (!value || _crashDetection) return;
+    _crashDetection = true;
     notifyListeners();
-    await _save(SafetyConstants.keyCrashDetection, value);
+    await _save(SafetyConstants.keyCrashDetection, true);
   }
 
-  /// Emergency texts. The caller asks for the SMS permission before switching on.
+  /// Emergency texts: always on (3.55), "off" is ignored.
   Future<void> setSmsFallback(bool value) async {
-    if (value == _smsFallback) return;
-    _smsFallback = value;
+    if (!value || _smsFallback) return;
+    _smsFallback = true;
     notifyListeners();
-    await _save(SafetyConstants.keySmsFallback, value);
+    await _save(SafetyConstants.keySmsFallback, true);
   }
 
+  // ---- 3.55 minimal settings: always-on safety settings and their one-time migration.
+
+  /// Stored keys of the settings that are always on (no switch in the app).
+  static const List<String> alwaysOnKeys = [
+    SafetyConstants.keyCrashDetection,
+    SafetyConstants.keySmsFallback,
+    SafetyConstants.keyFatigueReminder,
+    SafetyConstants.keySoloCheckIn,
+    keyEtaCheckIn,
+    keyNoSignalAhead,
+    NetworkConstants.keyHazardAlerts,
+    NetworkConstants.keyRideOnLockScreen,
+    keyAutoReroute,
+    keyVoiceCleanup,
+  ];
+
+  /// Keys the version-1 migration wrote to true. Siren alerts were always on in that round; they
+  /// have a switch again (default on), so the value it wrote simply stays on until the rider turns
+  /// it off. Nothing is ever forced off.
+  static const List<String> safetyDefaultsV1Keys = [...alwaysOnKeys, keySirenAlerts];
+
+  /// Version of the safety defaults written by [load]; bumped when a setting joins [alwaysOnKeys].
+  static const String keySafetyDefaultsVersion = 'settings_safety_defaults_version';
+  static const int safetyDefaultsVersion = 1;
+
+  /// One time per [safetyDefaultsVersion]: rewrites every [alwaysOnKeys] value to true, so a
+  /// stored "off" from an older version cannot come back. Only ever turns settings on.
+  Future<void> _migrateSafetyDefaults(SharedPreferences prefs) async {
+    if ((prefs.getInt(keySafetyDefaultsVersion) ?? 0) >= safetyDefaultsVersion) return;
+    for (final k in safetyDefaultsV1Keys) {
+      await prefs.setBool(k, true);
+    }
+    await prefs.setInt(keySafetyDefaultsVersion, safetyDefaultsVersion);
+  }
+
+  /// Always on (3.55): "off" is ignored.
   Future<void> setFatigueReminder(bool value) async {
-    if (value == _fatigueReminder) return;
-    _fatigueReminder = value;
+    if (!value || _fatigueReminder) return;
+    _fatigueReminder = true;
     notifyListeners();
-    await _save(SafetyConstants.keyFatigueReminder, value);
+    await _save(SafetyConstants.keyFatigueReminder, true);
   }
 
   static const String keyEtaCheckIn = 'eta_check_in_v1';
   static const String keyNoSignalAhead = 'no_signal_ahead_v1';
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setEtaCheckIn(bool value) async {
-    if (value == _etaCheckIn) return;
-    _etaCheckIn = value;
+    if (!value || _etaCheckIn) return;
+    _etaCheckIn = true;
     notifyListeners();
-    await _save(keyEtaCheckIn, value);
+    await _save(keyEtaCheckIn, true);
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setNoSignalAhead(bool value) async {
-    if (value == _noSignalAhead) return;
-    _noSignalAhead = value;
+    if (!value || _noSignalAhead) return;
+    _noSignalAhead = true;
     notifyListeners();
-    await _save(keyNoSignalAhead, value);
+    await _save(keyNoSignalAhead, true);
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setSoloCheckIn(bool value) async {
-    if (value == _soloCheckIn) return;
-    _soloCheckIn = value;
+    if (!value || _soloCheckIn) return;
+    _soloCheckIn = true;
     notifyListeners();
-    await _save(SafetyConstants.keySoloCheckIn, value);
+    await _save(SafetyConstants.keySoloCheckIn, true);
   }
 
   Future<void> setVoiceWarnings(bool value) async {
@@ -307,18 +363,20 @@ class SettingsService extends ChangeNotifier {
     await _save(NetworkConstants.keyPauseOtherAudio, value);
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setHazardAlerts(bool value) async {
-    if (value == _hazardAlerts) return;
-    _hazardAlerts = value;
+    if (!value || _hazardAlerts) return;
+    _hazardAlerts = true;
     notifyListeners();
-    await _save(NetworkConstants.keyHazardAlerts, value);
+    await _save(NetworkConstants.keyHazardAlerts, true);
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setRideOnLockScreen(bool value) async {
-    if (value == _rideOnLockScreen) return;
-    _rideOnLockScreen = value;
+    if (!value || _rideOnLockScreen) return;
+    _rideOnLockScreen = true;
     notifyListeners();
-    await _save(NetworkConstants.keyRideOnLockScreen, value);
+    await _save(NetworkConstants.keyRideOnLockScreen, true);
   }
 
   Future<void> markNetConsentSeen() async {
@@ -430,11 +488,12 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setAutoReroute(bool value) async {
-    if (value == _autoReroute) return;
-    _autoReroute = value;
+    if (!value || _autoReroute) return;
+    _autoReroute = true;
     notifyListeners();
-    await _save(keyAutoReroute, value);
+    await _save(keyAutoReroute, true);
   }
 
   // 3.55 audio (docs/features_355/audio_and_calls.md). Read lazily from the prefs that load() opened,
@@ -464,7 +523,8 @@ class SettingsService extends ChangeNotifier {
   bool _voiceCleanup = true;
   String _giveWaySide = 'auto';
 
-  /// Emergency-vehicle siren alerts from the phone's own microphone during rides (default on).
+  /// Emergency-vehicle siren alerts from the phone's own microphone during rides (switch in
+  /// Settings > Ride, on by default; admin switch `sirenDetector`). Off releases the mic at once.
   /// Full spoken alert when the rider may not hear outside sound (earphones, music), else softer.
   bool get sirenAlerts => _sirenAlerts;
 
@@ -472,7 +532,7 @@ class SettingsService extends ChangeNotifier {
   /// music or a call may stop the rider hearing traffic).
   bool? get hornAlerts => switch (_hornAlertsMode) { 1 => true, 2 => false, _ => null };
 
-  /// "Clean up my voice" for the intercom (default on).
+  /// "Clean up my voice" for the intercom (always on, 3.55).
   bool get voiceCleanup => _voiceCleanup;
 
   /// Side to keep to when giving way: 'auto' (from the phone's country; India = left), 'left', 'right'.
@@ -481,9 +541,9 @@ class SettingsService extends ChangeNotifier {
   Future<void> loadSoundSettings() async {
     try {
       final prefs = await _p();
-      _sirenAlerts = prefs.getBool(keySirenAlerts) ?? true;
+      _sirenAlerts = prefs.getBool(keySirenAlerts) ?? true; // rider's choice, default on
       _hornAlertsMode = (prefs.getInt(keyHornAlerts) ?? 0).clamp(0, 2);
-      _voiceCleanup = prefs.getBool(keyVoiceCleanup) ?? true;
+      _voiceCleanup = true; // always on (3.55)
       final side = prefs.getString(keyGiveWaySide) ?? 'auto';
       _giveWaySide = const {'auto', 'left', 'right'}.contains(side) ? side : 'auto';
     } catch (e) {
@@ -492,6 +552,7 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Rider's choice (default on). Listeners (RideMicHub via the detector) release or open the mic.
   Future<void> setSirenAlerts(bool value) async {
     if (value == _sirenAlerts) return;
     _sirenAlerts = value;
@@ -512,11 +573,12 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
+  /// Always on (3.55): "off" is ignored.
   Future<void> setVoiceCleanup(bool value) async {
-    if (value == _voiceCleanup) return;
-    _voiceCleanup = value;
+    if (!value || _voiceCleanup) return;
+    _voiceCleanup = true;
     notifyListeners();
-    await _save(keyVoiceCleanup, value);
+    await _save(keyVoiceCleanup, true);
   }
 
   Future<void> setGiveWaySide(String value) async {

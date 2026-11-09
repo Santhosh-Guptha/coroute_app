@@ -416,7 +416,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                     Text(
                       '${activeIdx + 1}/$count',
                       style: AppText.caption.copyWith(
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         color: AppTheme.accentText,
                         fontSize: 11,
                       ),
@@ -582,7 +582,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                             children: [
                               Text(
                                 'FUEL STATIONS NEAR YOU',
-                                style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted),
+                                style: AppText.caption.copyWith(fontWeight: FontWeight.w600, color: AppTheme.muted),
                               ),
                               if (riderLat != null && riderLng != null && riderLat != 0 && riderLng != 0)
                                 TextButton.icon(
@@ -741,7 +741,7 @@ class _ActionPill extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: AppText.label.copyWith(
                         color: AppTheme.text,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         fontSize: 13,
                       ),
                     ),
@@ -973,7 +973,7 @@ class _SideFuelButton extends StatelessWidget {
                       'LOW FUEL · $rangeText',
                       style: AppText.caption.copyWith(
                         color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         fontSize: 12,
                         letterSpacing: 0.3,
                       ),

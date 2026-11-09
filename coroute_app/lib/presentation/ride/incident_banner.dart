@@ -278,7 +278,7 @@ class IncidentBanner extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(L10n.t('incident.emergency'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: sosPaleRose, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5, height: 1.3)),
+                            Text(L10n.t('incident.emergency'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: sosPaleRose, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1.5, height: 1.3)),
                             Text(i.summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg)),
                             if (where != null)
                               Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w700)),
@@ -349,7 +349,7 @@ ButtonStyle _onRedFilled({double height = 48}) => FilledButton.styleFrom(
       minimumSize: Size.fromHeight(height),
       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w600),
     );
 
 /// Outlined white button on the red banner.
@@ -360,7 +360,7 @@ ButtonStyle _onRedOutlined({double height = 48}) => OutlinedButton.styleFrom(
       minimumSize: Size.fromHeight(height),
       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w600),
     );
 
 /// A short positive line: "Nearby rider responding, ETA 3 min". Solid teal
@@ -392,7 +392,7 @@ class PositiveLine extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                  Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w600)),
                   if (d != null) Text(d, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: DsHeroCard.secondary)),
                 ],
               ),

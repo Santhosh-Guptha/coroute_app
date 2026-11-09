@@ -319,11 +319,7 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl> {
                     ),
                   ]
                 : [
-                    BoxShadow(
-                      color: AppTheme.shadow.withOpacity(AppTheme.isLight ? 0.16 : 0.5),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
+                    BoxShadow(color: AppTheme.shadow, blurRadius: 16, offset: const Offset(0, 4)),
                   ],
           ),
           child: Center(child: _OrbitRingsIcon(color: ringColor)),
@@ -480,7 +476,7 @@ class _OrbitQuickAccessCard extends StatelessWidget {
                   style: TextStyle(
                     color: AppTheme.accentText,
                     fontSize: 11,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 1,
                   ),
                 ),

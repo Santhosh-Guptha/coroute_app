@@ -80,7 +80,7 @@ class EssentialsRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
                 Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
               ],
             ),
@@ -247,12 +247,12 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
                           style: TextStyle(
                             color: AppTheme.accentText,
                             fontSize: 44,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w600,
                             height: 1,
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                           children: [
-                            TextSpan(text: 'km', style: TextStyle(color: AppTheme.muted, fontSize: 18, fontWeight: FontWeight.w800)),
+                            TextSpan(text: 'km', style: TextStyle(color: AppTheme.muted, fontSize: 18, fontWeight: FontWeight.w600)),
                           ],
                         ),
                         maxLines: 1,
@@ -312,7 +312,7 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
                             lowest == null ? 'Group fuel' : '$lowestName ${lowest.riderId == convoyService?.myUserId ? 'have' : 'has'} the least range',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: AppTheme.warnText, fontSize: 15, fontWeight: FontWeight.w800),
+                            style: TextStyle(color: AppTheme.warnText, fontSize: 15, fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 2),
                           Text(

@@ -214,7 +214,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                                     Text(
                                       'OFFLINE TILE VERIFICATION',
                                       style: AppText.caption.copyWith(
-                                        fontWeight: FontWeight.w800,
+                                        fontWeight: FontWeight.w600,
                                         letterSpacing: 0.8,
                                         fontSize: 11,
                                         color: AppTheme.brand,
@@ -319,7 +319,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                               widget.highDetail ? 'HIGH DETAIL' : 'STANDARD',
                               style: AppText.caption.copyWith(
                                 color: AppTheme.brand,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w600,
                                 fontSize: 10,
                               ),
                             ),

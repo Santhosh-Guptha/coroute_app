@@ -265,6 +265,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   RouteObserver<ModalRoute<void>>? _subscribedObserver;
   ModalRoute<void>? _subscribedRoute;
   String? _selectedRiderId;
+
+  /// 3.56 the way each bike faces: a standing rider's GPS course is noise, so below walking speed
+  /// (or without a course) the 3D bike keeps its last heading.
+  final HeadingHold _headingHold = HeadingHold();
   bool _sosNoticeScheduled = false;
   bool _leaveNoticeScheduled = false;
 
@@ -528,6 +532,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     super.didChangeDependencies();
     _subscribeRouteObserver();
     _syncWakelock();
+    BikeSpriteCache.precache(context); // 3.56 the 3D bike images, decoded before the first marker
   }
 
   @override
@@ -1379,7 +1384,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('NEARBY FUEL STATIONS', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted)),
+                              Text('NEARBY FUEL STATIONS', style: AppText.caption.copyWith(fontWeight: FontWeight.w600, color: AppTheme.muted)),
                               if (me.lat != 0 && me.lng != 0)
                                 TextButton.icon(
                                   onPressed: isScanning ? null : () async {
@@ -1702,12 +1707,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     // (at most 2, skippable; admin switches placeReviews and reviewPrompt).
     final places = context.read<PlaceReviewService?>();
     final placesOn = context.featureOnNow('placeReviews') && context.featureOnNow('reviewPrompt');
-    places?.onRideEnded();
+    places?.onRideEnded(rideId: groupId);
     final client = api;
     unawaited(() async {
       await _promptTripReview(nav, client, groupId: groupId, recordId: recordId, tripName: convoy.name);
       if (places != null && placesOn && nav.mounted) {
-        await AfterRidePlaceReviews.show(nav.context, service: places, enabled: placesOn);
+        await AfterRidePlaceReviews.show(nav.context, service: places, enabled: placesOn, rideId: groupId);
       }
     }());
   }
@@ -2985,7 +2990,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                             ),
                           ),
                           onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
-                          child: Text('+$extra more', maxLines: 1, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                          child: Text('+$extra more', maxLines: 1, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
                         ),
                       ),
                     )
@@ -3007,7 +3012,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                           ),
                           onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
                           icon: const Icon(Icons.notifications_none_rounded, size: 16),
-                          label: Text('$_activeAlertCount in notifications', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                          label: Text('$_activeAlertCount in notifications', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w600)),
                         ),
                       ),
                     ),
@@ -3576,7 +3581,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                       children: [
                         Icon(Icons.cloud_off_rounded, size: 14, color: AppTheme.warnText),
                         const SizedBox(width: 4),
-                        Text('OFFLINE MODE', style: AppText.overline.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w800)),
+                        Text('OFFLINE MODE', style: AppText.overline.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
@@ -3833,8 +3838,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     return SmoothMarker(
       id: r.userId,
       point: LatLng(r.lat, r.lng),
-      heading: r.heading,
-      showHeading: isMe || moving,
+      // 3.56: the 3D bike itself points the way (no separate arrow); stopped bikes keep their heading.
+      heading: _headingHold.update(r.userId, r.heading, moving || isMe ? r.speedKmh : 0),
+      showHeading: false,
       headingRadius: isMe ? 31.0 : 25.0,
       headingColor: isMe ? AppTheme.brand : (color ?? AppTheme.brand),
       width: 144,
@@ -4078,7 +4084,7 @@ class RiderMapMarker extends StatelessWidget {
               fallbackColor: color ?? AppTheme.brand,
               ring: isMe ? AppTheme.brand : ring,
               statusColor: status.color,
-              height: avatarSize * 0.82,
+              height: isMe ? 46 : 40, // 3.56: 3D bike box 65 / 57 px (the halo stays above the label)
               twoUp: pillion != null,
               heading: rider.heading,
               cue: BikeMarkerCue.of(
@@ -4109,7 +4115,7 @@ class RiderMapMarker extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textScaler: TextScaler.noScaling,
-                        style: TextStyle(color: pillText, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.5, height: 1.2),
+                        style: TextStyle(color: pillText, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5, height: 1.2),
                       ),
                       Text(
                         speedBadge,
