@@ -12,10 +12,15 @@
  *                no credit). A downgrade already paid for (scheduled) is credited in full.
  *   payable    = max(0, price_new - coupon - credit). Coupon first (on the list price), then credit.
  *   Upgrade, Community -> paid, or renewing early: the new plan starts NOW with a full period.
- *   Credit larger than what is left to pay is never lost: it adds whole days to the new period.
- *   Downgrade (fewer seats) during a paid period: no credit and no refund; the new plan starts when
- *   the current one ends (startsAt = its end) and runs a full period from there.
+ *   Upgrade credit is capped at what is left to pay (never more than the new price after the
+ *   coupon); nothing is carried over. (Kinds a rider can no longer buy, renewal and downgrade, keep
+ *   their old maths for stored orders: leftover credit adds whole days.)
  *   payable 0 -> the order activates without a payment.
+ *
+ * Plan changes (owner's rule, 3.55): while a paid plan is active a rider may only move UP
+ * (Community < Small Group < Large Group, PLAN_ORDER). A smaller or the same plan is refused with
+ * 409 DOWNGRADE_NOT_ALLOWED ([changeBlock]); once the plan has ended any plan can be chosen.
+ * Admin "Change plan" (admin_plans.js) does not go through this check.
  */
 const {
   PAID_PLANS, COMMUNITY_PLAN, isLegacyMembershipPlan, normalizePlanId, effectiveMembership, DEFAULT_SEATS,
@@ -223,9 +228,12 @@ function computeQuote({ catalog, planId, membership = null, coupon = null, coupo
   const discount = Math.min(base, couponDiscount !== null ? Math.max(0, Math.round(couponDiscount)) : couponDiscountInr(coupon, base));
   const afterCoupon = base - discount;
   const credit = creditOf({ membership, catalog, now, includeCurrent: kind !== 'downgrade' });
+  // Never more credit than is left to pay (so never above the new price).
   const creditUsed = Math.min(credit.creditInr, afterCoupon);
   const leftover = credit.creditInr - creditUsed;
-  const extraDays = leftover > 0 && base > 0 ? Math.floor(leftover / (base / days)) : 0;
+  // An upgrade carries nothing over; only kinds no longer sold to riders keep the extra days.
+  const carries = kind === 'renewal' || kind === 'downgrade';
+  const extraDays = carries && leftover > 0 && base > 0 ? Math.floor(leftover / (base / days)) : 0;
   const payable = Math.max(0, afterCoupon - creditUsed);
   const startsAt = kind === 'downgrade' ? Number(cur.validUntil) : now;
   const endsAt = startsAt + (days + extraDays) * DAY_MS;
@@ -280,6 +288,34 @@ function computeQuote({ catalog, planId, membership = null, coupon = null, coupo
   };
 }
 
+/** Tier order, lowest first (the retired ₹9 Individual sits between Community and Small Group). */
+const PLAN_ORDER = Object.freeze([COMMUNITY_PLAN, 'individual', ...PAID_PLANS]);
+
+/** Rank of a plan id in [PLAN_ORDER] (-1 when unknown). */
+const planRank = (id) => PLAN_ORDER.indexOf(String(id || ''));
+
+const DOWNGRADE_MESSAGE = 'You can move to a bigger plan anytime. Smaller plans can be chosen when your current plan ends.';
+
+/**
+ * Why a rider cannot move to `planId` now: a paid plan is active and `planId` is not a higher tier.
+ * Returns { status: 409, error, reason, code, currentPlan, currentPlanEndsAt } or null (pure).
+ */
+function changeBlock({ membership, planId, now = Date.now() }) {
+  const cur = currentPaidPeriod(membership, now);
+  if (!cur) return null;
+  const from = planRank(cur.category);
+  const to = planRank(planId);
+  if (from < 0 || to < 0 || to > from) return null;
+  return {
+    status: 409,
+    error: DOWNGRADE_MESSAGE,
+    reason: 'DOWNGRADE_NOT_ALLOWED',
+    code: 'DOWNGRADE_NOT_ALLOWED',
+    currentPlan: cur.category,
+    currentPlanEndsAt: Number(cur.validUntil) || null,
+  };
+}
+
 /** Why plan `planId` cannot be ordered (legacy, free or unknown), or null. */
 function orderBlock(planId, catalog) {
   if (isLegacyMembershipPlan(planId)) {
@@ -297,4 +333,5 @@ function orderBlock(planId, catalog) {
 module.exports = {
   DAY_MS, billingDaysOf, couponPlans, couponFitsPlan, couponDiscountInr, checkCoupon, paidPurchases,
   currentPaidPeriod, creditOf, computeQuote, orderBlock, siteMaxRiders,
+  PLAN_ORDER, planRank, changeBlock, DOWNGRADE_MESSAGE,
 };

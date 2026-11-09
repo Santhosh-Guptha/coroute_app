@@ -86,6 +86,18 @@ function refusePlan(res, category, catalog) {
 }
 
 /**
+ * Sends 409 DOWNGRADE_NOT_ALLOWED when a paid plan is active and `category` is not a bigger plan
+ * (plan_pricing.changeBlock); true when sent. Admin plan changes never call this.
+ */
+function refuseChange(res, membership, category, now = Date.now(), extra = {}) {
+  const block = pricing.changeBlock({ membership, planId: category, now });
+  if (!block) return false;
+  const { status, ...body } = block;
+  res.status(status).json({ ...extra, ...body });
+  return true;
+}
+
+/**
  * The price of `category` for this rider now, with the coupon `rawCode` when it applies: the single
  * computation behind the quote, the validation answer and the order. Returns
  * { quote, coupon, couponError } (couponError: { error, reason } when a typed code was refused).
@@ -590,6 +602,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     if (!planOnSale(catalog[category])) {
       return res.status(400).json({ error: `${catalog[category].name || category} is not on sale right now`, reason: 'PLAN_INACTIVE' });
     }
+    // Only a bigger plan while a paid plan runs (3.55).
+    if (refuseChange(res, await repo.findMembershipByOwner(uid).catch(() => null), category)) return;
     const { quote, couponError } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: req.query.coupon || req.query.code, catalog });
     res.set('Cache-Control', 'no-store').json({ ...quote, couponError, paymentsEnabled: config.paymentsEnabled });
   }));
@@ -613,6 +627,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       const { status, ...body } = block;
       return res.status(status).json({ valid: false, ...body });
     }
+    if (refuseChange(res, await repo.findMembershipByOwner(uid).catch(() => null), category, Date.now(), { valid: false })) return;
     const { quote, coupon, couponError } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: String(code), catalog });
     if (couponError) {
       return res.status(couponError.reason === 'COUPON_NOT_FOUND' ? 404 : 400).json({ valid: false, error: couponError.error, reason: couponError.reason, quote });
@@ -681,6 +696,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
           isAlreadyActive: true,
         });
       }
+      // Only a bigger plan while a paid plan runs (3.55).
+      if (refuseChange(res, existing, category, now)) return;
 
       // Every free activation is paid for by a real coupon record (no built-in shortcut codes).
       const matchedCoupon = await repo.findCoupon(cleanCoupon);
@@ -778,6 +795,10 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     const now = Date.now();
     const existingRaw = await repo.findMembershipByOwner(uid);
     const existing = effectiveMembership(existingRaw, now);
+    // Only a bigger plan while a paid plan runs (3.55). The same plan is answered below first (a
+    // repeat tap with nothing to pay reads "already active"), then refused.
+    const sameActive = !!(existing && existing.status === 'ACTIVE' && existing.category === category && existing.validUntil > now);
+    if (!sameActive && refuseChange(res, existingRaw, category, now)) return;
     // Capacity conflict check on downgrade
     if (existing && existing.members && Object.keys(existing.members).length + 1 > plan.capacity) {
       return res.status(409).json({
@@ -838,6 +859,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         message: `You already have an active ${existing.categoryName} membership.`,
       });
     }
+    if (sameActive && refuseChange(res, existingRaw, category, now)) return;
 
     const reservation = (rid, final) => ({
       userId: uid,
@@ -1126,6 +1148,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     if (existing && existing.status === 'ACTIVE' && existing.category === category && existing.validUntil > now) {
       return res.json({ message: `You already have an active ${existing.categoryName} membership.`, membership: existing, isAlreadyActive: true });
     }
+    if (refuseChange(res, existing, category, now)) return;
     let coupon = null;
     let offerId = null;
     if (offerCode) {

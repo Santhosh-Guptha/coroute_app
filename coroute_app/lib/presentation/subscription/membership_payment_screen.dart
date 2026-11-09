@@ -6,6 +6,8 @@ import '../../core/ui/ui.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/membership_service.dart';
+import '../../data/services/pending_coupon_store.dart';
+import '../../domain/membership/plan_change_rules.dart';
 import 'payment_success_screen.dart';
 
 /// Membership checkout: buy Small Group or Large Group (Community is free and never bought).
@@ -18,6 +20,9 @@ import 'payment_success_screen.dart';
 /// Coupons never block paying: a refused code shows a short message under the field, the field is
 /// cleared and Pay still works at the normal price. When the server prices the order at ₹0 (a 100%
 /// coupon, or credit covering it all) it activates the plan itself and no payment opens.
+///
+/// 3.55: while a paid plan runs only bigger plans are offered ([PlanChangeRules]); a code from a
+/// coupon QR / link ([PendingCouponStore]) is prefilled and checked, never bought by itself.
 class MembershipPaymentScreen extends StatefulWidget {
   final MembershipCategory category;
   final bool isTripCreationFlow;
@@ -87,13 +92,37 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      // Opened for a plan that is not sold (Community, the retired Individual): the cheapest paid plan.
-      if (!_selectedCategory.canBuy) {
-        final paid = context.read<MembershipService>().catalog?.paidCategories ?? const <MembershipCategory>[];
-        if (paid.isNotEmpty) setState(() => _selectedCategory = paid.first);
+      // Opened for a plan that is not sold (Community, the retired Individual) or not allowed now
+      // (smaller than the plan that runs): the first plan the rider can choose.
+      final paid = _choosable(context.read<MembershipService>());
+      if ((!_selectedCategory.canBuy || !paid.any((c) => c.id == _selectedCategory.id)) && paid.isNotEmpty) {
+        setState(() => _selectedCategory = paid.first);
       }
-      _refreshQuote();
+      _prefillPendingCoupon();
     });
+  }
+
+  /// The paid plans the rider can choose now (only bigger ones while a paid plan runs).
+  static List<MembershipCategory> _choosable(MembershipService ms) {
+    final all = ms.catalog?.paidCategories ?? const <MembershipCategory>[];
+    final owned = ms.ownedMembership;
+    final active = owned != null && owned.isActive;
+    return all
+        .where((c) => PlanChangeRules.canChoose(currentPlan: owned?.category, currentActive: active, target: c.id))
+        .toList();
+  }
+
+  /// A code from a coupon QR / link waits in [PendingCouponStore]: prefilled and checked (the
+  /// server says "applied" or why it can't be used). Nothing is bought until the rider taps Pay.
+  Future<void> _prefillPendingCoupon() async {
+    final pending = await PendingCouponStore.read();
+    if (!mounted) return;
+    if (pending == null || _offerCtrl.text.trim().isNotEmpty || _appliedCouponCode != null) {
+      _refreshQuote();
+      return;
+    }
+    _offerCtrl.text = pending;
+    await _checkCoupon(pending, keepTextOnRefusal: true);
   }
 
   @override
@@ -194,6 +223,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
 
   /// Removes applied coupon and immediately restores original price
   void _removeCoupon() {
+    PendingCouponStore.clear().ignore(); // a code from a link is not offered again
     setState(() {
       _offerCtrl.clear();
       _appliedCouponCode = null;
@@ -362,6 +392,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   }
 
   void _navigateToSuccess(UserMembership mem, String ref, {int? paid}) async {
+    if (_appliedCouponCode != null) PendingCouponStore.clear().ignore();
     final res = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -397,7 +428,8 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   @override
   Widget build(BuildContext context) {
     final ms = context.watch<MembershipService>();
-    final paid = ms.catalog?.paidCategories ?? const <MembershipCategory>[];
+    final paid = _choosable(ms);
+    final hidesSmaller = (ms.catalog?.paidCategories.length ?? 0) > paid.length;
     final price = _price;
     final basePrice = price.basePriceInr;
     final netPayable = price.payableInr;
@@ -466,6 +498,10 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                   ),
                   const SizedBox(height: 18),
                 ],
+                if (hidesSmaller) ...[
+                  Text(PlanChangeRules.note, key: const Key('payment_upgrade_only_note'), style: AppText.caption),
+                  const SizedBox(height: 14),
+                ],
 
                 // Selected Plan details card
                 Container(
@@ -485,7 +521,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(_selectedCategory.name, style: AppText.title.copyWith(fontSize: 17, fontWeight: FontWeight.w800)),
+                                Text(_selectedCategory.name, style: AppText.title.copyWith(fontSize: 17, fontWeight: FontWeight.w600)),
                                 const SizedBox(height: 2),
                                 Text(
                                   'Up to ${_selectedCategory.capacity} ${_selectedCategory.capacity == 1 ? 'rider' : 'riders'} · 30 days',
@@ -544,7 +580,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                               onTap: _removeCoupon,
                               child: Text(
                                 'Remove coupon',
-                                style: TextStyle(color: Colors.redAccent.shade100, fontSize: 11, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: AppTheme.danger, fontSize: 11, fontWeight: FontWeight.bold),
                               ),
                             ),
                         ],
@@ -558,7 +594,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                                 controller: _offerCtrl,
                                 textCapitalization: TextCapitalization.characters,
                                 onSubmitted: (_) => _applyPromoCode(),
-                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1),
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, letterSpacing: 1),
                                 decoration: InputDecoration(
                                   hintText: 'Enter coupon code',
                                   hintStyle: TextStyle(color: AppTheme.text2, fontSize: 12),
@@ -579,7 +615,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                               onPressed: (_isValidatingCoupon || _isProcessing) ? null : _applyPromoCode,
                               child: _isValidatingCoupon
                                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                  : const Text('Apply', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
+                                  : const Text('Apply', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
                             ),
                           ],
                         ),
@@ -597,19 +633,19 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           decoration: BoxDecoration(
-                            color: Colors.greenAccent.withValues(alpha: 0.12),
+                            color: AppTheme.success.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.4)),
+                            border: Border.all(color: AppTheme.success.withValues(alpha: 0.4)),
                           ),
                           child: Row(
                             children: [
                               Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
-                                  color: Colors.greenAccent.withValues(alpha: 0.2),
+                                  color: AppTheme.success.withValues(alpha: 0.2),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.check_rounded, color: Colors.greenAccent, size: 16),
+                                child: Icon(Icons.check_rounded, color: AppTheme.success, size: 16),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -618,11 +654,11 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                                   children: [
                                     Text(
                                       '$_appliedCouponCode applied',
-                                      style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.w900, fontSize: 13),
+                                      style: TextStyle(color: AppTheme.success, fontWeight: FontWeight.w700, fontSize: 13),
                                     ),
                                     Text(
                                       _promoMessage ?? 'Discount applied to plan',
-                                      style: TextStyle(color: Colors.greenAccent.shade100, fontSize: 11),
+                                      style: TextStyle(color: AppTheme.success, fontSize: 11),
                                     ),
                                   ],
                                 ),
@@ -631,7 +667,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                                 onPressed: _removeCoupon,
                                 style: TextButton.styleFrom(
                                   minimumSize: const Size(48, 48),
-                                  foregroundColor: Colors.redAccent.shade100,
+                                  foregroundColor: AppTheme.danger,
                                 ),
                                 child: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                               ),
@@ -664,16 +700,16 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.redAccent.withValues(alpha: 0.15),
+                      color: AppTheme.danger.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+                      border: Border.all(color: AppTheme.danger.withValues(alpha: 0.5)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 20),
+                        Icon(Icons.error_outline_rounded, color: AppTheme.danger, size: 20),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                          child: Text(_errorMessage!, style: TextStyle(color: AppTheme.danger, fontSize: 12)),
                         ),
                       ],
                     ),
@@ -711,7 +747,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                         )
                       : Text(
                           netPayable > 0 ? 'Pay ₹$netPayable and start plan' : 'Start plan for ₹0',
-                          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 15),
+                          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w700, fontSize: 15),
                         ),
                 ),
                 const SizedBox(height: 20),
@@ -792,7 +828,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: AppText.body.copyWith(fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600, fontSize: 13)),
+                  Text(title, style: AppText.body.copyWith(fontWeight: isSelected ? FontWeight.w600 : FontWeight.w600, fontSize: 13)),
                   Text(subtitle, style: AppText.caption.copyWith(fontSize: 11)),
                 ],
               ),
@@ -869,10 +905,10 @@ class PlanQuoteBreakdown extends StatelessWidget {
           value,
           style: TextStyle(
             color: discount
-                ? Colors.lightGreenAccent.shade400
-                : (total ? (value.contains('Free') ? Colors.lightGreenAccent.shade400 : AppTheme.brand) : AppTheme.text),
+                ? AppTheme.success
+                : (total ? (value.contains('Free') ? AppTheme.success : AppTheme.brand) : AppTheme.text),
             fontSize: total ? 15 : 13,
-            fontWeight: total ? FontWeight.w900 : FontWeight.w700,
+            fontWeight: total ? FontWeight.w700 : FontWeight.w700,
           ),
         ),
       ],

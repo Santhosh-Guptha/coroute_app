@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui_tokens.dart';
+import '../../domain/membership/plan_change_rules.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/membership_service.dart';
@@ -313,7 +314,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('${access.name}${until != null ? ' · until $until' : ''}',
-              style: TextStyle(color: AppTheme.text, fontSize: 16, fontWeight: FontWeight.w800)),
+              style: TextStyle(color: AppTheme.text, fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           Text(
             '${access.canHostGroup ? 'Host up to ${access.seats} riders' : 'Solo trips'} until it ends. '
@@ -415,16 +416,10 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            isExpired ? Colors.red.shade900.withValues(alpha: 0.4) : AppTheme.brand.withValues(alpha: 0.25),
-            AppTheme.card,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isExpired ? AppTheme.sos : AppTheme.brand.withValues(alpha: 0.6)),
+        // Flat tint instead of a gradient (design system v3.55).
+        color: isExpired ? AppTheme.warnTint : AppTheme.tint,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isExpired ? AppTheme.danger : AppTheme.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -846,7 +841,14 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     bool isRenewal = false,
   }) {
     // Community (free, shown for what it includes) and the paid plans; the retired ₹9 Individual is not offered.
-    final listed = (catalog?.categories ?? const <MembershipCategory>[]).where((c) => c.isCommunity || c.canBuy).toList();
+    // 3.55: while a paid plan runs only bigger plans (and the current one) are shown.
+    final active = owned != null && owned.isActive;
+    final listed = (catalog?.categories ?? const <MembershipCategory>[])
+        .where((c) => c.isCommunity || c.canBuy)
+        .where((c) => !active || c.id == owned.category ||
+            PlanChangeRules.canChoose(currentPlan: owned.category, currentActive: true, target: c.id))
+        .toList();
+    final hidesSmaller = active && PlanChangeRules.rank(owned.category) > 0;
     // Prices and seats come only from the server catalog. Until it loads (offline), only the
     // free Community plan is shown, never invented paid plans.
     final categories = listed.isNotEmpty
@@ -869,7 +871,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     final subtitle = isRenewal
         ? 'Pick a plan below to renew or change your plan.'
         : (owned != null
-            ? 'An upgrade starts now and credits your unused days. Fewer seats start when your plan ends.'
+            ? 'An upgrade starts now and credits your unused days.'
             : 'Ride solo for free, or pick how many riders you host. Each plan lasts 30 days.');
 
     return Column(
@@ -900,6 +902,15 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
         for (final cat in categories) ...[
           _buildCategoryCard(cat, owned, isRenewal: isRenewal),
         ],
+        if (hidesSmaller)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Text(
+              PlanChangeRules.note,
+              key: const Key('membership_upgrade_only_note'),
+              style: TextStyle(color: AppTheme.muted, fontSize: 12, height: 1.3),
+            ),
+          ),
         if (listed.isEmpty)
           Padding(
             padding: EdgeInsets.only(bottom: 14),
@@ -989,15 +1000,14 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       if (isExpired) {
         buttonLabel = 'Renew plan (₹${cat.priceRupees})';
       } else {
-        buttonLabel = 'Your plan · tap to extend';
+        // 3.55: the same plan cannot be bought again while it runs (it can be renewed when it ends).
+        buttonLabel = 'Your plan';
       }
     } else if (owned != null) {
-      if (cat.capacity > owned.capacity) {
+      if (!isExpired && owned.isActive) {
         buttonLabel = 'Upgrade to ${cat.name} (₹${cat.priceRupees})';
-      } else if (isExpired) {
-        buttonLabel = 'Switch to ${cat.name} (₹${cat.priceRupees})';
       } else {
-        buttonLabel = 'Switch to ${cat.name} (₹${cat.priceRupees}) when this plan ends';
+        buttonLabel = 'Switch to ${cat.name} (₹${cat.priceRupees})';
       }
     } else {
       buttonLabel = 'Buy for ₹${cat.priceRupees}';
@@ -1033,7 +1043,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                         color: AppTheme.brand,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Text('POPULAR', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 10)),
+                      child: const Text('POPULAR', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700, fontSize: 10)),
                     ),
                   ],
                 ],
@@ -1088,7 +1098,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              onPressed: () => _openPaymentCheckoutSheet(cat),
+              onPressed: (isCurrent && !isExpired) ? null : () => _openPaymentCheckoutSheet(cat),
               child: Text(
                 buttonLabel,
                 style: TextStyle(

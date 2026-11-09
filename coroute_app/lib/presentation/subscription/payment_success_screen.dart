@@ -58,13 +58,13 @@ class PaymentSuccessScreen extends StatelessWidget {
                     width: 76,
                     height: 76,
                     decoration: BoxDecoration(
-                      color: Colors.greenAccent.withValues(alpha: 0.15),
+                      color: AppTheme.success.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.8), width: 2),
+                      border: Border.all(color: AppTheme.success.withValues(alpha: 0.8), width: 2),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.check_circle_rounded,
-                      color: Colors.greenAccent,
+                      color: AppTheme.success,
                       size: 44,
                     ),
                   ),
@@ -76,7 +76,7 @@ class PaymentSuccessScreen extends StatelessWidget {
                   child: Text(
                     'Membership Activated!',
                     textAlign: TextAlign.center,
-                    style: AppText.headline.copyWith(fontSize: 24, fontWeight: FontWeight.w900),
+                    style: AppText.headline.copyWith(fontSize: 24, fontWeight: FontWeight.w700),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -106,7 +106,7 @@ class PaymentSuccessScreen extends StatelessWidget {
                           Expanded(
                             child: Text(
                               membership.name,
-                              style: AppText.title.copyWith(fontSize: 17, fontWeight: FontWeight.w800),
+                              style: AppText.title.copyWith(fontSize: 17, fontWeight: FontWeight.w600),
                             ),
                           ),
                           Container(
@@ -120,7 +120,7 @@ class PaymentSuccessScreen extends StatelessWidget {
                               '${membership.capacity} ${membership.capacity == 1 ? 'Rider' : 'Riders'}',
                               style: TextStyle(
                                 color: AppTheme.brand,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w600,
                                 fontSize: 11,
                               ),
                             ),
@@ -137,7 +137,7 @@ class PaymentSuccessScreen extends StatelessWidget {
                       const SizedBox(height: 8),
                       _infoRow('Valid Until', validUntilDate),
                       const SizedBox(height: 8),
-                      _infoRow('Status', 'Active · Server Verified', valueColor: Colors.greenAccent),
+                      _infoRow('Status', 'Active · Server Verified', valueColor: AppTheme.success),
                     ],
                   ),
                 ),
@@ -202,7 +202,7 @@ class PaymentSuccessScreen extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.black,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w700,
                             fontSize: 15,
                           ),
                         ),
@@ -244,7 +244,7 @@ class PaymentSuccessScreen extends StatelessWidget {
   Widget _featureRow(IconData icon, String text) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: Colors.greenAccent),
+        Icon(icon, size: 18, color: AppTheme.success),
         const SizedBox(width: 10),
         Expanded(
           child: Text(text, style: AppText.body.copyWith(fontSize: 13)),

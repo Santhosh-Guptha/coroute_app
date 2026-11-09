@@ -50,7 +50,7 @@ class MembershipStatusChip extends StatelessWidget {
                   text,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800),
+                  style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ),
               const SizedBox(width: 4),
