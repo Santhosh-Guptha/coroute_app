@@ -684,6 +684,7 @@ class Mirror {
       }
       for (const id of d.unsaved || []) C._setUnsaved(room, id, true);
       for (const id of d.saved || []) C._setUnsaved(room, id, false);
+      this._afterMerge(room);
       if (w && w.type === 'MIC_STATUS' && w.micMuted !== undefined && room.riders.has(w.userId)) room.riders.get(w.userId).micMuted = !!w.micMuted;
     }
     // The same room message for this node's sockets of the room.
@@ -722,6 +723,7 @@ class Mirror {
       if (remote.unsaved && remote.unsaved.length) room.unsaved = new Set(remote.unsaved);
       C.rooms.set(gid, room);
       for (const a of room.alerts.values()) C._indexLiveLink(gid, a);
+      this._afterMerge(room);
       return room;
     }
     const newer = (Number(remote.meta.updatedAt) || 0) > (Number(room.meta.updatedAt) || 0);
@@ -752,7 +754,19 @@ class Mirror {
     }
     const map = room.clientIds || (room.clientIds = new Map());
     for (const [k, at] of remote.cids || []) if (!(map.get(k) >= at)) map.set(k, at);
+    this._afterMerge(room);
     return room;
+  }
+
+  /**
+   * After remote state was merged: pending swap asks follow the replicated meta (they survive a
+   * failover), and the one-LEAD invariant is restored (ConvoyManager.fixDoubleLead).
+   */
+  _afterMerge(room) {
+    const C = this.convoys;
+    if (!room || C.rooms.get(room.groupId) !== room) return;
+    try { if (typeof C._swapsOf === 'function') C._swapsOf(room, now()); } catch (e) { this.log.warn('[mirror] swaps', e.message); }
+    try { if (typeof C.fixDoubleLead === 'function') C.fixDoubleLead(room); } catch (e) { this.log.warn('[mirror] roles', e.message); }
   }
 
   /** Snapshot merge of one rider: telemetry from the fresher copy, membership fields from the newer meta's side. */

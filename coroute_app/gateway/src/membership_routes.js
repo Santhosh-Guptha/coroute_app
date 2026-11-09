@@ -494,6 +494,20 @@ function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
 /**
  * Authenticated membership routes: purchase, invitations, seat management, admin.
  */
+/**
+ * True when the rider is on someone else's active group ride (joined with a code): the host's plan
+ * gives the seats (capacity of 2 or more), the joiner needs no plan of their own.
+ */
+async function inHostedGroupRide(repo, uid, activeTrip) {
+  if (!activeTrip || !activeTrip.groupId || !['PLANNING', 'STARTED', 'PAUSED'].includes(activeTrip.status)) return false;
+  const meta = await repo.getConvoyMeta(activeTrip.groupId).catch(() => null);
+  if (!meta || !['PLANNING', 'STARTED', 'PAUSED'].includes(meta.tripStatus || 'STARTED')) return false;
+  if ((meta.tripOwnerUserId || meta.createdByUserId) === uid) return false;
+  const cap = Number(meta.capacity);
+  // Rides from before capacities were stored are group rides (the server ceiling).
+  return !Number.isFinite(cap) || cap >= 2;
+}
+
 function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) {
   /**
    * GET /api/membership/my
@@ -529,11 +543,13 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         basicNav: true,
         sharedTrip: true,
       };
-    } else if (plan.canHostGroup || !participating.some((m) => m.status === 'ACTIVE' && m.validUntil > Date.now())) {
+    } else if (plan.canHostGroup || !(participating.some((m) => m.status === 'ACTIVE' && m.validUntil > Date.now())
+        || await inHostedGroupRide(repo, uid, activeTrip))) {
       // The rider's own plan: Community (solo), a membership, or a legacy tier until it ends.
       effectiveEntitlements = entitlementsFor(plan, await repo.getMembershipCatalog());
     } else {
-      // A Community rider in someone's group: the group features come with that host's plan.
+      // A Community rider in someone's group (their membership group, or a group ride joined with a
+      // code): the group features come with that host's plan. Joining never needs a plan.
       effectiveEntitlements = {
         ptt: true,
         convoy: true,

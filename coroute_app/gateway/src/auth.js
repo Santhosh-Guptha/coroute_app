@@ -90,6 +90,9 @@ function publicUser(u) {
     createdAt: u.createdAt || 0,
     lastActiveAt: u.lastActiveAt || u.lastLoginAt || 0,
     mustChangePassword: !!u.mustChangePassword,
+    // 3.55 public username and profile picture (src/usernames.js, src/avatars.js): safe to show.
+    username: u.username || '',
+    avatarUrl: require('./avatars').avatarUrlOf(u.avatarId),
   };
 }
 
@@ -110,7 +113,9 @@ function selfUser(u) {
     // Nearby-rider assistance (3.15): owner only, never in publicUser.
     assistHelp: u.assistHelp !== false,
     assistAsk: u.assistAsk !== false,
-    responderMedical: u.responderMedical === true,
+    // Medical info is always shared with responders in an emergency (no switch any more). Kept as a
+    // constant true so older apps that read it show the right state; a stored false is ignored.
+    responderMedical: true,
     netConsentAt: Number(u.netConsentAt) || 0,
     subscriptionTier: u.subscriptionTier || 'community',
     subscriptionValidUntil: Number(u.subscriptionValidUntil) || 0,
@@ -119,13 +124,16 @@ function selfUser(u) {
     subscriptionStatus: effectiveSubscription(u),
     // Lets the app tell a guest session apart (guest ids are ordinary usr_ ids).
     isGuest: u.provider === 'guest',
+    // 3.55: hide my username from the website leaderboards (default shown); username change cooldown.
+    publicLeaderboard: u.publicLeaderboard !== false,
+    usernameChangedAt: Number(u.usernameChangedAt) || 0,
   };
 }
 
 /** Profile keys that change what the ride group's SMS roster holds. */
 const ROSTER_KEYS = ['phone', 'emergencyContact', 'emergencyContactName', 'smsOptOut'];
 /** Profile keys the safety network reads from the live rider record (3.15, server only, no ROSTER_CHANGED). */
-const ASSIST_KEYS = ['assistHelp', 'assistAsk', 'responderMedical'];
+const ASSIST_KEYS = ['assistHelp', 'assistAsk'];
 
 function signToken(user) {
   return jwt.sign(
@@ -266,6 +274,8 @@ class AuthService {
     this.onProfileChanged = null;
     /** async (user) => user|null: set by app.js; rolls an expired paid tier back on login and /me. */
     this.onUserSeen = null;
+    /** async (user, {created, inviteCode}) => user: set by social_routes.attachSocial (username, invite). */
+    this.onUserReady = null;
     this.google = googleVerifier || (config.googleClientIds.length ? new OAuth2Client() : null);
   }
 
@@ -284,7 +294,7 @@ class AuthService {
     }
   }
 
-  async register({ name, email, password, phone, vehicleType, vehicleNo, emergencyContact, emergencyContactName }) {
+  async register({ name, email, password, phone, vehicleType, vehicleNo, emergencyContact, emergencyContactName, inviteCode }) {
     if (!String(name ?? '').trim()) throw new AuthError('Callsign / full name is required.');
     if (!String(email ?? '').trim()) throw new AuthError('A valid email address is required.');
     if (!password || typeof password !== 'string' || password.length < 8) throw new AuthError('Password must be at least 8 characters.');
@@ -318,7 +328,8 @@ class AuthService {
       createdAt: Date.now(),
       lastLoginAt: Date.now(),
     });
-    return { token: signToken(user), user: selfUser(user) };
+    const ready = await this._ready(user, { created: true, inviteCode: typeof inviteCode === 'string' ? inviteCode.slice(0, 20) : null });
+    return { token: signToken(ready), user: selfUser(ready) };
   }
 
   async login({ identifier, password }) {
@@ -335,7 +346,7 @@ class AuthService {
     // Transparent upgrade: a legacy bcrypt hash (or scrypt at older parameters) is replaced now that we
     // know the password. passwordChangedAt is not touched, so no session ends.
     if (check.needsRehash) patch.passwordHash = await this.hasher.hash(password);
-    const updated = await this._seen(await this.repo.updateUser(user.key, patch) || user);
+    const updated = await this._ready(await this._seen(await this.repo.updateUser(user.key, patch) || user));
     return { token: signToken(updated), user: selfUser(updated) };
   }
 
@@ -365,10 +376,11 @@ class AuthService {
         createdAt: Date.now(),
         lastLoginAt: Date.now(),
       });
+      user = await this._ready(user, { created: true });
     } else {
       if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
       if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
-      user = await this._seen(await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user);
+      user = await this._ready(await this._seen(await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user));
     }
     return { token: signToken(user), user: selfUser(user) };
   }
@@ -439,12 +451,15 @@ class AuthService {
       const same = k === 'vehicleNo' || k === 'bloodGroup' ? next.toUpperCase() === current.toUpperCase() : next === current;
       if (!same) changed[k] = patch[k];
     }
-    // On/off switches (smsOptOut, 3.15 assistHelp / assistAsk / responderMedical).
+    // On/off switches (smsOptOut, 3.15 assistHelp / assistAsk; responderMedical is ignored).
     // Type checked even when unchanged, so a wrong client learns about it.
-    const defaults = { smsOptOut: false, assistHelp: true, assistAsk: true, responderMedical: false };
+    // responderMedical (older apps) is still type checked but never stored: medical info always goes to
+    // responders during the rider's emergency, so an old app sending false changes nothing.
+    const defaults = { smsOptOut: false, assistHelp: true, assistAsk: true };
     for (const k of SWITCHES) {
       if (patch[k] === undefined || patch[k] === null) continue;
       if (typeof patch[k] !== 'boolean') throw new ValidationError('This field must be on or off.', { [k]: 'This field must be on or off.' });
+      if (k === 'responderMedical') continue;
       const current = typeof user[k] === 'boolean' ? user[k] : defaults[k];
       if (patch[k] !== current) changed[k] = patch[k];
     }
@@ -527,6 +542,12 @@ class AuthService {
   issueToken(user) { return signToken(user); }
 
   /** Runs the subscription hook (expiry rollback); never fails the caller. */
+  /** 3.55 username allocation / invite hook; never fails the caller. */
+  async _ready(user, ctx = {}) {
+    if (!this.onUserReady || !user) return user;
+    try { return (await this.onUserReady(user, ctx)) || user; } catch { return user; }
+  }
+
   async _seen(user) {
     if (!this.onUserSeen || !user) return user;
     try { return (await this.onUserSeen(user)) || user; } catch { return user; }
@@ -536,7 +557,7 @@ class AuthService {
     let user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
     if (isLegacyGuest(user)) throw new AuthError(MSG_GUEST_RETIRED, 401, 'SESSION_INVALID');
-    user = await this._seen(user);
+    user = await this._ready(await this._seen(user));
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
     // Which app build each rider uses, so the minimum build can be raised safely.

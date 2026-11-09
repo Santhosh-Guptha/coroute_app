@@ -68,7 +68,11 @@ class GuardianService {
     const subject = input.subject || 'PERSONAL';
     const subjects = [];
     if (subject === 'GROUP') {
-      if (member.role !== 'LEAD' && meta.createdByUserId !== userId) throw new GuardianError('Only the lead can share the group.', 403);
+      // Trip owner or a Lead the owner picked (an automatic front rider has no lead rights; 3.55: the
+      // Trip head changes settings only).
+      const manualLead = member.role === 'LEAD' && meta.autoRoles !== true;
+      const owner = (meta.tripOwnerUserId || meta.createdByUserId) === userId || meta.createdByUserId === userId;
+      if (!manualLead && !owner) throw new GuardianError('Only the Trip owner or Lead can share the group.', 403);
       for (const id of Object.keys(meta.members || {}).slice(0, 100)) {
         const m = memberOf(meta, id);
         if (!m) continue;
@@ -347,17 +351,31 @@ function projectPersonal(grant, meta, room, now, arrivedAt = null, signalAhead =
   if (notice) out.signalAhead = { near: String(notice.near || '').slice(0, 60), backAt: notice.backAt, at: notice.at };
   if (alerts.length) {
     out.status = 'EMERGENCY';
-    // Only incident-local facts; no medical data, messages, responder identities or invented ETA.
+    // Only incident-local facts and the rider's medical info (owner rule: always shared with responders,
+    // guardians included, while the alert is open; no consent switch). No messages, responder
+    // identities or invented ETA.
     out.alerts = alerts.slice(0, 5).map((a) => {
       const result = { type: a.source === 'CRASH_AUTO' ? 'POSSIBLE_ACCIDENT' : 'HELP_REQUESTED',
         status: ['ASSISTANCE_REQUESTED', 'CONFIRMED_ACCIDENT', 'RESPONDER_ASSIGNED', 'RESPONDER_ARRIVED'].includes(a.status) ? a.status : 'HELP_REQUESTED',
         reportedAt: Number.isSafeInteger(a.timestamp) && a.timestamp <= now ? a.timestamp : null };
       const incident = positionOf({ lat: a.lat, lng: a.lng, timestamp: a.timestamp }, now);
       if (grant.level !== 'BASIC' && incident) result.position = incident;
+      const medical = guardianMedical(a.medical);
+      if (medical) result.medical = medical;
       return result;
     });
   }
   return out;
 }
 
-module.exports = { GuardianService, GuardianError, projectPersonal };
+/** Allowlisted medical fields of an open alert (strings only, bounded), or null. */
+function guardianMedical(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+  const out = {};
+  for (const k of ['bloodGroup', 'allergies', 'notes']) {
+    if (typeof m[k] === 'string' && m[k].trim()) out[k] = m[k].trim().slice(0, 200);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+module.exports = { GuardianService, GuardianError, projectPersonal, guardianMedical };

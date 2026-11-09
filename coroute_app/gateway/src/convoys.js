@@ -31,6 +31,18 @@ const SWAP_ID = /^SWP-[0-9A-F]{12}$/;
 const SWAP_TTL_MS = 2 * 60000;
 const SWAP_RATE_MAX = 4;
 const SWAP_RATE_WINDOW_MS = 10 * 60000;
+/** 3.55 live bike change (RIDER_VEHICLE): at most one applied update per rider per window. */
+const VEHICLE_RATE_MS = 10000;
+const VEHICLE_MODEL_MAX = 40;
+const VEHICLE_COLOUR_HEX = /^#[0-9A-Fa-f]{6}$/;
+/** A colour name as the garage keeps it ("Kaza Brown", "Gunmetal Grey"): letters first, at most 20 characters. */
+const VEHICLE_COLOUR_NAME = /^\p{L}[\p{L}\p{M}\p{N} .'\-/]{0,19}$/u;
+/** 3.55 bike type (garage bike shape, map marker): one of these ids, '' when unknown (older apps). */
+const VEHICLE_KINDS = new Set(['commuter', 'scooter', 'sport', 'cruiser', 'adventure', 'offroad', 'electric', 'retro']);
+/** 3.55 pillion seat: the rider may decline a new pillion within this window (and remove one any time). */
+const PILLION_DECLINE_MS = 60000;
+const PILLION_RATE_MAX = 6;
+const PILLION_RATE_WINDOW_MS = 10 * 60000;
 const MAX_STOPS = 20;
 const RESPONSE_KINDS = new Set(['GOING', 'WITH_THEM', 'CANCEL']);
 const PRESENCE = new Set(['ONLINE', 'NO_SIGNAL', 'APP_CLOSED']);
@@ -56,7 +68,7 @@ const TRANSITIONS = {
   RESOLVED: EMERGENCY_OPEN, FALSE_ALARM: EMERGENCY_OPEN, CANCELLED: EMERGENCY_OPEN, EXPIRED: EMERGENCY_OPEN,
 };
 /** Rider profile keys the safety network reads from the live rider record (server only). */
-const ASSIST_RIDER_KEYS = ['assistHelp', 'assistAsk', 'responderMedical'];
+const ASSIST_RIDER_KEYS = ['assistHelp', 'assistAsk'];
 
 /** Status of an alert; docs written before 3.15 have none. */
 function statusOf(a) {
@@ -195,6 +207,9 @@ class ConvoyManager extends EventEmitter {
     // (a late JOIN, status call or telemetry for it must not pin it in memory or revive its timers).
     if (meta.tripStatus === 'ENDED') return room;
     this.rooms.set(groupId, room);
+    this.fixDoubleLead(room, { announce: false });
+    // Pending bike / pillion swap asks survive a restart or failover (meta.pendingSwaps).
+    this._swapsOf(room, now());
     // 3.16: live link index from the open alerts (the token itself is never stored, only its hash).
     for (const a of room.alerts.values()) {
       if (!a.resolved && a.liveLink && a.liveLink.hash && !a.liveLink.revokedAt) this.liveLinks.set(a.liveLink.hash, { gid: groupId, alertId: a.alertId });
@@ -467,7 +482,7 @@ class ConvoyManager extends EventEmitter {
     }
     // Removed from the owner's membership group: no new join (a rider already riding is never dropped).
     if (!room.riders.has(user.userId) && room.meta.joinBlocked && room.meta.joinBlocked[user.userId]) {
-      throw new ConvoyError('The trip owner removed you from this group.', 403, 'JOIN_BLOCKED');
+      throw new ConvoyError('The Trip owner removed you from this group.', 403, 'JOIN_BLOCKED');
     }
     // A seat is held from this check until the rider is in, so concurrent joins never overfill the ride.
     const joining = room.joining || (room.joining = new Set());
@@ -484,6 +499,7 @@ class ConvoyManager extends EventEmitter {
       const rider = buildRider(user, { ...(existing || {}), ...clientRiderInput(riderProfile), ...profile, role: existing?.role || 'PACK' }, now());
       // 3.55: a bike swapped in this ride stays swapped when the rider re-joins (the profile is unchanged).
       if (existing?.rideVehicle) Object.assign(rider, existing.rideVehicle, { rideVehicle: existing.rideVehicle });
+      if (existing?.roleAt) rider.roleAt = existing.roleAt;
       room.riders.set(rider.userId, rider);
       const prev = room.meta.members?.[rider.userId];
       const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
@@ -538,6 +554,9 @@ class ConvoyManager extends EventEmitter {
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     if (rider) this._emit(groupId, 'RIDER_LEFT', { userId, name: rider.name });
+    // 3.55 pillion seat: a rider who leaves takes no pillion along (the pillion is shown alone again
+    // and picks another bike); a pillion who leaves frees the seat. Never throws into leave().
+    if (rider) await this._pillionLeft(room, rider).catch((e) => this.log.warn('[convoys] pillion unlink failed', e.message));
     // 3.55 safety review: since 3.55 any rider can hold LEAD. When that rider leaves, the ride must
     // not be left without a lead (incident/BEHIND notify lists, sweeper distress and the riders'
     // "who leads" all read role LEAD): the owner, if still riding, takes the front again. Same rule
@@ -572,6 +591,10 @@ class ConvoyManager extends EventEmitter {
       // Durable, location-free record of who rode together (kept forever).
       room.meta.memberSummary = Object.values(room.meta.members || {});
       room.meta.riderCount = room.meta.memberSummary.length;
+      // Pending swap asks end with the ride.
+      for (const x of (room.swaps || new Map()).values()) clearTimeout(x.timer);
+      if (room.swaps) room.swaps.clear();
+      delete room.meta.pendingSwaps;
     }
     this._touch(room);
     await this.flushRoom(room);
@@ -1073,7 +1096,7 @@ class ConvoyManager extends EventEmitter {
     this._requireMember(room, user);
     const a = typeof alertId === 'string' ? room.alerts.get(alertId) : null;
     if (!a || a.resolved) throw new ConvoyError('That alert is no longer open.', 404, 'ALERT_CLOSED');
-    if (a.userId !== user.userId && !this.isLead(room, user)) throw new ConvoyError('Only the rider or the lead can share a live link.', 403, 'NOT_ALLOWED');
+    if (a.userId !== user.userId && !this.isLead(room, user)) throw new ConvoyError('Only the rider, the Trip owner or Lead can share a live link.', 403, 'NOT_ALLOWED');
     const t = now();
     const cur = a.liveLink;
     if (cur && cur.hash && !cur.revokedAt && cur.expiresAt > t) {
@@ -1101,7 +1124,7 @@ class ConvoyManager extends EventEmitter {
     if (user.role !== 'MASTER_ADMIN') this._requireMember(room, user);
     const a = typeof alertId === 'string' ? room.alerts.get(alertId) : null;
     if (!a) throw new ConvoyError('That alert is no longer open.', 404, 'ALERT_CLOSED');
-    if (a.userId !== user.userId && !this.isLead(room, user)) throw new ConvoyError('Only the rider or the lead can stop a live link.', 403, 'NOT_ALLOWED');
+    if (a.userId !== user.userId && !this.isLead(room, user)) throw new ConvoyError('Only the rider, the Trip owner or Lead can stop a live link.', 403, 'NOT_ALLOWED');
     if (this._revokeLink(groupId, a, now(), user.userId)) {
       await this.repo.updateAlert(groupId, a.alertId, { liveLink: a.liveLink }).catch(() => {});
       if (!a.resolved) this.emitEmergencyUpdate(groupId, a.alertId);
@@ -1231,6 +1254,11 @@ class ConvoyManager extends EventEmitter {
   async applyAutoRoles(groupId, orderedIds) {
     const room = this.rooms.get(groupId);
     if (!room || !room.meta.autoRoles || this.isSoloRide(room) || !Array.isArray(orderedIds) || orderedIds.length < 2) return null;
+    // Single writer: only the node that owns the room (src/mirror.js authoritative) computes automatic
+    // roles. During a two-node split both nodes saw the riders and each picked a lead, which could
+    // briefly show two LEADs. The other node only applies what the owner replicates.
+    if (this.passive(groupId)) return null;
+    this.fixDoubleLead(room);
     const ids = orderedIds.filter((id) => room.riders.has(id));
     if (ids.length < 2) return null;
     const front = ids[0], back = ids[ids.length - 1];
@@ -1246,7 +1274,42 @@ class ConvoyManager extends EventEmitter {
       if ((cur === 'LEAD' && plan.has(front)) || (cur === 'SWEEPER' && plan.has(back))) plan.set(r.userId, 'PACK');
     }
     if (!plan.size) return null;
+    // Replicated with the meta: a node taking the room over keeps the AUTO_ROLE_EVERY_MS spacing.
+    room.meta.autoRolesAt = now();
     return this._commitRoles(room, plan, { userId: 'AUTO', name: 'Auto roles' }, { auto: true, target: front });
+  }
+
+  /**
+   * Invariant: a ride has one LEAD. If a merged or loaded state ever holds two (a two-node split, an
+   * old peer), the rider who became lead first (earlier `roleAt`, then the smaller userId) keeps it
+   * and the others ride in the middle (PACK). Both nodes decide the same from the same state; the
+   * owning node (`announce`, default: when not passive) tells the room with RIDER_UPDATE.
+   * Returns the demoted rider ids.
+   */
+  fixDoubleLead(room, { announce = !this.passive(room.groupId) } = {}) {
+    if (!room || !room.riders) return [];
+    const leads = [...room.riders.values()].filter((r) => this._roleOfRider(room, r) === 'LEAD');
+    if (leads.length < 2) return [];
+    leads.sort((a, b) => (Number(a.roleAt) || 0) - (Number(b.roleAt) || 0) || String(a.userId).localeCompare(String(b.userId)));
+    const demoted = [];
+    for (const r of leads.slice(1)) {
+      // Keeps the rider's roleAt: the fix is not a new role change (both nodes stay identical).
+      const next = { ...r, role: 'PACK' };
+      room.riders.set(r.userId, next);
+      if (room.meta.members?.[r.userId]) room.meta.members[r.userId] = { ...room.meta.members[r.userId], role: 'PACK' };
+      room.dirty.add(r.userId);
+      demoted.push(r.userId);
+    }
+    this.log.warn(`[convoys] two leads in ${room.groupId}: kept ${leads[0].userId}, ${demoted.length} moved to PACK`);
+    if (announce && this.rooms.get(room.groupId) === room) {
+      this._schedulePersist(room);
+      for (const id of demoted) {
+        const r = room.riders.get(id);
+        this.repo.upsertRider(room.groupId, r).catch(() => {});
+        this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(r) });
+      }
+    }
+    return demoted;
   }
 
   /** The riding role of a rider: the owner without a stored role counts as the lead (older rides). */
@@ -1317,7 +1380,8 @@ class ConvoyManager extends EventEmitter {
   }
 
   _applyRole(room, uid, role) {
-    const next = { ...room.riders.get(uid), role };
+    // roleAt: when this rider's role last changed (fixDoubleLead keeps the earlier lead).
+    const next = { ...room.riders.get(uid), role, roleAt: now() };
     room.riders.set(uid, next);
     if (room.meta.members?.[uid]) room.meta.members[uid] = { ...room.meta.members[uid], role };
     return next;
@@ -1486,7 +1550,7 @@ class ConvoyManager extends EventEmitter {
       const cur = room.riders.get(userId);
       const next = {
         ...cur, phone: p.phone, emergencyContact: p.emergencyContact, emergencyContactName: p.emergencyContactName, smsOptOut: p.smsOptOut,
-        assistHelp: p.assistHelp, assistAsk: p.assistAsk, responderMedical: p.responderMedical,
+        assistHelp: p.assistHelp, assistAsk: p.assistAsk,
       };
       room.riders.set(userId, next);
       room.dirty.add(userId);
@@ -1500,12 +1564,169 @@ class ConvoyManager extends EventEmitter {
     return rooms.length;
   }
 
+  // ------------------------------------------------------ 3.55 live bike change
+  /**
+   * RIDER_VEHICLE: the rider picked another garage bike during the ride, so the colour (and model)
+   * the group sees follow at once instead of on the next join. Validated (riderVehicleInput), at
+   * most one per rider per VEHICLE_RATE_MS (409 VEHICLE_RATE: the app keeps the latest and sends it
+   * after the window), and refused for a pillion or a rider whose bike was swapped in this ride (the
+   * swap decides that rider's bike). Applied to this ride's rider record only, never the profile;
+   * the change goes out as RIDER_UPDATE (old apps apply vehicleColor and ignore vehicleModel) and
+   * is in every later snapshot.
+   */
+  async setRiderVehicle(groupId, user, msg) {
+    const room = await this.getRoom(groupId);
+    if (room.meta.tripStatus === 'ENDED') throw new ConvoyError('This ride has ended.', 409, 'TRIP_ENDED');
+    const me = room.riders.get(user.userId);
+    if (!me) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const v = riderVehicleInput(msg);
+    if (me.isCoRiding || String(me.vehicleNo || '').toUpperCase() === 'PILLION') {
+      throw new ConvoyError('A pillion has no bike of their own in this ride.', 409, 'PILLION_RIDER');
+    }
+    if (me.rideVehicle) throw new ConvoyError('You swapped bikes in this ride. The swapped bike stays.', 409, 'BIKE_SWAPPED');
+    const t = now();
+    const log = room.vehicleLog || (room.vehicleLog = new Map());
+    const last = log.get(me.userId) || 0;
+    if (t - last < VEHICLE_RATE_MS) throw new ConvoyError('Bike changed a moment ago. Try again in a few seconds.', 409, 'VEHICLE_RATE');
+    const next = { ...me, ...v };
+    if (next.vehicleColor === me.vehicleColor && (next.vehicleModel || '') === (me.vehicleModel || '')
+      && (next.vehicleKind || '') === (me.vehicleKind || '') && !!next.bikeComplete === !!me.bikeComplete) return publicRider(me);
+    log.set(me.userId, t);
+    room.riders.set(me.userId, next);
+    room.dirty.add(me.userId);
+    this._touch(room);
+    this._schedulePersist(room);
+    this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(next) });
+    return publicRider(next);
+  }
+
+  // ------------------------------------------------------ 3.55 pillion seat
+  /** True when the record is a pillion (seated on a bike, or a pillion account). */
+  _isPillionRecord(r) {
+    return !!r && (!!r.isCoRiding || String(r.vehicleNo || '').toUpperCase() === 'PILLION');
+  }
+
+  /** The rider seated as pillion on `riderId`'s bike, or null. */
+  _pillionOf(room, riderId) {
+    for (const r of room.riders.values()) if (r.isCoRiding && r.ridingWithUserId === riderId) return r;
+    return null;
+  }
+
+  /**
+   * PILLION_SEAT {withUserId}: the caller confirms which bike they ride pillion on. The target must be
+   * a rider of this group ride with a bike of their own (not a pillion), without a pillion, and not the
+   * caller; the caller must not carry a pillion. Applied to this ride's rider records (isCoRiding,
+   * ridingWithUserId, pillionSeatAt; persisted in the room snapshot and replicated like the rest),
+   * broadcast as RIDER_UPDATE + PILLION_SEATED to everyone. The rider may decline within
+   * PILLION_DECLINE_MS (and remove the pillion any time) with PILLION_UNSEAT. Rate limited per rider.
+   */
+  async seatPillion(groupId, user, withUserId) {
+    const room = await this.getRoom(groupId);
+    this._requireGroupRide(room);
+    if (room.meta.tripStatus === 'ENDED') throw new ConvoyError('This ride has ended.', 409, 'TRIP_ENDED');
+    const me = room.riders.get(user.userId);
+    if (!me) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const uid = typeof withUserId === 'string' && withUserId.length <= 64 ? withUserId : '';
+    if (!uid) throw new ConvoyError('Pick the rider whose bike you sit on.', 400, 'BAD_PILLION');
+    if (uid === me.userId) throw new ConvoyError('You cannot ride pillion on your own bike.', 400, 'BAD_PILLION');
+    const target = room.riders.get(uid);
+    if (!target) throw new ConvoyError('That rider is not in this convoy.', 404, 'NOT_MEMBER');
+    if (this._isPillionRecord(target)) throw new ConvoyError('That rider is a pillion and has no bike in this ride.', 409, 'TARGET_PILLION');
+    if (me.isCoRiding && me.ridingWithUserId === uid) {
+      return { riderUserId: uid, declineBy: (me.pillionSeatAt || 0) + PILLION_DECLINE_MS, already: true };
+    }
+    const taken = this._pillionOf(room, uid);
+    if (taken && taken.userId !== me.userId) throw new ConvoyError('That bike already has a pillion.', 409, 'SEAT_TAKEN');
+    if (this._pillionOf(room, me.userId)) throw new ConvoyError('Someone rides pillion on your bike. Remove them first.', 409, 'HAS_PILLION');
+    const t = now();
+    const log = room.pillionLog || (room.pillionLog = new Map());
+    const recent = (log.get(me.userId) || []).filter((x) => t - x < PILLION_RATE_WINDOW_MS);
+    if (recent.length >= PILLION_RATE_MAX) throw new ConvoyError('Too many seat changes. Try again in a few minutes.', 409, 'PILLION_RATE');
+    recent.push(t);
+    log.set(me.userId, recent);
+    // Moving from one bike to another: the first rider is told the seat is free.
+    if (me.isCoRiding && me.ridingWithUserId && room.riders.has(me.ridingWithUserId)) {
+      this._emit(groupId, 'PILLION_UNSEATED', {
+        pillion: this._who(me), rider: this._who(room.riders.get(me.ridingWithUserId)), reason: 'MOVED', byUserId: me.userId,
+      });
+    }
+    const next = { ...me, isCoRiding: true, ridingWithUserId: uid, pillionSeatAt: t };
+    await this._saveRiderNow(room, next);
+    const declineBy = t + PILLION_DECLINE_MS;
+    this._emit(groupId, 'PILLION_SEATED', {
+      pillion: this._who(next),
+      rider: { ...this._who(target), vehicleModel: target.vehicleModel || '', vehicleColor: target.vehicleColor || '', vehicleKind: target.vehicleKind || '' },
+      at: t, declineBy,
+    });
+    this.emit('activity', groupId, { type: 'CORIDE', user: { userId: me.userId, name: me.name || user.name || '' }, withUserId: uid });
+    return { riderUserId: uid, declineBy };
+  }
+
+  /**
+   * PILLION_UNSEAT {userId?}: the pillion gets off (no userId, or their own), or the rider declines
+   * (within PILLION_DECLINE_MS: reason DECLINED) or removes (later: REMOVED) the pillion on their bike.
+   * Never feature-gated (getting off is always allowed). Broadcast as RIDER_UPDATE + PILLION_UNSEATED.
+   */
+  async unseatPillion(groupId, user, pillionUserId) {
+    const room = await this.getRoom(groupId);
+    if (room.meta.tripStatus === 'ENDED') throw new ConvoyError('This ride has ended.', 409, 'TRIP_ENDED');
+    const me = room.riders.get(user.userId);
+    if (!me) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const pid = typeof pillionUserId === 'string' && pillionUserId.length <= 64 && pillionUserId ? pillionUserId : me.userId;
+    const pillion = room.riders.get(pid);
+    if (!pillion || !pillion.isCoRiding || !pillion.ridingWithUserId) {
+      throw new ConvoyError('Nobody rides pillion there now.', 409, 'NOT_SEATED');
+    }
+    let reason;
+    if (pid === me.userId) reason = 'PILLION_LEFT';
+    else if (pillion.ridingWithUserId === me.userId) reason = now() - (pillion.pillionSeatAt || 0) <= PILLION_DECLINE_MS ? 'DECLINED' : 'REMOVED';
+    else throw new ConvoyError('Only the rider of that bike can remove their pillion.', 403, 'NOT_YOUR_PILLION');
+    await this._unlinkPillion(room, pillion, reason, me.userId);
+    return { reason };
+  }
+
+  /** Clears one pillion link and tells everyone (RIDER_UPDATE + PILLION_UNSEATED). */
+  async _unlinkPillion(room, pillion, reason, byUserId) {
+    const riderRec = room.riders.get(pillion.ridingWithUserId);
+    const riderWho = riderRec ? this._who(riderRec) : { userId: pillion.ridingWithUserId, name: '' };
+    const next = { ...pillion, isCoRiding: false, ridingWithUserId: '', pillionSeatAt: 0 };
+    await this._saveRiderNow(room, next);
+    this._emit(room.groupId, 'PILLION_UNSEATED', { pillion: this._who(next), rider: riderWho, reason, byUserId });
+    this.emit('activity', room.groupId, { type: 'CORIDE', user: { userId: next.userId, name: next.name || '' }, withUserId: '' });
+  }
+
+  /** After `left` left the room: their pillion is unlinked (RIDER_LEFT), or their seat is freed (PILLION_LEFT). */
+  async _pillionLeft(room, left) {
+    for (const r of [...room.riders.values()]) {
+      if (r.isCoRiding && r.ridingWithUserId === left.userId) await this._unlinkPillion(room, r, 'RIDER_LEFT', left.userId);
+    }
+    if (left.isCoRiding && left.ridingWithUserId && room.riders.has(left.ridingWithUserId)) {
+      this._emit(room.groupId, 'PILLION_UNSEATED', {
+        pillion: this._who(left), rider: this._who(room.riders.get(left.ridingWithUserId)), reason: 'PILLION_LEFT', byUserId: left.userId,
+      });
+    }
+  }
+
+  _who(r) { return { userId: r.userId, name: r.name || '' }; }
+
+  /** A rider record changed by the server: memory, its own document now, the snapshot soon, RIDER_UPDATE. */
+  async _saveRiderNow(room, next) {
+    room.riders.set(next.userId, next);
+    room.dirty.add(next.userId);
+    this._touch(room);
+    this._schedulePersist(room);
+    await this.repo.upsertRider(room.groupId, next).catch((e) => this.log.warn('[convoys] rider save failed', e.message));
+    this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(next) });
+  }
+
   // ------------------------------------------------------ 3.55 bike / pillion swap
   /**
    * Two riders of a group ride swap their bikes (BIKES), or a rider and their pillion change places
    * (PILLION). The requester asks, only the other rider answers, within SWAP_TTL_MS. Pending asks
-   * live in room memory only (a gateway restart or failover drops them: the requester simply asks
-   * again). Applied to the rider records of this ride, never to the account profile; `rideVehicle`
+   * are kept in the convoy meta (`pendingSwaps`, server only, never in a snapshot): saved with the
+   * meta and replicated to the peer gateway like the rest of the room, so a restart or failover keeps
+   * them until they expire (the node that owns the room tells the requester). Applied to the rider
+   * records of this ride, never to the account profile; `rideVehicle`
    * (server only) keeps the swapped bike over the profile when the rider re-joins this ride.
    * Personal messages (SWAP_ASK to the target, SWAP_RESULT to the requester) go out as the
    * 'userMessage' event (the hub sends them to that rider's sockets, through the peer if needed);
@@ -1545,9 +1766,9 @@ class ConvoyManager extends EventEmitter {
       requestId, kind: k, pair, fromUserId: me.userId, fromName: me.name || user.name || '', toUserId: other.userId,
       toName: other.name || '', at: t, expiresAt: t + SWAP_TTL_MS, timer: null,
     };
-    pending.timer = setTimeout(() => this._expireSwap(groupId, requestId), SWAP_TTL_MS);
-    if (pending.timer.unref) pending.timer.unref();
     swaps.set(requestId, pending);
+    this._swapTimer(room, pending, t);
+    await this._storeSwaps(room);
     this.emit('userMessage', groupId, other.userId, {
       type: 'SWAP_ASK', groupId, requestId, fromUserId: pending.fromUserId, fromName: pending.fromName, kind: k, expiresAt: pending.expiresAt,
     });
@@ -1564,6 +1785,7 @@ class ConvoyManager extends EventEmitter {
     if (pending.toUserId !== user.userId) throw new ConvoyError('Only the rider who was asked can answer.', 403, 'NOT_SWAP_TARGET');
     swaps.delete(id);
     clearTimeout(pending.timer);
+    await this._storeSwaps(room);
     if (accept !== true) {
       this.emit('userMessage', groupId, pending.fromUserId, { type: 'SWAP_RESULT', groupId, requestId: id, accepted: false, kind: pending.kind, byUserId: user.userId, byName: pending.toName });
       return { accepted: false };
@@ -1618,20 +1840,69 @@ class ConvoyManager extends EventEmitter {
     return (!!a.isCoRiding && a.ridingWithUserId === b.userId) || (!!b.isCoRiding && b.ridingWithUserId === a.userId);
   }
 
-  /** The room's pending swap asks, expired ones dropped (their requesters told, as by the timer). */
+  /**
+   * The room's pending swap asks, following the stored / replicated `meta.pendingSwaps` (asks made or
+   * answered on the peer, or before a restart), expired ones dropped (their requesters told, as by
+   * the timer). Every ask has a timer on this node.
+   */
   _swapsOf(room, t) {
     const swaps = room.swaps || (room.swaps = new Map());
+    const stored = room.meta.pendingSwaps && typeof room.meta.pendingSwaps === 'object' ? room.meta.pendingSwaps : {};
+    if (room.meta.tripStatus === 'ENDED') {
+      for (const x of swaps.values()) clearTimeout(x.timer);
+      swaps.clear();
+      return swaps;
+    }
+    for (const [id, x] of swaps) if (!stored[id]) { clearTimeout(x.timer); swaps.delete(id); }
+    for (const [id, x] of Object.entries(stored)) {
+      if (!SWAP_ID.test(id) || !x || typeof x !== 'object' || !Number.isFinite(x.expiresAt)) continue;
+      if (!swaps.has(id)) swaps.set(id, { ...x, requestId: id, timer: null });
+      this._swapTimer(room, swaps.get(id), t);
+    }
     for (const [id, x] of swaps) if (x.expiresAt <= t) this._expireSwap(room.groupId, id);
     return swaps;
   }
 
-  /** No answer in time: the requester hears it was not accepted. */
+  /** Starts the expiry timer of an ask on this node (once). */
+  _swapTimer(room, pending, t, delay = null) {
+    if (pending.timer) return;
+    const ms = delay ?? Math.max(0, pending.expiresAt - t);
+    pending.timer = setTimeout(() => { pending.timer = null; this._expireSwap(room.groupId, pending.requestId); }, ms);
+    if (pending.timer.unref) pending.timer.unref();
+  }
+
+  /**
+   * Writes the room's pending asks into the meta at once (plain objects, no timers), then saves the
+   * meta and replicates it to the peer. A failed save is logged: the ask still works on this node.
+   */
+  async _storeSwaps(room) {
+    const plain = {};
+    for (const [id, x] of room.swaps || []) {
+      const { timer, ...rest } = x;
+      plain[id] = rest;
+    }
+    if (Object.keys(plain).length) room.meta.pendingSwaps = plain; else delete room.meta.pendingSwaps;
+    this._touch(room);
+    if (this.mirror) this.mirror.replicate(room.groupId, { meta: room.meta });
+    await this.repo.saveConvoyMeta(room.meta).catch((e) => this.log.warn('[convoys] swap save failed', e.message));
+  }
+
+  /**
+   * No answer in time: the requester hears it was not accepted. Told by the node that owns the room;
+   * the other node keeps the ask until the owner's change arrives (or takes over after a failover).
+   */
   _expireSwap(groupId, requestId) {
     const room = this.rooms.get(groupId);
     const pending = room?.swaps?.get(requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
+    pending.timer = null;
+    if (this.passive(groupId) && now() - pending.expiresAt < SWAP_TTL_MS) {
+      this._swapTimer(room, pending, now(), 5000);
+      return;
+    }
     room.swaps.delete(requestId);
+    this._storeSwaps(room).catch(() => {});
     this.emit('userMessage', groupId, pending.fromUserId, { type: 'SWAP_RESULT', groupId, requestId, accepted: false, kind: pending.kind, expired: true });
   }
 
@@ -1777,14 +2048,45 @@ class ConvoyManager extends EventEmitter {
     return { allReachedNow, count: everyone.length };
   }
 
+  /**
+   * Lead rights (pause / resume, riding roles, stops and route, regroup, buddy pairs, live links of
+   * others, hazard broadcast): the Trip owner, a platform master admin, or a Lead the owner picked.
+   * 3.55 (owner decision, Nov 9): the Trip head is NOT here. A trip head who also rides as a picked
+   * Lead keeps these rights by that riding role. With automatic roles on, the riding LEAD is simply
+   * whoever is at the front, so it does not carry the lead's rights.
+   */
   isLead(room, user) {
     const rider = room.riders.get(user.userId);
     const isOwner = room.meta.tripOwnerUserId === user.userId || room.meta.createdByUserId === user.userId;
-    const isHead = room.meta.tripHeadUserId === user.userId;
-    // 3.55: with automatic roles on, the riding LEAD is simply whoever is at the front, so it does
-    // not carry the lead's rights (route, end ride, roles); the owner and the trip head keep them.
     const ridingLead = rider?.role === 'LEAD' && room.meta.autoRoles !== true;
-    return user.role === 'MASTER_ADMIN' || isOwner || isHead || ridingLead;
+    return user.role === 'MASTER_ADMIN' || isOwner || ridingLead;
+  }
+
+  /** The Trip head of this trip (secondary owner chosen by the Trip owner). */
+  isTripHead(room, user) {
+    return !!room?.meta?.tripHeadUserId && !!user && room.meta.tripHeadUserId === user.userId;
+  }
+
+  /**
+   * Group settings (CONFIG: speed limits, thresholds, voice, visibility, feature policy, public ride,
+   * automatic roles): everyone with lead rights, plus the Trip head. 3.55 owner decision: changing
+   * the trip's settings is the only extra power of the Trip head.
+   */
+  canChangeSettings(room, user) {
+    if (!room || !user) return false;
+    return this.isLead(room, user) || this.isTripHead(room, user);
+  }
+
+  /**
+   * Management rights of this trip (end the trip, remove riders): the Trip owner (creator) and
+   * platform admins (ADMIN, MASTER_ADMIN). 3.55 owner decision: the Trip head can NOT end the trip
+   * or remove riders; choosing the Trip head stays with the Trip owner. Riding roles never give these.
+   */
+  canManage(room, user) {
+    if (!room || !user) return false;
+    const m = room.meta;
+    return user.role === 'ADMIN' || user.role === 'MASTER_ADMIN'
+      || (m.tripOwnerUserId || m.createdByUserId) === user.userId || m.createdByUserId === user.userId;
   }
 
   _requireMember(room, user) {
@@ -1793,7 +2095,7 @@ class ConvoyManager extends EventEmitter {
 
   _requireLead(room, user) {
     this._requireMember(room, user);
-    if (!this.isLead(room, user)) throw new ConvoyError('Only the convoy lead can change the route.', 403);
+    if (!this.isLead(room, user)) throw new ConvoyError('Only the Trip owner or Lead can do this.', 403, 'NOT_LEAD');
   }
 
   async _saveStops(room, { route = true } = {}) {
@@ -1973,9 +2275,11 @@ class ConvoyManager extends EventEmitter {
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     this._requireGroupRide(room);
     const rider = room.riders.get(user.userId);
-    const isLeadOrSweeper = rider.role === 'LEAD' || rider.role === 'SWEEPER' || room.meta.createdByUserId === user.userId || user.role === 'MASTER_ADMIN';
+    // Trip owner, a Lead the owner picked (isLead: never an automatic front rider), or the sweeper.
+    // 3.55: not the Trip head as such (settings only), unless they ride as that Lead or sweeper.
+    const isLeadOrSweeper = this.isLead(room, user) || rider.role === 'SWEEPER';
     if (!isLeadOrSweeper) {
-      throw new ConvoyError('Only the lead or sweeper can designate a regroup point.', 403, 'NOT_AUTHORIZED');
+      throw new ConvoyError('Only the Trip owner, Lead or sweeper can set a regroup point.', 403, 'NOT_AUTHORIZED');
     }
     const lat = num(payload.lat);
     const lng = num(payload.lng);
@@ -2052,8 +2356,10 @@ class ConvoyManager extends EventEmitter {
     const room = await this.getRoom(groupId);
     const rider = room.riders.get(user.userId);
     if (!rider) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
-    if (rider.role !== 'LEAD' && room.meta.createdByUserId !== user.userId && user.role !== 'MASTER_ADMIN') {
-      throw new ConvoyError('Only the convoy lead can change settings.', 403);
+    // 3.55: the Trip owner, a lead the owner picked (never a front rider chosen by automatic roles)
+    // and the Trip head (owner decision: the trip head can change the trip's settings, nothing more).
+    if (!this.canChangeSettings(room, user)) {
+      throw new ConvoyError('Only the Trip owner, Trip head or Lead can change group settings.', 403, 'NOT_LEAD');
     }
     const updated = structuredClone(room.meta);
     let nextPolicy;
@@ -2100,6 +2406,10 @@ class ConvoyManager extends EventEmitter {
       capacity: this._storedCapacity(room.meta),
       capacityPlan: room.meta.capacityPlan || null,
       soloRide: this.isSoloRide(room),
+      // 3.55 fix: every group setting rides in CONFIG, so one CONFIG brings a rider fully up to date
+      // (automatic roles decide whether a front rider has lead rights; before it came only in
+      // AUTO_ROLES and a missed one stayed wrong until the next full snapshot).
+      autoRoles: room.meta.autoRoles === true,
     };
   }
 
@@ -2175,30 +2485,17 @@ class ConvoyManager extends EventEmitter {
   async setTripHead(groupId, user, targetUserId) {
     const room = await this.getRoom(groupId);
     const isOwner = (room.meta.tripOwnerUserId || room.meta.createdByUserId) === user.userId || user.role === 'ADMIN' || user.role === 'MASTER_ADMIN';
-    if (!isOwner) throw new ConvoyError('Only the Trip Owner can assign the Trip Head.', 403, 'OWNER_ONLY');
+    if (!isOwner) throw new ConvoyError('Only the Trip owner can choose the Trip head.', 403, 'OWNER_ONLY');
 
     if (!targetUserId || !room.riders.has(targetUserId)) {
       throw new ConvoyError('Target rider is not in this convoy.', 404, 'NOT_MEMBER');
     }
 
-    const currentHeadId = room.meta.tripHeadUserId;
-    if (currentHeadId && currentHeadId !== targetUserId && room.riders.has(currentHeadId)) {
-      const oldHead = room.riders.get(currentHeadId);
-      if (oldHead && oldHead.role === 'LEAD') {
-        oldHead.role = 'PACK';
-        await this.repo.upsertRider(groupId, oldHead);
-        this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(oldHead) });
-      }
-    }
-
+    // 3.55 (owner decision): the Trip head can change the trip's settings only. Choosing a trip head
+    // no longer moves the riding roles; the owner picks a Lead separately (Riding role), and a trip
+    // head who rides as that Lead has the Lead's rights by that role.
     room.meta.tripHeadUserId = targetUserId;
     const newHead = room.riders.get(targetUserId);
-    newHead.role = 'LEAD';
-    room.dirty.add(targetUserId);
-    if (currentHeadId) room.dirty.add(currentHeadId);
-    this._schedulePersist(room);
-    await this.repo.upsertRider(groupId, newHead);
-    this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(newHead) });
 
     await this.repo.setActiveTrip(targetUserId, { groupId, role: 'HEAD', status: room.meta.tripStatus || 'STARTED' });
     this._touch(room);
@@ -2209,26 +2506,21 @@ class ConvoyManager extends EventEmitter {
 
   async removeRider(groupId, user, targetUserId) {
     const room = await this.getRoom(groupId);
-    const isOwner = (room.meta.tripOwnerUserId || room.meta.createdByUserId) === user.userId || user.role === 'ADMIN' || user.role === 'MASTER_ADMIN';
-    if (!isOwner) throw new ConvoyError('Only the Trip Owner can remove riders.', 403, 'OWNER_ONLY');
+    // Trip owner (and platform admins) only: the Trip head can change settings, not remove riders.
+    if (!this.canManage(room, user)) throw new ConvoyError('Only the Trip owner can remove riders.', 403, 'OWNER_ONLY');
 
     const ownerId = room.meta.tripOwnerUserId || room.meta.createdByUserId;
     if (targetUserId === ownerId) {
-      throw new ConvoyError('Trip Owner cannot be removed. End the trip instead.', 400, 'CANNOT_REMOVE_OWNER');
+      throw new ConvoyError('The Trip owner cannot be removed. End the trip instead.', 400, 'CANNOT_REMOVE_OWNER');
     }
 
     if (!room.riders.has(targetUserId)) {
       throw new ConvoyError('Rider is not in this convoy.', 404, 'NOT_MEMBER');
     }
 
-    if (room.meta.tripHeadUserId === targetUserId) {
-      room.meta.tripHeadUserId = ownerId;
-      if (room.riders.has(ownerId)) {
-        const ownerRider = room.riders.get(ownerId);
-        ownerRider.role = 'LEAD';
-        await this.repo.upsertRider(groupId, ownerRider);
-      }
-    }
+    // The trip head role goes back to the owner. Riding roles are not touched here: leave() hands
+    // the LEAD back to the owner when the removed rider was the Lead (never two LEADs).
+    if (room.meta.tripHeadUserId === targetUserId) room.meta.tripHeadUserId = ownerId;
 
     await this.leave(groupId, targetUserId);
     return { ok: true, removedUserId: targetUserId };
@@ -2351,7 +2643,6 @@ function profileOf(u) {
     // 3.15 nearby assistance, server only (never in publicRider).
     assistHelp: u.assistHelp !== false,
     assistAsk: u.assistAsk !== false,
-    responderMedical: u.responderMedical === true,
   };
 }
 
@@ -2360,7 +2651,6 @@ function ownerInfo(u) {
   if (!u) return null;
   return {
     assistAsk: typeof u.assistAsk === 'boolean' ? u.assistAsk : undefined,
-    responderMedical: u.responderMedical === true,
     falseAlarmAt: Array.isArray(u.falseAlarmAt) ? u.falseAlarmAt.filter(Number.isFinite) : [],
   };
 }
@@ -2389,6 +2679,50 @@ function routeIndexOf(meta, lat, lng) {
 function clientRiderInput(p) {
   const out = sanitizeTelemetry({ lat: p?.lat, lng: p?.lng, heading: p?.heading, batteryLevel: p?.batteryLevel, isCharging: p?.isCharging });
   if (p && p.vehicleColor !== undefined && p.vehicleColor !== null) out.vehicleColor = String(p.vehicleColor).slice(0, 20);
+  // 3.55: the garage bike's model, when a newer app sends it (anything invalid is simply dropped).
+  if (p && typeof p.vehicleModel === 'string') {
+    const m = cleanVehicleModel(p.vehicleModel);
+    if (m !== null) out.vehicleModel = m;
+  }
+  // 3.55 bike type and "bike details complete" (the new app enforces the details; older apps send
+  // neither and are never refused, the rider is only marked incomplete).
+  if (p && typeof p.vehicleKind === 'string' && VEHICLE_KINDS.has(p.vehicleKind)) out.vehicleKind = p.vehicleKind;
+  if (p && typeof p.bikeComplete === 'boolean') out.bikeComplete = p.bikeComplete;
+  return out;
+}
+
+/** Control and direction-override characters out, spaces collapsed; null when longer than VEHICLE_MODEL_MAX. */
+function cleanVehicleModel(raw) {
+  const m = String(raw).replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ').replace(/\s+/g, ' ').trim();
+  return m.length <= VEHICLE_MODEL_MAX ? m : null;
+}
+
+/**
+ * 3.55 RIDER_VEHICLE body: {vehicleColor?, vehicleModel?}, at least one. The colour is a name as the
+ * garage keeps it (letters first, at most 20 characters) or #RRGGBB, '' for "no colour" (shown as the
+ * default); the model is plain text of at most 40 characters. Anything else is 400 BAD_VEHICLE.
+ */
+function riderVehicleInput(msg) {
+  const out = {};
+  const bad = (m) => new ConvoyError(m, 400, 'BAD_VEHICLE');
+  if (msg && msg.vehicleColor !== undefined && msg.vehicleColor !== null) {
+    if (typeof msg.vehicleColor !== 'string') throw bad('Bike colour must be text.');
+    const c = msg.vehicleColor.replace(/\s+/g, ' ').trim();
+    if (c && !VEHICLE_COLOUR_HEX.test(c) && !VEHICLE_COLOUR_NAME.test(c)) throw bad('Bike colour must be a colour name or #RRGGBB.');
+    out.vehicleColor = VEHICLE_COLOUR_HEX.test(c) ? c.toUpperCase() : c;
+  }
+  if (msg && msg.vehicleModel !== undefined && msg.vehicleModel !== null) {
+    if (typeof msg.vehicleModel !== 'string') throw bad('Bike model must be text.');
+    const m = cleanVehicleModel(msg.vehicleModel);
+    if (m === null) throw bad(`Bike model can be at most ${VEHICLE_MODEL_MAX} characters.`);
+    out.vehicleModel = m;
+  }
+  if (msg && msg.vehicleKind !== undefined && msg.vehicleKind !== null) {
+    if (typeof msg.vehicleKind !== 'string' || (msg.vehicleKind !== '' && !VEHICLE_KINDS.has(msg.vehicleKind))) throw bad('Unknown bike type.');
+    out.vehicleKind = msg.vehicleKind;
+  }
+  if (msg && typeof msg.bikeComplete === 'boolean' && Object.keys(out).length) out.bikeComplete = msg.bikeComplete;
+  if (!Object.keys(out).length) throw bad('Send the bike colour or model.');
   return out;
 }
 
@@ -2405,6 +2739,9 @@ function publicRider(r) {
   // Everything the convoy-mates need; nothing they don't.
   return {
     userId: r.userId, name: r.name, vehicleType: r.vehicleType || 'Motorcycle', vehicleColor: r.vehicleColor || 'Black',
+    vehicleModel: r.vehicleModel || '', // 3.55: garage bike model ('' when unknown; old apps ignore it)
+    // 3.55 bike type (map marker shape) and complete bike details; pillion seat time (decline window).
+    vehicleKind: r.vehicleKind || '', bikeComplete: r.bikeComplete === true, pillionSeatAt: r.isCoRiding ? (r.pillionSeatAt || 0) : 0,
     lat: r.lat || 0, lng: r.lng || 0, speedKmh: r.speedKmh || 0, heading: r.heading || 0,
     batteryLevel: r.batteryLevel ?? 100, isCharging: !!r.isCharging, role: r.role || 'PACK',
     statusReason: r.statusReason || '', statusMessage: r.statusMessage || '', lastSeenEpochMs: r.lastSeenEpochMs || 0,
@@ -2432,7 +2769,6 @@ function buildRider(user, p, t) {
     smsOptOut: !!p.smsOptOut,
     assistHelp: p.assistHelp !== false,
     assistAsk: p.assistAsk !== false,
-    responderMedical: p.responderMedical === true,
   };
 }
 
@@ -2520,5 +2856,6 @@ function sanitizeBreadcrumbs(list) {
 module.exports = {
   ConvoyManager, ConvoyError, publicRider, publicAlert, sanitizeTelemetry, TELEMETRY_FIELDS, WAIT_MESSAGE, LIVE_STATUSES,
   statusOf, sourceOf, severityOf, falseAlarmCount, ownerInfo, EMERGENCY_OPEN, EMERGENCY_TERMINAL, EMERGENCY_SOURCES,
-  townLimit, sha256,
+  townLimit, sha256, riderVehicleInput, VEHICLE_RATE_MS,
+  VEHICLE_KINDS, PILLION_DECLINE_MS, PILLION_RATE_MAX, PILLION_RATE_WINDOW_MS,
 };

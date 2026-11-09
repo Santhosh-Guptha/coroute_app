@@ -37,6 +37,7 @@ const { haversine, medianCentre } = require('./geo_math');
 const { angleDiff, crossAlongHeading, projectNearest, RouteIndexCache, gridSize } = require('./net_geo');
 const { ConvoyError } = require('./convoys');
 const { publicRideOf, radiusOf, DEFAULT_RADIUS_KM } = require('./public_ride_settings');
+const { cleanMessage, validateWarnMessage, MESSAGE_MAX, DEFAULT_MESSAGE } = require('./admin_warnings');
 
 const CAP = 'pubride1';
 const COLL = 'public_ride';
@@ -942,6 +943,8 @@ class PublicRides {
     const now = this.clock();
     const next = { ...r.value, status };
     if (action) Object.assign(next, { action, actionAt: now, actionBy: String(by || '').slice(0, 120), ...(action === 'SUSPEND' ? { actionDays: Math.max(0, Math.floor(Number(days) || 0)) } : {}) });
+    // The admin record keeps the text the rider was sent (admins only; plain text).
+    if (action === 'WARN') next.warnMessage = cleanMessage(message) || DEFAULT_MESSAGE;
     await this.soda.replace(COLL, r.key, next);
     if (action === 'WARN' && r.value.reportedId) {
       // 3.55: the warning is also delivered to the rider (src/admin_warnings.js, switch adminWarnings).
@@ -1049,8 +1052,15 @@ function publicRideAdminRouter(publicRides) {
     const action = req.body?.action === undefined ? undefined : String(req.body.action);
     if (action !== undefined && !REPORT_ACTIONS.has(action)) return res.status(400).json({ error: 'Unknown action.' });
     const by = req.user ? (req.user.email || req.user.userId || '') : '';
-    // 3.55: `message` (plain text, optional) goes to the rider with a WARN (src/admin_warnings.js).
-    const message = typeof req.body?.message === 'string' ? req.body.message : '';
+    // `message`: the admin's typed warning, sent to the rider with a WARN (src/admin_warnings.js).
+    // When sent it is required (non-empty after trimming / cleaning) and at most 280 characters;
+    // an older console that sends no `message` still delivers the default guidelines line.
+    let message = '';
+    if (action === 'WARN' && req.body?.message !== undefined && req.body?.message !== null) {
+      const v = validateWarnMessage(req.body.message);
+      if (!v.ok) return res.status(400).json({ error: v.error, code: v.code, max: MESSAGE_MAX });
+      message = v.message;
+    }
     const ok = await publicRides.setReportStatus(String(req.params.reportId || ''), String(req.body?.status || ''), { action, by, byUserId: req.user?.userId || null, days: req.body?.days, message });
     res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Report not found.' });
   }));

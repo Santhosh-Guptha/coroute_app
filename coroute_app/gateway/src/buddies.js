@@ -156,8 +156,9 @@ class BuddyService {
       const me = room.riders.get(user.userId);
       if (!me) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
       if (room.meta.tripStatus === 'ENDED') throw new ConvoyError('This ride has ended.', 409, 'TRIP_ENDED');
-      const lead = me.role === 'LEAD' || room.meta.createdByUserId === user.userId || user.role === 'MASTER_ADMIN';
-      if (!lead) throw new ConvoyError('Only the lead can assign buddies.', 403, 'NOT_AUTHORIZED');
+      // Trip owner or a Lead the owner picked (never an automatic front rider; not the Trip head as such).
+      const lead = this.convoys.isLead(room, user);
+      if (!lead) throw new ConvoyError('Only the Trip owner or Lead can assign buddies.', 403, 'NOT_AUTHORIZED');
       if (!isLargeRide(this.convoys, room)) throw new ConvoyError('Buddy pairs are for large groups (7 riders or more).', 403, 'PLAN_REQUIRED');
       if (room.riders.size < 2) throw new ConvoyError('Buddy pairs need at least two riders.', 409, 'TOO_FEW_RIDERS');
       const buddies = assignBuddies(groupId, [...room.riders.keys()]);

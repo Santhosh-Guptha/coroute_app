@@ -17,6 +17,11 @@
 (coroute_tls) {
 	tls {
 		dns duckdns {env.DUCKDNS_TOKEN}
+		# coroute.devmonks.space: its ACME challenge is delegated to DuckDNS with the DNS record
+		#   _acme-challenge.coroute.devmonks.space. CNAME _acme-challenge.coroute.duckdns.org.
+		# so the same token issues both certificates (no new secret; docs/DOMAIN_MIGRATION_devmonks.md).
+		# For coroute.duckdns.org this is its own challenge name, so nothing changes there.
+		dns_challenge_override_domain _acme-challenge.coroute.duckdns.org
 		resolvers 1.1.1.1 8.8.8.8
 		protocols tls1.2 tls1.3
 	}
@@ -28,16 +33,29 @@
 	# same values, applied only where a response lacks them (static files, proxy errors).
 	header {
 		defer
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		?X-Content-Type-Options nosniff
 		?X-Frame-Options DENY
 		?Referrer-Policy no-referrer
 		-Server
 		-X-Powered-By
 	}
+	# HSTS: one year on the DuckDNS name (as before). The new domain starts at 5 minutes; raise it to
+	# "max-age=31536000" once https://coroute.devmonks.space is verified (docs/DOMAIN_MIGRATION_devmonks.md
+	# step 4). Never set HSTS with includeSubDomains on devmonks.space itself (other sites live there).
+	@coroute_new_domain host coroute.devmonks.space
+	@coroute_old_domain not host coroute.devmonks.space
+	header @coroute_new_domain {
+		defer
+		Strict-Transport-Security "max-age=300"
+	}
+	header @coroute_old_domain {
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
 }
 
-coroute.duckdns.org {
+# Both names during the domain move: installed apps have coroute.duckdns.org built in (keep it >= 6 months).
+coroute.devmonks.space, coroute.duckdns.org {
 	import coroute_tls
 	import coroute_common
 

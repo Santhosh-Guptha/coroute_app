@@ -43,6 +43,7 @@ const { EmergencySmsGateway } = require('./emergency_sms_gateway');
 const { JobLease } = require('./job_lease');
 const { Mirror } = require('./mirror');
 const { FeatureFlags } = require('./feature_flags');
+const { siteOriginsOf, legacyHostRedirect } = require('./domains');
 // Encrypted Object Storage backups (src/backups.js -> backup_jobs.js): startBackupJobs({ lease, repo, soda, logger })
 // registers 'backup-critical' and 'backup-full' on the job lease. Optional so a build without it still starts.
 const backupModule = (() => {
@@ -57,7 +58,7 @@ function createSoda() {
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts } = {}) {
+async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport } = {}) {
   const repo = new Repo(soda);
   const nodeName = config.nodeName || process.env.NODE_NAME || require('os').hostname();
   // Scheduled jobs run on exactly one node of a two-VM deployment (src/job_lease.js, GATEWAY_ROLE).
@@ -133,6 +134,12 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   new GuardianArrival({ convoys, repo, logger }).attach();
   convoys.signalAhead = new SignalAhead({ convoys, logger });
   convoys.on('roomEnded', (gid) => convoys.signalAhead.onRoomEnded(gid));
+  // 3.55 rider score + public leaderboard (src/rider_score.js, src/leaderboard.js): rides are recorded
+  // when a trip report is finished (TimelineEngine.finishTrip -> convoys.riderScore).
+  const riderScore = new (require('./rider_score').RiderScoreService)({ soda, repo, flagsOf: () => featureFlags, logger });
+  convoys.riderScore = riderScore;
+  if (migrate) await riderScore.init().catch((e) => logger.warn(`[rider-score] collection setup failed: ${e.message}`));
+  const leaderboard = new (require('./leaderboard').Leaderboard)({ soda, repo, riderScore, flagsOf: () => featureFlags });
   network.publicRides = publicRides;
 
   const app = express();
@@ -165,7 +172,11 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(self "https://checkout.razorpay.com" "https://api.razorpay.com")');
     next();
   });
-  app.use(cors(config.corsOrigins.length ? { origin: config.corsOrigins } : { origin: false }));
+  // CORS_ORIGINS, when set, always includes every site origin (PUBLIC_ORIGIN and the legacy hosts).
+  const corsOrigins = config.corsOrigins.length ? [...new Set([...config.corsOrigins, ...siteOriginsOf(config)])] : [];
+  app.use(cors(corsOrigins.length ? { origin: corsOrigins } : { origin: false }));
+  // REDIRECT_LEGACY_HOST=true: website pages on the old host -> PUBLIC_ORIGIN (301). Never /api, /ws, /.well-known.
+  app.use(legacyHostRedirect(config));
   // The Razorpay webhook is signed over the exact bytes it sends: keep them raw, and small (1 MB).
   app.use('/api/subscription/webhook', express.raw({ type: () => true, limit: '1mb' }));
   app.use('/api/membership/webhook', express.raw({ type: () => true, limit: '1mb' }));
@@ -179,6 +190,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   publicRides.attach(hub);
   // 3.55 platform: a report's WARN reaches the rider (stored until acknowledged, pushed when online).
   publicRides.adminWarnings = new AdminWarnings({ repo, hub, audit, flagsOf: () => featureFlags, logger });
+  // 3.55 push notifications (src/push.js): FCM HTTP v1, off unless FCM_SERVICE_ACCOUNT_JSON / _FILE is set.
+  // One service per gateway: hub.push, convoys.push, app.locals.push (push.notifyUsers(...), never throws).
+  const push = require('./push').attachPush({ app, repo, hub, convoys, featureFlags, logger, ...(pushTransport !== undefined ? { transport: pushTransport } : {}) });
   // Two-node live mirror (src/mirror.js): off unless MIRROR_LISTEN_HOST / MIRROR_PEER_URL are set (opts: tests).
   const mirror = new Mirror({ convoys, logger, node: nodeName, ...(mirrorOpts || {}) });
   mirror.attach(hub);
@@ -205,7 +219,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       const push = guardianPush;
       lease.run('guardian-push', 15000, () => push.tick(), { prefer: 'live', firstDelayMs: 15000 });
     }
-    app.use('/api/guardian', guardianRouter({ service, gate, origin: origin.origin, push: guardianPush }));
+    app.use('/api/guardian', guardianRouter({ service, gate, origin: origin.origin, allowedOrigins: siteOriginsOf(config), push: guardianPush }));
   }
   // ---- Public website, served from here so no extra hosting is needed ----
   const path = require('path');
@@ -338,7 +352,12 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.get('/api/health/live', (req, res) => { const h = mirror.health(); res.status(h.status).set('Cache-Control', 'no-store').json(h.body); });
   // Public ride safety review (reports with their conversation, contact log, suspensions): admins only.
   app.use('/api/admin/public-ride', requireAuth(gate), requireAdmin, publicRideAdminRouter(publicRides));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName }));
+  // 3.55b website all-time totals: one shared aggregate, refreshed by one node under the lease (src/public_stats.js).
+  const publicStats = new (require('./public_stats').PublicStatsStore)({ repo, logger });
+  app.use('/api', require('./leaderboard').riderScoreRouter({ riderScore, leaderboard, gate, flagsOf: () => featureFlags }));
+  // 3.55 usernames, friends, profile pictures: auth hooks, username backfill, erase cleanup, /join/friend/:code page.
+  require('./social_routes').attachSocial({ app, repo, auth, hub, lease, featureFlags, logger, site, pageVars });
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -377,6 +396,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     lease.run('convoy-auto-end', 60 * min, () => retention.autoEnd(), { prefer: 'live', firstDelayMs: min });
     lease.run('db-keepalive', config.keepAliveEveryMinutes * min, () => retention.keepAlive());
     lease.run('subscriptions', subscriptions.everyMs, () => subscriptions.runOnce(), { firstDelayMs: 90000 });
+    lease.run('rider-score-daily', 24 * 60 * min, ({ signal } = {}) => riderScore.recomputeAll({ signal }), { firstDelayMs: 10 * min });
+    publicStats.start(lease);
     if (backupModule && typeof backupModule.startBackupJobs === 'function') {
       backupModule.startBackupJobs({ lease, repo, soda, logger });
     }
@@ -406,7 +427,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { push, riderScore, leaderboard, publicStats, featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

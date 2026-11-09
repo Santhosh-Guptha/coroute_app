@@ -47,6 +47,43 @@ const OFF_ROUTE_CHECK_MS = 5000;
 
 const newId = () => `EV-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
+/**
+ * 3.55 pillion seat: the riders of [list] once per bike. A seated pillion (isCoRiding with
+ * ridingWithUserId naming a rider in [list] who is not a pillion) rides on that bike, so they are
+ * left out of the group checks (separation, behind the sweeper, splits, automatic roles) and never
+ * alerted about apart from their rider. When their rider is not in [list] (not fresh), the
+ * pillion stays and stands for the bike. [keep]: also keep a pillion for whom this returns true.
+ */
+function oncePerBike(list, keep) {
+  const byId = new Map(list.map((r) => [r.userId, r]));
+  return list.filter((r) => {
+    if (!r.isCoRiding || !r.ridingWithUserId || r.ridingWithUserId === r.userId) return true;
+    const bike = byId.get(r.ridingWithUserId);
+    if (!bike || bike.isCoRiding) return true;
+    return !!(keep && keep(r));
+  });
+}
+
+/** A bike partner's answer (status time) this recent counts for the whole bike (missing-rider check). */
+const BIKE_ANSWER_WINDOW_MS = 15 * 60000;
+
+/**
+ * 3.55 pillion pair: the other person on [rider]'s bike (their rider when [rider] is a seated
+ * pillion, or the pillion seated on [rider]'s bike), or null. Same link rule as oncePerBike.
+ */
+function bikePartnerOf(room, rider) {
+  if (!room || !rider) return null;
+  if (rider.isCoRiding && rider.ridingWithUserId && rider.ridingWithUserId !== rider.userId) {
+    const bike = room.riders.get(rider.ridingWithUserId);
+    return bike && !bike.isCoRiding ? bike : null;
+  }
+  if (rider.isCoRiding) return null;
+  for (const p of room.riders.values()) {
+    if (p.userId !== rider.userId && p.isCoRiding && p.ridingWithUserId === rider.userId) return p;
+  }
+  return null;
+}
+
 /** The period of a convoy a user may see: from their first join until they left (or forever while in it). */
 function visibleWindow(meta, user) {
   if (!meta) return null;
@@ -444,7 +481,18 @@ class TimelineEngine {
   }
 
   async _checkSeparation(gid, st, room, t) {
-    const fresh = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    const all = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    const fresh = oncePerBike(all);
+    // A seated pillion is never separated from their own bike: forget / close their own entry.
+    if (fresh.length !== all.length) {
+      const counted = new Set(fresh.map((r) => r.userId));
+      for (const r of all) {
+        if (counted.has(r.userId)) continue;
+        this._rs(st, r.userId).sepSince = 0;
+        const slot = `SEPARATED:${r.userId}`;
+        if (st.open.has(slot)) await this._close(gid, st, slot, t, { data: { result: 'PILLION' } });
+      }
+    }
     if (fresh.length < 2) return;
     const limit = room.meta.distanceThresholdMeters ?? 1000;
     const centre = medianCentre(fresh);
@@ -820,7 +868,17 @@ class TimelineEngine {
       await this._instant(gid, { userId: user.userId, userName: rider.name, type: 'FOLLOW_UP', startedAt: t, lat, lng, data: { result: 'OK' } });
       return { followUp: true };
     }
+    // 3.55 pillion pair (owner decision): one bike, one answer. The other phone on this bike (the
+    // rider, or the seated pillion) answering the missing-rider check counts for both.
+    const partner = bikePartnerOf(room, rider);
     if (result === 'NO_REPLY') {
+      if (partner && msg.context === 'MISSING_RIDER') {
+        // The partner's "no answer" is already with the lead: no second entry for the same bike.
+        if (st.open.has(`NO_REPLY:${partner.userId}`)) return { opened: false, sameBike: partner.userId };
+        // The partner answered this stop (I'm OK, a stop reason, Need help): nothing to tell.
+        const answeredAt = partner.statusReason ? Number(partner.stoppedSince) || 0 : 0;
+        if (answeredAt && t - answeredAt <= BIKE_ANSWER_WINDOW_MS && t - answeredAt >= -BIKE_ANSWER_WINDOW_MS) return { opened: false, answeredOnBike: partner.userId };
+      }
       const awayM = Number.isFinite(num(msg.awayM)) ? Math.round(Math.max(0, Math.min(500000, num(msg.awayM)))) : 0;
       // 3.55 missing-rider check (the phone decided; the server only relays): the lead's text says why.
       const why = msg.context === 'MISSING_RIDER' ? { context: 'MISSING_RIDER' } : {};
@@ -833,6 +891,8 @@ class TimelineEngine {
     for (const slot of [`INCIDENT:${user.userId}`, `NO_REPLY:${user.userId}`]) {
       if (await this._close(gid, st, slot, t, { data: { result: 'OK' } })) closed++;
     }
+    // ... and the bike partner's "no answer" too (never their possible incident: that is their own alarm).
+    if (partner && await this._close(gid, st, `NO_REPLY:${partner.userId}`, t, { data: { result: 'OK', answeredBy: 'BIKE_PARTNER' } })) closed++;
     if (closed) await this._instant(gid, { userId: user.userId, userName: rider.name, type: 'CHECK_IN', startedAt: t, lat, lng, data: { result: 'OK' } });
     return { closed };
   }
@@ -934,9 +994,16 @@ class TimelineEngine {
       const on = alongRoute({ lat: sweeper.lat, lng: sweeper.lng }, route, { fromIndex: srs.segIndex });
       if (on) { sAlong = on.alongM; srs.segIndex = on.segIndex; }
     }
+    // 3.55 pillion seat: one check per bike (a seated pillion is behind exactly when their rider is).
+    const counted = new Set(oncePerBike([...room.riders.values()].filter(fresh)).map((r) => r.userId));
     for (const r of room.riders.values()) {
       if (r.userId === sid || !fresh(r)) continue;
       const rs = this._rs(st, r.userId);
+      if (!counted.has(r.userId)) {
+        rs.behindSince = 0;
+        if (st.open.has(`BEHIND:${r.userId}`)) await this._close(gid, st, `BEHIND:${r.userId}`, t, { data: { result: 'PILLION' } });
+        continue;
+      }
       let behindM = null;
       if (route && sAlong !== null) {
         const on = alongRoute({ lat: r.lat, lng: r.lng }, route, { fromIndex: rs.segIndex });
@@ -978,9 +1045,19 @@ class TimelineEngine {
     // 3.55 admin feature switches: automatic roles (or riding roles as a whole) turned off for everyone.
     const ff = this.convoys.featureFlags;
     if (ff && (!ff.isOn('autoRoles') || !ff.isOn('rideRoles'))) { st.autoKey = null; return; }
+    // Single writer (two nodes): only the node that owns the room computes automatic roles. The
+    // other forgets its candidate, so after a takeover the new owner waits the full AUTO_ROLE_HOLD_MS
+    // before it changes anything (and then recomputes once).
+    if (this.convoys.passive && this.convoys.passive(gid)) { st.autoKey = null; return; }
+    // The last automatic change on either node (replicated meta) keeps the spacing across a takeover.
     if (st.autoLastAt && t - st.autoLastAt < AUTO_ROLE_EVERY_MS) return;
+    const metaAuto = Number(room.meta.autoRolesAt) || 0;
+    if (!st.autoLastAt && metaAuto && t >= metaAuto && t - metaAuto < AUTO_ROLE_EVERY_MS) return;
     const m = room.meta;
-    const fresh = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    // 3.55 pillion seat: a seated pillion is never picked as the automatic lead or sweeper (one who
+    // already holds a role keeps being compared, so nothing flips).
+    const fresh = oncePerBike([...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng)),
+      (r) => r.role === 'LEAD' || r.role === 'SWEEPER' || m.createdByUserId === r.userId);
     if (fresh.length < 2) { st.autoKey = null; return; }
     const route = this._route(st, m);
     const dest = (m.destinationLat || m.destinationLng) ? { lat: m.destinationLat, lng: m.destinationLng } : null;
@@ -1038,7 +1115,8 @@ class TimelineEngine {
    * when gap exceeds convoySplitThresholdM for convoySplitHoldS. Suppresses individual SEPARATED alarms.
    */
   async _checkSubClusters(gid, st, room, t) {
-    const fresh = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    // 3.55 pillion seat: a pack is counted in bikes, so one bike two-up is never a "pack of two".
+    const fresh = oncePerBike([...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng)));
     if (fresh.length < 2) {
       if (st.isSplit) {
         st.isSplit = false;
@@ -1388,6 +1466,8 @@ class TimelineEngine {
       if (rebuilt && !(await this.repo.getTrip(pm.tripDoc.tripId).catch(() => null))) continue; // the rider deleted this trip
       await this.repo.saveTrip(pm.tripDoc);
     }
+    // 3.55 rider score: one ride per analysed member (numbers only; never blocks the report).
+    if (this.convoys.riderScore) await this.convoys.riderScore.onTripFinished({ meta: fresh || meta, perMember, events }).catch(() => {});
     this.convoys._emit(gid, 'REPORT_READY', { groupId: gid });
     return report;
   }
@@ -1404,4 +1484,4 @@ function median(list) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-module.exports = { TimelineEngine, visibleWindow, eventVisible, publicEvent };
+module.exports = { TimelineEngine, visibleWindow, eventVisible, publicEvent, oncePerBike, bikePartnerOf };

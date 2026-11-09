@@ -10,6 +10,10 @@
  *    (on either gateway VM: Hub.sendToUser relays to the peer).
  * Rider API: GET /api/me/warnings, POST /api/me/warnings/:id/ack.
  *
+ * The admin console types the text (required, at most MESSAGE_MAX characters, validated by
+ * validateWarnMessage; the default line stays as a quick option there). An older console that sends
+ * no `message` still gets DEFAULT_MESSAGE.
+ *
  * Rules: admins only (the caller is the admin router), plain text (control characters removed,
  * spaces collapsed, at most MESSAGE_MAX characters; never HTML), audited (ids and codes only, never
  * the text), switchable with the admin feature switch `adminWarnings` (off: the warning is still
@@ -32,6 +36,23 @@ function cleanMessage(raw) {
     .replace(/\s+/g, ' ')
     .trim();
   return text.length > MESSAGE_MAX ? `${text.slice(0, MESSAGE_MAX - 1).trimEnd()}…` : text;
+}
+
+/**
+ * The admin's typed "Warn" text (admin console text box): required, trimmed, plain text after
+ * cleaning, at most MESSAGE_MAX characters (refused, never cut, so the preview is what the rider
+ * reads). Returns { ok: true, message } or { ok: false, code, error }.
+ */
+function validateWarnMessage(raw) {
+  if (typeof raw !== 'string') return { ok: false, code: 'WARN_MESSAGE_REQUIRED', error: 'Type the warning the rider will see.' };
+  const text = raw
+    .replace(/[\u0000-\u001F\u007F\u200B-\u200F\u2028-\u202E\u2060-\u206F]/g, ' ')
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return { ok: false, code: 'WARN_MESSAGE_REQUIRED', error: 'Type the warning the rider will see.' };
+  if (text.length > MESSAGE_MAX) return { ok: false, code: 'WARN_MESSAGE_TOO_LONG', error: `Use at most ${MESSAGE_MAX} characters for the warning.` };
+  return { ok: true, message: text };
 }
 
 /** What the rider sees of a stored warning (no admin identity). */
@@ -106,4 +127,4 @@ function registerAdminWarningRoutes({ r, warnings, wrap }) {
   }));
 }
 
-module.exports = { AdminWarnings, registerAdminWarningRoutes, cleanMessage, MESSAGE_MAX, MAX_PENDING, DEFAULT_MESSAGE };
+module.exports = { AdminWarnings, registerAdminWarningRoutes, cleanMessage, validateWarnMessage, MESSAGE_MAX, MAX_PENDING, DEFAULT_MESSAGE };

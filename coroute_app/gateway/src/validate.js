@@ -65,7 +65,7 @@ const RULES = {
     if (s.length > 16 || !VEHICLE_NO.test(s)) return [null, 'Use letters, numbers, spaces or - for the bike number (at most 16).'];
     return [s];
   },
-  // Optional medical info (3.14): shown to the ride group only while the rider's SOS is open.
+  // Optional medical info (3.14): shown to responders only while the rider's SOS is open (no consent switch).
   bloodGroup(v) {
     const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '');
     if (s !== '' && !BLOOD_GROUPS.has(s)) return [null, 'Pick a blood group from the list.'];

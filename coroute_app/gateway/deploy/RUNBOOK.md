@@ -20,13 +20,18 @@ its own data.
 
 ## 0b. Custom domain (launch requirement)
 
+**The two-VM cluster (NLB + `deploy/caddy/Caddyfile.vm1/.vm2`) follows `docs/DOMAIN_MIGRATION_devmonks.md`**: the
+Caddyfiles already serve `coroute.devmonks.space` and `coroute.duckdns.org`, the gateway takes `PUBLIC_ORIGIN`,
+`LEGACY_ORIGINS` and `REDIRECT_LEGACY_HOST`, and the app defaults to the new name with a fallback. The steps below
+are for a single VM installed with `install.sh`.
+
 The DuckDNS name is for testing. Before launch, point your own domain at the VM and let Caddy issue its certificate:
 
 1. At your DNS provider (for devmonks.space, or whichever domain you choose) add **A record** `coroute` → `<vm-public-ip>` (giving `coroute.devmonks.space`).
 2. On the VM, re-run the installer with both hostnames so existing test builds keep working while the new one takes over:
    `sudo API_HOST="coroute.devmonks.space, coroute.duckdns.org" bash gateway/deploy/install.sh`
    (Caddy accepts a comma-separated list of site addresses; certificates are issued for each.)
-3. Make the custom domain the app's default: in `lib/core/config/app_config.dart` set `defaultValue: 'https://coroute.devmonks.space'`, and in `gateway/public/index.html`, `store/LISTING.md` and `PLAY_STORE_CHECKLIST.md` replace `coroute.duckdns.org`. Rebuild the app.
+3. Set `PUBLIC_ORIGIN=https://coroute.devmonks.space` in `/etc/coroute/gateway.env` and restart the gateway. The app already defaults to `https://coroute.devmonks.space` (`AppConfig.defaultApiBaseUrl`, with the DuckDNS fallback); the website takes its origin from `PUBLIC_ORIGIN`.
 4. Check `https://coroute.devmonks.space/`, `/privacy`, `/terms` and `/api/health`.
 
 ## 1. Database: dedicated low-privilege schema (5 min)
@@ -94,11 +99,13 @@ the Play Store gets an app bundle (Play splits it per phone by itself).
 flutter pub get
 # APKs for the website download (64-bit and 32-bit ARM phones)
 flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
-  --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
+  --obfuscate --split-debug-info=build/symbols
 # App bundle for the Play Store
-flutter build appbundle --release --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
+flutter build appbundle --release --obfuscate --split-debug-info=build/symbols
 ```
-(`COROUTE_API` defaults to `https://coroute.duckdns.org` in `lib/core/config/app_config.dart`, so the flag is optional unless you chose another hostname. Keep `build/symbols` for reading crash stack traces; it is not committed.)
+(`COROUTE_API` defaults to `https://coroute.devmonks.space` in `lib/core/config/app_config.dart`, with an automatic
+fallback to `https://coroute.duckdns.org` when the new name cannot be reached (`docs/DOMAIN_MIGRATION_devmonks.md`).
+Pass `--dart-define=COROUTE_API=https://<host>` only for another gateway: an override has no fallback. Keep `build/symbols` for reading crash stack traces; it is not committed.)
 
 Publish the APKs on the gateway (the website's Download button and `GET /download` serve them;
 no other hosting is needed):

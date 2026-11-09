@@ -296,21 +296,30 @@ log_ok "Firewall opened for ports 22, 80, and 443."
 # ------------------------------------------------------------------------------
 log_step "10/11. Pointing coroute.duckdns.org to this new VM ($PUBLIC_IP)..."
 
-cat > /usr/local/bin/update-duckdns.sh << 'EOF'
+DUCKDNS_TOKEN="${DUCKDNS_TOKEN:-}"
+if [[ -z "$DUCKDNS_TOKEN" && -f /etc/coroute/gateway.env ]]; then
+  DUCKDNS_TOKEN=$(grep -E '^DUCKDNS_TOKEN=' /etc/coroute/gateway.env | cut -d= -f2- | tr -d '"'\''')
+fi
+
+if [[ -n "$DUCKDNS_TOKEN" ]]; then
+  cat > /usr/local/bin/update-duckdns.sh << EOF
 #!/bin/bash
-curl -fsS "https://www.duckdns.org/update?domains=coroute&token=59b0a0ec-e7e4-405e-b6e9-2d8c0fdefdc2&ip=" >/dev/null 2>&1
+curl -fsS "https://www.duckdns.org/update?domains=coroute&token=\${DUCKDNS_TOKEN}&ip=" >/dev/null 2>&1
 EOF
-chmod +x /usr/local/bin/update-duckdns.sh
+  chmod 700 /usr/local/bin/update-duckdns.sh
 
-# Install cron job for persistence
-(crontab -l 2>/dev/null | grep -v "update-duckdns.sh" || true; echo "*/30 * * * * /usr/local/bin/update-duckdns.sh") | crontab -
+  # Install cron job for persistence
+  (crontab -l 2>/dev/null | grep -v "update-duckdns.sh" || true; echo "*/30 * * * * /usr/local/bin/update-duckdns.sh") | crontab -
 
-# Trigger immediate DNS update
-CUTOVER_RESP=$(curl -fsS "https://www.duckdns.org/update?domains=coroute&token=59b0a0ec-e7e4-405e-b6e9-2d8c0fdefdc2&ip=")
-if [[ "$CUTOVER_RESP" == "OK" ]]; then
-  log_ok "DuckDNS updated successfully! coroute.duckdns.org now resolves to this VM."
+  # Trigger immediate DNS update
+  CUTOVER_RESP=$(curl -fsS "https://www.duckdns.org/update?domains=coroute&token=${DUCKDNS_TOKEN}&ip=")
+  if [[ "$CUTOVER_RESP" == "OK" ]]; then
+    log_ok "DuckDNS updated successfully! coroute.duckdns.org now resolves to this VM."
+  else
+    log_warn "DuckDNS response: $CUTOVER_RESP"
+  fi
 else
-  log_warn "DuckDNS response: $CUTOVER_RESP"
+  log_warn "DUCKDNS_TOKEN not set in environment or /etc/coroute/gateway.env; skipping DuckDNS updater."
 fi
 
 # ------------------------------------------------------------------------------

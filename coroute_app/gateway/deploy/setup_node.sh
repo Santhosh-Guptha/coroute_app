@@ -16,6 +16,9 @@ NODE_ROLE="${NODE_ROLE:?set NODE_ROLE (live / web)}"
 NODE_IP="${NODE_IP:?set NODE_IP (this VM private IP)}"
 PEER_IP="${PEER_IP:?set PEER_IP (the other VM private IP)}"
 DOMAIN="${DOMAIN:-coroute.duckdns.org}"
+# Canonical origin for generated links. During the domain move: PUBLIC_ORIGIN=https://coroute.devmonks.space
+# (docs/DOMAIN_MIGRATION_devmonks.md); the Caddyfiles serve both names whatever DOMAIN is.
+PUBLIC_ORIGIN="${PUBLIC_ORIGIN:-https://$DOMAIN}"
 APP_DIR=/opt/coroute/gateway
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # .../gateway/deploy
 case "$NODE_ROLE" in live|web) ;; *) echo "NODE_ROLE must be live or web" >&2; exit 1;; esac
@@ -99,7 +102,7 @@ set_kv HOST 0.0.0.0          # Caddy (loopback) and the peer VM (VCN, firewalled
 set_kv PORT 3000
 set_kv NODE_NAME "$NODE_NAME"
 set_kv GATEWAY_ROLE "$NODE_ROLE"
-set_kv PUBLIC_ORIGIN "https://$DOMAIN"
+set_kv PUBLIC_ORIGIN "$PUBLIC_ORIGIN"
 if [ "$NODE_ROLE" = web ]; then set_kv TRUST_PROXY "loopback,$PEER_IP"; else set_kv TRUST_PROXY loopback; fi
 chown root:coroute "$ENV"; chmod 0640 "$ENV"
 
@@ -150,7 +153,11 @@ systemctl enable coroute-secrets.service coroute-gateway.service caddy.service >
 log "Caddyfile ($NODE_ROLE)"
 CF="$SRC_DIR/caddy/Caddyfile.vm1"; [ "$NODE_ROLE" = web ] && CF="$SRC_DIR/caddy/Caddyfile.vm2"
 [ -f /etc/caddy/Caddyfile.orig ] || cp -a /etc/caddy/Caddyfile /etc/caddy/Caddyfile.orig 2>/dev/null || true
-sed "s/coroute\.duckdns\.org/$DOMAIN/g" "$CF" > /etc/caddy/Caddyfile
+case "$DOMAIN" in
+  # The shipped Caddyfiles already serve both names (and delegate the new name's ACME challenge to DuckDNS).
+  coroute.duckdns.org|coroute.devmonks.space) cp "$CF" /etc/caddy/Caddyfile ;;
+  *) sed "s/coroute\.duckdns\.org/$DOMAIN/g" "$CF" > /etc/caddy/Caddyfile ;;
+esac
 # VM1 forwards WEB routes to the peer's gateway: use the real peer IP.
 sed -i "s/10\.0\.0\.99:3000/$PEER_IP:3000/g" /etc/caddy/Caddyfile
 caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null 2>&1 || true

@@ -111,7 +111,7 @@ class EmergencySmsGateway {
     // (Not registered in convoys.liveLinks: that index is for alert links only; /e/<token> and
     // /api/public/live fall back to this.liveView.)
 
-    const origin = this.config.publicOrigin || 'https://coroute.live';
+    const origin = this.config.publicOrigin || this.config.linkOrigin || require('./domains').FALLBACK_ORIGIN;
     return `${origin}/e/${token}`;
   }
 

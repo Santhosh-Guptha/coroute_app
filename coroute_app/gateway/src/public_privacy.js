@@ -106,6 +106,42 @@ function safeImpact(raw) {
   };
 }
 
+/**
+ * 3.55b website all-time view (GET /public/alltime-stats): the impact numbers since CoRoute began, plus
+ *  - ridersWithRide: registered riders (not guests, not staff) with at least one completed ride;
+ *  - registeredRiders: every registered rider;
+ *  - movingHours: hours on the road, all riders (rider-hours), rounded down like counts;
+ *  - thisWeek: the last 7 days as a small secondary line; km and hours only behind 10 rides that week.
+ * Same floors as everywhere: counts below 10 read as 0, rounded down; km to 100 / 1,000; records gated.
+ */
+function safeAllTime(raw) {
+  const u = raw || {};
+  const imp = safeImpact(u);
+  const w = u.thisWeek || {};
+  const weekRides = roundCount(w.rides);
+  return {
+    scope: 'all-time',
+    ridersWithRide: roundCount(u.ridersWithRide),
+    registeredRiders: roundCount(u.riders),
+    ridesCompleted: imp.ridesCompleted,
+    movingHours: imp.movingHours,
+    kmRidden: imp.kmRidden,
+    groupRides: imp.groupRides,
+    largestGroup: imp.largestGroup,
+    longestTripKm: imp.longestTripKm,
+    bikes: imp.bikes,
+    avgSpeedKmh: imp.avgSpeedKmh,
+    safety: imp.safety,
+    thisWeek: {
+      rides: weekRides,
+      km: weekRides ? roundKm(w.km) : 0,
+      movingHours: weekRides ? roundCount(w.movingHours) : 0,
+      riders: roundCount(w.riders),
+    },
+    updatedAt: imp.updatedAt,
+  };
+}
+
 /** The public view of repo.getCommunityStats: totals only, no per-ride list. The admin view keeps everything. */
 function safeCommunityStats(stats) {
   const s = stats || {};
@@ -123,4 +159,4 @@ function safeCommunityStats(stats) {
 /** What the website may say about how its numbers are made (sent with usage-stats). */
 const PRIVACY_NOTE = Object.freeze({ minCount: MIN_COUNT, rounding: 'down', timeResolution: 'hour', perRider: false, perPlace: false });
 
-module.exports = { MIN_COUNT, roundCount, roundKm, toHour, toDay, safeRating, safeUsage, safeImpact, safeCommunityStats, PRIVACY_NOTE };
+module.exports = { MIN_COUNT, roundCount, roundKm, toHour, toDay, safeRating, safeUsage, safeImpact, safeAllTime, safeCommunityStats, PRIVACY_NOTE };

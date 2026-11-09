@@ -44,7 +44,8 @@ const CATALOG = Object.freeze([
   f('noSignalAhead', 'Safety', 'No-signal ahead', 'Tells the group and guardians before a stretch that had no signal on the rider\'s earlier rides.'),
   f('arrivalMessage', 'Safety', 'Arrival message', 'Guardians get "Arrived safely" once at the end of the ride, then the link stops tracking.'),
   f('publicRiderHelp', 'Safety', 'Help from public riders', 'An SOS also asks riders of nearby public rides who agreed to help.'),
-  f('sirenDetector', 'Safety', 'Siren detector', 'Listens for emergency vehicle sirens and lowers the audio.'),
+  f('sirenDetector', 'Safety', 'Siren detector', 'Listens for ambulance, police and fire engine sirens, lowers the audio and tells the rider.'),
+  f('hornAlert', 'Safety', 'Horn close by alert', 'Tells the rider when a vehicle honks close by (on the phone, nothing is recorded).'),
   // 3.55 phone-only sensor safety (free on every plan, no signal needed; logic on the phone).
   f('fatigueScore', 'Safety', 'Fatigue score', 'Break reminders that adapt to ride time, time of day, short stops and steering wobble.'),
   f('riderDown', 'Safety', 'Rider-down check', '"Bike down?" alarm when the bike falls at a stop and nothing moves for a minute.'),
@@ -67,6 +68,8 @@ const CATALOG = Object.freeze([
   f('engineCare', 'Riding', 'Engine care', 'Service reminders and engine care tips in the garage.'),
   f('rideAnalytics', 'Riding', 'Ride analytics', 'Personal ride numbers and charts after a ride.'),
   f('riskyStretch', 'Riding', 'Risky-stretch heads-up', 'Warns of stretches where many riders brake hard (anonymous, 10 riders or more).'),
+  f('speedAudio', 'Riding', 'Lower music when speeding', 'Lowers music and other audio while the rider is over the speed limit.'),
+  f('callAwareAlerts', 'Riding', 'Calls: hold ride voice, let critical alerts through', 'During a phone call ride announcements wait; crash, SOS and other critical alerts still play.'),
   // ---- Group ----
   f('rideRoles', 'Group', 'Riding roles', 'Lead, middle and sweeper roles, swaps and role prompts.'),
   f('autoRoles', 'Group', 'Automatic roles', 'Roles follow the riders\' order along the route.'),
@@ -74,7 +77,10 @@ const CATALOG = Object.freeze([
   f('groupFuel', 'Group', 'Group fuel stop', 'Shares fuel range so the group stops before anyone runs dry.'),
   f('publicRide', 'Group', 'Public ride', 'Shows the ride to nearby riders, safe contact and shared road warnings.'),
   f('discovery', 'Group', 'Nearby groups', 'Tells a group when another CoRoute group rides close by.'),
+  f('voiceCleanup', 'Group', 'Intercom voice cleanup: noise, wind and breath', 'Removes engine noise, wind and breathing from group talk before it is sent.'),
+  f('riderVehicleLive', 'Group', 'Live bike change', 'Changing the active garage bike in a ride updates the colour and model the group sees at once.'),
   f('vehicleSwap', 'Group', 'Bike swap', 'Two riders swap bikes mid-ride and the app follows.'),
+  f('pillionSeat', 'Group', 'Pillion seat', 'A pillion confirms whose bike they sit on; the group sees one bike with two people.'),
   // 3.55 group safety (logic on the phones; the gateway relays and stores)
   f('missingRiderCheck', 'Group', 'Missing-rider check', 'Asks a rider who stopped while the group moved on if they are OK, then tells the lead.'),
   f('stretchAlert', 'Group', 'Group stretch alert', 'Tells the lead when the group spreads out more than the set distance.'),
@@ -90,9 +96,23 @@ const CATALOG = Object.freeze([
   // ---- Community ----
   f('reviewPrompt', 'Community', 'Ride review prompt', 'Asks riders to review the ride after it ends.'),
   f('communityStatsWebsite', 'Community', 'Website community numbers', 'Rider, ride and kilometre totals on the public website.'),
+  // 3.55 friends and profile pictures (docs/features_355/usernames_friends_profiles.md). Usernames are core (no switch).
+  f('friends', 'Community', 'Friends', 'Add riders as friends by username or invite link and see friends\' ride totals.'),
+  f('profilePhotos', 'Community', 'Profile photos', 'Riders can add a profile picture shown on their profile, to friends and to their ride group.'),
+  // 3.55 crews (docs/features_355/crews_polls.md): standing circles of friends; polls only, no chat.
+  f('crews', 'Community', 'Crews', 'Riders create crews and invite their friends. Off: crews and crew invites are hidden.'),
+  f('crewPolls', 'Community', 'Crew polls', 'Crew admins (and members, if allowed) ask the crew a question with fixed options. No chat.'),
+  f('crewRides', 'Community', 'Start a ride with this crew', 'The host of a ride invites chosen crew members; they accept or decline. Off: no crew ride invites.'),
+  // 3.55 rider score (docs/features_355/rider_score.md)
+  f('riderScore', 'Community', 'Rider score', 'A private 0-100 score of safe riding (speed discipline, smoothness, safety habits, regular riding) with tips.'),
+  f('leaderboard', 'Community', 'Public leaderboard', 'Top riders by score, distance, hours and rides, by username only. Off: the lists are empty.'),
   // ---- Platform ----
   f('offlineMesh', 'Platform', 'No-internet link', 'Phone-to-phone link for positions when there is no network.'),
   f('adminWarnings', 'Platform', 'Moderator warnings', 'Delivers a moderator\'s warning on a public-ride report to the rider as an in-app notice.'),
+  // 3.55 admin-only tool (docs/features_355/marketing_studio.md): off answers 403 FEATURE_OFF on /admin/marketing/*.
+  f('marketingStudio', 'Platform', 'Marketing studio', 'Admin image creator for coupon and special-offer posts (admin console only).'),
+  // 3.55 push notifications (docs/features_355/push_notifications.md): off = the gateway sends no FCM pushes.
+  f('pushNotifications', 'Platform', 'Push notifications', 'Friend requests, crew invites, polls and ride invites reach the phone when the app is closed.'),
 ]);
 const BY_ID = new Map(CATALOG.map((e) => [e.id, e]));
 const ID_RE = /^[A-Za-z][A-Za-z0-9]{1,39}$/;
@@ -272,6 +292,8 @@ const WS_FEATURE = Object.freeze({
   BUDDY_PING: ['buddyPairs'],
   WAVE: ['discovery'],
   SIGNAL_AHEAD: ['noSignalAhead'],
+  RIDER_VEHICLE: ['riderVehicleLive'],
+  PILLION_SEAT: ['pillionSeat'],
 });
 /**
  * Feature ids a socket message needs ([] = none). Turning something OFF is always allowed (automatic
@@ -320,7 +342,7 @@ function registerFeatureFlagPublicGuards({ r, flagsOf }) {
   const communityOff = (req, res, next) => (off()
     ? res.set('Cache-Control', 'public, max-age=60').json({ enabled: false, message: FEATURE_OFF_MESSAGE, code: FEATURE_OFF })
     : next());
-  for (const p of ['/public/usage-stats', '/usage-stats', '/public/impact-stats', '/impact-stats']) r.get(p, usageOff);
+  for (const p of ['/public/usage-stats', '/usage-stats', '/public/impact-stats', '/impact-stats', '/public/alltime-stats', '/alltime-stats']) r.get(p, usageOff);
   for (const p of ['/public/community-stats', '/community-stats']) r.get(p, communityOff);
 }
 

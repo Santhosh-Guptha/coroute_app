@@ -20,7 +20,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null }) {
   const r = express.Router();
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
@@ -216,7 +216,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
   registerMembershipPublicRoutes({ r, repo, wrap, convoys });
   // Aggregated, PII-free usage numbers for the website (cached 5 min).
-  registerPublicUsageRoutes({ r, repo, wrap });
+  registerPublicUsageRoutes({ r, repo, wrap, store: publicStats });
   // Rounded count of riders on a ride right now for the website (cached 30 s, no PII).
   require('./public_live').registerPublicLiveRoutes({ r, convoys, wrap });
 
@@ -237,6 +237,16 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./feature_flags').registerFeatureFlagRoutes({ r, flagsOf, repo, wrap, requireAdmin });
   // 3.55 platform: admin warnings for the rider (GET /me/warnings, POST /me/warnings/:id/ack).
   if (hub && hub.publicRides && hub.publicRides.adminWarnings) require('./admin_warnings').registerAdminWarningRoutes({ r, warnings: hub.publicRides.adminWarnings, wrap });
+  // 3.55 usernames, profiles, friends, blocks, profile pictures (src/social_routes.js).
+  require('./social_routes').registerSocialRoutes({ r, repo, auth, hub, wrap, requireAdmin, flagsOf });
+  // 3.55 crews and crew polls (src/crews.js, src/crew_routes.js; switches crews / crewPolls).
+  require('./crew_routes').registerCrewRoutes({ r, repo, hub, wrap, requireAdmin, flagsOf });
+  // 3.55 "Start a ride with this crew": ride invites to chosen crew members (src/crew_ride_invites.js; switch crewRides).
+  require('./crew_ride_invites').registerCrewRideInviteRoutes({ r, repo, hub, convoys, wrap, flagsOf, ensureProfileComplete: (req) => ensureProfileComplete(req) });
+  // 3.55 push notifications: POST / DELETE /me/push-tokens (src/push.js).
+  if (hub && hub.push) require('./push').registerPushRoutes({ r, push: hub.push, wrap });
+  // 3.55 marketing studio: coupon / offer image templates (admin only, switch marketingStudio).
+  require('./marketing_templates').registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf });
 
   r.get('/me', wrap(async (req, res) => {
     const me = await auth.me(req.user.userId, { appBuild: parseInt(req.get('X-CoRoute-Build') || '0', 10) });
@@ -397,8 +407,11 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const prev = recentDispatch.get(key);
     if (prev) return res.status(200).json({ ...prev.out, duplicate: true });
     // Only a link to this server's own live page is put into the text (never a URL the client chose).
-    const own = `${originOf(req)}/e/`;
-    const trackingUrl = typeof b.trackingUrl === 'string' && b.trackingUrl.startsWith(own) && liveTokenOf(b.trackingUrl.slice(own.length)) ? b.trackingUrl : null;
+    // Either site host during the domain move (src/domains.js).
+    const ownPrefix = typeof b.trackingUrl === 'string'
+      ? [originOf(req), ...require('./domains').siteOriginsOf(config)].map((o) => `${o}/e/`).find((p) => b.trackingUrl.startsWith(p))
+      : null;
+    const trackingUrl = ownPrefix && liveTokenOf(b.trackingUrl.slice(ownPrefix.length)) ? b.trackingUrl : null;
     const severity = SEVERITIES.has(String(b.severity || '').toUpperCase()) ? String(b.severity).toUpperCase() : 'CRITICAL';
     const out = await gw.dispatchExternal({
       tripId: (typeof b.tripId === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(b.tripId)) ? b.tripId : `trip-${t}`,
@@ -439,18 +452,15 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   }));
   r.post('/convoys/:groupId/status', wrap(async (req, res) => {
     const room = await convoys.getRoom(req.params.groupId);
-    const rider = room.riders.get(req.user.userId);
-    const isLead = rider && rider.role === 'LEAD';
-    const isCreator = room.meta.createdByUserId === req.user.userId;
-    const isOwner = room.meta.tripOwnerUserId === req.user.userId;
-    const isHead = room.meta.tripHeadUserId === req.user.userId;
+    // Pause / resume: Trip owner or a Lead the owner picked (never an automatic front rider, see
+    // ConvoyManager.isLead). End: Trip owner (and platform admins). The Trip head changes settings only.
     const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'MASTER_ADMIN';
-    if (!isLead && !isCreator && !isOwner && !isHead && !isAdmin) {
-      return res.status(403).json({ error: 'Only the convoy lead or admin can change the trip state.' });
+    if (!convoys.isLead(room, req.user) && !isAdmin) {
+      return res.status(403).json({ error: 'Only the Trip owner or Lead can change the trip state.', reason: 'NOT_LEAD' });
     }
     const status = String(req.body?.status || '').toUpperCase();
-    if (status === 'ENDED' && !isOwner && !isCreator && !isAdmin) {
-      return res.status(403).json({ error: 'Only the Trip Owner or Platform Admin can end the trip.', reason: 'ONLY_OWNER_CAN_END_TRIP' });
+    if (status === 'ENDED' && !convoys.canManage(room, req.user)) {
+      return res.status(403).json({ error: 'Only the Trip owner can end the trip.', reason: 'ONLY_OWNER_CAN_END_TRIP' });
     }
     res.json({ tripStatus: await convoys.setTripStatus(req.params.groupId, status) });
   }));
@@ -946,10 +956,14 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
         phone: user.phone || '', vehicleType: user.vehicleType || 'Motorcycle', vehicleNo: user.vehicleNo || '',
         emergencyContact: user.emergencyContact || '', emergencyContactName: user.emergencyContactName || '',
         provider: user.provider || 'password', createdAt: user.createdAt || 0, lastActiveAt: user.lastActiveAt || 0,
+        // 3.55 public username and profile picture (DELETE /admin/users/:userId/avatar removes it).
+        username: user.username || '', avatarUrl: require('./avatars').avatarUrlOf(user.avatarId),
       },
       activeGroup,
       isInActiveConvoy: !!activeGroup,
       groups,
+      // 3.55 rider score breakdown (src/rider_score.js); null before the first ride.
+      riderScore: convoys.riderScore ? await convoys.riderScore.adminView(userId).catch(() => null) : null,
     });
   }));
 

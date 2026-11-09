@@ -362,6 +362,10 @@ const config = {
   iosIpaUrl: (process.env.IOS_IPA_URL || '').trim(),
   iosIpaPath: '/coroute.ipa',
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
+  // Domain move (src/domains.js, docs/DOMAIN_MIGRATION_devmonks.md): origins still served for installed apps
+  // and old links (CORS / guardian Origin checks accept them), and the opt-in 301 of website pages on them.
+  legacyOrigins: list('LEGACY_ORIGINS', ['https://coroute.duckdns.org']),
+  redirectLegacyHost: process.env.REDIRECT_LEGACY_HOST === 'true',
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
   latestAppBuild: int('LATEST_APP_BUILD', 10019),
@@ -413,7 +417,9 @@ const config = {
 
 // User-Agent for the map-data providers (Nominatim, Photon, Overpass ask for a contact): the gateway
 // version, this site's origin and the contact address, in one place.
-config.providerUserAgent = `CoRoute/${require('../package.json').version} (+${config.publicOrigin || 'https://coroute.duckdns.org'}; ${config.geoContact})`;
+// Origin for links built outside a request: PUBLIC_ORIGIN, else the legacy host that is live today.
+config.linkOrigin = require('./domains').linkOriginOf(config);
+config.providerUserAgent = `CoRoute/${require('../package.json').version} (+${config.linkOrigin}; ${config.geoContact})`;
 
 if (!isTest && config.jwtSecret.length < 32) {
   throw new Error('[config] JWT_SECRET must be at least 32 characters');

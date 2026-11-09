@@ -7,8 +7,10 @@ const { GuardianError } = require('./guardians');
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 
 /** Separate observer endpoints: guest sessions are never accepted by rider auth. */
-function guardianRouter({ service, gate, origin, push = null }) {
+function guardianRouter({ service, gate, origin, allowedOrigins = null, push = null }) {
   const r = express.Router();
+  // Watch pages may be open on a legacy host during a domain move: accept every site origin; links use `origin`.
+  const okOrigins = new Set([origin, ...(allowedOrigins || [])]);
   r.use((req, res, next) => { const started = Date.now(); res.once('finish', () => service.convoys?.featureAnalytics?.record('guardian', res.statusCode < 400, Date.now() - started)); next(); });
   r.use((req, res, next) => {
     res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
@@ -30,24 +32,24 @@ function guardianRouter({ service, gate, origin, push = null }) {
   };
   r.get('/capabilities', limit(30), (req, res) => res.json({ push: !!push, publicKey: push?.publicKey || null }));
   r.post('/ticket', limit(10), wrap(async (req, res) => {
-    if (req.get('origin') !== origin) throw new GuardianError('Origin not allowed.', 403);
+    if (!okOrigins.has(req.get('origin'))) throw new GuardianError('Origin not allowed.', 403);
     const view = await service.snapshot(req.body?.ticket);
     setSession(res, { credential: req.body.ticket, expiresAt: view.expiresAt });
   }));
   r.post('/sessions/:id/subscription', limit(10), wrap(async (req, res) => {
     if (!push) throw new GuardianError('Browser alerts are unavailable.', 503);
-    if (req.get('origin') !== origin) throw new GuardianError('Origin not allowed.', 403);
+    if (!okOrigins.has(req.get('origin'))) throw new GuardianError('Origin not allowed.', 403);
     res.status(201).json(await push.subscribe(credentialOf(req), req.body?.subscription, req.body?.preferences));
   }));
   r.delete('/sessions/:id/subscription/:subscriptionId', limit(10), wrap(async (req, res) => {
     if (!push) throw new GuardianError('Browser alerts are unavailable.', 503);
-    if (req.get('origin') !== origin) throw new GuardianError('Origin not allowed.', 403);
+    if (!okOrigins.has(req.get('origin'))) throw new GuardianError('Origin not allowed.', 403);
     await push.unsubscribe(credentialOf(req), req.params.subscriptionId);
     res.json({ removed: true });
   }));
   const pinLimit = rateLimit({ windowMs: 60000, limit: 10, keyGenerator: (req) => crypto.createHash('sha256').update(String(req.body?.token || '').slice(0, 128)).digest('hex'), standardHeaders: 'draft-7', legacyHeaders: false });
   r.post('/session', limit(10), pinLimit, wrap(async (req, res) => {
-    if (req.get('origin') !== origin) throw new GuardianError('Origin not allowed.', 403);
+    if (!okOrigins.has(req.get('origin'))) throw new GuardianError('Origin not allowed.', 403);
     const result = await service.exchange(req.body?.token, req.body?.pin);
     setSession(res, result);
   }));

@@ -38,7 +38,8 @@ const { publicRideOf } = require('./public_ride_settings');
  * route / heading rules above do not pick them (stopped at a dhaba, on a side road, no route).
  * Same consent as the rest of the network (the subject's "Ask nearby riders", the helper's "Help
  * other riders"), same caps, never across a public-ride block, never a rider whose public ride is
- * suspended. Medical info still only after acceptance and only with responderMedical.
+ * suspended. Medical info (no consent switch: always shared in an emergency) only after acceptance
+ * and only while the alert is open.
  */
 const PUBLIC_RADIUS_M = Math.max(200, Math.min(5000, Number(process.env.NET_PUBLIC_RADIUS_M) || 2000));
 
@@ -200,7 +201,7 @@ class SafetyNetwork extends EventEmitter {
     const throttled = !!owner && falseAlarmCount({ falseAlarmAt: owner.falseAlarmAt }, Date.now()) >= config.abuseFalseAlarms;
     const hazardKind = (HAZARD_TYPES.has(alert.alertType) || source === 'CRASH_AUTO' || source === 'NEED_HELP') && SEVERITY_RANK[severity] >= 1;
     const hazards = hasPos && hazardKind && (!throttled || source === 'CRASH_AUTO');
-    const ref = { gid, alertId: alert.alertId, uid: alert.userId, source, assist, ownerOptOut: ownerAsk === false, responderMedical: !!owner?.responderMedical };
+    const ref = { gid, alertId: alert.alertId, uid: alert.userId, source, assist, ownerOptOut: ownerAsk === false };
 
     // Clustering: one incident per place (any group) or per subject.
     let inc = null;
@@ -861,11 +862,19 @@ class SafetyNetwork extends EventEmitter {
     const a = this._primaryAlert(inc);
     const room = this.convoys.rooms.get(inc.primary.gid);
     const subjectRider = room?.riders.get(inc.primary.uid);
-    const medicalOk = !!a && !a.resolved && !!a.medical && (subjectRider ? subjectRider.responderMedical === true : inc.primary.responderMedical);
+    // Owner rule: whenever the rider entered medical info it goes to an accepted responder while the
+    // alert is open. There is no consent switch; a stored responderMedical (old apps) is ignored.
+    // Minimal set: blood group, allergies, notes (conditions / medications) and the emergency contact.
+    const open = !!a && !a.resolved;
+    const medical = open && ACTIVE_RESPONDER.has(R.status) ? {
+      ...(a.medical || {}),
+      contactName: subjectRider?.emergencyContact ? String(subjectRider.emergencyContactName || '') : '',
+      contactPhone: String(subjectRider?.emergencyContact || ''),
+    } : null;
     return externalResponderView(inc, R, {
       incidentStatus: a ? statusOf(a) : 'RESOLVED',
       subject: ACTIVE_RESPONDER.has(R.status) ? { firstName: firstName(a?.userName || subjectRider?.name), vehicleType: String(subjectRider?.vehicleType || ''), vehicleColor: String(subjectRider?.vehicleColor || '') } : null,
-      medical: ACTIVE_RESPONDER.has(R.status) && medicalOk ? a.medical : null,
+      medical,
       ...extra,
     });
   }
@@ -1140,7 +1149,7 @@ function externalRequestView(inc, n) {
   return out;
 }
 
-/** ASSIST_UPDATE: after acceptance adds the subject's first name and vehicle, medical only with opt-in. */
+/** ASSIST_UPDATE: after acceptance adds the subject's first name, vehicle and medical info (open alert only). */
 function externalResponderView(inc, R, { incidentStatus, subject = null, medical = null, arrivalCheck = false } = {}) {
   const out = {
     type: 'ASSIST_UPDATE', incidentId: inc.incidentId, incidentStatus, myStatus: R.status,
@@ -1155,6 +1164,10 @@ function externalResponderView(inc, R, { incidentStatus, subject = null, medical
     if (medical.bloodGroup) m.bloodGroup = String(medical.bloodGroup);
     if (medical.allergies) m.allergies = String(medical.allergies);
     if (medical.notes) m.notes = String(medical.notes);
+    if (medical.contactPhone) {
+      m.contactPhone = String(medical.contactPhone);
+      if (medical.contactName) m.contactName = String(medical.contactName);
+    }
     if (Object.keys(m).length) out.medical = m;
   }
   return out;

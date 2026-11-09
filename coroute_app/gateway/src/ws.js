@@ -91,18 +91,24 @@ const ACTION_TYPES = new Set([
   'SIGNAL_AHEAD',
   // 3.55 buddy pairs
   'BUDDY_ASSIGN', 'BUDDY_PING',
+  // 3.55 live bike change
+  'RIDER_VEHICLE',
+  // 3.55 pillion seat
+  'PILLION_SEAT', 'PILLION_UNSEAT',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
 const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN', 'REPORT_DOWN']);
 /** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
-const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET', 'REGROUP_SET', 'REGROUP_CLEAR', 'ROLE_SWAP', 'ROLE_AUTO', 'SWAP_REQUEST', 'SWAP_ANSWER', 'BUDDY_ASSIGN', 'BUDDY_PING']);
+const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET', 'REGROUP_SET', 'REGROUP_CLEAR', 'ROLE_SWAP', 'ROLE_AUTO', 'SWAP_REQUEST', 'SWAP_ANSWER', 'BUDDY_ASSIGN', 'BUDDY_PING', 'PILLION_SEAT', 'PILLION_UNSEAT']);
 const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
 /** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
 const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 /** 3.15: safety network and discovery, appended when switched on. */
 /** 3.16: sweeper role, follow-up check-in, town limit, live links (always on). */
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355'];
+/** 3.55 'vehicle1': RIDER_VEHICLE (the rider's bike colour / model changed mid-ride).
+ *  3.55 'pillion2': PILLION_SEAT / PILLION_UNSEAT (the pillion confirms the bike; the rider may decline). */
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2'];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
@@ -761,6 +767,7 @@ class Hub {
         const room = await this.convoys.getRoom(gid);
         const driver = String(msg.ridingWithUserId || '');
         if (driver && !room.riders.has(driver)) throw new ConvoyError('Driver is not in this convoy.');
+        if (driver && driver === u.userId) throw new ConvoyError('You cannot ride pillion on your own bike.', 400, 'BAD_PILLION');
         const was = room.riders.get(u.userId)?.ridingWithUserId || '';
         this.convoys.patchRider(room, u.userId, { isCoRiding: !!driver, ridingWithUserId: driver }, { trusted: true });
         if (was !== driver) this.convoys.emit('activity', gid, { type: 'CORIDE', user: u, withUserId: driver });
@@ -867,6 +874,20 @@ class Hub {
         const gid = this._requireRoom(ws);
         return this._once(ws, cid, 'SWAP_ANSWER', () => this.convoys.answerSwap(gid, u, msg.requestId, msg.accept === true));
       }
+      // ---- 3.55: the rider picked another garage bike mid-ride ----
+      case 'RIDER_VEHICLE': {
+        const gid = this._requireRoom(ws);
+        return void await this.convoys.setRiderVehicle(gid, u, msg);
+      }
+      // ---- 3.55: the pillion confirms which bike they sit on; the rider may decline / remove ----
+      case 'PILLION_SEAT': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'PILLION_SEAT', () => this.convoys.seatPillion(gid, u, msg.withUserId));
+      }
+      case 'PILLION_UNSEAT': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'PILLION_UNSEAT', () => this.convoys.unseatPillion(gid, u, msg.userId));
+      }
       // ---- 3.55: buddy pairs in large groups (src/buddies.js) ----
       case 'BUDDY_ASSIGN': {
         const gid = this._requireRoom(ws);
@@ -921,18 +942,14 @@ class Hub {
       case 'TRIP_STATUS': {
         const gid = this._requireRoom(ws);
         const room = await this.convoys.getRoom(gid);
-        const rider = room.riders.get(u.userId);
-        const isLead = rider && rider.role === 'LEAD';
-        const isCreator = room.meta.createdByUserId === u.userId;
-        const isOwner = room.meta.tripOwnerUserId === u.userId;
-        const isHead = room.meta.tripHeadUserId === u.userId;
+        // Same rule as POST /convoys/:id/status (routes.js).
         const isAdmin = u.role === ROLE_ADMIN || u.role === 'MASTER_ADMIN';
-        if (!isLead && !isCreator && !isOwner && !isHead && !isAdmin) {
-          throw new ConvoyError('Only the convoy lead or admin can change the trip state.', 403);
+        if (!this.convoys.isLead(room, u) && !isAdmin) {
+          throw new ConvoyError('Only the Trip owner or Lead can change the trip state.', 403, 'NOT_LEAD');
         }
         const status = String(msg.status || '').toUpperCase();
-        if (status === 'ENDED' && !isOwner && !isCreator && !isAdmin) {
-          throw new ConvoyError('Only the Trip Owner or Platform Admin can end the trip.', 403, 'ONLY_OWNER_CAN_END_TRIP');
+        if (status === 'ENDED' && !this.convoys.canManage(room, u)) {
+          throw new ConvoyError('Only the Trip owner can end the trip.', 403, 'ONLY_OWNER_CAN_END_TRIP');
         }
         await this.convoys.setTripStatus(gid, status);
         return;
@@ -986,12 +1003,11 @@ class Hub {
         const rider = room.riders.get(u.userId);
 
         // Enforce Road Captain Broadcast Entitlement (Server-Enforced)
-        const isRoadCaptain = (rider && (rider.role === 'LEAD' || rider.role === 'CAPTAIN')) ||
-          u.role === 'ROAD_CAPTAIN' || u.role === 'MASTER_ADMIN' || u.role === 'ADMIN' ||
-          (room.meta && room.meta.createdByUserId === u.userId);
+        const isRoadCaptain = this.convoys.isLead(room, u) || (rider && rider.role === 'CAPTAIN') ||
+          u.role === 'ROAD_CAPTAIN' || u.role === 'MASTER_ADMIN' || u.role === 'ADMIN';
 
         if (!isRoadCaptain) {
-          throw new ConvoyError('Only the Road Captain or convoy lead can broadcast road hazard telemetry.', 403, 'ENTITLEMENT_REQUIRED');
+          throw new ConvoyError('Only the Trip owner or Lead can broadcast road hazard alerts.', 403, 'ENTITLEMENT_REQUIRED');
         }
 
         // Validate payload
@@ -1174,9 +1190,9 @@ class Hub {
         const room = this.convoys.rooms.get(gid);
         const speakerRider = room && room.riders ? room.riders.get(ws.user.userId) : null;
         const speakerRole = speakerRider ? speakerRider.role : ws.user.role;
-        const isLeader = speakerRole === 'LEAD' || speakerRole === 'SWEEPER' || (room && room.meta && room.meta.createdByUserId === ws.user.userId) || ws.user.role === 'ADMIN' || ws.user.role === 'MASTER_ADMIN';
+        const isLeader = (room && this.convoys.isLead(room, ws.user)) || speakerRole === 'SWEEPER' || ws.user.role === 'ADMIN' || ws.user.role === 'MASTER_ADMIN';
         if (!isLeader) {
-          return this.sendError(ws, 403, 'Lead channel is restricted to convoy leads and sweepers.');
+          return this.sendError(ws, 403, 'The lead channel is for the Trip owner, Lead and sweeper.');
         }
       }
       const stream = {

@@ -3,7 +3,7 @@
 ## Store listing
 - App name: **CoRoute** · Category: **Maps & Navigation** (alt: Travel & Local) · Free, no ads, no in-app purchases.
 - Short description and full description: see `store/LISTING.md` (kept in one place).
-- Privacy policy URL: `https://coroute.duckdns.org/privacy` (served by the gateway).
+- Privacy policy URL: `https://coroute.devmonks.space/privacy` (served by the gateway; `https://coroute.duckdns.org/privacy` until the new domain is live, see `docs/DOMAIN_MIGRATION_devmonks.md`).
 - Contact e-mail: santhoshbukka5@gmail.com
 
 ## Data safety form answers
@@ -70,8 +70,9 @@ new outbound host `api.open-meteo.com` on the server (or leave `WEATHER_URL` emp
 
 ## Build
 ```
-flutter build appbundle --release --dart-define=COROUTE_API=https://coroute.duckdns.org
+flutter build appbundle --release
 ```
+No `COROUTE_API` flag: the default (`https://coroute.devmonks.space`) falls back to `https://coroute.duckdns.org` by itself while the domain move is under way. An explicit `COROUTE_API` turns that fallback off. Release this build only after the new domain serves HTTPS and `/.well-known/assetlinks.json` (`docs/DOMAIN_MIGRATION_devmonks.md`).
 Upload `build/app/outputs/bundle/release/app-release.aab`. Screenshots: `store/capture_screenshots.ps1`. When the listing is live, set `PLAY_STORE_URL` (see the end of `store/LISTING.md`). Target SDK is set by Flutter's default (34+).
 
 ## Test track

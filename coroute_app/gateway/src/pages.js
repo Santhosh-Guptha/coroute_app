@@ -19,6 +19,7 @@ const SITE_PAGES = {
   '/features': 'features.html',
   '/safety': 'safety.html',
   '/how-it-works': 'how-it-works.html',
+  '/leaderboard': 'leaderboard.html', // 3.55b public leaderboards (usernames only)
   '/about': 'about.html',
   '/get': 'get.html',
   '/checkout': 'checkout.html', // payment page for an order made in the app (not listed in the sitemap)
@@ -26,11 +27,11 @@ const SITE_PAGES = {
   '/terms': 'terms.html',
 };
 /** Pages rendered by other handlers (not routes of their own). 3.16: the live emergency link pages (/e/<token>). */
-const SPECIAL_PAGES = ['404.html', 'join.html', 'live.html', 'live_expired.html', 'watch.html'];
+const SPECIAL_PAGES = ['404.html', 'join.html', 'join_friend.html', 'live.html', 'live_expired.html', 'watch.html'];
 /** Special pages a deployment may still lack (the server then answers with a built-in plain page). */
-const OPTIONAL_PAGES = new Set(['live.html', 'live_expired.html']);
+const OPTIONAL_PAGES = new Set(['live.html', 'live_expired.html', 'join_friend.html']); // 3.55: friend invite page (social_routes.js)
 /** Sitemap entries: path and priority. */
-const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/how-it-works', '0.7'], ['/get', '0.8'], ['/about', '0.5'], ['/privacy', '0.3'], ['/terms', '0.3']];
+const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/how-it-works', '0.7'], ['/leaderboard', '0.6'], ['/get', '0.8'], ['/about', '0.5'], ['/privacy', '0.3'], ['/terms', '0.3']];
 
 const INCLUDE = /<!--#include ([a-z0-9-]+)-->/g;
 /** An /assets/ file reference in a page (attribute, inline style or url()), with an optional old ?v= query. */
