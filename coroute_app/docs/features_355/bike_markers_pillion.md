@@ -2,18 +2,26 @@
 
 ## What riders see
 
-- **Ride map**: every bike is one marker: a small white plate with the bike's shape (its type) in
-  the bike's colour (`vehicleColor`). The plate keeps the old cues: ring colour (rider colour while
-  moving, amber when stopped, red for SOS, teal glow for me), status dot, a role letter (L lead,
-  S sweeper), selected glow, faded when the position is stale. The bike faces the way it travels
-  (mirrored when heading left on the screen); the heading arrow still points exactly.
-- **Pillion**: a seated pillion has no dot of their own. Their rider's bike shows two people, the
+- **Ride map (3.56, 3D)**: every bike is one marker: a top-down **3D motorcycle with its rider**
+  (helmet with visor, shoulders, arms on the bars), in the bike's type and colour (`vehicleColor`),
+  with a soft shadow on the map, like a navigation app's 3D car arrow. No plate. It turns to the
+  rider's heading (smoothed between reports by `SmoothMarkerLayer`, passed down as `MarkerHeading`;
+  below 3 km/h or without a GPS course it keeps the last heading, `HeadingHold`), so the old heading
+  arrow is gone. State cues: a soft ground halo / ring under the bike (rider colour while moving,
+  amber when stopped or with a warning, pulsing red for SOS, blue glow for me, white ring and 12 %
+  larger when selected), an upright status dot, an upright role chip (L lead, S sweeper),
+  desaturated and translucent when stale. The name / speed label under it is unchanged, and so are
+  the screen-reader labels. Admin live maps and the trip report / replay use the same 3D marker
+  (replay heading from the track: `ReplayTrack.headingAt`).
+- **Pillion**: a seated pillion has no dot of their own. Their rider's bike shows two people (the
+  pillion behind, light helmet and jacket), the
   label says "Asha + Kiran", and screen readers hear "Asha, Classic 350, red, with pillion Kiran,
   42 km/h, Riding". On the pillion's phone the pair is drawn at the pillion's own position (it
   follows their camera). If the rider's phone goes quiet (more than 20 s older than the pillion's),
   the pillion's position carries the bike, so the pair never disappears.
-- **Garage**: each bike card shows the bike's shape instead of a round icon; the add / edit sheet
-  has a bike type picker (each type with its shape), pre-selected from the model.
+- **Garage**: each bike card shows the bike as a rendered 3D 3/4 view of its type in its colour
+  (3.56, same models as the map); the add / edit sheet has a bike type picker (each type with its
+  3D view), pre-selected from the model. The pillion confirm shows the bike with two people.
 - **Before riding**: creating or joining a ride as a rider needs a bike with complete details. If
   something is missing, "Complete your bike" opens inline, pre-filled (preset for the model, type
   guess). Joining offers "I'm riding pillion (no bike)", which then asks which bike they sit on.
@@ -35,14 +43,40 @@
 | `retro` | Cafe racer / Retro | Classic 350, Interceptor, Jawa, Hunter |
 
 The guess only pre-selects; a bike counts as complete when the rider picked / confirmed the type.
-Unknown names fall back to commuter for drawing. The silhouettes are original, simple vector
-designs (`lib/presentation/garage/bike_silhouette.dart`: SVG-style path data, 64 × 44 design box)
-and are the same on the map and in the garage. Visual check: the same data rendered to SVG at
-24 px and 64 px, with one and two riders and on the marker plate.
+Unknown names fall back to commuter for drawing.
 
-Performance: one recorded `Picture` per type + colour + people + cue + 4 px size bucket
-(`BikeMarkerKey`, LRU of 96, `BikeGlyphCache`), replayed by every marker each frame.
+### 3D bikes (3.56)
 
+Owner feedback: the plate marker looked like a sticker; riders should be 3D vehicles. Each type has
+an original procedural model (tool/map_bikes, three.js), recognisable from above: Commuter; Scooter
+(apron, floorboard, small wheels, bulbous body); Sport (narrow pointed fairing, clip-ons, tucked
+rider); Cruiser (long wheelbase, wide pull-back bars, chrome, laid-back rider); Adventure / Tourer
+(wide bars with hand guards, tall screen, panniers + top box); Off-road (narrow, knobby tyres, high
+fender, number plate, elbows-up rider); Electric (one smooth shell, glowing cyan light blades);
+Cafe racer / Retro (round tank, round chrome headlight, single seat hump).
+
+Follow-up (Nov 9): Commuter, Electric and Retro looked alike at the cockpit size (~57 px). Now the
+Commuter has a slim tank, a flat square seat and a light **carrier rack** past the tail; the Electric
+has no engine or exhaust, a pointed teardrop shell with a **cyan light strip along each flank**, a
+cyan nose bar and a wide hub motor with cyan rings; the Retro has a **round headlight with a flat
+chrome ring**, **twin round mirrors** on stalks, a chrome tank strip, a wide flat bench with a tan
+stitching band and an upright rider. Check sheet: `preview.mjs --mode types --size 57` (8 types,
+1 / 2 riders, 3 colours, light and dark map). Assets regenerated for these three types (map and
+garage), 1.07 MB in all.
+
+Assets (`BikeSprites`, `assets/map_bikes/<type>_<1|2>_<layer>.png` and `assets/garage_bikes/
+<type>_<0|2>_<layer>.png`, 1x / 2.0x / 3.0x, palette PNG, about 1.1 MB in all): map layers `shadow`,
+`base`, `paint` (white shading, tinted at runtime with `BlendMode.modulate`, dark colours lifted by
+`BikeSprites.paintArgb`), `gloss`; heroes `base`, `paint`, `gloss`. Regenerate:
+`tool/map_bikes/README.md`. The vector silhouettes (`bike_silhouette.dart`, 64 × 44 design box)
+stay as the fallback when an image cannot be loaded (`BikeSilhouette(vector: true)` forces them).
+
+Performance: flutter_map draws markers as widgets, so the 3D bike is never re-rendered per heading:
+base + tinted paint + gloss are merged once per type + colour + people + pixel size (`BikeMarkerKey`,
+LRU of 64, `BikeSpriteCache.merged`) and each marker draws that bitmap and the shadow under a
+rotation transform (the merged image sits in a `RepaintBoundary`; a heading change only moves the
+layer). `BikeSpriteCache.precache` decodes the images when the ride map opens. The cache key has an
+optional heading bucket (`headingBucket`, 10°) for platforms that bake bitmaps per direction.
 ## Mandatory bike details
 
 `BikeDetails` / `validateBikeDetails` (`lib/domain/garage/bike_details.dart`):
@@ -115,12 +149,23 @@ else falls back to `CORIDER`.
   incident. Tests: `pillion_seat_355.test.js` (one bike, one answer), `test/group_safety_355_test.dart`.
 - Admin switch `pillionSeat` (Group): off → pillions are drawn as their own markers and the old
   `CORIDER` link is used.
+- Maps watched from outside the ride use the same once-per-bike plan (follow-up, Nov 9):
+  `BikeMarkerPlan.forViewer` in the admin convoy inspector and the master admin fleet map (one
+  two-up 3D marker, name "Arjun + Meera", the rider's bike look). The replay (`ReplayScreen` →
+  `TripRouteMap.pillionOf`) takes the seated pairs from the ride snapshot the phone holds
+  (`seatedPairs`) and merges a pillion into the rider's two-up marker only while the two tracks are
+  within 150 m (`replayBikes`; the pillion carries the bike when the rider has no track at that
+  moment). Limitation: the stored tracks and the trip report carry no pillion links, so a finished
+  ride the phone no longer holds (and the trip report's Route tab) still shows one marker per rider.
 
 ## Tests
 
 - Gateway: `gateway/test/pillion_seat_355.test.js` (validation, broadcast to all, decline /
   remove / get off / rider left / moved, rate limit, snapshot and stored room snapshot, old
   `CORIDER`, switch off). `net_compat` HELLO list updated.
+- App (pure): `test/bike_markers_viewer_355_test.dart` (admin maps and replay: `forViewer`,
+  `nameOf`, `seatedPairs`, `replayBikes`).
 - App (pure): `test/bike_markers_garage_355_test.dart` (type inference, mandatory details incl.
   electric, suggestions, marker plan, cue, colours, cache key and LRU, labels, pillion seat rules
-  and notices, `RIDER_VEHICLE` with the type). `garage_355_test` preset check covers electric presets.
+  and notices, `RIDER_VEHICLE` with the type; 3.56: asset paths per type / riders, cache key heading
+  bucket, colour names incl. "Kaza Brown", paint tint lift, heading hold, replay heading). `garage_355_test` preset check covers electric presets.

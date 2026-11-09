@@ -32,6 +32,18 @@ Android: CoRouteMessagingService (FirebaseMessagingService)
   `social_routes.js` and `crew_routes.js`. `FRIEND_REQUEST`, `FRIEND_ACCEPTED`, `CREW_INVITE` and
   `POLL_CREATED` are pushed only when no socket on this gateway got the event, because a live app
   already showed it. `RIDE_INVITE` always pushes (crew ride invites call `notifyUsers` directly).
+- **Two nodes, one notice (follow-up, Nov 9).** "Connected" means on either node: the mirror's
+  `LU` list now also carries `o` (every rider with an open signed-in socket on that node, home
+  screen included, not only riders in a ride room), so `mirror.userOnPeer(userId)` answers from
+  memory. `onSocketEvent` skips the push when the peer holds the rider's socket (the hub forwards the
+  socket message there as `U`), and `skipConnected` checks both nodes. The presence list can lag a
+  heartbeat (1 s), so the app also dedupes.
+- **eventId.** `push.stampEvent(payload)` gives every notice a stable id (`FRIEND_REQUEST:<requestId>`,
+  `CREW_INVITE:<inviteId>`, `POLL_CREATED:<pollId>`, `RIDE_INVITE:<inviteId>`; random when the
+  notice has no id). `social_routes.js` / `crew_routes.js` stamp it before `hub.sendToUser`, and
+  crew ride invites put the same id in the socket message and the push data, so both carry it.
+  Test: `gateway/test/push_two_node_355.test.js` (rider on the peer node gets the socket notice and
+  no push; offline riders still get one; same eventId on both paths).
 - Token registry: collection `push_tokens` `{userId, token, platform, appVersion, updatedAt}`.
   The token is unique: a token that signs in to another account moves to that account. The 5
   newest tokens per rider are kept. Tokens are removed when the rider deletes the account, signs
@@ -92,6 +104,11 @@ Android: CoRouteMessagingService (FirebaseMessagingService)
 - `lib/presentation/widgets/push_router_host.dart` (in `MaterialApp.builder`): opens the screen.
   On a cold start it waits for sign-in and for the splash hand-over. A push that arrives while
   the app is in front becomes a snackbar with "View".
+- `lib/domain/notify/notice_dedupe.dart` (`NoticeDedupe.shared`): one notice per `eventId` within
+  10 minutes. The socket handlers (`FriendsService`, `CrewsService`, `RideInvitesService` banner)
+  and the foreground push snackbar check it; a second copy only refreshes the list. With the app in
+  the background the native service cannot know the socket state, so a rare duplicate system
+  notification stays possible there (accepted). Test: `test/notice_dedupe_355_test.dart`.
 - Settings > Account & privacy has a **Push notifications** switch (default on). It is shown
   only when the build has push. Turning it on asks for the notification permission if Android
   has not granted it. Turning it off removes the token from the gateway and from FCM.

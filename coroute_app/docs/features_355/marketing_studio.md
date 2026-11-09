@@ -56,10 +56,38 @@ offer re-laid as a banner, Weekend flash sale.*
 Every layer: position, size, rotation, opacity, hidden, locked, editor-only name.
 
 **Link and QR code.** `{link}` is the template's link, or (empty) `<server>/get?coupon=<CODE>`, the
-download page. A custom link may contain `{code}`. The QR encoder is pure Dart
+download page. A custom link may contain `{code}`. The code from that link is applied in the app
+automatically (see "Coupon from the QR / link" below). The QR encoder is pure Dart
 (`lib/domain/marketing/qr_encoder.dart`: byte mode, level M, versions 1-10, up to 213 bytes), checked
 module for module against the Python `qrcode` reference encoder for versions 1, 4, 7, 8, 9 and 10
 and all eight masks.
+
+## Coupon from the QR / link (3.55)
+
+The QR code and `{link}` open `<server>/get?coupon=CODE`. The code is filled in for the rider; nothing
+is bought by itself.
+
+- **Website `/get`** (`gateway/public/get.html` + `assets/get.js`): reads `coupon` from the address,
+  accepts only `A-Z 0-9 - _` up to 24 characters (upper-cased), and shows one line "Code CODE will be
+  applied in the app" (written with `textContent` only; the server never puts the query in the page).
+  With `PLAY_STORE_URL` set, every "Download for Android" link becomes the Play link with
+  `&referrer=coupon%3DCODE`. On Android, **Open in the app** opens `coroute://get?coupon=CODE`
+  (intent link, falls back to the store / download). **Copy code** is always there.
+- **App, already installed**: App Links on both hosts (`coroute.devmonks.space`,
+  `coroute.duckdns.org`) for the paths `/get` and `/get/` (same `assetlinks.json`, which covers the whole
+  host), plus `coroute://get`. `_DeepLinkListener` (main.dart) saves the code and shows "Code CODE will
+  be applied when you choose a plan." with a **Plans** button when signed in.
+- **App, new install from Play**: on first launch the app reads the Play Install Referrer once
+  (`coroute/install_referrer` channel, `InstallReferrerChannel.kt`, Gradle
+  `com.android.installreferrer:installreferrer:2.2`) and takes `coupon=CODE` from it. A Play Store
+  that cannot be reached is asked again next launch; any other answer ends it. Never crashes.
+- **Kept 7 days** (`PendingCouponStore`, SharedPreferences `pending_coupon_v1`; only the code is kept).
+  The plan payment screen prefills it and checks it with the server quote (same rules as typing it):
+  "CODE applied" with the discount, or the reason it can't be used. Removing it, or paying with it,
+  forgets it.
+- Tests: gateway `website_get_coupon_355` (chip, Play referrer, intent link, hostile codes, no
+  `innerHTML`), Dart `coupon_link_and_plan_change_355_test` (link / referrer parsing, format, expiry,
+  store).
 
 ## Rendering
 
@@ -164,8 +192,9 @@ differences are possible (text measuring, shadows).
   by `dart analyze` and the pure tests, not on a device.
 - Save to device goes through the share sheet (no `path_provider` / gallery package in the app).
 - Fonts: the bundled Manrope plus the platform's sans, serif and monospace; no font upload.
-- The QR code and `{link}` open `<server>/get?coupon=CODE`. The website and the app do not apply
-  the coupon from that link yet; riders type the code shown on the image.
+- Coupon from the link: the Install Referrer path and the app link need a Play / device check
+  (the Kotlin channel was not compiled here). A sideloaded APK (the site's own download) has no
+  referrer: those riders use "Copy code" or type it.
 - One undo history per editor session (not saved).
 - The "all sizes" export is an automatic re-layout; extreme aspect changes may need a manual
   touch in the editor (change the size in the Template tab and adjust).

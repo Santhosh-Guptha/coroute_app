@@ -152,6 +152,16 @@ Built in code by the feature agents; gateway tests added; Dart pure tests and an
 
 Gateway suite after this round (docs agent, Nov 9): **904 / 904 pass** (new suites `push_355`, `crew_ride_invites_355`, `domain_migration`).
 
+## 1g. Owner decisions, Nov 9 (late): siren switch, upgrade only, coupon QR
+
+| Decision | What was built |
+|---|---|
+| Siren alerts get a switch, on by default | Settings › Ride › **Siren alerts** ("Listens on your phone during rides. Nothing is recorded."). Removed from the always-on list; a rider the last migration turned on stays on and can turn it off. Off releases the mic at once (RideMicHub re-evaluates on every settings change; the mic stays only for the intercom). [SETTINGS_MINIMAL_v3.55.md](SETTINGS_MINIMAL_v3.55.md) |
+| Riders can upgrade but not downgrade | While a paid plan runs only a bigger plan can be bought (prorated; coupons apply; credit capped at the new price, no extra days). A smaller or the same plan answers `409 DOWNGRADE_NOT_ALLOWED` "You can move to a bigger plan anytime. Smaller plans can be chosen when your current plan ends." After the plan ends any plan can be chosen. Admin "Change plan" is exempt. The app hides smaller plans with that line. |
+| Coupon QR / link applies the code | `/get?coupon=CODE` shows "Code CODE will be applied in the app", tags the Play link with `referrer=coupon%3DCODE`, offers **Open in the app** and **Copy code**. The app takes the code from App Links (`/get`, both hosts), `coroute://get` or the Play Install Referrer (first launch), keeps it 7 days and prefills it on the plan payment screen. Never auto-purchases. [marketing_studio.md](features_355/marketing_studio.md) |
+
+Compatibility: the 409 is new for rider downgrades and early same-plan renewals (older apps show the server message). A repeat tap on the plan already held with nothing to pay still answers "already active". New Android pieces (App Links paths `/get` and `/get/`, `coroute://get`, Gradle `com.android.installreferrer:installreferrer:2.2`, `InstallReferrerChannel.kt`) need a device check: the Kotlin was not compiled here.
+
 ## 2. Compatibility with existing users and older app builds
 
 - Older apps (3.54) keep working: new socket types are only sent to/asked from 3.55 apps (`ride355` feature) or ignored by old apps; old apps still apply roles through RIDER_UPDATE.
