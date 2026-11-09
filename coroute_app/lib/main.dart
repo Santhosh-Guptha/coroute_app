@@ -23,12 +23,20 @@ import 'data/services/alert_service.dart';
 import 'data/services/api_client.dart';
 import 'data/services/feature_flags_service.dart';
 import 'data/services/admin_warnings_service.dart';
+import 'data/services/friends_service.dart'; // 3.55 usernames, friends, profile pictures
+import 'data/services/crews_service.dart'; // 3.55 crews and crew polls
+import 'data/services/rider_score_service.dart'; // 3.55 rider score sync at ride end
+import 'presentation/social/friend_notice_host.dart'; // 3.55 friend request notices
+import 'presentation/social/ride_invite_screen.dart'; // 3.55 crew ride invites
+import 'domain/social/username_rules.dart' show InviteCodes;
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
+import 'data/services/alarm_notifier.dart'; // 3.55 siren / horn lock-screen heads-up
 import 'data/services/p2p_mesh_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
 import 'data/services/intercom_service.dart';
+import 'data/services/speed_audio_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/services/app_version_service.dart';
 import 'data/services/device_diagnostic_service.dart';
@@ -36,6 +44,9 @@ import 'data/services/membership_service.dart';
 import 'data/local/ride_stats_store.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
+import 'data/services/ride_mic_hub.dart'; // 3.55 sound awareness (mic)
+import 'data/services/siren_acoustic_detector.dart'; // 3.55 sound awareness (mic)
+import 'data/services/audio_priority_manager.dart'; // 3.55 sound awareness (mic)
 import 'data/services/ride_notification_service.dart';
 import 'data/services/medical_id_lock_sync.dart';
 import 'data/services/safety_native.dart';
@@ -46,6 +57,8 @@ import 'data/services/settings_service.dart';
 import 'data/services/tile_cache_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/public_ride_service.dart';
+import 'data/services/push_service.dart'; // 3.55 push notifications
+import 'data/services/ride_invites_service.dart'; // 3.55 crew ride invites
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
@@ -61,12 +74,15 @@ import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
 import 'presentation/splash/splash_screen.dart';
+import 'presentation/widgets/push_router_host.dart'; // 3.55 push notifications
 
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 3.55: a tapped RIDE_INVITE push opens the invitation screen (set before any push can arrive).
+  PushRouterHost.openRideInvite = RideInviteScreen.open;
   tz_data.initializeTimeZones();
   BackgroundService.initCommunicationPort();
   // Portrait + landscape are both supported; layouts adapt to width.
@@ -82,6 +98,7 @@ void main() async {
   // Data saver is known before the first frame, so the first ride already uses it.
   final settings = SettingsService();
   await settings.load();
+  await settings.loadSoundSettings(); // 3.55 sound awareness (mic): siren / horn / voice cleanup settings
   // Map tiles saved on the phone (3.16): best effort; without it maps use the network.
   try {
     final dir = await SafetyNative.cacheDir();
@@ -132,6 +149,17 @@ class CoRouteApp extends StatelessWidget {
         // 3.55 platform: moderator warnings on Home (GET /me/warnings + socket push; switch adminWarnings).
         ChangeNotifierProvider<AdminWarningsService>(lazy: false,
           create: (ctx) => AdminWarningsService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
+        ChangeNotifierProvider<FriendsService>(lazy: false,
+          create: (ctx) => FriendsService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
+        // 3.55 crews and crew polls (GET /crews + socket pushes; switches crews / crewPolls).
+        ChangeNotifierProvider<CrewsService>(lazy: false,
+          create: (ctx) => CrewsService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
+        // 3.55 "Start a ride with this crew": my ride invitations + socket RIDE_INVITE (switch crewRides).
+        ChangeNotifierProvider<RideInvitesService>(lazy: false,
+          create: (ctx) => RideInvitesService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
+        // 3.55 push notifications (FCM via the native coroute/push channel): token registration after
+        // sign-in, removal on sign-out, tapped notifications (routed by PushRouterHost).
+        ChangeNotifierProvider<PushService>(lazy: false, create: (ctx) => PushService(ctx.read<ApiClient>())..start()),
         ChangeNotifierProvider(create: (ctx) {
           final auth = AuthService(ctx.read<ApiClient>());
           ctx.read<RealtimeService>().onAuthRejected = auth.revalidate;
@@ -197,6 +225,8 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider(create: (ctx) {
           final intercom = IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>());
           intercom.featureOn = FeatureFlagsService.on; // 3.55 admin feature switch 'intercom'
+          // 3.55 fix: a switch turned off mid-ride also stops a talk in progress / an armed VOX mic.
+          ctx.read<FeatureFlagsService>().addListener(intercom.featureSwitchesChanged);
           final phoneCall = ctx.read<PhoneCallService>();
           phoneCall.addListener(() => intercom.setPhoneCallActive(phoneCall.isCallActive));
           return intercom;
@@ -233,6 +263,9 @@ class CoRouteApp extends StatelessWidget {
             // 3.55: potholes, speed breakers and rough road felt at the front warn the riders
             // behind and are saved for later rides (ConvoyService decides whether to send).
             safety.onRoadSurface = convoys.reportRoadSurface;
+            // 3.55 rider score: at ride end send the ride's counts (only while the rider's setting is on).
+            final scoreApi = ctx.read<ApiClient>();
+            safety.onRideStatsEnded = () => RiderScoreService.syncAfterRide(scoreApi);
             return safety;
           },
         ),
@@ -248,6 +281,86 @@ class CoRouteApp extends StatelessWidget {
           },
           dispose: (_, b) => b.dispose(),
         ),
+        // ==== 3.55 sound awareness (mic agent) BEGIN: one shared ride microphone (RideMicHub) for
+        // siren / horn detection and the intercom; alerts through VoiceService's priority manager.
+        // Audio is analysed on the phone only. docs/features_355/sound_awareness_and_intercom.md
+        ChangeNotifierProvider<RideMicHub>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final safety = ctx.read<SafetyService>();
+            final settings = ctx.read<SettingsService>();
+            final intercom = ctx.read<IntercomService>();
+            final hub = RideMicHub()
+              ..rideActive = (() => convoys.activeConvoy?.tripStatus == 'STARTED' || safety.offlineSoloActive)
+              ..batteryLow = (() =>
+                  SosBatteryReserve.isActive || settings.batterySaver || (convoys.currentBatteryLevel < 15 && !convoys.isCharging))
+              ..onNotice = ((m) => ctx.read<VoiceService>().speak(m, key: 'mic_permission_notice').ignore());
+            intercom.micHub = hub;
+            final phoneCall = ctx.read<PhoneCallService>();
+            phoneCall.addListener(() => hub.setPhoneCallActive(phoneCall.isCallActive));
+            void again() => hub.reevaluate().ignore();
+            convoys.addListener(again);
+            safety.addListener(again);
+            settings.addListener(again);
+            SosBatteryReserve.shared.addListener(again);
+            return hub;
+          },
+        ),
+        ChangeNotifierProvider<SirenAcousticDetector>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final settings = ctx.read<SettingsService>();
+            final intercom = ctx.read<IntercomService>();
+            final voice = ctx.read<VoiceService>();
+            final hub = ctx.read<RideMicHub>();
+            final country = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+            final d = SirenAcousticDetector(intercomService: intercom)
+              ..speak = ((text, {required urgent, required key}) => voice.priorityManager.submit(
+                    text: text,
+                    priority: urgent ? AudioPriority.p1SafetyConfirmation : AudioPriority.p2ImmediateHazard,
+                    dedupeKey: key,
+                    pauseOthers: urgent,
+                  ))
+              ..tone = (() => NativeVoiceEngine.alertTone().ignore())
+              ..sirenSettingOn = (() => settings.sirenAlerts)
+              ..hornSetting = (() => settings.hornAlerts)
+              ..giveWaySide = (() => settings.giveWaySide == 'auto' ? SirenAcousticDetector.keepSideForCountry(country) : settings.giveWaySide)
+              ..riderTalking = (() => intercom.isTransmitting)
+              ..intercomPlaying = (() => intercom.isReceiving)
+              // Can the rider hear outside? Headset / music / call from the phone's audio state, no mic.
+              ..readListening = NativeVoiceEngine.readListeningState;
+            // 3.55: siren / horn with the screen locked or the app in the background: a heads-up
+            // with vibration (HapticFeedback may not vibrate then). In front: haptics only.
+            d.backgroundAlert = (title, body, {required strong}) => AlarmNotifier.showSoundAwarenessAlert(title, body,
+                showFor: strong ? const Duration(seconds: 60) : const Duration(seconds: 10));
+            d.attachHub(hub);
+            // 3.55: the ride foreground service starts as location|microphone (when the mic
+            // permission is already granted) if siren / horn alerts are on or the intercom may be used.
+            final safetyForMic = ctx.read<SafetyService>();
+            BackgroundService.micMayBeNeeded = () =>
+                d.detectionWanted ||
+                (FeatureFlagsService.on('intercom') &&
+                    !safetyForMic.offlineSoloActive &&
+                    (convoys.activeConvoy?.hasGroupFeatures ?? true));
+            // Setting or admin switch off releases the mic at once; a new ride starts fresh.
+            settings.addListener(d.settingsChanged);
+            ctx.read<FeatureFlagsService>().addListener(d.settingsChanged);
+            var wasRiding = false;
+            void rideChanged() {
+              final riding = hub.rideActive();
+              if (riding && !wasRiding) d.resetForRide();
+              if (riding != wasRiding) d.setRideActive(riding);
+              wasRiding = riding;
+            }
+            convoys.addListener(rideChanged);
+            safetyForMic.addListener(rideChanged);
+            rideChanged();
+            return d;
+          },
+        ),
+        // ==== 3.55 sound awareness (mic agent) END
         // 3.55 solo check-in by ETA (text the emergency contact when a solo ride is overdue and the
         // rider does not answer) and no-signal ahead (coverage log of my own rides). Not lazy: the
         // timer must run with the screen off.
@@ -308,10 +421,12 @@ class CoRouteApp extends StatelessWidget {
             return GarageBinding(
               ctx.read<GarageService>(),
               engineCare: ctx.read<SafetyService>().engineCare,
+              fuelEconomy: ctx.read<SafetyService>().fuelEconomy, // 3.55 fix: bike change mid-ride
               auth: ctx.read<AuthService>(),
               settings: ctx.read<SettingsService>(),
               weather: ctx.read<WeatherService>(),
-              onVehicleColour: (c) => convoys.vehicleColor = c,
+              onVehicle: convoys.setActiveVehicle, // 3.55: also tells the group mid-ride
+              onBikeDetails: convoys.setActiveBikeDetails, // 3.55 bike type (map shape) and complete details
             );
           },
           dispose: (_, b) => b.dispose(),
@@ -382,6 +497,8 @@ class CoRouteApp extends StatelessWidget {
               settings,
               essentials: ctx.read<RideEssentialsCoordinator>(),
               safety: ctx.read<SafetyService>(),
+              // 3.55: intercom state line + lock-screen Talk / Mute buttons.
+              intercom: ctx.read<IntercomService>(),
               // Always on (Agent 4): the rider's medical ID badge on the lock screen during a ride
               // and the full line during their own SOS; empty when no medical info was entered.
               medicalId: () => MedicalId.fromAuth(auth),
@@ -395,6 +512,13 @@ class CoRouteApp extends StatelessWidget {
             );
           },
           dispose: (_, n) => n.dispose(),
+        ),
+        // 3.55 "Lower music when speeding" (admin switch speedAudio).
+        Provider<SpeedAudioService>(
+          lazy: false,
+          create: (ctx) => SpeedAudioService(ctx.read<ConvoyService>(), ctx.read<SettingsService>(),
+              safety: ctx.read<SafetyService>(), intercom: ctx.read<IntercomService>()),
+          dispose: (_, s) => s.dispose(),
         ),
       ],
       child: const _SessionBinder(
@@ -414,7 +538,7 @@ class _App extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: appNavigatorKey,
-      navigatorObservers: [appRouteObserver],
+      navigatorObservers: [appRouteObserver, PushRouterHost.observer],
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeFor(theme.palette),
@@ -428,7 +552,19 @@ class _App extends StatelessWidget {
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.3).toDouble())),
           child: CrashAlarmHost(
             navigatorKey: appNavigatorKey,
-            child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+            // 3.55 friend request / accepted: snackbar in the foreground (system notification in the background).
+            child: FriendNoticeHost(
+              navigatorKey: appNavigatorKey,
+              // 3.55 push notifications: tapped push -> the right screen; foreground push -> snackbar.
+              child: PushRouterHost(
+                navigatorKey: appNavigatorKey,
+                // 3.55 ride invitations: shown by themselves on app open / resume, banner on RIDE_INVITE.
+                child: RideInviteHost(
+                  navigatorKey: appNavigatorKey,
+                  child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+                ),
+              ),
+            ),
           ),
         );
       },
@@ -564,6 +700,13 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
       context.read<MembershipService>().fetchMyMembership().ignore();
       return;
     }
+    // 3.55 friend invite link (https://<site>/join/friend/<CODE>, coroute://join/friend/<CODE>).
+    final invite = InviteCodes.fromUri(uri);
+    if (invite != null) {
+      context.read<FriendsService>().handleInviteCode(invite).ignore();
+      return;
+    }
+    if (uri.pathSegments.contains('friend')) return; // a malformed invite is never a ride join code
     final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     String? code;
     if (uri.scheme == 'coroute' && uri.host == 'join' && segs.isNotEmpty) code = segs.first;
