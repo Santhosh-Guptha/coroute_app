@@ -24,7 +24,7 @@ void main() {
     final a = SwapAsk.fromWire({'requestId': 'SWP-0123456789AB', 'fromUserId': 'ravi', 'fromName': 'Ravi', 'kind': 'BIKES'})!;
     expect(a.kind, SwapKind.bikes);
     expect(a.title, 'Ravi wants to swap bikes with you');
-    expect(a.speech, contains('Accept or decline'));
+    expect(a.speech, contains('Stop when safe to accept or decline'));
     expect(SwapAsk.fromWire({'requestId': 'x', 'fromUserId': 'ravi', 'kind': 'CARS'}), isNull);
     expect(SwapAsk.fromWire({'fromUserId': 'ravi', 'kind': 'BIKES'}), isNull);
   });

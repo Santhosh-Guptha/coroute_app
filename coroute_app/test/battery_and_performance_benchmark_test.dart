@@ -194,16 +194,16 @@ void main() {
         TripStorageService(api),
       );
 
-      // 1. Moving normal settings: the speed band picks the cadence (slow: 10 m, high accuracy;
-      // highway: 2 m, navigation grade).
+      // 1. Moving normal settings: the speed band picks the cadence (slow: 2 s, high accuracy;
+      // highway: 500 ms, navigation grade); no distance filter while riding (speed accuracy).
       final movingNormal = convoyService.settingsForTesting(idle: false, lowBattery: false);
-      expect(movingNormal.distanceFilter, 10);
+      expect(movingNormal.distanceFilter, 0);
       expect(movingNormal.accuracy, LocationAccuracy.high);
       final highway = convoyService.settingsForTesting(idle: false, lowBattery: false, band: SpeedBand.highway);
-      expect(highway.distanceFilter, 2);
+      expect(highway.distanceFilter, 0);
       expect(highway.accuracy, LocationAccuracy.bestForNavigation);
       final highwayLow = convoyService.settingsForTesting(idle: false, lowBattery: true, band: SpeedBand.highway);
-      expect(highwayLow.distanceFilter, 5);
+      expect(highwayLow.distanceFilter, 0);
       expect(highwayLow.accuracy, LocationAccuracy.high);
 
       // 2. Idle normal settings (stationary)
@@ -213,7 +213,7 @@ void main() {
 
       // 3. Moving low battery settings
       final movingLow = convoyService.settingsForTesting(idle: false, lowBattery: true);
-      expect(movingLow.distanceFilter, 15);
+      expect(movingLow.distanceFilter, 0);
       expect(movingLow.accuracy, LocationAccuracy.medium);
 
       // 4. Idle low battery settings (maximum power conservation)
@@ -253,11 +253,11 @@ void main() {
         },
       ));
 
-      // Simulate moving position
+      // Simulate moving position (65 s before the stopped fix below)
       convoyService.handlePositionForTesting(Position(
         latitude: 12.9716,
         longitude: 77.5946,
-        timestamp: DateTime.now(),
+        timestamp: DateTime.now().subtract(const Duration(seconds: 65)),
         accuracy: 10.0,
         altitude: 800.0,
         altitudeAccuracy: 5.0,
@@ -285,6 +285,8 @@ void main() {
         headingAccuracy: 5.0,
         speed: 0.0,
         speedAccuracy: 0.5,
+        hasSpeed: true,
+        hasSpeedAccuracy: true,
       ));
 
       expect(convoyService.isGpsIdleProfile, isTrue, reason: 'Must throttle GPS polling to idle when stationary');

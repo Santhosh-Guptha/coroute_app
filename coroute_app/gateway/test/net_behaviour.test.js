@@ -49,7 +49,7 @@ async function scenario({ abcPublic }) {
   const lng = lane();
   const north = line(lng, 17.40, 17.70);
   const south = line(lng, 17.70, 17.40);
-  // ---- A: Rahul's group (Rahul + 7 riders 9 km ahead). Rahul shares medical with his group only.
+  // ---- A: Rahul's group (Rahul + 7 riders 9 km ahead). Rahul's emergency info goes to an accepted responder (no switch).
   const aLead = await person('Kiran Lead');
   const A = await h.rideOn(north, { name: 'Hyderabad to Goa', lead: aLead });
   const rahul = await joinAs(A, await person('Rahul Sharma', { bloodGroup: 'B+', allergies: 'Penicillin' }));
@@ -127,7 +127,9 @@ async function scenario({ abcPublic }) {
   await B.aws.next((m) => m.type === 'ACK' && m.clientId === 'acc-arjun');
   const accUpd = await B.aws.next((m) => m.type === 'ASSIST_UPDATE' && m.myStatus === 'ACCEPTED');
   assert.equal(accUpd.subject.firstName, 'Rahul');
-  assert.equal(accUpd.medical, undefined, 'no medical: Rahul did not opt in for responders');
+  // No consent switch any more: the accepted responder gets what Rahul entered while the alert is open
+  // (sign-up stores no medical fields, so only the emergency contact here).
+  assert.deepEqual(accUpd.medical, { contactName: 'Kin Contact', contactPhone: '+919000000002' });
   for (const ws of [B.ws, D.ws]) assert.equal((await ws.next((m) => m.type === 'ASSIST_CLOSED')).reason, 'TAKEN');
   const assigned = await A.ws.next((m) => m.type === 'EMERGENCY_UPDATE' && m.status === 'RESPONDER_ASSIGNED' && m.network.responders.length);
   assert.equal(assigned.network.responders[0].name, 'Arjun');
@@ -182,7 +184,11 @@ async function scenario({ abcPublic }) {
   const aNeedles = [A.gid, 'Hyderabad to Goa', rahul.user.userId, rahul.user.phone, rahul.user.name, rahul.user.name.split(' ')[1], 'Penicillin', 'B+', rahul.user.vehicleNo,
     ...aMembers.flatMap((m) => [m.user.userId, m.user.name, m.user.phone]), '+919000000002', 'Kin Contact', A.c.joinCode, '17.581'];
   for (const [k, ws] of Object.entries(externals)) {
-    const s = JSON.stringify(ws.frames.filter((f) => NEW_TYPES.includes(f.type)));
+    // The accepted responder's ASSIST_UPDATE.medical (emergency contact, medical info) is the one
+    // allowed exception while the alert is open; everything else is walked.
+    const frames = ws.frames.filter((f) => NEW_TYPES.includes(f.type));
+    for (const f of frames) if (f.medical) assert.ok(f.type === 'ASSIST_UPDATE' && f.myStatus !== 'ASKED', `${k}: medical only for an accepted responder`);
+    const s = JSON.stringify(frames.map(({ medical, ...rest }) => rest));
     for (const n of aNeedles) assert.equal(s.includes(String(n)), false, `${k} received ${n}`);
   }
   // The original group never learns the responders' ids, group or names beyond the first name.

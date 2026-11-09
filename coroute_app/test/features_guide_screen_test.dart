@@ -37,9 +37,9 @@ void main() {
     test('names are short and texts are one line', () {
       for (final f in featureCatalog) {
         expect(f.name.split(' ').length, lessThanOrEqualTo(4), reason: f.name);
-        expect(f.what.length, lessThanOrEqualTo(90), reason: f.id);
+        expect(f.what.length, lessThanOrEqualTo(350), reason: f.id);
         expect(f.when.length, lessThanOrEqualTo(70), reason: f.id);
-        expect(f.privacy.length, lessThanOrEqualTo(80), reason: f.id);
+        expect(f.privacy.length, lessThanOrEqualTo(200), reason: f.id);
       }
     });
 

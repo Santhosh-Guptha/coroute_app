@@ -215,3 +215,14 @@ test('pause resume preserves expiry and permanent revocation; deleted grants fai
   t.repo.guardianGrant = async () => null;
   await assert.rejects(t.service.snapshot(s.credential), { status: 410 });
 });
+test('owner rule: a guardian sees the medical info of an open alert only (allowlisted, no consent switch)', async () => {
+  const t = await setup(); const grant = await t.create('EMERGENCY_ONLY');
+  assert.equal((await t.view(grant)).alerts, undefined, 'no emergency: nothing medical');
+  t.room.alerts.set('a', { userId: 'me', lat: 17, lng: 78, timestamp: T, source: 'MANUAL',
+    medical: { bloodGroup: 'O+', allergies: 'Penicillin', notes: 'Asthma', phone: 'SECRET', extra: { x: 1 } } });
+  const out = await t.view(grant);
+  assert.deepEqual(out.alerts[0].medical, { bloodGroup: 'O+', allergies: 'Penicillin', notes: 'Asthma' });
+  assert.ok(!JSON.stringify(out).includes('SECRET'));
+  t.room.alerts.get('a').resolved = true;
+  assert.ok(!JSON.stringify(await t.view(grant)).includes('Penicillin'), 'gone once resolved');
+});

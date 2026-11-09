@@ -271,6 +271,12 @@ void main() {
     expect(find.text('445566'), findsOneWidget);
     expect(find.text('TRIP OWNER'), findsOneWidget);
     expect(find.text('TRIP HEAD'), findsOneWidget);
+    // 3.55 naming: the riding role shows next to the trip role (the trip owner rides Lead here).
+    expect(find.text('LEAD'), findsOneWidget);
+    expect(find.text('MIDDLE'), findsOneWidget);
+    for (final line in RiderManagementSheet.roleExplanations) {
+      expect(find.text(line), findsOneWidget);
+    }
     expect(find.text('Share'), findsOneWidget);
 
     await tester.tap(find.text('Share'));

@@ -51,6 +51,46 @@ void main() {
       expect(last, MissingRiderAction.none, reason: 'no reply is sent once only');
     });
 
+    test('pillion pair: the other phone on my bike answered, so mine closes and sends no "no answer"', () {
+      // Two phones on one bike stop together; the pillion's phone answers I'm OK at 200 s.
+      final rider1 = MissingRiderCheck();
+      final actions = <MissingRiderAction>[];
+      int? partnerAt;
+      for (var s = 0; s <= 400; s += 5) {
+        final now = t0 + s * sec;
+        if (s == 200) partnerAt = now; // the partner's status time (RIDER_UPDATE statusReason + stoppedSince)
+        actions.add(rider1.evaluate(nowMs: now, me: rider('me', 5, speed: 0, seen: now), others: group(now, 5.2 + s * 0.011), partnerAnsweredAtMs: partnerAt));
+      }
+      expect(actions.contains(MissingRiderAction.ask), isTrue);
+      expect(actions.where((a) => a == MissingRiderAction.answeredOnOtherPhone).length, 1);
+      expect(actions.contains(MissingRiderAction.sendNoReply), isFalse, reason: 'one answer per bike: no "no answer" from this phone');
+      expect(rider1.closedAfterNoReply, isFalse);
+      expect(rider1.showing, isFalse);
+
+      // This phone had already told the lead (no answer at 270 s), then the partner answered: close and say OK.
+      final late = MissingRiderCheck();
+      final got = <MissingRiderAction>[];
+      partnerAt = null;
+      for (var s = 0; s <= 400; s += 5) {
+        final now = t0 + s * sec;
+        if (s == 330) partnerAt = now;
+        got.add(late.evaluate(nowMs: now, me: rider('me', 5, speed: 0, seen: now), others: group(now, 5.2 + s * 0.011), partnerAnsweredAtMs: partnerAt));
+      }
+      expect(got.contains(MissingRiderAction.sendNoReply), isTrue);
+      expect(got.last == MissingRiderAction.none && got.contains(MissingRiderAction.answeredOnOtherPhone), isTrue);
+      expect(late.closedAfterNoReply, isTrue);
+
+      // A stale answer from an earlier stop (long before this stop began) does not count.
+      final stale = MissingRiderCheck();
+      final st = <MissingRiderAction>[];
+      for (var s = 0; s <= 300; s += 5) {
+        final now = t0 + s * sec;
+        st.add(stale.evaluate(nowMs: now, me: rider('me', 5, speed: 0, seen: now), others: group(now, 5.2 + s * 0.011), partnerAnsweredAtMs: t0 - 30 * minute));
+      }
+      expect(st.contains(MissingRiderAction.ask), isTrue);
+      expect(st.contains(MissingRiderAction.sendNoReply), isTrue);
+    });
+
     test('no reply is suppressed when the server already alerted the lead in the last 5 min', () {
       final c = MissingRiderCheck();
       final actions = <MissingRiderAction>[];

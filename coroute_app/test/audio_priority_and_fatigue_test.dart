@@ -269,17 +269,35 @@ void main() {
       phoneCall.dispose();
     });
 
-    test('Voice guidance continues by default when call is answered (offhook)', () async {
+    test('3.55 call-aware: no ordinary speech over a call, summary after it', () async {
       phoneCall.simulateCallState(PhoneCallStatus.offhook);
       expect(phoneCall.isCallActive, isTrue);
 
       final navSpoken = await voice.speakNavigation('Take the second exit at roundabout');
-      expect(navSpoken, isTrue);
-      expect(engine.spokenList.last.$1, contains('roundabout'));
+      expect(navSpoken, isFalse, reason: 'directions are stale after a call: dropped');
 
       final hazardSpoken = await voice.speakHazard('Caution: Animal on road 200 meters ahead');
-      expect(hazardSpoken, isTrue);
-      expect(engine.spokenList.last.$1, contains('Animal on road'));
+      expect(hazardSpoken, isTrue, reason: 'held for the after-call summary');
+      expect(engine.spokenList.any((t) => t.$1.contains('Animal on road')), isFalse);
+
+      phoneCall.simulateCallState(PhoneCallStatus.idle);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(engine.spokenList.any((t) => t.$1.startsWith('While you were on the call') && t.$1.contains('Animal on road')), isTrue);
+    });
+
+    test('3.55 call-aware switch off: the old behaviour (lines spoken during the call)', () async {
+      final legacy = AudioPriorityManager(engine: engine, phoneCallService: phoneCall, callAware: () => false);
+      phoneCall.simulateCallState(PhoneCallStatus.offhook);
+      final ok = await legacy.submit(text: 'Caution: pothole', priority: AudioPriority.p2ImmediateHazard);
+      expect(ok, isTrue);
+      expect(engine.spokenList.last.$1, contains('pothole'));
+      legacy.dispose();
+    });
+
+    test('3.55 call-aware: a critical line during a call is a short phrase', () async {
+      phoneCall.simulateCallState(PhoneCallStatus.offhook);
+      await voice.speakEmergency('Crash detected. Countdown 15 seconds. Say OK to cancel.');
+      expect(engine.spokenList.last.$1, 'Crash detected.');
     });
 
     test('Critical alert during call is spoken and queued into post-call replay', () async {

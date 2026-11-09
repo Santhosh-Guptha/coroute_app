@@ -70,6 +70,12 @@ class FakeConvoyService extends ChangeNotifier implements ConvoyService {
 
   @override
   bool canEditRoute = true;
+  @override
+  bool get canChangeGroupSettings => canEditRoute;
+  @override
+  bool get isSettingsOnlyTripHead => false;
+  @override
+  bool get canEndTrip => canEditRoute;
 
   @override
   bool isOnline = true;

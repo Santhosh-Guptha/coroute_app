@@ -220,3 +220,45 @@ test('rider and pillion change places: the pillion takes the bike and rides, the
   for (const w of [wr, wk]) w.close();
   await end(R);
 });
+
+test('a pending ask survives a restart: stored with the convoy meta, reloaded, still answerable; then it expires and is gone', async () => {
+  advance(16 * 60000); // past the sign-up limiter window of the earlier tests
+  const R = await ride();
+  const [ravi, kiran, arjun] = R.members;
+  const bikeKiran = rider(R, kiran).vehicleNo;
+  const wr = await t.joinRoom(ravi.token, R.gid);
+  const wk = await t.joinRoom(kiran.token, R.gid);
+  wr.sendJson({ type: 'SWAP_REQUEST', withUserId: uid(kiran), kind: 'BIKES', clientId: 'p1' });
+  const ask = await wk.next((m) => m.type === 'SWAP_ASK');
+  // Stored (server only): in the DB meta, never in a snapshot.
+  const stored = await gw.repo.getConvoyMeta(R.gid);
+  assert.equal(stored.pendingSwaps[ask.requestId].toUserId, uid(kiran));
+  assert.equal(stored.pendingSwaps[ask.requestId].timer, undefined, 'no timer object in the stored copy');
+  assert.equal(JSON.stringify(gw.convoys.snapshot(R.room)).includes(ask.requestId), false);
+
+  // The gateway restarts: the room is loaded again from the database.
+  for (const x of R.room.swaps.values()) clearTimeout(x.timer);
+  gw.convoys.rooms.delete(R.gid);
+  const room2 = await gw.convoys.getRoom(R.gid);
+  assert.notEqual(room2, R.room);
+  assert.ok(room2.swaps.has(ask.requestId), 'the ask is back');
+  const res = await gw.convoys.answerSwap(R.gid, { userId: uid(kiran), name: 'Kiran' }, ask.requestId, true);
+  assert.equal(res.accepted, true);
+  assert.equal(room2.riders.get(uid(ravi)).vehicleNo, bikeKiran);
+  assert.equal((await gw.repo.getConvoyMeta(R.gid)).pendingSwaps, undefined, 'answered: removed from the meta');
+
+  // A second ask, restart, and the 2 minutes pass: the requester hears it expired, the meta is cleaned.
+  const ask2 = await gw.convoys.requestSwap(R.gid, { userId: uid(ravi), name: 'Ravi' }, uid(arjun), 'BIKES');
+  for (const x of room2.swaps.values()) clearTimeout(x.timer);
+  gw.convoys.rooms.delete(R.gid);
+  advance(2 * 60000 + 1000);
+  const wr2 = await t.joinRoom(ravi.token, R.gid); // loads the room again
+  const room3 = gw.convoys.rooms.get(R.gid);
+  await assert.rejects(gw.convoys.answerSwap(R.gid, { userId: uid(arjun) }, ask2.requestId, true), (e) => e.reason === 'SWAP_EXPIRED');
+  assert.equal(room3.swaps.size, 0);
+  await sleep(20);
+  assert.equal((await gw.repo.getConvoyMeta(R.gid)).pendingSwaps, undefined);
+  for (const w of [wr, wk, wr2]) w.close();
+  await end(R);
+  assert.equal((await gw.repo.getConvoyMeta(R.gid)).pendingSwaps, undefined, 'nothing pending after the ride');
+});

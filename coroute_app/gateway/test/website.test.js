@@ -109,7 +109,7 @@ test('internal documentation is not served; public pages follow the site rules',
 });
 
 test('site pages: shared shell, unique head tags, active nav, no placeholders left', async () => {
-  const pages = ['/', '/features', '/safety', '/how-it-works', '/about', '/get', '/privacy', '/terms'];
+  const pages = ['/', '/features', '/safety', '/how-it-works', '/leaderboard', '/about', '/get', '/privacy', '/terms'];
   const titles = new Set(), descs = new Set();
   for (const p of pages) {
     const r = await fetch(base + p);

@@ -39,10 +39,10 @@ void main() {
       final city = LocationCadence.plan(SpeedBand.city, idle: false);
       final road = LocationCadence.plan(SpeedBand.road, idle: false);
       final highway = LocationCadence.plan(SpeedBand.highway, idle: false);
-      expect(stopped, const CadencePlan(3000, 10, GpsPrecision.high));
-      expect(city, const CadencePlan(1000, 5, GpsPrecision.navigation));
-      expect(road, const CadencePlan(1000, 3, GpsPrecision.navigation));
-      expect(highway, const CadencePlan(500, 2, GpsPrecision.navigation));
+      expect(stopped, const CadencePlan(2000, 0, GpsPrecision.high));
+      expect(city, const CadencePlan(1000, 0, GpsPrecision.navigation));
+      expect(road, const CadencePlan(1000, 0, GpsPrecision.navigation));
+      expect(highway, const CadencePlan(500, 0, GpsPrecision.navigation));
     });
 
     test('low battery relaxes every band and parked wins over speed', () {
@@ -50,8 +50,12 @@ void main() {
         final n = LocationCadence.plan(b, idle: false);
         final l = LocationCadence.plan(b, idle: false, lowBattery: true);
         expect(l.intervalMs, greaterThan(n.intervalMs));
-        expect(l.distanceFilterM, greaterThan(n.distanceFilterM));
+        // Riding never uses a distance filter (speed readout, overspeed check, stop -> 0).
+        expect(l.distanceFilterM, 0);
+        expect(n.distanceFilterM, 0);
         expect(l.precision, isNot(GpsPrecision.navigation));
+        // Battery saver may slow the GPS, but never below a fix every 2 s once moving.
+        if (b != SpeedBand.stopped) expect(l.intervalMs, lessThanOrEqualTo(2000));
       }
       expect(LocationCadence.plan(SpeedBand.highway, idle: true), LocationCadence.idle);
       expect(LocationCadence.plan(SpeedBand.highway, idle: true, lowBattery: true), LocationCadence.idleLowBattery);

@@ -28,7 +28,7 @@ void main() {
 
     test('the WebSocket follows the scheme: https -> wss', () {
       expect(AppConfig.wsUrlFor('https://api.example.com'), 'wss://api.example.com/ws');
-      expect(AppConfig.wsUrlFor(AppConfig.resolveApiBase('http://10.0.0.2', release: true)), 'wss://coroute.duckdns.org/ws');
+      expect(AppConfig.wsUrlFor(AppConfig.resolveApiBase('http://10.0.0.2', release: true)), 'wss://coroute.devmonks.space/ws');
     });
 
     test('tests run in debug: the default gateway is HTTPS', () {

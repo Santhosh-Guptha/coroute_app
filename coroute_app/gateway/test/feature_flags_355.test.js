@@ -57,6 +57,15 @@ test('pure: defaults, locked features, cleaning and the socket message map', () 
     const e = CATALOG.find((x) => x.id === id);
     assert.ok(e && !e.locked, `${id} is switchable`);
   }
+  // 3.55 audio / mic round and live bike change: switchable, on by default, listed in the console.
+  const added = { speedAudio: 'Riding', callAwareAlerts: 'Riding', hornAlert: 'Safety', voiceCleanup: 'Group', riderVehicleLive: 'Group' };
+  for (const [id, group] of Object.entries(added)) {
+    const e = CATALOG.find((x) => x.id === id);
+    assert.ok(e && !e.locked && e.defaultOn === true && e.group === group && e.label && e.description, `${id} is a default-on switch in ${group}`);
+  }
+  assert.match(CATALOG.find((x) => x.id === 'sirenDetector').description, /ambulance, police and fire/);
+  assert.equal(new Set(CATALOG.map((e) => e.id)).size, CATALOG.length, 'ids are unique');
+  assert.deepEqual(wsFeaturesFor({ type: 'RIDER_VEHICLE' }), ['riderVehicleLive']);
   assert.deepEqual(cleanStored({ sos: false, weather: false, nope: false, intercom: 'no' }), { weather: false });
   assert.deepEqual(wsFeaturesFor({ type: 'ROAD_HAZARD' }), ['roadHazards']);
   assert.deepEqual(wsFeaturesFor({ type: 'ROLE_SET', role: 'LEAD' }), ['rideRoles']);

@@ -90,7 +90,8 @@ void main() {
       await render(tester, palette: palette);
       expect(tester.takeException(), isNull);
       await tester.scrollUntilVisible(find.text('Medical info (optional)'), 200, scrollable: find.byType(Scrollable).first);
-      expect(find.text('Shown to your ride group only while your SOS or crash alert is open.'), findsOneWidget);
+      expect(find.text('Shown to responders in an emergency and on your lock screen.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('responderMedical')), findsNothing, reason: 'no medical consent switch');
       // Limits: the fields stop at 120 and 200 characters.
       await tester.scrollUntilVisible(find.byKey(const ValueKey('allergies')), 200, scrollable: find.byType(Scrollable).first);
       await tester.enterText(find.byKey(const ValueKey('allergies')), 'a' * 150);
@@ -155,6 +156,8 @@ void main() {
     expect(body['bloodGroup'], 'O+');
     expect(body['allergies'], 'penicillin');
     expect(body['smsOptOut'], isTrue);
+    // No switch: sent as true for older gateways that still gate responders on it.
+    expect(body['responderMedical'], isTrue);
     // Not loaded from a 3.14 server and not touched: left out, so it is never cleared by mistake.
     expect(body.containsKey('medicalNotes'), isFalse);
     // The answer carries the fields back: memory only, never in SharedPreferences.

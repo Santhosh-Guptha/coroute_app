@@ -163,11 +163,17 @@ void main() {
       await tester.ensureVisible(find.text('Warn'));
       await tester.tap(find.text('Warn'));
       await tester.pumpAndSettle();
-      expect(find.text('Warn Ravi?'), findsOneWidget);
+      expect(find.text('Warn Ravi'), findsOneWidget);
       expect(sent('PATCH', '/admin/public-ride/reports/'), isEmpty, reason: 'nothing before the confirmation');
-      await tester.tap(find.text('Warn').last);
+      await tester.tap(find.byKey(const ValueKey('warnUseGuidelines')));
       await tester.pumpAndSettle();
-      expect(jsonDecode(sent('PATCH', '/admin/public-ride/reports/RPT-0A1B2C3D4E5F').single.body), {'status': 'ACTIONED', 'action': 'WARN'});
+      await tester.tap(find.byKey(const ValueKey('warnSend')));
+      await tester.pumpAndSettle();
+      expect(jsonDecode(sent('PATCH', '/admin/public-ride/reports/RPT-0A1B2C3D4E5F').single.body), {
+        'status': 'ACTIONED',
+        'action': 'WARN',
+        'message': AdminWarnText.guidelines,
+      });
     });
 
     testWidgets('suspend 7 days suspends public ride and closes the report', (tester) async {

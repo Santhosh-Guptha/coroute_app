@@ -21,7 +21,7 @@ test('HELLO keeps the 3.14 features first and appends net1, discovery1, pubride1
   const u = await h.rider('Hello');
   const ws = await h.t.connect(u.token);
   const hello = await ws.next((m) => m.type === 'HELLO');
-  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'pubride1', 'ride316', 'featurePolicy1', 'bin1', 'ride355']);
+  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'pubride1', 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2']);
   ws.close();
 });
 
@@ -94,7 +94,7 @@ test('PATCH /me: assist switches are type checked, selfUser defaults, never in p
   const me = await h.t.api('GET', '/me', null, u.token);
   assert.equal(me.json.assistHelp, true);
   assert.equal(me.json.assistAsk, true);
-  assert.equal(me.json.responderMedical, false);
+  assert.equal(me.json.responderMedical, true, 'medical info has no switch: always shared in an emergency');
   assert.equal(me.json.netConsentAt, 0);
   const bad = await h.t.api('PATCH', '/me', { assistHelp: 'yes' }, u.token);
   assert.equal(bad.status, 422);
@@ -107,10 +107,15 @@ test('PATCH /me: assist switches are type checked, selfUser defaults, never in p
   assert.equal(ok.json.assistHelp, false);
   assert.equal(ok.json.assistAsk, false);
   assert.equal(ok.json.responderMedical, true);
+  // An old app turning it off is accepted (no error) and ignored.
+  const off = await h.t.api('PATCH', '/me', { responderMedical: false }, u.token);
+  assert.equal(off.status, 200);
+  assert.equal(off.json.responderMedical, true);
+  assert.equal((await h.t.api('PATCH', '/me', { responderMedical: 'no' }, u.token)).status, 422, 'still type checked');
   assert.ok(ok.json.netConsentAt >= t0);
   const rider = h.t.gw.convoys.rooms.get(R.gid).riders.get(u.user.userId);
   assert.equal(rider.assistHelp, false);
-  assert.equal(rider.responderMedical, true);
+  assert.equal(rider.responderMedical, undefined, 'no longer kept on the live rider');
   await h.settle(40);
   assert.equal(h.got(ws, 'ROSTER_CHANGED').length, 0, 'assist keys only: no roster refresh');
   const snap = (await h.t.api('GET', `/convoys/${R.gid}`, null, u.token)).json;

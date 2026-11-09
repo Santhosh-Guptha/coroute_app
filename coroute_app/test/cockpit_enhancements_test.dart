@@ -31,6 +31,12 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
 
   @override
   bool canEditRoute = true;
+  @override
+  bool get canChangeGroupSettings => canEditRoute;
+  @override
+  bool get isSettingsOnlyTripHead => false;
+  @override
+  bool get canEndTrip => canEditRoute;
 
   @override
   bool isOnline = true;
@@ -43,6 +49,9 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
 
   @override
   bool supports(dynamic feature) => true;
+
+  @override
+  bool get supportsRideRoles => true;
 
   final List<Map<String, dynamic>> configUpdates = [];
 

@@ -2,8 +2,10 @@
 /**
  * 3.15 privacy of the safety network: every JSON frame an external rider receives (requests,
  * updates, closes, hazards, discovery) is walked key by key; nothing that identifies the other
- * group or its riders may appear. Medical info only after acceptance and only with the subject's
- * separate opt-in. The original group never learns the responder's id or group. Access ends at resolve.
+ * group or its riders may appear. Medical info (and the emergency contact) only inside the ASSIST_UPDATE
+ * of an accepted responder while the alert is open; there is no consent switch any more and an old
+ * app's responderMedical=false is ignored. The original group never learns the responder's id or group.
+ * Access ends at resolve.
  */
 const { netBoot, line, E_LAT, sleep } = require('./_net_helpers');
 const { test, before, after } = require('node:test');
@@ -22,6 +24,8 @@ const FORBIDDEN_KEYS = ['userId', 'groupId', 'alertId', 'phone', 'emergencyConta
 function badKeys(frame, { medicalOk = false } = {}) {
   const bad = [];
   const walk = (v, path) => {
+    // The accepted responder's medical block is checked separately (exact keys).
+    if (medicalOk && frame.type === 'ASSIST_UPDATE' && path === `${frame.type}.medical`) return;
     if (Array.isArray(v)) { v.forEach((x, i) => walk(x, `${path}[${i}]`)); return; }
     if (!v || typeof v !== 'object') return;
     for (const [k, x] of Object.entries(v)) {
@@ -50,7 +54,7 @@ async function setup({ responderMedical }) {
   const subject = await h.rider('Victim Lead');
   const r = await h.t.api('PATCH', '/me', { bloodGroup: 'O+', allergies: 'Peanut allergy', medicalNotes: 'Asthma inhaler', responderMedical }, subject.token);
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.equal(r.json.responderMedical, responderMedical);
+  assert.equal(r.json.responderMedical, true, 'no switch: always reads as shared, a stored false is ignored');
   const V = await h.rideOn(line(lng, 17.40, 17.70), { name: 'Secret Squad Name', lead: subject });
   V.ws = await h.net1(V.lead.token, V.gid);
   h.place(V.gid, V.lead, E_LAT, lng, 0, 0);
@@ -66,13 +70,16 @@ async function setup({ responderMedical }) {
   h.place(W.gid, W.lead, 17.455, lng, 0, 60);
   const needles = [
     subject.user.userId, mate.user.userId, V.gid, 'Secret Squad Name', subject.user.name, mate.user.name, subject.user.phone, mate.user.phone,
-    '+919000000002', 'Kin Contact', subject.user.vehicleNo, V.c.joinCode, '17.43219', String(lng + 0.00123),
-    ...(responderMedical ? [] : ['Peanut allergy', 'Asthma inhaler']),
+    subject.user.vehicleNo, V.c.joinCode, '17.43219', String(lng + 0.00123),
   ];
-  return { lng, subject, mate, V, X, W, needles };
+  // Allowed only in the accepted responder's ASSIST_UPDATE.medical while the alert is open.
+  const medicalNeedles = ['Peanut allergy', 'Asthma inhaler', '+919000000002', 'Kin Contact'];
+  return { lng, subject, mate, V, X, W, needles, medicalNeedles };
 }
 
-test('external frames carry only the whitelisted fields; no medical without the separate opt-in', async () => {
+const MEDICAL = { bloodGroup: 'O+', allergies: 'Peanut allergy', notes: 'Asthma inhaler', contactName: 'Kin Contact', contactPhone: '+919000000002' };
+
+test('external frames carry only the whitelisted fields; medical only to the accepted responder, even when an old app sent consent=false', async () => {
   const s = await setup({ responderMedical: false });
   const a = await h.sos(s.V.ws, E_LAT, s.lng);
   const req = await s.X.ws.next((m) => m.type === 'ASSIST_REQUEST');
@@ -81,7 +88,7 @@ test('external frames carry only the whitelisted fields; no medical without the 
   const upd = await s.X.ws.next((m) => m.type === 'ASSIST_UPDATE' && m.myStatus === 'ACCEPTED');
   assert.deepEqual(Object.keys(upd.subject).sort(), ['firstName', 'vehicleColor', 'vehicleType']);
   assert.equal(upd.subject.firstName, 'Net');
-  assert.equal(upd.medical, undefined, 'no opt-in, no medical');
+  assert.deepEqual(upd.medical, MEDICAL, 'emergency: shared without a consent switch (old false ignored)');
   h.place(s.X.gid, s.X.lead, 17.49, s.lng, 0, 50);
   h.place(s.V.gid, s.V.lead, E_LAT + 0.001, s.lng, 0, 3); // the subject moved a little
   await sleep(50);
@@ -90,8 +97,13 @@ test('external frames carry only the whitelisted fields; no medical without the 
   await s.W.ws.next((m) => m.type === 'HAZARD_CLEAR');
   const ext = [...s.X.ws.frames, ...s.W.ws.frames].filter((f) => NEW_TYPES.has(f.type));
   assert.ok(ext.length >= 4);
-  for (const f of ext) assert.deepEqual(badKeys(f), [], JSON.stringify(f));
+  for (const f of ext) assert.deepEqual(badKeys(f, { medicalOk: true }), [], JSON.stringify(f));
   assert.deepEqual(leaks(ext, s.needles), []);
+  // Medical info and the emergency contact appear only in accepted-responder updates of the open alert.
+  const withMedical = ext.filter((f) => f.type === 'ASSIST_UPDATE' && f.medical);
+  assert.ok(withMedical.length >= 1);
+  assert.deepEqual(leaks(ext.filter((f) => !(f.type === 'ASSIST_UPDATE' && f.medical)), s.medicalNeedles), [], 'no medical in requests, hazards, closes');
+  assert.deepEqual(leaks(h.got(s.W.ws, 'HAZARD'), s.medicalNeedles), [], 'a warned-only rider never sees it');
   for (const f of ext.filter((x) => x.type === 'ASSIST_REQUEST')) {
     assert.deepEqual(Object.keys(f).filter((k) => !['type', 'ts'].includes(k)).sort(),
       ['aheadOnRoute', 'distanceM', 'etaS', 'fasterThanGroup', 'incidentId', 'kind', 'lastUpdateAt', 'lat', 'lng', 'reportedAt', 'routeDistanceM', 'severity']);
@@ -103,7 +115,7 @@ test('external frames carry only the whitelisted fields; no medical without the 
   for (const X of [s.V, s.X, s.W]) await h.endRide(X);
 });
 
-test('medical info goes to an accepted responder only with responderMedical, never before acceptance', async () => {
+test('medical info goes to an accepted responder (no consent switch), never before acceptance', async () => {
   const s = await setup({ responderMedical: true });
   await h.sos(s.V.ws, E_LAT, s.lng);
   const req = await s.X.ws.next((m) => m.type === 'ASSIST_REQUEST');
@@ -111,7 +123,7 @@ test('medical info goes to an accepted responder only with responderMedical, nev
   assert.equal(h.got(s.X.ws, 'ASSIST_UPDATE').length, 0);
   s.X.ws.sendJson({ type: 'ASSIST_ANSWER', incidentId: req.incidentId, answer: 'ACCEPT', clientId: 'm-acc' });
   const upd = await s.X.ws.next((m) => m.type === 'ASSIST_UPDATE' && m.myStatus === 'ACCEPTED');
-  assert.deepEqual(upd.medical, { bloodGroup: 'O+', allergies: 'Peanut allergy', notes: 'Asthma inhaler' });
+  assert.deepEqual(upd.medical, MEDICAL);
   assert.deepEqual(badKeys(upd, { medicalOk: true }), []);
   assert.equal(h.got(s.W.ws, 'HAZARD').every((f) => f.medical === undefined), true);
   // The responder cancels: their phone drops the request (and with it the medical info).

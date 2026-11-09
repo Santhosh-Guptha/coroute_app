@@ -18,7 +18,7 @@ const { safeImpact, PRIVACY_NOTE } = require('../src/public_privacy');
 
 const PUB = path.join(__dirname, '..', 'public');
 const JS = fs.readFileSync(path.join(PUB, 'assets', 'site.js'), 'utf8');
-const KEYS = ['km', 'hours', 'rides', 'groupRides', 'largestGroup', 'longestTrip', 'bikes', 'sos', 'crash', 'answered', 'response', 'roads'];
+const KEYS = ['riders', 'km', 'hours', 'rides', 'groupRides', 'largestGroup', 'longestTrip', 'bikes', 'sos', 'crash', 'answered', 'response', 'roads'];
 
 let gw, base;
 before(async () => {
@@ -110,7 +110,7 @@ test('home: the impact section is hidden until real numbers load and writes no n
   assert.ok(sec.includes('data-impact-updated') && sec.includes('class="live-dot"'), 'live dot and update time');
   assert.ok(sec.includes('data-impact-group') && textOf(sec).includes('Safety at work'), 'safety strip');
   const t = textOf(sec);
-  for (const w of ['CoRoute impact, live', 'Real totals from real riders, rounded down', 'Never per rider', 'Kilometres ridden', 'Hours on the road', 'Largest group', 'Longest trip', 'Bikes on CoRoute', 'SOS alerts resolved', 'Crash alerts raised', 'Alerts answered by fellow riders', 'Typical response time', 'Road hazards reported']) {
+  for (const w of ['CoRoute impact, all time', 'Real totals from real riders since CoRoute began, rounded down', 'Riders on the road', 'Never per rider', 'Kilometres ridden', 'Hours on the road', 'Largest group', 'Longest trip', 'Bikes on CoRoute', 'SOS alerts resolved', 'Crash alerts raised', 'Alerts answered by fellow riders', 'Typical response time', 'Road hazards reported']) {
     assert.ok(t.includes(w), `impact: "${w}"`);
   }
   assert.ok(!/\d/.test(t), 'impact: no number written into the page');
@@ -133,11 +133,12 @@ test('/safety and /features carry a compact impact strip with the same hooks', a
 });
 
 test('site.js: impact block polls the API every minute, pauses when hidden, respects reduced motion, no innerHTML', () => {
-  const i = JS.indexOf('/* ---------- CoRoute impact, live');
-  const j = JS.indexOf('/* ---------- Accordion', i);
+  const i = JS.indexOf('/* ---------- CoRoute impact, all time');
+  const j = JS.indexOf('/* ---------- Leaderboards', i);
   assert.ok(i > 0 && j > i, 'site.js has the impact block');
   const block = JS.slice(i, j);
-  assert.ok(block.includes("fetch('/api/public/impact-stats'"), 'calls /api/public/impact-stats');
+  assert.ok(block.includes("iGet('/api/public/alltime-stats')"), 'calls /api/public/alltime-stats (3.55b all-time)');
+  assert.ok(block.includes("iGet('/api/public/impact-stats')"), 'falls back to /api/public/impact-stats on an older server');
   assert.ok(block.includes("credentials: 'omit'"), 'no credentials');
   assert.ok(block.includes('setInterval(loadImpact, 60000)'), 'every 60 s');
   assert.ok(block.includes('if (doc.hidden) return;') && block.includes('visibilitychange'), 'paused on a hidden tab');
@@ -199,12 +200,13 @@ function makePage(keys, group) {
 }
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
 const IMPACT = (() => {
-  const i = JS.indexOf('/* ---------- CoRoute impact, live');
-  return JS.slice(i, JS.indexOf('/* ---------- Accordion', i));
+  const i = JS.indexOf('/* ---------- CoRoute impact, all time');
+  return JS.slice(i, JS.indexOf('/* ---------- Leaderboards', i));
 })();
 
-async function run(body, keys = KEYS, group = false) {
+async function run(body, keys = KEYS, group = false, setup = null) {
   const page = makePage(keys, group);
+  if (setup) setup(page);
   const calls = [];
   const fetchFn = async (url) => { calls.push(url); return { ok: true, status: 200, json: async () => body }; };
   // No matchMedia: treated as reduced motion, so the final values are written at once.
@@ -223,7 +225,7 @@ test('impact render: real tiles shown with coarse values, empty ones hidden, the
     safety: { sosResolved: 20, crashAlerts: 0, alertsAnswered: 30, medianResponseSec: 142, roadReports: null },
   };
   const full = await run({ ok: true, enabled: true, stats });
-  assert.deepEqual(full.calls, ['/api/public/impact-stats']);
+  assert.deepEqual(full.calls, ['/api/public/alltime-stats']);
   assert.equal(full.box.hidden, false);
   assert.deepEqual(full.shown, {
     km: '48,000+', hours: '1,300+', rides: '340+', groupRides: '90+', largestGroup: '14', longestTrip: '1,840+', bikes: '210+',
@@ -254,4 +256,22 @@ test('impact render: real tiles shown with coarse values, empty ones hidden, the
   assert.equal(safetyOnly.box.hidden, false);
   const g = await run({ ok: true, enabled: true, stats: { safety: { sosResolved: 1 } } }, ['sos', 'crash'], true);
   assert.equal(g.group.hidden, true);
+});
+
+test('impact render (3.55b all time): riders with a ride, and a "this week" line only behind 10 rides', async () => {
+  const stats = { ridersWithRide: 234, registeredRiders: 560, ridesCompleted: 1234, kmRidden: 48200, movingHours: 1320, thisWeek: { rides: 57, km: 2345, movingHours: 80, riders: 30 }, safety: {} };
+  let week;
+  const r = await run({ ok: true, enabled: true, scope: 'all-time', stats }, KEYS, false, (page) => { week = page.box.appendChild(new El('p', { 'data-impact-week': '', hidden: '' })); });
+  assert.equal(r.shown.riders, '230+', 'riders with at least one ride, rounded down');
+  assert.equal(r.shown.hours, '1,300+');
+  assert.equal(r.shown.rides, '1,200+');
+  assert.equal(week.hidden, false);
+  assert.equal(week.textContent, 'This week: 50+ rides, 2,300+ km.');
+  let quiet;
+  await run({ ok: true, enabled: true, stats: { ...stats, thisWeek: { rides: 9, km: 900 } } }, KEYS, false, (page) => { quiet = page.box.appendChild(new El('p', { 'data-impact-week': '', hidden: '' })); });
+  assert.equal(quiet.hidden, true, 'a quiet week shows no line');
+  assert.equal(quiet.textContent, '');
+  // An older server (impact-stats) has no rider count: that tile stays hidden.
+  const old = await run({ ok: true, enabled: true, stats: { ridesCompleted: 340, kmRidden: 48200, riders: 900, safety: {} } });
+  assert.equal(old.tiles.riders.hidden, true);
 });

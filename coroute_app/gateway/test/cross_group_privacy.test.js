@@ -319,7 +319,11 @@ test('privacy invariant: external safety frames carry zero forbidden keys and is
 
   // Subject details after acceptance: ONLY firstName, vehicleColor, vehicleType.
   assert.deepEqual(Object.keys(upd.subject).sort(), ['firstName', 'vehicleColor', 'vehicleType']);
-  assert.equal(upd.medical, undefined, 'Medical data omitted because victim did not opt in');
+  // Owner rule: no consent switch. An old app's responderMedical=false is ignored; the accepted
+  // responder gets the medical info (and emergency contact) while the alert is open.
+  assert.equal(upd.medical.bloodGroup, 'O+', 'medical shared in an emergency even with an old consent=false');
+  assert.equal(upd.medical.allergies, 'Peanut allergy');
+  assert.deepEqual(collectForbiddenKeyLeaks(upd, { allowMedical: true }), []);
 
   // Check victim group frames: responder real identity is never sent.
   const victimUpdate = await victimRide.ws.next((m) => m.type === 'EMERGENCY_UPDATE' && m.network.state === 'ASSIGNED');

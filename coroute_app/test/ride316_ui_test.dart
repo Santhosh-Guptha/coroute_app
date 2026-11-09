@@ -68,6 +68,8 @@ class _Convoys extends ConvoyService {
   @override
   bool get canEditRoute => lead;
   @override
+  bool get canChangeGroupSettings => lead;
+  @override
   bool get isOnline => online;
   @override
   bool supports(String feature) => feature == ProtocolFeatures.featurePolicy ? policySupported : feature == ProtocolFeatures.ride316 ? ride316 : feature != ProtocolFeatures.discovery;

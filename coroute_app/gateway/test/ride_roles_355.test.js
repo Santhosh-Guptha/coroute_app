@@ -109,6 +109,10 @@ test('automatic roles: off by default; when on, the front rider leads and the la
   // An automatic (front-rider) lead gets no lead rights; the owner keeps them.
   assert.equal(gw.convoys.isLead(R.room, { userId: uid(kiran), role: 'RIDER' }), false);
   assert.equal(gw.convoys.isLead(R.room, { userId: uid(R.lead), role: 'RIDER' }), true);
+  // Group settings (speed limit) follow the same rule: an automatic lead cannot change them, the owner can.
+  await assert.rejects(gw.convoys.updateConfig(R.gid, { userId: uid(kiran), role: 'RIDER' }, { speedLimitKmh: 60 }), (e) => e.status === 403);
+  await gw.convoys.updateConfig(R.gid, { userId: uid(R.lead), role: 'RIDER' }, { speedLimitKmh: 60 });
+  assert.equal(R.room.meta.speedLimitKmh, 60);
   const snap = gw.convoys.snapshot(R.room);
   assert.equal(snap.autoRoles, true);
 
@@ -126,4 +130,107 @@ test('automatic roles: off by default; when on, the front rider leads and the la
   assert.equal((await wl.next((m) => m.type === 'AUTO_ROLES' && m.autoRoles === false)).autoRoles, false);
   wl.close();
   await t.api('POST', `/convoys/${R.gid}/status`, { status: 'ENDED' }, R.lead.token);
+});
+
+test('one LEAD invariant: two leads in a merged state keep the earlier lead (roleAt); the owner node announces it', async () => {
+  advance(16 * 60000); // past the sign-up limiter window of the earlier tests
+  const R = await ride();
+  const [asha, kiran] = R.members;
+  const wl = await t.joinRoom(R.lead.token, R.gid);
+  // Asha becomes lead normally (roleAt set), then a stale copy from the other node says Kiran leads too.
+  await gw.convoys.setRole(R.gid, { userId: uid(R.lead), role: 'RIDER' }, uid(asha), 'LEAD');
+  const ashaAt = R.room.riders.get(uid(asha)).roleAt;
+  assert.ok(ashaAt > 0, 'role changes carry roleAt');
+  advance(1000);
+  R.room.riders.set(uid(kiran), { ...R.room.riders.get(uid(kiran)), role: 'LEAD', roleAt: ashaAt + 1000 });
+  assert.equal([...R.room.riders.values()].filter((r) => r.role === 'LEAD').length, 2);
+  const demoted = gw.convoys.fixDoubleLead(R.room);
+  assert.deepEqual(demoted, [uid(kiran)]);
+  assert.equal(role(R, asha), 'LEAD', 'the earlier lead keeps it');
+  assert.equal(role(R, kiran), 'PACK');
+  assert.equal((await wl.next((m) => m.type === 'RIDER_UPDATE' && m.rider.userId === uid(kiran) && m.rider.role === 'PACK')).rider.role, 'PACK');
+  assert.deepEqual(gw.convoys.fixDoubleLead(R.room), [], 'one lead: nothing to fix');
+  wl.close();
+  await t.api('POST', `/convoys/${R.gid}/status`, { status: 'ENDED' }, R.lead.token);
+});
+
+test('single writer: a node that does not own the room never computes automatic roles, and waits the full hold after a takeover', async () => {
+  const R = await ride({ start: { lat: 17.0, lng: 78.0, name: 'Start' }, destination: 'End', destLat: 17.3, destLng: 78.0 });
+  const [asha, kiran, arjun] = R.members;
+  await gw.convoys.setAutoRoles(R.gid, { userId: uid(R.lead), role: 'RIDER' }, true);
+  const place = async () => {
+    advance(10000);
+    await fix(R.room, kiran, 17.150, 78.0);
+    await fix(R.room, R.lead, 17.120, 78.0);
+    await fix(R.room, asha, 17.110, 78.0);
+    await fix(R.room, arjun, 17.090, 78.0);
+  };
+  // Passive (the peer gateway owns the room): nothing is computed, however long the order holds.
+  let owner = false;
+  const realMirror = gw.convoys.mirror;
+  gw.convoys.mirror = { authoritative: () => owner, replicate() {}, local() { return null; }, shouldPersist: () => true, position() {}, roomCreated() {}, wire() {}, user() {} };
+  try {
+    for (let i = 0; i < 10; i++) await place();
+    assert.equal(role(R, kiran), 'PACK', 'passive node: no automatic roles');
+    assert.equal(await gw.convoys.applyAutoRoles(R.gid, [uid(kiran), uid(R.lead), uid(asha), uid(arjun)]), null, 'refused when passive');
+    // Takeover: the full 45 s hold starts now, then one change.
+    owner = true;
+    await place();
+    await place();
+    assert.equal(role(R, kiran), 'PACK', 'held after the takeover');
+    for (let i = 0; i < 5; i++) await place();
+    assert.equal(role(R, kiran), 'LEAD');
+    assert.equal([...R.room.riders.values()].filter((r) => r.role === 'LEAD').length, 1, 'never two leads');
+    assert.ok(R.room.meta.autoRolesAt > 0, 'replicated with the meta for the next owner');
+  } finally { gw.convoys.mirror = realMirror; }
+  await t.api('POST', `/convoys/${R.gid}/status`, { status: 'ENDED' }, R.lead.token);
+});
+
+test('Trip owner / Trip head / Lead: the head changes settings only; a manual Lead pauses; an automatic lead has no rights', async () => {
+  const R = await ride();
+  const [asha, kiran, arjun] = R.members;
+  const status = (u, s) => t.api('POST', `/convoys/${R.gid}/status`, { status: s }, u.token);
+  // Automatic roles: Kiran at the front holds LEAD but gets no lead rights.
+  await gw.convoys.setAutoRoles(R.gid, { userId: uid(R.lead), role: 'RIDER' }, true);
+  await gw.convoys.applyAutoRoles(R.gid, [uid(kiran), uid(R.lead), uid(asha), uid(arjun)]);
+  assert.equal(role(R, kiran), 'LEAD');
+  const autoPause = await status(kiran, 'PAUSED');
+  assert.equal(autoPause.status, 403);
+  assert.equal(autoPause.json.error, 'Only the Trip owner or Lead can change the trip state.');
+  const regroup = await gw.convoys.setRegroup(R.gid, { userId: uid(kiran), role: 'RIDER' }, { lat: 17.1, lng: 78.1 }).catch((e) => e);
+  assert.equal(regroup.reason, 'NOT_AUTHORIZED');
+  // Manual roles: a Lead the owner picked may pause / resume, not end.
+  await gw.convoys.setAutoRoles(R.gid, { userId: uid(R.lead), role: 'RIDER' }, false);
+  assert.equal((await status(kiran, 'PAUSED')).status, 200);
+  assert.equal((await status(kiran, 'STARTED')).status, 200);
+  const leadEnd = await status(kiran, 'ENDED');
+  assert.equal(leadEnd.status, 403);
+  assert.equal(leadEnd.json.reason, 'ONLY_OWNER_CAN_END_TRIP');
+  assert.equal(leadEnd.json.error, 'Only the Trip owner can end the trip.');
+  // The Trip head (chosen by the owner) changes settings only (owner decision, Nov 9).
+  const head = await t.api('POST', `/convoys/${R.gid}/trip-head`, { targetUserId: uid(asha) }, R.lead.token);
+  assert.equal(head.status, 200, JSON.stringify(head.json));
+  await gw.convoys.updateConfig(R.gid, { userId: uid(asha), role: 'RIDER' }, { speedLimitKmh: 70 });
+  assert.equal(R.room.meta.speedLimitKmh, 70);
+  const pack = await gw.convoys.updateConfig(R.gid, { userId: uid(arjun), role: 'RIDER' }, { speedLimitKmh: 50 }).catch((e) => e);
+  assert.equal(pack.status, 403);
+  assert.equal(pack.message, 'Only the Trip owner, Trip head or Lead can change group settings.');
+  const headEnd = await status(asha, 'ENDED');
+  assert.equal(headEnd.status, 403);
+  assert.ok(['NOT_LEAD', 'ONLY_OWNER_CAN_END_TRIP'].includes(headEnd.json.reason));
+  if (role(R, asha) !== 'LEAD') assert.equal((await status(asha, 'PAUSED')).status, 403, 'the trip head does not pause as such');
+  const headRemove = await t.api('DELETE', `/convoys/${R.gid}/riders/${uid(arjun)}`, null, asha.token);
+  assert.equal(headRemove.status, 403);
+  assert.equal(headRemove.json.error, 'Only the Trip owner can remove riders.');
+  const headRoles = await gw.convoys.setRole(R.gid, { userId: uid(asha), role: 'RIDER' }, uid(arjun), 'SWEEPER').catch((e) => e);
+  assert.equal(headRoles.reason, 'NOT_LEAD', 'roles stay with the owner and the Lead');
+  const headStop = await gw.convoys.setRoute(R.gid, { userId: uid(asha), role: 'RIDER' }, { destination: { name: 'X', lat: 17.3, lng: 78.3 } }).catch((e) => e);
+  assert.equal(headStop.reason, 'NOT_LEAD');
+  assert.equal(R.room.meta.tripStatus === 'ENDED', false);
+  // A trip head who rides as the Lead the owner picked has the Lead's rights by that role.
+  await gw.convoys.setRole(R.gid, { userId: uid(R.lead), role: 'RIDER' }, uid(asha), 'LEAD');
+  assert.equal((await status(asha, 'PAUSED')).status, 200);
+  assert.equal((await status(asha, 'STARTED')).status, 200);
+  assert.equal((await status(asha, 'ENDED')).status, 403, 'still never ends the trip');
+  assert.equal((await status(R.lead, 'ENDED')).status, 200);
 });

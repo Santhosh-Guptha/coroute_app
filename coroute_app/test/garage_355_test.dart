@@ -110,8 +110,13 @@ void main() {
       expect(const BikeProfile(id: 'a', name: 'a').effectiveCooling, EngineCooling.unknown);
     });
 
-    test('every preset has an engine size and a cooling type', () {
+    test('every preset has an engine size and a cooling type (electric ones: neither)', () {
       for (final p in BikeProfile.popularPresets) {
+        expect(p.bikeType, isNotNull, reason: p.name);
+        if (p.fuelType == BikeFuelType.ev) {
+          expect(p.reserveCapacityL, lessThan(p.tankCapacityL), reason: p.name);
+          continue;
+        }
         expect(p.engineCc, greaterThanOrEqualTo(50), reason: p.name);
         expect(p.cooling, isNot(EngineCooling.unknown), reason: p.name);
         expect(p.reserveCapacityL, lessThan(p.tankCapacityL), reason: p.name);

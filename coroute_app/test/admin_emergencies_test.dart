@@ -139,7 +139,7 @@ void main() {
       expect(find.text('Emergencies (1)'), findsOneWidget);
       expect(find.text('Crash: Kiran'), findsOneWidget);
       expect(find.textContaining('Automatic crash alert, open 4 min'), findsOneWidget);
-      expect(find.textContaining('Sunday ride, lead Venkata, 6 riders'), findsOneWidget);
+      expect(find.textContaining('Sunday ride, trip owner Venkata, 6 riders'), findsOneWidget);
       expect(find.textContaining('No signal, last seen 3 min ago'), findsOneWidget);
       expect(find.text('Helping: Arjun on the way'), findsOneWidget);
       expect(find.text('Open map'), findsOneWidget);

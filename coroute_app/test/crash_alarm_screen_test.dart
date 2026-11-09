@@ -196,6 +196,48 @@ void main() {
     port.dispose();
   });
 
+  testWidgets('3.55: crash detection switched off during the countdown keeps the alarm and says how to cancel it', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = SettingsService();
+    await settings.load();
+    final port = _Port();
+    var now = 1700000000000;
+    final safety = SafetyService.forTest(port, settings, accel: _NoAccel(), sms: _NoSms(), clock: () => now);
+    final nav = GlobalKey<NavigatorState>();
+    await screen(tester, const Size(360, 740));
+    await tester.pumpWidget(ChangeNotifierProvider<SafetyService>.value(
+      value: safety,
+      child: MaterialApp(
+        navigatorKey: nav,
+        builder: (context, child) => CrashAlarmHost(navigatorKey: nav, child: child ?? const SizedBox.shrink()),
+        home: const Scaffold(body: Text('Ride screen')),
+      ),
+    ));
+    safety.debugRaiseCrash(const CrashEvent(impactAtMs: 1700000000000, impactG: 6, speedBeforeKmh: 50, lat: 12.97, lng: 77.59));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(safety.alarmRunsWithDetectionOff, isFalse);
+    expect(find.byKey(const ValueKey('crashDetectionOffNote')), findsNothing);
+
+    await settings.setCrashDetection(false);
+    await tester.pump();
+    expect(safety.alarm, isNotNull, reason: 'never cancelled behind the rider');
+    expect(safety.alarmRunsWithDetectionOff, isTrue);
+    expect(find.text(SafetyService.crashAlarmStillRunning), findsOneWidget);
+    expect(find.text(CrashAlarmView.title), findsOneWidget);
+
+    await tester.tap(find.text('I\'m OK'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(safety.alarm, isNull);
+    expect(safety.alarmRunsWithDetectionOff, isFalse);
+    expect(port.raised, isEmpty);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    safety.dispose();
+    port.dispose();
+  });
+
   // The one Settings screen replaced the safety settings sheet and the glove settings screen.
   testWidgets('Settings: safety switches; SMS asks for the permission first; crash detection off asks first', (tester) async {
     SharedPreferences.setMockInitialValues({});

@@ -369,9 +369,8 @@ void main() {
       calls: calls,
     );
     // Bala is on hold: releasing needs no form.
+    await tester.scrollUntilVisible(find.text('Release hold'), 250, scrollable: find.byType(Scrollable).first);
     expect(find.text('Release hold'), findsOneWidget);
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Release hold'));
     await tester.pump(const Duration(milliseconds: 300));
     final release = calls.where((r) => r.method == 'PATCH').toList();

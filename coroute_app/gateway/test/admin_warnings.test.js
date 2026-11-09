@@ -8,7 +8,7 @@ process.env.ADMIN_EMAILS = 'pr.warnadmin@coroute.test';
 const { netBoot, line } = require('./_net_helpers');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { AdminWarnings, cleanMessage, MESSAGE_MAX, MAX_PENDING, DEFAULT_MESSAGE } = require('../src/admin_warnings');
+const { AdminWarnings, cleanMessage, validateWarnMessage, MESSAGE_MAX, MAX_PENDING, DEFAULT_MESSAGE } = require('../src/admin_warnings');
 const { publicRideOf } = require('../src/public_ride_settings');
 
 // ------------------------------------------------------------------ unit
@@ -33,6 +33,19 @@ test('plain text: control characters and angle brackets removed, spaces collapse
   const long = cleanMessage('x'.repeat(MESSAGE_MAX + 50));
   assert.equal(long.length, MESSAGE_MAX);
   assert.ok(long.endsWith('…'));
+});
+
+test('typed Warn text: required, trimmed, sanitized, at most 280 characters (refused, never cut)', () => {
+  assert.deepEqual(validateWarnMessage('  Keep\u0000 it  <i>polite</i>  '), { ok: true, message: 'Keep it ipolite/i' });
+  for (const bad of [undefined, null, 42, '', '   ', '\u0000\u200B', '<>']) {
+    const v = validateWarnMessage(bad);
+    assert.equal(v.ok, false, JSON.stringify(bad)); assert.equal(v.code, 'WARN_MESSAGE_REQUIRED');
+  }
+  assert.equal(validateWarnMessage('x'.repeat(MESSAGE_MAX)).ok, true, 'limit inclusive');
+  assert.equal(validateWarnMessage(`  ${'x'.repeat(MESSAGE_MAX)}  `).ok, true, 'trimmed before counting');
+  const long = validateWarnMessage('x'.repeat(MESSAGE_MAX + 1));
+  assert.equal(long.ok, false); assert.equal(long.code, 'WARN_MESSAGE_TOO_LONG');
+  assert.equal(validateWarnMessage(DEFAULT_MESSAGE).ok, true, 'the default line fits (quick option)');
 });
 
 test('warn: stored on the user until acknowledged, pushed at once, audited without the text', async () => {
@@ -123,12 +136,30 @@ test('admin WARN on a report: the reported rider gets ADMIN_WARNING now, sees it
   const nope = await h.t.api('PATCH', `/admin/public-ride/reports/${r.reportId}`, { status: 'ACTIONED', action: 'WARN', message: 'x' }, A.lead.token);
   assert.equal(nope.status, 403);
 
+  // The typed text is validated: empty or over 280 characters is refused and nothing is sent.
+  let early = 0;
+  const count = (d, bin) => { if (!bin && JSON.parse(d.toString()).type === 'ADMIN_WARNING') early++; };
+  B.ws.on('message', count);
+  const empty = await h.t.api('PATCH', `/admin/public-ride/reports/${r.reportId}`, { status: 'ACTIONED', action: 'WARN', message: '   ' }, admin.token);
+  assert.equal(empty.status, 400); assert.equal(empty.json.code, 'WARN_MESSAGE_REQUIRED');
+  const tooLong = await h.t.api('PATCH', `/admin/public-ride/reports/${r.reportId}`, { status: 'ACTIONED', action: 'WARN', message: 'y'.repeat(281) }, admin.token);
+  assert.equal(tooLong.status, 400); assert.equal(tooLong.json.code, 'WARN_MESSAGE_TOO_LONG');
+  const notText = await h.t.api('PATCH', `/admin/public-ride/reports/${r.reportId}`, { status: 'ACTIONED', action: 'WARN', message: { x: 1 } }, admin.token);
+  assert.equal(notText.status, 400);
+  await h.settle(30);
+  B.ws.off('message', count);
+  assert.equal(early, 0, 'refused: nothing delivered');
+  assert.equal((await h.t.api('GET', '/admin/public-ride/reports?status=OPEN', null, admin.token)).json.reports.some((x) => x.reportId === r.reportId), true, 'still open');
+
   const push = B.ws.next((m) => m.type === 'ADMIN_WARNING');
-  const warn = await h.t.api('PATCH', `/admin/public-ride/reports/${r.reportId}`, { status: 'ACTIONED', action: 'WARN', message: 'Please keep\u0000 contact polite.' }, admin.token);
+  const warn = await h.t.api('PATCH', `/admin/public-ride/reports/${r.reportId}`, { status: 'ACTIONED', action: 'WARN', message: '  Please keep\u0000 contact polite.  ' }, admin.token);
   assert.equal(warn.status, 200, JSON.stringify(warn.json));
   const msg = await push;
   assert.equal(msg.message, 'Please keep contact polite.');
   assert.match(msg.id, /^AW-[0-9A-F]{12}$/);
+
+  const all = await h.t.api('GET', '/admin/public-ride/reports', null, admin.token);
+  assert.equal(all.json.reports.find((x) => x.reportId === r.reportId).warnMessage, 'Please keep contact polite.', 'admin record keeps the text sent');
 
   const mine = await h.t.api('GET', '/me/warnings', null, B.lead.token);
   assert.equal(mine.status, 200);

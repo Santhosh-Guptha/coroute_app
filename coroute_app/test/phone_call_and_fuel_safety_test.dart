@@ -98,7 +98,7 @@ void main() {
   });
 
   group('VoiceService & Phone Call Interruption Tests', () {
-    test('Voice guidance remains enabled by default during active call, with critical alerts spoken and queued', () async {
+    test('3.55 call-aware: ordinary lines are held during a call, critical alerts spoken and replayed after', () async {
       final settings = SettingsService();
       final engine = FakeVoiceEngine();
       final voice = VoiceService(settings, engine: engine);
@@ -113,10 +113,14 @@ void main() {
       // Call starts
       phone.simulateCallState(PhoneCallStatus.offhook);
 
-      // Voice guidance remains enabled by default during call
+      // 3.55 (admin switch callAwareAlerts, on by default): CoRoute never talks over a call.
+      // Directions are dropped (stale after the call); other ordinary lines are held for a summary.
       final inCallGuidance = await voice.speak('Turn left onto Outer Ring Rd');
-      expect(inCallGuidance, isTrue);
-      expect(engine.spokenTexts, contains('Turn left onto Outer Ring Rd'));
+      expect(inCallGuidance, isFalse);
+      expect(engine.spokenTexts, isNot(contains('Turn left onto Outer Ring Rd')));
+      final held = await voice.speak('Asha fell behind', priority: VoicePriority.important, key: 'BEHIND:asha');
+      expect(held, isTrue);
+      expect(engine.spokenTexts, isNot(contains('Asha fell behind')));
 
       // Critical emergency is spoken immediately AND queued as post-call safety fallback
       final crit = await voice.speak('Rahul SOS Emergency', priority: VoicePriority.critical);
@@ -128,6 +132,7 @@ void main() {
       phone.simulateCallState(PhoneCallStatus.idle);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(engine.spokenTexts.any((t) => t.contains('Rahul SOS Emergency')), isTrue);
+      expect(engine.spokenTexts.any((t) => t.contains('While you were on the call: Asha fell behind')), isTrue);
     });
 
     test('Spoken alerts off silences ordinary voice but NEVER silences critical emergencies', () async {

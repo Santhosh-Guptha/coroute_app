@@ -7,8 +7,9 @@ if (!JWT_SECRET) {
   console.error('Set JWT_SECRET in the environment to run this verifier.');
   process.exit(1);
 }
-const BASE_URL = 'https://coroute.duckdns.org';
-const WS_URL = 'wss://coroute.duckdns.org/ws';
+// COROUTE_BASE_URL=https://coroute.devmonks.space to check the new domain (docs/DOMAIN_MIGRATION_devmonks.md).
+const BASE_URL = (process.env.COROUTE_BASE_URL || 'https://coroute.duckdns.org').replace(/\/+$/, '');
+const WS_URL = `${BASE_URL.replace(/^http/, 'ws')}/ws`;
 const INVITE_CODE = '612495';
 const GROUP_ID = 'GRP-6CE093E3';
 

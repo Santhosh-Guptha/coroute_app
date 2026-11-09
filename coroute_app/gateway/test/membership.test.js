@@ -274,7 +274,9 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
     assert.equal(failJoin.status, 200); // re-joining the same trip returns snapshot
   });
 
-  await t.test('Two-Role Model: Trip Owner assigns Trip Head; Trip Head is operational leader', async () => {
+  await t.test('Two-Role Model: Trip Owner assigns Trip Head; riding roles do not move', async () => {
+    const before = await env.gw.convoys.getRoom(activeGroupId);
+    const leadBefore = [...before.riders.values()].filter((r) => r.role === 'LEAD').map((r) => r.userId);
     const assignRes = await env.api('POST', `/convoys/${activeGroupId}/trip-head`, {
       targetUserId: headUser.userId,
     }, ownerToken);
@@ -284,19 +286,38 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
 
     const room = await env.gw.convoys.getRoom(activeGroupId);
     assert.equal(room.meta.tripHeadUserId, headUser.userId);
-    assert.equal(room.riders.get(headUser.userId).role, 'LEAD');
+    // 3.55 owner decision: the trip head is governance (settings only), not the riding Lead.
+    assert.notEqual(room.riders.get(headUser.userId).role, 'LEAD');
+    assert.deepEqual([...room.riders.values()].filter((r) => r.role === 'LEAD').map((r) => r.userId), leadBefore, 'the Lead stays');
   });
 
-  await t.test('Two-Role Model: Trip Head CANNOT remove participants; Trip Owner CAN', async () => {
+  await t.test('Two-Role Model: Trip Head changes the trip settings only (no remove, no end, no pause)', async () => {
+    // Settings: allowed.
+    await env.gw.convoys.updateConfig(activeGroupId, { userId: headUser.userId, role: 'RIDER' }, { speedLimitKmh: 70 });
+    const room = await env.gw.convoys.getRoom(activeGroupId);
+    assert.equal(room.meta.speedLimitKmh, 70);
+
+    // Remove a rider: refused (owner and platform admins only).
     const failRemove = await env.api('DELETE', `/convoys/${activeGroupId}/riders/${riderA.userId}`, null, headToken);
     assert.equal(failRemove.status, 403);
     assert.equal(failRemove.json.reason, 'OWNER_ONLY');
+    assert.equal(failRemove.json.error, 'Only the Trip owner can remove riders.');
+    const failOwner = await env.api('DELETE', `/convoys/${activeGroupId}/riders/${ownerUser.userId}`, null, headToken);
+    assert.equal(failOwner.status, 403);
+    assert.ok((await env.gw.convoys.getRoom(activeGroupId)).riders.has(riderA.userId));
 
-    const roomBefore = await env.gw.convoys.getRoom(activeGroupId);
-    assert.ok(roomBefore.riders.has(riderA.userId));
+    // End / pause: refused (the trip head is not the riding Lead here).
+    const end = await env.api('POST', `/convoys/${activeGroupId}/status`, { status: 'ENDED' }, headToken);
+    assert.equal(end.status, 403);
+    const pause = await env.api('POST', `/convoys/${activeGroupId}/status`, { status: 'PAUSED' }, headToken);
+    assert.equal(pause.status, 403);
+    assert.equal(pause.json.error, 'Only the Trip owner or Lead can change the trip state.');
+    assert.equal((await env.gw.convoys.getRoom(activeGroupId)).meta.tripStatus, 'STARTED');
+  });
 
+  await t.test('Two-Role Model: the Trip Owner removes participants, never themselves', async () => {
     const successRemove = await env.api('DELETE', `/convoys/${activeGroupId}/riders/${riderA.userId}`, null, ownerToken);
-    assert.equal(successRemove.status, 200);
+    assert.equal(successRemove.status, 200, JSON.stringify(successRemove.json));
 
     const roomAfter = await env.gw.convoys.getRoom(activeGroupId);
     assert.ok(!roomAfter.riders.has(riderA.userId));
@@ -305,13 +326,11 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
     assert.equal(lockA, null);
   });
 
-  await t.test('Two-Role Model: Trip Head CANNOT end trip; Trip Owner CAN', async () => {
-    // Trip Head attempts to send status: 'ENDED' -> MUST FAIL with 403 ONLY_OWNER_CAN_END_TRIP
-    const failEnd = await env.api('POST', `/convoys/${activeGroupId}/status`, { status: 'ENDED' }, headToken);
-    assert.equal(failEnd.status, 403);
-    assert.equal(failEnd.json.reason, 'ONLY_OWNER_CAN_END_TRIP');
-
-    // Room is still active
+  await t.test('Two-Role Model: only the Trip Owner chooses the Trip Head', async () => {
+    const reassign = await env.api('POST', `/convoys/${activeGroupId}/trip-head`, { targetUserId: ownerUser.userId }, headToken);
+    assert.equal(reassign.status, 403);
+    assert.equal(reassign.json.reason, 'OWNER_ONLY');
+    assert.match(reassign.json.error, /Trip owner/);
     const room = await env.gw.convoys.getRoom(activeGroupId);
     assert.equal(room.meta.tripStatus, 'STARTED');
   });
@@ -336,7 +355,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
     assert.ok(room.riders.has(ownerUser.userId));
     assert.ok(room.riders.has(headUser.userId));
 
-    const statusRes = await env.api('POST', `/convoys/${activeGroupId}/status`, { status: 'PAUSED' }, headToken);
+    const statusRes = await env.api('POST', `/convoys/${activeGroupId}/status`, { status: 'PAUSED' }, ownerToken);
     assert.equal(statusRes.status, 200);
 
     // Trip Owner ends the trip

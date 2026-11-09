@@ -95,6 +95,12 @@ test('membership plans drive hosting, capacity and the legacy cut-over', async (
     assert.equal(seventh.json.code, 'CONVOY_FULL');
     // A rider already in the ride can always re-join.
     assert.equal((await env.api('POST', '/convoys/join', { code: created.json.joinCode }, riders[0].token)).status, 200);
+    // One member with a plan hosts; the planless joiner keeps no plan of their own but gets the
+    // group features of the host's ride (no paywall for joiners).
+    const joinerMy = await env.api('GET', '/membership/my', null, riders[0].token);
+    assert.deepEqual([joinerMy.json.plan.source, joinerMy.json.plan.canHostGroup], ['community', false]);
+    assert.equal(joinerMy.json.effectiveEntitlements.ptt, true, 'group talk comes with the host plan');
+    assert.equal(joinerMy.json.effectiveEntitlements.convoy, true);
     t.smallRide = created.json;
   });
 
@@ -126,6 +132,10 @@ test('membership plans drive hosting, capacity and the legacy cut-over', async (
     assert.equal(res.filter((r) => r.status === 200).length, 5);
     assert.ok(res.filter((r) => r.status !== 200).every((r) => r.status === 409 && r.json.code === 'CONVOY_FULL'));
     await endRide(host.token, created.json.groupId);
+    // The ride is over: a planless joiner is back on Community (solo) entitlements.
+    const joined = riders.find((r, i) => res[i].status === 200);
+    const after = await env.api('GET', '/membership/my', null, joined.token);
+    assert.equal(after.json.effectiveEntitlements.ptt, false, 'no host ride, no group features');
   });
 
   await t.test('Individual: a solo trip of 1; nobody else can join (409 SOLO_TRIP_ONLY)', async () => {

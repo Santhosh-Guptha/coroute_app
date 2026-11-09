@@ -456,7 +456,7 @@ void main() {
         directionKnown: false,
         approachingFromBehind: false,
       );
-      expect(unverifiedEvent.alertText, equals('🚨 EMERGENCY SIREN DETECTED · YIELD'));
+      expect(unverifiedEvent.alertText, equals('🚨 EMERGENCY VEHICLE SIREN · GIVE WAY'));
 
       // 2. Verified rear direction: behind alert
       final verifiedRearEvent = SirenDetectionEvent(
@@ -467,7 +467,7 @@ void main() {
         directionKnown: true,
         approachingFromBehind: true,
       );
-      expect(verifiedRearEvent.alertText, equals('🚨 EMERGENCY SIREN DETECTED BEHIND · YIELD'));
+      expect(verifiedRearEvent.alertText, equals('🚨 EMERGENCY VEHICLE SIREN · GIVE WAY'));
     });
 
     testWidgets('TEST-HUD-03: SirenHudPill renders correctly with accessibility semantics', (tester) async {
@@ -491,8 +491,8 @@ void main() {
         ),
       ));
 
-      expect(find.text('EMERGENCY SIREN DETECTED'), findsOneWidget);
-      expect(find.text('YIELD'), findsOneWidget);
+      expect(find.text('EMERGENCY VEHICLE SIREN'), findsOneWidget);
+      expect(find.text('GIVE WAY'), findsOneWidget);
       expect(find.textContaining('Wail siren'), findsOneWidget);
       expect(find.byIcon(Icons.close_rounded), findsOneWidget);
 
@@ -516,8 +516,8 @@ void main() {
         ),
       ));
 
-      expect(find.text('EMERGENCY SIREN BEHIND'), findsOneWidget);
-      expect(find.text('YIELD'), findsOneWidget);
+      expect(find.text('EMERGENCY VEHICLE SIREN'), findsOneWidget);
+      expect(find.text('GIVE WAY'), findsOneWidget);
       expect(find.textContaining('Yelp siren'), findsOneWidget);
     });
   });

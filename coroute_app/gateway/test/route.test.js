@@ -96,7 +96,7 @@ test('trip planned on the map: route through every stop, suggestions, reorder, s
   wm.json({ type: 'STOP_ACCEPT', stopId: tea.stopId });
   const denied = await wm.wait((m) => m.type === 'ERROR');
   assert.equal(denied.code, 403);
-  assert.equal(denied.reason, undefined);
+  assert.equal(denied.reason, 'NOT_LEAD'); // 3.55: a plain permission code, never a removal reason (NOT_MEMBER / CONVOY_GONE)
   wm.json({ type: 'STOP_ADD', name: 'Viewpoint', lat: 17.25, lng: 78.0 });
   await wl.wait((m) => m.type === 'STOPS' && m.stopPoints.some((s) => s.name === 'Viewpoint' && s.status === 'SUGGESTED'));
 

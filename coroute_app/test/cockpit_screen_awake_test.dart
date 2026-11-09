@@ -66,6 +66,12 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
 
   @override
   bool canEditRoute = true;
+  @override
+  bool get canChangeGroupSettings => canEditRoute;
+  @override
+  bool get isSettingsOnlyTripHead => false;
+  @override
+  bool get canEndTrip => canEditRoute;
 
   @override
   bool isOnline = true;
@@ -105,6 +111,24 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
 
   @override
   int get p2pMeshPeerCount => 0;
+
+  @override
+  bool get pillionNeedsSeat => false;
+
+  @override
+  bool get supportsPillionSeat => false;
+
+  @override
+  bool get isAutomaticLead => false;
+
+  @override
+  bool get pillionWaitPromptOpen => false;
+
+  @override
+  bool get supportsRideRoles => true;
+
+  @override
+  bool get supportsRiderVehicles => false;
 
   @override
   List<AssistRequest> get assistRequests => const [];

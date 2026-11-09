@@ -97,7 +97,7 @@ void main() {
       expect(tester.widget<Text>(find.text('O+')).style!.fontSize, AppText.metric.fontSize);
       expect(tester.widget<Text>(find.text('penicillin')).style!.fontSize, AppText.title.fontSize);
       expect(find.text('Call Priya'), findsOneWidget);
-      expect(find.textContaining('only while your SOS or crash alert is open'), findsOneWidget);
+      expect(find.textContaining('Shown to responders in an emergency'), findsOneWidget);
     });
   }
 
