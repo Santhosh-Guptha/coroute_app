@@ -346,6 +346,26 @@
             android:visibility="gone"
             android:text="Talk" />
 
+        <!-- 3.55: group voice Mute / Unmute (broadcast: works on the lock screen without unlocking). -->
+        <Button
+            android:id="@+id/ride_notif_btn_mute"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/ride_notif_pill_btn"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textAllCaps="false"
+            android:textColor="@color/ride_notif_btn_text"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:text="Mute" />
+
         <Button
             android:id="@+id/ride_notif_btn_wait"
             android:layout_width="0dp"

@@ -18,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private var rideNotification: RideNotification? = null
     private var ttsChannel: TtsChannel? = null
     private var phoneCallChannel: PhoneCallChannel? = null
+    private var pushChannel: PushChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -50,18 +51,38 @@ class MainActivity : FlutterActivity() {
         phoneCallChannel = phoneCall
         MethodChannel(messenger, "coroute/phone_call").setMethodCallHandler(phoneCall)
         EventChannel(messenger, "coroute/phone_call_events").setStreamHandler(phoneCall)
+
+        // 3.55 push notifications (FCM): token, foreground messages, tapped notifications.
+        val pushMethods = MethodChannel(messenger, "coroute/push")
+        val push = PushChannel(this, pushMethods)
+        push.register()
+        pushChannel = push
+        pushMethods.setMethodCallHandler(push)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A ride notification button started the app: kept until Dart asks (takeLaunchAction).
         if (savedInstanceState == null) rideNotification?.handleActivityIntent(intent, coldStart = true)
+        // A tapped push notification started the app: kept until Dart asks (takeLaunchMessage).
+        if (savedInstanceState == null) pushChannel?.handleActivityIntent(intent, coldStart = true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        PushChannel.foreground = true
+    }
+
+    override fun onPause() {
+        PushChannel.foreground = false
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         rideNotification?.handleActivityIntent(intent, coldStart = false)
+        pushChannel?.handleActivityIntent(intent, coldStart = false)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -77,13 +98,16 @@ class MainActivity : FlutterActivity() {
         rideNotification?.dispose()
         rideNotification = null
         MethodChannel(messenger, "coroute/ride_notification").setMethodCallHandler(null)
-        ttsChannel?.release()
+        ttsChannel?.dispose() // also gives back music lowered by "Lower music when speeding"
         ttsChannel = null
         MethodChannel(messenger, "coroute/tts").setMethodCallHandler(null)
         phoneCallChannel?.dispose()
         phoneCallChannel = null
         MethodChannel(messenger, "coroute/phone_call").setMethodCallHandler(null)
         EventChannel(messenger, "coroute/phone_call_events").setStreamHandler(null)
+        pushChannel?.dispose()
+        pushChannel = null
+        MethodChannel(messenger, "coroute/push").setMethodCallHandler(null)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

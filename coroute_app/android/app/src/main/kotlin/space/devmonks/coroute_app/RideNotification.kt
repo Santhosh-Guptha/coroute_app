@@ -58,8 +58,12 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         const val TALK = "TALK"
         const val END = "END"
 
+        /** 3.55: glove-safe toggles that work from the lock screen (broadcasts, no unlock). */
+        const val TALK_TOGGLE = "TALK_TOGGLE"
+        const val MUTE_TOGGLE = "MUTE_TOGGLE"
+
         private val ACTIVITY_ACTIONS = setOf(SOS, MAP, NAV_EMERGENCY, WAIT, ASSIST_ACCEPT, "FUEL", TALK, END)
-        private val BROADCAST_ACTIONS = setOf(WAIT, ASSIST_ACCEPT, "VIEW_GROUP", "VIEW_FUEL")
+        private val BROADCAST_ACTIONS = setOf(WAIT, ASSIST_ACCEPT, "VIEW_GROUP", "VIEW_FUEL", TALK_TOGGLE, MUTE_TOGGLE)
 
         private const val RC_CONTENT = 7101
         private const val RC_SOS = 7102
@@ -71,6 +75,8 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         private const val RC_END = 7111
         private const val RC_MEDICAL = 7112
         private const val RC_URGENT_CONTENT = 7113
+        private const val RC_TALK_TOGGLE = 7114
+        private const val RC_MUTE_TOGGLE = 7115
         private const val RC_URGENT_FULL = 7200
 
         private const val DEFAULT_ID = 1001
@@ -223,6 +229,8 @@ class RideNotification(private val activity: Activity, private val channel: Meth
     }
 
     private fun fallback(action: String, ref: String, fromBroadcast: Boolean) {
+        // A toggle nobody handled now must never replay later (it could open the mic at the next start).
+        if (action == TALK_TOGGLE || action == MUTE_TOGGLE) return
         pendingLaunch = mapOf("action" to action, "ref" to ref)
         if (!fromBroadcast) return
         // No Dart listening: open the app with the same action (may be refused by
@@ -352,6 +360,10 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         val showTalk = bool(args, "showTalk", false)
         val showEnd = bool(args, "showEnd", false)
         val talkLabel = str(args, "talkLabel").ifEmpty { "Talk" }
+        // 3.55: Talk as a hands-free on/off toggle (broadcast) instead of opening the app; Mute / Unmute.
+        val talkToggle = bool(args, "talkToggle", false)
+        val showMute = bool(args, "showMute", false)
+        val muteLabel = str(args, "muteLabel").ifEmpty { "Mute" }
         val endLabel = str(args, "endLabel").ifEmpty { "Leave" }
         val medicalBadge = str(args, "medicalBadge")
         val emergency = mode == "GROUP_EMERGENCY" || mode == "ASSIST"
@@ -507,7 +519,12 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         val waitLabel = str(args, "waitLabel").let { if (it.isEmpty() || it == "Wait for me") "⏸  WAIT" else it }
         val mapLabel = str(args, "mapLabel").let { if (it.isEmpty() || it == "Open map") "📍  MAP" else it }
         setButton(expanded, R.id.ride_notif_btn_sos, showSos, sosLabel, "$sosLabel, opens the hold to send screen", sosIntent())
-        setButton(expanded, R.id.ride_notif_btn_talk, showTalk, talkLabel, "$talkLabel, opens hold to talk", activityIntent(TALK, "", RC_TALK))
+        if (talkToggle) {
+            setButton(expanded, R.id.ride_notif_btn_talk, showTalk, talkLabel, "$talkLabel, turns hands-free talk on or off", broadcastIntent(TALK_TOGGLE, "", RC_TALK_TOGGLE))
+        } else {
+            setButton(expanded, R.id.ride_notif_btn_talk, showTalk, talkLabel, "$talkLabel, opens hold to talk", activityIntent(TALK, "", RC_TALK))
+        }
+        setButton(expanded, R.id.ride_notif_btn_mute, showMute, muteLabel, "$muteLabel, group voice", broadcastIntent(MUTE_TOGGLE, "", RC_MUTE_TOGGLE))
         setButton(expanded, R.id.ride_notif_btn_wait, showWait && !showTalk, waitLabel, waitLabel, broadcastIntent(WAIT, "", RC_WAIT))
         setButton(expanded, R.id.ride_notif_btn_map, !showEnd, mapLabel, mapLabel, activityIntent(MAP, "", RC_MAP))
         setButton(expanded, R.id.ride_notif_btn_end, showEnd, endLabel, "$endLabel, asks to confirm in the app", activityIntent(END, "", RC_END))

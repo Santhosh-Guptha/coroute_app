@@ -31,6 +31,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Rider safety: crash alarm over the lock screen. Direct SMS permission removed for Play compliance; emergency SOS uses SMS composer intent. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- 3.55: lets the rider allow CoRoute's "Critical ride alerts" channel through Do Not Disturb
+         (Settings > Do Not Disturb access; normal permission, nothing is asked at install). -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
     <!-- SEND_SMS would otherwise make Play hide CoRoute from tablets without a SIM. -->
     <uses-feature android:name="android.hardware.telephony" android:required="false"/>
 
@@ -87,6 +90,15 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="coroute.duckdns.org" android:pathPrefix="/join/"/>
+            </intent-filter>
+            <!-- Same invite links on the new domain (docs/DOMAIN_MIGRATION_devmonks.md): both hosts serve the
+                 same assetlinks.json. Release this only once https://coroute.devmonks.space/.well-known/assetlinks.json
+                 is live: Android 11 and older verify all autoVerify hosts together. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="coroute.devmonks.space" android:pathPrefix="/join/"/>
             </intent-filter>
         </activity>
         <!-- 3.15: invisible trampoline for the SOS button of the ride notification. showWhenLocked lets
@@ -159,6 +171,15 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+        <!-- 3.55 push notifications: FCM data messages (friend requests, crew invites, polls, ride
+             invites). Not exported: only Google Play services delivers to it. -->
+        <service
+            android:name=".CoRouteMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

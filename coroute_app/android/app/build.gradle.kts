@@ -44,6 +44,18 @@ if (releasePackagingRequested && !releaseSigningReady) {
     )
 }
 
+// 3.55 push notifications (Firebase Cloud Messaging, docs/features_355/push_notifications.md).
+// The four Firebase client values come from gradle properties (-PCOROUTE_FCM_APP_ID=... or
+// ~/.gradle/gradle.properties) or the environment (CI). They are never committed. Without all four
+// the app builds and runs normally with push turned off (FirebaseApp is never initialised).
+fun fcmValue(name: String): String =
+    ((project.findProperty(name) as String?) ?: System.getenv(name) ?: "").trim()
+val fcmAppId = fcmValue("COROUTE_FCM_APP_ID")
+val fcmApiKey = fcmValue("COROUTE_FCM_API_KEY")
+val fcmProjectId = fcmValue("COROUTE_FCM_PROJECT_ID")
+val fcmSenderId = fcmValue("COROUTE_FCM_SENDER_ID")
+val fcmConfigured = listOf(fcmAppId, fcmApiKey, fcmProjectId, fcmSenderId).all { it.isNotEmpty() }
+
 android {
     namespace = "space.devmonks.coroute_app"
     // compileSdk stays 37 (raised on purpose in 3d96e53 for the release build); it may be higher
@@ -65,6 +77,23 @@ android {
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // 3.55 push: read by PushConfig (PushChannel.kt); empty strings = push off.
+        resValue("string", "coroute_fcm_app_id", fcmAppId)
+        resValue("string", "coroute_fcm_api_key", fcmApiKey)
+        resValue("string", "coroute_fcm_project_id", fcmProjectId)
+        resValue("string", "coroute_fcm_sender_id", fcmSenderId)
+        if (fcmConfigured) {
+            // The standard names let Firebase initialise itself at process start, so a push that
+            // wakes a closed app is handled before any CoRoute code runs.
+            resValue("string", "google_app_id", fcmAppId)
+            resValue("string", "google_api_key", fcmApiKey)
+            resValue("string", "project_id", fcmProjectId)
+            resValue("string", "gcm_defaultSenderId", fcmSenderId)
+        }
+    }
+
+    buildFeatures {
+        resValues = true
     }
 
     signingConfigs {
@@ -117,4 +146,7 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // 3.55 push notifications: FCM only (no Analytics). Configured at build time, see above.
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
 }
