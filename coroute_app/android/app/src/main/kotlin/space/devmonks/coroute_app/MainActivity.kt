@@ -32,7 +32,10 @@ class MainActivity : FlutterActivity() {
         accelStream = accel
         EventChannel(messenger, "coroute/accel").setStreamHandler(accel)
         MethodChannel(messenger, "coroute/safety").setMethodCallHandler(SafetyChannel(this))
-        val sms = SmsChannel(applicationContext)
+        // 3.56: the activity (weakly held) lets the SOS composer ask to unlock first when the SOS
+        // screen is shown over the lock screen.
+        val self = java.lang.ref.WeakReference(this)
+        val sms = SmsChannel(applicationContext) { self.get() }
         smsChannel = sms
         MethodChannel(messenger, "coroute/sms").setMethodCallHandler(sms)
 
@@ -61,9 +64,8 @@ class MainActivity : FlutterActivity() {
         pushChannel = push
         pushMethods.setMethodCallHandler(push)
 
-        // 3.55 coupon QR: the Play Install Referrer ("coupon=CODE"), read once by Dart on first launch.
-        MethodChannel(messenger, "coroute/install_referrer")
-            .setMethodCallHandler(InstallReferrerChannel(applicationContext))
+        // 3.55 "Rate CoRoute": Google Play in-app review card (InAppReviewChannel.kt).
+        MethodChannel(messenger, "coroute/in_app_review").setMethodCallHandler(InAppReviewChannel(this))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,6 +122,7 @@ class MainActivity : FlutterActivity() {
         pushChannel = null
         MethodChannel(messenger, "coroute/push").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/install_referrer").setMethodCallHandler(null)
+        MethodChannel(messenger, "coroute/in_app_review").setMethodCallHandler(null)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

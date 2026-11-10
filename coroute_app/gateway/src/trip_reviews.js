@@ -45,6 +45,7 @@ const LIMITS = Object.freeze({
   photoUrl: 500,
   place: 60,
   tripName: 80,
+  chips: 10,
 });
 
 const TRIP_ID = /^[A-Za-z0-9_-]{4,80}$/;
@@ -185,6 +186,15 @@ function validateSubmission(body) {
   }
   if (Object.keys(fields).length) throw new ReviewError(422, 'Please correct the highlighted fields.', 'INVALID_REVIEW', fields);
 
+  // 3.55 quick chips ("Great route", "Good pace"...; ids from the engagement config, src/engagement.js).
+  const chips = [];
+  if (Array.isArray(b.chips)) {
+    for (const x of b.chips) {
+      const id = typeof x === 'string' ? x.trim() : '';
+      if (/^[a-z][a-z0-9_]{0,31}$/.test(id) && !chips.includes(id)) chips.push(id);
+      if (chips.length >= LIMITS.chips) break;
+    }
+  }
   const consentTripDetails = b.consentTripDetails === true;
   const photoTick = b.consentPhoto === true || b.consentPhotos === true;
   // Publication consent: explicit when sent; older builds only sent the trip-details consent.
@@ -193,7 +203,7 @@ function validateSubmission(body) {
   // Photos the rider did not agree to show are not kept at all (uploads included).
   const consentPhoto = photoTick && consentPublish;
   return {
-    rating, writtenFeedback, safetyExperience, suggestions,
+    rating, writtenFeedback, safetyExperience, suggestions, chips,
     photos: consentPhoto ? photos : [], keepUploads: consentPhoto ? keepUploads : [],
     consentPublish, consentTripDetails, consentPhoto,
   };
@@ -345,6 +355,7 @@ function riderView(doc) {
     writtenFeedback: doc.writtenFeedback || '',
     safetyExperience: doc.safetyExperience || '',
     suggestions: doc.suggestions || '',
+    chips: Array.isArray(doc.chips) ? doc.chips : [],
     photos: doc.photos || [],
     photoUrl: ((doc.photos || []).find((p) => !isUploadId(p))) || null,
     // Uploaded photos, viewable by the rider through GET /api/trips/:tripId/feedback/photos/:photoId.

@@ -425,6 +425,7 @@ class PlaceReviewService extends ChangeNotifier {
     required int rating,
     String text = '',
     int dwellMin = 0,
+    List<String> chips = const [],
   }) async {
     final res = await _api.post('/places/reviews', {
       'placeId': place.id,
@@ -435,6 +436,8 @@ class PlaceReviewService extends ChangeNotifier {
       'rating': rating.clamp(1, 5),
       'text': text.trim().length > maxTextChars ? text.trim().substring(0, maxTextChars) : text.trim(),
       'dwellMin': dwellMin,
+      // 3.55 quick chips of the place's category (engagement config ids).
+      if (chips.isNotEmpty) 'chips': chips,
     });
     _pages.remove(place.id);
     if (_prompt?.placeId == place.id) _prompt = null;

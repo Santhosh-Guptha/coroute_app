@@ -35,8 +35,6 @@ class TripReviewSheet extends StatefulWidget {
   /// For the sunset line in tests; defaults to now.
   final DateTime? now;
 
-  /// Whether membership was activated in this trip creation flow.
-  final bool membershipActivated;
 
   /// Label for final confirmation action button.
   final String confirmLabel;
@@ -55,7 +53,6 @@ class TripReviewSheet extends StatefulWidget {
     this.destinationLat,
     this.destinationLng,
     this.now,
-    this.membershipActivated = false,
     this.confirmLabel = 'Confirm and Create Trip',
   });
 
@@ -74,7 +71,6 @@ class TripReviewSheet extends StatefulWidget {
     double? startLng,
     double? destinationLat,
     double? destinationLng,
-    bool membershipActivated = false,
     String confirmLabel = 'Confirm and Create Trip',
   }) {
     return showAppSheet<int>(
@@ -96,7 +92,6 @@ class TripReviewSheet extends StatefulWidget {
         startLng: startLng,
         destinationLat: destinationLat,
         destinationLng: destinationLng,
-        membershipActivated: membershipActivated,
         confirmLabel: confirmLabel,
       ),
     );
@@ -198,33 +193,6 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (widget.membershipActivated) ...[
-          Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppTheme.success.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.success.withValues(alpha: 0.6)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Membership Activated Successfully',
-                    style: TextStyle(
-                      color: AppTheme.success,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
         AppSheetHeader(
           title: widget.name,
           subtitle: TripReviewSheet.fromTo(widget.startName, widget.destinationName),
