@@ -60,24 +60,6 @@ class AdminTabBody extends StatelessWidget {
   }
 }
 
-/// TEST / LIVE / MANUAL pill of a payment (icon and colour, never colour alone).
-class AdminModeBadge extends StatelessWidget {
-  final String badge;
-  const AdminModeBadge(this.badge, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    switch (badge) {
-      case 'TEST':
-        return StatusTextChip(icon: Icons.science_outlined, text: 'TEST', color: AppTheme.warnText);
-      case 'MANUAL':
-        return StatusTextChip(icon: Icons.edit_note_rounded, text: 'MANUAL', color: AppTheme.text2);
-      default:
-        return StatusTextChip(icon: Icons.bolt_rounded, text: 'LIVE', color: AppTheme.accentText);
-    }
-  }
-}
-
 /// Outlined field decoration of the admin forms.
 InputDecoration adminInput(String label, {String? hint, String? helper, String? prefix, String? suffix}) {
   final side = BorderSide(color: AppTheme.border);
@@ -229,31 +211,6 @@ class _AskTextDialogState extends State<_AskTextDialog> {
           child: Text(widget.confirmLabel),
         ),
       ],
-    );
-  }
-}
-
-/// Small stacked label + value used inside list rows (amounts at the right).
-class AdminAmount extends StatelessWidget {
-  final String value;
-  final String? caption;
-  final Color? color;
-
-  const AdminAmount(this.value, {super.key, this.caption, this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = caption;
-    return Padding(
-      padding: const EdgeInsets.only(left: 8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(value, style: AppText.label.copyWith(color: color ?? AppTheme.text, fontWeight: FontWeight.w600)),
-          if (c != null) Text(c, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
-        ],
-      ),
     );
   }
 }

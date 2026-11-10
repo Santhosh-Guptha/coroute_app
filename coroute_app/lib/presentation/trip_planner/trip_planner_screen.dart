@@ -274,10 +274,10 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     FocusScope.of(context).unfocus();
     try {
       // Every rider can start a ride: Community (free) rides solo, a group plan hosts a group. The
-      // plan only decides the seats, which the gateway sets; there is nothing to pay here. The plan
+      // plan only decides the seats, which the gateway sets. The plan
       // is refreshed in the background so the home line and the ride sheet read right.
       final ms = context.read<MembershipService?>();
-      if (ms != null && ms.paymentsEnabled) ms.fetchMyMembership().ignore();
+      if (ms != null && ms.plansEnforced) ms.fetchMyMembership().ignore();
 
       if (!mounted) return;
 

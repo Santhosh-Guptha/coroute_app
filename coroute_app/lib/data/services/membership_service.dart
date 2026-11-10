@@ -6,104 +6,32 @@ import '../../core/constants/app_constants.dart';
 import '../models/membership_model.dart';
 import 'api_client.dart';
 
-/// Short, plain messages for the gateway's coupon refusal reasons
-/// (`reason` in the error body of validate-coupon, order, create-order and activate-free).
-const Map<String, String> couponReasonMessages = {
-  'COUPON_NOT_FOUND': "We couldn't find that code",
-  'COUPON_EXPIRED': 'Code expired',
-  'COUPON_SCHEDULED': "This code isn't active yet",
-  'COUPON_LIMIT_REACHED': 'This code has been fully used',
-  'COUPON_USAGE_LIMIT_REACHED': 'This code has been fully used',
-  'COUPON_INACTIVE': 'This code is no longer active',
-  'COUPON_PAUSED': 'This code is paused right now',
-  'COUPON_ARCHIVED': 'This code is no longer active',
-  'COUPON_INVALID': "This code can't be used",
-  'COUPON_RESERVATION_FAILED': "This code couldn't be applied",
-  'COUPON_REQUIRED': 'Enter a code to activate for free',
-  'PER_USER_LIMIT_REACHED': "You've already used this code",
-  'TIER_MISMATCH': "This code isn't for this plan",
-  'CYCLE_MISMATCH': "This code isn't for this billing period",
-  'MIN_ORDER_NOT_MET': "This plan doesn't meet the code's minimum amount",
-  'PARTIAL_COUPON': "This code doesn't cover the full price",
-  'NEW_MEMBERS_ONLY': 'This code is for new members only',
-  'FIRST_PAYMENT_ONLY': 'This code is for your first payment only',
-  'NOT_ELIGIBLE': "This code isn't available for your account",
-  'PLAN_INACTIVE': "This plan isn't on sale right now",
-};
-
-/// The plain message for a coupon refusal [reason], or null when it is not a coupon reason.
-String? couponErrorMessage(String? reason) => reason == null ? null : couponReasonMessages[reason];
-
-/// True when [reason] means only the code was refused: the rider can still pay the normal price.
-bool isCouponRefusal(String? reason) => reason != null && reason != 'PLAN_INACTIVE' && couponReasonMessages.containsKey(reason);
-
-/// The discount in rupees a validate-coupon answer grants on a ₹[basePrice] plan, as the server
-/// computed it (`discountAmount`, older `discountInr`, else `discountPercent`). Never more than the
-/// price and never assumed: an answer without a discount gives 0.
-int couponDiscountRupees(Map<String, dynamic> res, int basePrice) {
-  final raw = res['discountAmount'] ?? res['discountInr'];
-  var amount = 0;
-  if (raw is num) {
-    amount = raw.round();
-  } else if (res['discountPercent'] is num) {
-    amount = (basePrice * (res['discountPercent'] as num) / 100).round();
-  }
-  if (amount < 0) return 0;
-  return amount > basePrice ? basePrice : amount;
-}
-
-/// True only when the server itself says the coupon makes this plan free (`isFree`, or a final amount of 0).
-bool couponServerConfirmsFree(Map<String, dynamic> res) {
-  if (res['valid'] != true) return false;
-  if (res['isFree'] == true) return true;
-  final fin = res['finalAmount'] ?? res['finalAmountInr'];
-  return fin is num && fin == 0;
-}
-
-/// Manages CoRoute Membership, Group Seat Entitlements, Two-Role Trip Governance,
-/// Single Active Trip concurrency enforcement and secure Razorpay payment lifecycle.
+/// Reads the rider's CoRoute plan (membership, seats, active trip lock) from the server and keeps a
+/// cached copy for offline use. Play payments policy (docs/features_355/play_payments_policy.md):
+/// the app is consumption-only. It never sells, prices or links to buying a plan; plans are
+/// managed in the rider's CoRoute account and the app only re-reads them ([fetchMyMembership],
+/// also on the SUBSCRIPTION_* socket / push events).
 class MembershipService extends ChangeNotifier {
   final ApiClient _api;
   SharedPreferences? _prefs;
 
   MembershipCatalog? _catalog;
   MyMembershipOverview? _myOverview;
-  List<MembershipPaymentItem> _paymentHistory = const [];
   bool _isLoading = false;
   bool _isVerifying = false;
   String? _lastError;
-  String? _lastErrorReason;
-
-  Future<Map<String, dynamic>?>? _inFlightOrderFuture;
-  String? _inFlightOrderKey;
 
   MembershipCatalog? get catalog => _catalog;
   MyMembershipOverview? get myOverview => _myOverview;
   UserMembership? get ownedMembership => _myOverview?.ownedMembership;
   List<UserMembership> get participating => _myOverview?.participating ?? const [];
   ActiveTripLock? get activeTrip => _myOverview?.activeTrip;
-  List<MembershipPaymentItem> get paymentHistory => _paymentHistory;
-  bool get paymentsEnabled => _myOverview?.paymentsEnabled ?? true;
+
+  /// False when the server runs without plans (every rider may host): the app then shows no plan UI.
+  bool get plansEnforced => _myOverview?.plansEnforced ?? true;
   bool get isLoading => _isLoading;
   bool get isVerifying => _isVerifying;
   String? get lastError => _lastError;
-
-  /// The gateway's machine-readable reason for the last refusal (for example PER_USER_LIMIT_REACHED).
-  String? get lastErrorReason => _lastErrorReason;
-
-  /// True when the last call failed only because of the coupon: the rider can pay the normal price.
-  bool get lastErrorIsCouponRefusal => isCouponRefusal(_lastErrorReason);
-
-  /// Records [e] as the last error: a coupon refusal gets its short plain message.
-  void _recordError(Object e, String fallback) {
-    if (e is ApiException) {
-      _lastErrorReason = e.reason;
-      _lastError = couponErrorMessage(e.reason) ?? e.message;
-    } else {
-      _lastErrorReason = null;
-      _lastError = fallback;
-    }
-  }
 
   /// Authoritatively recognizes whether the rider has an active plan with valid capacity (ISSUE-10):
   /// a membership, or a legacy tier until its end date.
@@ -112,13 +40,6 @@ class MembershipService extends ChangeNotifier {
   /// The rider's plan (the single source for hosting, seats and the home status line). Every rider
   /// has at least Community (free, solo rides), also before the server answered.
   PlanAccess get planAccess => _myOverview?.planAccess ?? PlanAccess.community;
-
-  /// The lowest price of a group plan on sale (for "Host a group from ₹49"), or null when unknown.
-  int? get groupFromPrice {
-    final groups = (_catalog?.categories ?? const <MembershipCategory>[]).where((c) => c.isGroup && c.priceRupees > 0);
-    if (groups.isEmpty) return null;
-    return groups.map((c) => c.priceRupees).reduce((a, b) => a < b ? a : b);
-  }
 
   MembershipService(this._api, [this._prefs]) {
     _initCache();
@@ -185,12 +106,10 @@ class MembershipService extends ChangeNotifier {
     }
   }
 
-  /// Sign-out: forgets this account's plan, payments and cached overview (the catalog stays).
+  /// Sign-out: forgets this account's plan and cached overview (the catalog stays).
   Future<void> clearLocal() async {
     _myOverview = null;
-    _paymentHistory = const [];
     _lastError = null;
-    _lastErrorReason = null;
     notifyListeners();
     try {
       _prefs ??= await SharedPreferences.getInstance();
@@ -251,241 +170,6 @@ class MembershipService extends ChangeNotifier {
       notifyListeners();
     }
     return _myOverview;
-  }
-
-  /// Create a server-authoritative Razorpay order for membership checkout.
-  /// No code is sent unless the rider entered one. When the server prices the order at ₹0
-  /// (a 100% coupon it accepted) it answers `isFree` and has already activated the membership.
-  /// Deduplicates concurrent in-flight requests to never open duplicate payment orders.
-  Future<Map<String, dynamic>?> createOrder({
-    required String categoryId,
-    String? offerCode,
-  }) async {
-    final cleanOffer = offerCode?.trim().toUpperCase();
-    final orderKey = '$categoryId:${cleanOffer ?? ""}';
-
-    if (_inFlightOrderFuture != null && _inFlightOrderKey == orderKey) {
-      debugPrint('[MembershipService] Duplicate createOrder prevented for $orderKey; returning existing future.');
-      return _inFlightOrderFuture;
-    }
-
-    _inFlightOrderKey = orderKey;
-    _inFlightOrderFuture = _executeCreateOrder(categoryId: categoryId, offerCode: cleanOffer);
-
-    try {
-      return await _inFlightOrderFuture;
-    } finally {
-      _inFlightOrderFuture = null;
-      _inFlightOrderKey = null;
-    }
-  }
-
-  Future<Map<String, dynamic>?> _executeCreateOrder({
-    required String categoryId,
-    String? offerCode,
-  }) async {
-    _isLoading = true;
-    _lastError = null;
-    _lastErrorReason = null;
-    notifyListeners();
-    try {
-      final body = <String, dynamic>{
-        'category': categoryId,
-        'categoryId': categoryId,
-        if (offerCode != null && offerCode.isNotEmpty) 'offerCode': offerCode,
-      };
-      final res = await _api.post('/membership/order', body);
-      if (res is Map) {
-        final data = Map<String, dynamic>.from(res);
-        if (data['isFree'] == true) {
-          await fetchMyMembership();
-        }
-        return data;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] createOrder error: $e');
-      _recordError(e, 'Order creation failed. Please check your internet connection.');
-      notifyListeners();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-    return null;
-  }
-
-  /// Cryptographically verify Razorpay payment and activate membership.
-  Future<UserMembership?> verifyPayment({
-    required String orderId,
-    required String paymentId,
-    required String signature,
-  }) async {
-    _isLoading = true;
-    _lastError = null;
-    notifyListeners();
-    try {
-      final body = <String, dynamic>{
-        'orderId': orderId,
-        'paymentId': paymentId,
-        'signature': signature,
-      };
-      final res = await _api.post('/membership/verify', body);
-      if (res is Map && res['membership'] is Map) {
-        final mem = UserMembership.fromJson(Map<String, dynamic>.from(res['membership'] as Map));
-        await fetchMyMembership();
-        await fetchPaymentHistory();
-        return mem;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] verifyPayment error: $e');
-      if (e is ApiException) {
-        _lastError = e.message;
-      } else {
-        _lastError = 'Payment verification failed.';
-      }
-      notifyListeners();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-    return null;
-  }
-
-  /// Fetch user's payment and transaction history from ledger.
-  Future<List<MembershipPaymentItem>> fetchPaymentHistory() async {
-    try {
-      final res = await _api.get('/membership/payments');
-      if (res is Map && res['payments'] is List) {
-        _paymentHistory = (res['payments'] as List<dynamic>)
-            .whereType<Map>()
-            .map((e) => MembershipPaymentItem.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
-        notifyListeners();
-        return _paymentHistory;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] fetchPaymentHistory error: $e');
-    }
-    return _paymentHistory;
-  }
-
-  /// The server's price of [categoryId] for this rider now, with [couponCode] when it applies
-  /// (GET /membership/quote): coupon, upgrade credit, what to pay and the new period. A refused code
-  /// comes back as [PlanQuote.couponRefused] with the full price, never as a failure. Null only when
-  /// the server cannot be reached or refuses the plan (lastError / lastErrorReason say why).
-  Future<PlanQuote?> fetchQuote({required String categoryId, String? couponCode}) async {
-    _lastError = null;
-    _lastErrorReason = null;
-    final code = couponCode?.trim().toUpperCase() ?? '';
-    final query = 'plan=${Uri.encodeQueryComponent(categoryId)}${code.isEmpty ? '' : '&coupon=${Uri.encodeQueryComponent(code)}'}';
-    try {
-      final res = await _api.get('/membership/quote?$query');
-      if (res is Map) return PlanQuote.fromJson(Map<String, dynamic>.from(res));
-    } catch (e) {
-      debugPrint('[MembershipService] fetchQuote error: $e');
-      _recordError(e, 'Could not get the price. Check your connection.');
-    }
-    return null;
-  }
-
-  /// Validate coupon against a membership category on backend.
-  /// Returns coupon discount data, or null with lastError (a short plain message) and
-  /// lastErrorReason populated on rejection.
-  Future<Map<String, dynamic>?> validateCoupon({
-    required String code,
-    required String categoryId,
-  }) async {
-    _lastError = null;
-    _lastErrorReason = null;
-    try {
-      final body = {
-        'code': code.trim().toUpperCase(),
-        'category': categoryId,
-      };
-      final res = await _api.post('/membership/validate-coupon', body);
-      if (res is Map) {
-        return Map<String, dynamic>.from(res);
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] validateCoupon error: $e');
-      _recordError(e, 'Coupon validation failed.');
-    }
-    return null;
-  }
-
-  /// Activate zero-amount membership directly through backend authorization.
-  /// No Razorpay order or checkout is created. Call it only after the server confirmed the
-  /// coupon makes the plan free; the server checks the coupon again and may still refuse it.
-  Future<UserMembership?> activateFreeMembership({
-    required String categoryId,
-    required String couponCode,
-  }) async {
-    _isLoading = true;
-    _lastError = null;
-    _lastErrorReason = null;
-    notifyListeners();
-    try {
-      final body = {
-        'category': categoryId,
-        'couponCode': couponCode.trim().toUpperCase(),
-      };
-      final res = await _api.post('/membership/activate-free', body);
-      if (res is Map && res['membership'] is Map) {
-        final mem = UserMembership.fromJson(Map<String, dynamic>.from(res['membership'] as Map));
-        await fetchMyMembership();
-        await fetchPaymentHistory();
-        return mem;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] activateFreeMembership error: $e');
-      _recordError(e, 'Membership activation failed. Please try again.');
-      notifyListeners();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-    return null;
-  }
-
-  /// Purchase or claim an introductory offer for a membership category (legacy or direct wrapper).
-  Future<UserMembership?> purchaseMembership({
-    required String categoryId,
-    String? offerCode,
-    String? paymentId,
-    String? orderId,
-    String? signature,
-  }) async {
-    _isLoading = true;
-    _lastError = null;
-    notifyListeners();
-    try {
-      final body = <String, dynamic>{
-        'categoryId': categoryId,
-        'category': categoryId,
-        if (offerCode != null && offerCode.trim().isNotEmpty)
-          'offerCode': offerCode.trim().toUpperCase(),
-        if (paymentId != null && paymentId.trim().isNotEmpty) 'paymentId': paymentId.trim(),
-        if (orderId != null && orderId.trim().isNotEmpty) 'orderId': orderId.trim(),
-        if (signature != null && signature.trim().isNotEmpty) 'signature': signature.trim(),
-      };
-      final res = await _api.post('/membership/purchase', body);
-      if (res is Map && res['membership'] is Map) {
-        final mem = UserMembership.fromJson(Map<String, dynamic>.from(res['membership'] as Map));
-        await fetchMyMembership();
-        return mem;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] purchaseMembership error: $e');
-      if (e is ApiException) {
-        _lastError = e.message;
-      } else {
-        _lastError = 'Membership activation failed. Please try again.';
-      }
-      notifyListeners();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-    return null;
   }
 
   /// Trip Owner invites a participant by email or phone. Enforces capacity on backend.
@@ -550,98 +234,5 @@ class MembershipService extends ChangeNotifier {
       notifyListeners();
     }
     return false;
-  }
-
-  // =========================================================================
-  // PLATFORM ADMIN METHODS
-  // =========================================================================
-
-  /// Admin: fetch dynamic catalog config.
-  Future<Map<String, dynamic>?> fetchAdminCatalog() async {
-    try {
-      final res = await _api.get('/admin/membership/catalog');
-      if (res is Map) return Map<String, dynamic>.from(res);
-    } catch (e) {
-      debugPrint('[MembershipService] fetchAdminCatalog error: $e');
-    }
-    return null;
-  }
-
-  /// Admin: update dynamic catalog config.
-  Future<bool> updateAdminCatalog(Map<String, dynamic> catalogData) async {
-    try {
-      final res = await _api.put('/admin/membership/catalog', catalogData);
-      if (res is Map && (res['ok'] == true || res['message'] != null)) {
-        await fetchCatalog();
-        return true;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] updateAdminCatalog error: $e');
-    }
-    return false;
-  }
-
-  /// Admin: fetch all memberships across the platform.
-  Future<List<Map<String, dynamic>>> fetchAdminMemberships({int limit = 100}) async {
-    try {
-      final res = await _api.get('/admin/membership/memberships?limit=$limit');
-      if (res is Map && res['memberships'] is List) {
-        return (res['memberships'] as List<dynamic>)
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] fetchAdminMemberships error: $e');
-    }
-    return [];
-  }
-
-  /// Admin: fetch all payment transactions from ledger.
-  Future<List<Map<String, dynamic>>> fetchAdminPayments({int limit = 100}) async {
-    try {
-      final res = await _api.get('/admin/membership/payments?limit=$limit');
-      if (res is Map && res['payments'] is List) {
-        return (res['payments'] as List<dynamic>)
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] fetchAdminPayments error: $e');
-    }
-    return [];
-  }
-
-  /// Admin: refund a paid order via Razorpay API and revoke/update membership.
-  Future<bool> adminRefundPayment({
-    required String orderId,
-    int? amountInPaise,
-    String? reason,
-  }) async {
-    try {
-      final body = <String, dynamic>{
-        'amountInPaise': ?amountInPaise,
-        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
-      };
-      final res = await _api.post('/admin/membership/payments/$orderId/refund', body);
-      if (res is Map && res['ok'] == true) {
-        return true;
-      }
-    } catch (e) {
-      debugPrint('[MembershipService] adminRefundPayment error: $e');
-    }
-    return false;
-  }
-
-  /// Admin: fetch privacy-safe aggregate analytics.
-  Future<Map<String, dynamic>?> fetchAdminAnalytics() async {
-    try {
-      final res = await _api.get('/admin/membership/analytics');
-      if (res is Map) return Map<String, dynamic>.from(res);
-    } catch (e) {
-      debugPrint('[MembershipService] fetchAdminAnalytics error: $e');
-    }
-    return null;
   }
 }

@@ -6,28 +6,26 @@ import '../../data/models/membership_model.dart';
 import '../../data/services/membership_service.dart';
 import 'membership_dashboard_screen.dart';
 
-/// The rider's plan on the home screen, in one plain line, e.g.
-/// "Small Group · up to 6 riders · until 12 Dec" or
-/// "Community · Solo rides free · Host a group from ₹49". Tap opens the membership screen.
-/// Hidden when payments are switched off on the gateway.
+/// The rider's plan on the home screen: the plan name only ("Community", "Small Group",
+/// "Large Group"). Tap opens the read-only "Your plan" screen. Hidden when the gateway runs
+/// without plans. Play payments policy: no price, no buying words (play_payments_policy.md).
 class MembershipStatusChip extends StatelessWidget {
   const MembershipStatusChip({super.key});
 
   /// The line for [access] (pure, for tests).
-  static String textFor(PlanAccess access, {int? groupFromPrice}) =>
-      access.statusLine(groupFromPrice: groupFromPrice);
+  static String textFor(PlanAccess access) => access.isPaid ? access.shortName : 'Community';
 
   @override
   Widget build(BuildContext context) {
     final ms = context.watch<MembershipService?>();
-    if (ms == null || !ms.paymentsEnabled) return const SizedBox.shrink();
+    if (ms == null || !ms.plansEnforced) return const SizedBox.shrink();
     final access = ms.planAccess;
-    final text = textFor(access, groupFromPrice: ms.groupFromPrice);
+    final text = textFor(access);
     // A paid plan in the accent colour; Community (free) in the quiet text colour.
     final color = access.isPaid ? AppTheme.accentText : AppTheme.text2;
     return Semantics(
       button: true,
-      label: 'Membership: $text',
+      label: 'Your plan: $text',
       child: GestureDetector(
         key: const Key('home_membership_status'),
         onTap: () => Navigator.of(context).push(

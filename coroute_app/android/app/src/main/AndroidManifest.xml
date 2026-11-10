@@ -77,7 +77,7 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="coroute" android:host="cockpit"/>
             </intent-filter>
-            <!-- Return from the website checkout: coroute://subscription (re-reads the plan) -->
+            <!-- coroute://subscription: re-reads the plan from the server (no other action) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -99,25 +99,6 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="coroute.devmonks.space" android:pathPrefix="/join/"/>
-            </intent-filter>
-            <!-- 3.55 coupon QR / link: https://<site>/get?coupon=CODE prefills the code on the plan screen
-                 (never buys). Same hosts, so the same assetlinks.json verifies it (it covers the whole host). -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="https"/>
-                <data android:host="coroute.duckdns.org"/>
-                <data android:host="coroute.devmonks.space"/>
-                <data android:path="/get"/>
-                <data android:path="/get/"/>
-            </intent-filter>
-            <!-- 3.55 "Open in the app" on the website /get page: coroute://get?coupon=CODE -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="coroute" android:host="get"/>
             </intent-filter>
         </activity>
         <!-- 3.15: invisible trampoline for the SOS button of the ride notification. showWhenLocked lets
@@ -233,10 +214,6 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="upi"/>
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>

@@ -19,14 +19,13 @@ import '../rider/trip_history_screen.dart';
 import '../settings/settings_screen.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
-import '../subscription/payment_history_screen.dart';
 import '../subscription/membership_dashboard_screen.dart';
 import '../../data/models/membership_model.dart';
 import '../garage/garage_screen.dart';
 import '../analytics/ride_analytics_screen.dart';
 import '../feedback/suggest_feature_screen.dart';
+import '../engagement/rate_and_feedback.dart';
 import '../../data/services/friends_service.dart';
-import '../../data/services/crews_service.dart';
 import '../score/rider_score_card.dart';
 import '../social/profile_screen.dart';
 
@@ -49,14 +48,6 @@ class AccountScreen extends StatelessWidget {
   void _push(BuildContext context, Widget screen) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
-  /// "2 friend requests" when only friend requests wait, else "N new" (crew invites, polls too).
-  static String _socialBadgeText(int friendRequests, int total) {
-    if (friendRequests > 0 && friendRequests == total) {
-      return friendRequests == 1 ? '1 friend request' : '$friendRequests friend requests';
-    }
-    return '$total new';
-  }
-
   static String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return '?';
@@ -71,8 +62,6 @@ class AccountScreen extends StatelessWidget {
     final settings = context.watch<SettingsService?>();
     final trips = context.watch<TripStorageService?>();
     final social = context.watch<FriendsService?>();
-    // 3.55 crews: invitations + polls to answer join the friends badge on the profile row.
-    final socialBadge = (social?.badgeCount ?? 0) + (context.watch<CrewsService?>()?.badgeCount ?? 0);
     final base = AppConfig.apiBaseUrl;
     final privacyUrl = meta?.privacyUrl.isNotEmpty == true ? meta!.privacyUrl : '$base/privacy';
     final termsUrl = meta?.termsUrl.isNotEmpty == true ? meta!.termsUrl : '$base/terms';
@@ -300,35 +289,29 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                if (memService?.paymentsEnabled == true) ...[
+                if (memService?.plansEnforced == true) ...[
                   const SizedBox(height: Space.s24),
-                  const DsSectionHeader('Membership & plans'),
+                  const DsSectionHeader('Your plan'),
                   const SizedBox(height: Space.s12),
                   DsCard(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     child: Column(
                       children: [
+                        // Neutral account status only: plan name and end date (Play payments policy).
                         _SettingsRow(
                           icon: Icons.card_membership_rounded,
-                          title: 'Membership & plans',
+                          title: 'Your plan',
                           subtitle: access.isPaid
                               ? access.statusLine()
                               : (memService != null && memService.participating.isNotEmpty
-                                  ? 'Group member · Free for you'
-                                  : access.statusLine(groupFromPrice: memService?.groupFromPrice)),
+                                  ? "Riding in a friend's group plan"
+                                  : access.statusLine()),
                           value: access.isPaid
-                              ? (access.isLegacy ? 'LEGACY' : 'ACTIVE')
-                              : (memService != null && memService.participating.isNotEmpty ? 'PARTICIPANT' : 'FREE'),
+                              ? 'ACTIVE'
+                              : (memService != null && memService.participating.isNotEmpty ? 'MEMBER' : 'FREE'),
                           color: AppTheme.accentText,
-                          divider: true,
-                          onTap: () => _push(context, const MembershipDashboardScreen()),
-                        ),
-                        _SettingsRow(
-                          icon: Icons.receipt_long_rounded,
-                          title: 'Payments & plan history',
-                          subtitle: 'Past plans and payments',
                           divider: false,
-                          onTap: () => _push(context, const PaymentHistoryScreen()),
+                          onTap: () => _push(context, const MembershipDashboardScreen()),
                         ),
                       ],
                     ),
@@ -343,15 +326,14 @@ class AccountScreen extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
                     children: [
-                      // 3.55 public profile: username, picture, totals, friends (badge = new requests).
+                      // 3.55 public profile: username, picture, totals. Friends, crews and requests are
+                      // on the People tab (its badge counts what waits).
                       if (social != null)
                         _SettingsRow(
                           key: const Key('profile_public_profile'),
                           icon: Icons.account_circle_rounded,
-                          title: 'My profile & friends',
-                          subtitle: auth.username.isEmpty ? 'Username, picture and friends' : auth.username,
-                          value: socialBadge > 0 ? _socialBadgeText(social.badgeCount, socialBadge) : null,
-                          color: socialBadge > 0 ? AppTheme.warnText : null,
+                          title: 'My profile',
+                          subtitle: auth.username.isEmpty ? 'Username and picture' : auth.username,
                           onTap: () => MyProfileScreen.open(context),
                         ),
                       _SettingsRow(
@@ -421,6 +403,21 @@ class AccountScreen extends StatelessWidget {
                         title: 'Suggest a safety feature',
                         subtitle: 'Your ideas shape what we build next',
                         onTap: () => SuggestFeatureScreen.open(context),
+                      ),
+                      // 3.55 ratings & reviews: two separate rows (never one question that sorts riders).
+                      _SettingsRow(
+                        key: const Key('profile_send_feedback'),
+                        icon: Icons.chat_bubble_outline_rounded,
+                        title: RateAndFeedback.feedbackTitle,
+                        subtitle: RateAndFeedback.feedbackSubtitle,
+                        onTap: () => RateAndFeedback.openFeedback(context),
+                      ),
+                      _SettingsRow(
+                        key: const Key('profile_rate_coroute'),
+                        icon: Icons.star_outline_rounded,
+                        title: RateAndFeedback.rateTitle,
+                        subtitle: RateAndFeedback.rateSubtitle,
+                        onTap: () => RateAndFeedback.rate(context),
                       ),
                       _SettingsRow(icon: Icons.privacy_tip_rounded, title: 'Privacy policy', onTap: () => _open(context, privacyUrl)),
                       _SettingsRow(icon: Icons.gavel_rounded, title: 'Terms of use', onTap: () => _open(context, termsUrl), divider: false),
