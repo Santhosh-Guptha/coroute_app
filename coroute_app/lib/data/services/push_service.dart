@@ -46,6 +46,10 @@ class PushService extends ChangeNotifier {
 
   static const String prefKey = 'push_notifications_enabled';
 
+  /// 3.56: the rider's "News and updates" category switch (admin pushes). Safety, ride and social
+  /// pushes are not part of it and cannot be turned off here.
+  static const String newsPrefKey = 'push_news_enabled';
+
   final ApiClient _api;
   final MethodChannel _channel;
   final http.Client _http;
@@ -55,6 +59,7 @@ class PushService extends ChangeNotifier {
   bool _disposed = false;
   bool _available = false;
   bool _enabled = true;
+  bool _newsEnabled = true;
   bool _hadToken = false;
   String? _lastBearer;
   String? _registeredToken;
@@ -69,6 +74,11 @@ class PushService extends ChangeNotifier {
 
   /// The rider's switch (default on).
   bool get enabled => _enabled;
+
+  /// The "News and updates" switch (default on). Kept on the gateway (PUT /api/me/push-prefs), so
+  /// the server never sends admin pushes to a rider who turned it off; also mirrored to Android,
+  /// which drops a NEWS push while it is off.
+  bool get newsEnabled => _newsEnabled;
 
   /// The token the gateway has for this phone (null until registered).
   String? get registeredToken => _registeredToken;
@@ -106,10 +116,12 @@ class PushService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool(prefKey) ?? true;
+      _newsEnabled = prefs.getBool(newsPrefKey) ?? true;
     } catch (_) {}
     _channel.setMethodCallHandler(_onNative);
     _available = await _invoke<bool>('isAvailable') ?? false;
     await _invoke<void>('setEnabled', {'on': _enabled});
+    await _invoke<void>('setNewsEnabled', {'on': _newsEnabled});
     final launch = await _invoke<Map<dynamic, dynamic>>('takeLaunchMessage');
     if (launch != null) _emitOpened(launch);
     _notify();
@@ -148,6 +160,8 @@ class PushService extends ChangeNotifier {
       });
       _registeredToken = token;
       DiagLog.info(DiagCat.push, 'token_registered');
+      // "News and updates" turned off on this phone: make sure the gateway knows (new account / reinstall).
+      if (!_newsEnabled) _syncNews().ignore();
       _notify();
     } catch (e) {
       debugPrint('push: register note: $e');
@@ -208,6 +222,29 @@ class PushService extends ChangeNotifier {
       if (token != null && bearer != null) await _deleteOnGateway(bearer, token);
       if (_available) await _invoke<bool>('deleteToken');
       _notify();
+    }
+  }
+
+  /// The "News and updates" switch: saved here, on Android and on the gateway. Returns false
+  /// when the gateway could not be told (the switch stays as chosen and is sent again next start).
+  Future<bool> setNewsEnabled(bool on) async {
+    _newsEnabled = on;
+    _notify();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(newsPrefKey, on);
+    } catch (_) {}
+    if (_android) await _invoke<void>('setNewsEnabled', {'on': on});
+    return _syncNews();
+  }
+
+  Future<bool> _syncNews() async {
+    if (!_api.hasToken) return false;
+    try {
+      await _api.put('/me/push-prefs', {'news': _newsEnabled});
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

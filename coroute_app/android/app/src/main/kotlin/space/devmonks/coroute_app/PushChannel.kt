@@ -55,13 +55,23 @@ object PushConfig {
     fun setEnabled(context: Context, on: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
     }
+
+    private const val KEY_NEWS = "news"
+
+    /** 3.56: the rider's "News and updates" switch (admin NEWS pushes only; safety/ride pushes ignore it). */
+    fun isNewsEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_NEWS, true)
+
+    fun setNewsEnabled(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_NEWS, on).apply()
+    }
 }
 
 /**
  * MethodChannel "coroute/push".
  *
- * Dart -> Android: isAvailable, getToken, deleteToken, setEnabled {on}, takeLaunchMessage,
- * notificationsEnabled.
+ * Dart -> Android: isAvailable, getToken, deleteToken, setEnabled {on}, setNewsEnabled {on} (3.56),
+ * takeLaunchMessage, notificationsEnabled.
  * Android -> Dart (invokeMethod): onToken {token}, onMessage {data map} (app in front: no system
  * notification is shown), onMessageOpened {type, payload} (a push notification was tapped while
  * the app was running; a cold start is read with takeLaunchMessage).
@@ -111,6 +121,10 @@ class PushChannel(activity: Activity, private val channel: MethodChannel) : Meth
                     } catch (_: Throwable) {
                     }
                 }
+                result.success(null)
+            }
+            "setNewsEnabled" -> {
+                PushConfig.setNewsEnabled(app, call.argument<Boolean>("on") != false)
                 result.success(null)
             }
             "takeLaunchMessage" -> {

@@ -27,6 +27,7 @@ import '../models/convoy_model.dart';
 import '../models/emergency_roster.dart';
 import '../models/network_wire.dart';
 import '../models/pending_sos.dart';
+import '../../core/config/app_config.dart';
 import '../models/safety_wire.dart';
 import 'accel_source.dart';
 import 'alarm_notifier.dart';
@@ -2231,6 +2232,8 @@ class SafetyService extends ChangeNotifier {
         lng: p.lng,
         at: DateTime.fromMillisecondsSinceEpoch(p.createdAt > 0 ? p.createdAt : now),
         convoyName: convoy?.name,
+        // 3.56: the live link the gateway registers when this SOS reaches it (also via a relay).
+        liveLink: SmsText.liveLinkFor(AppConfig.apiBaseUrl, p.linkToken),
       );
       final perMessage = SmsText.parts(body);
       final roster = _port.emergencyRoster;

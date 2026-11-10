@@ -2,6 +2,7 @@ package space.devmonks.coroute_app
 
 import android.Manifest
 import android.app.Activity
+import android.app.KeyguardManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -33,8 +34,14 @@ import java.util.concurrent.atomic.AtomicReference
  * splits long texts into parts, and answers after the last part's sent report
  * or after 20 s. The send itself runs off the main thread. Phone numbers and
  * text are never logged.
+ *
+ * 3.56: launchSmsIntent from the SOS screen shown over the lock screen asks the system to unlock
+ * first (KeyguardManager.requestDismissKeyguard on [activity]); after the unlock the messages app
+ * opens with every contact and the text filled in. Cancelled: answers false (the rider can tap
+ * "Text the group now" again). The messages app queues and retries the text itself when there is
+ * no signal yet.
  */
-class SmsChannel(context: Context) : MethodChannel.MethodCallHandler {
+class SmsChannel(context: Context, private val activity: () -> Activity? = { null }) : MethodChannel.MethodCallHandler {
     private val app: Context = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
@@ -70,20 +77,45 @@ class SmsChannel(context: Context) : MethodChannel.MethodCallHandler {
     }
 
     private fun launchSmsIntent(to: String, body: String, result: MethodChannel.Result) {
-        try {
+        val intent = try {
             val cleanTo = to.replace(Regex("[^0-9+;,]"), "")
             val uri = if (cleanTo.isNotEmpty()) android.net.Uri.parse("smsto:$cleanTo") else android.net.Uri.parse("smsto:")
-            val intent = Intent(Intent.ACTION_SENDTO, uri).apply {
+            Intent(Intent.ACTION_SENDTO, uri).apply {
                 if (body.isNotEmpty()) {
                     putExtra("sms_body", body)
                 }
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            app.startActivity(intent)
-            result.success(true)
         } catch (e: Exception) {
             result.success(false)
+            return
         }
+        val act = activity()
+        val km = app.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (act != null && km != null && km.isKeyguardLocked && Build.VERSION.SDK_INT >= 26) {
+            val answered = AtomicBoolean(false)
+            fun answer(value: Boolean) {
+                if (answered.compareAndSet(false, true)) result.success(value)
+            }
+            try {
+                km.requestDismissKeyguard(act, object : KeyguardManager.KeyguardDismissCallback() {
+                    override fun onDismissSucceeded() = answer(startComposer(intent))
+                    override fun onDismissCancelled() = answer(false)
+                    override fun onDismissError() = answer(startComposer(intent))
+                })
+            } catch (e: Exception) {
+                answer(startComposer(intent))
+            }
+            return
+        }
+        result.success(startComposer(intent))
+    }
+
+    private fun startComposer(intent: Intent): Boolean = try {
+        app.startActivity(intent)
+        true
+    } catch (e: Exception) {
+        false
     }
 
     fun dispose() {

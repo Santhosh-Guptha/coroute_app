@@ -131,15 +131,28 @@ class SmsText {
     required DateTime at,
     String? convoyName,
     bool indianCorridor = false,
+    String? liveLink,
   }) {
     final who = name.trim().isEmpty ? 'A rider' : name.trim();
     final time = '${_two(at.hour)}:${_two(at.minute)}';
     final link = AppConstants.mapsLink(lat, lng, digits: 5);
     final ride = (convoyName ?? '').trim();
+    final live = (liveLink ?? '').trim();
     if (indianCorridor) {
       final act = auto ? 'crashed' : 'needs help';
       final ridePart = ride.isEmpty ? '' : ' Ride: $ride.';
-      return 'CoRoute SOS: $who $act at $time. Lat:${lat.toStringAsFixed(5)}, Lng:${lng.toStringAsFixed(5)}. Maps: $link$ridePart NHAI: ${SafetyConstants.highwayHelpline}. ERSS: ${SafetyConstants.emergencyNumber}';
+      final livePart = live.isEmpty ? '' : ' Live: $live';
+      return 'CoRoute SOS: $who $act at $time. Lat:${lat.toStringAsFixed(5)}, Lng:${lng.toStringAsFixed(5)}. Maps: $link$livePart$ridePart NHAI: ${SafetyConstants.highwayHelpline}. ERSS: ${SafetyConstants.emergencyNumber}';
+    }
+    if (live.isNotEmpty) {
+      // 3.56: name, time, the live link (follows the rider once the SOS reaches CoRoute) and the
+      // coordinates as text (they work even when the link cannot). The map link is added only
+      // while the text still fits one SMS part; the ride name likewise.
+      final head = auto ? 'CoRoute alert: $who may have crashed at $time.' : 'CoRoute SOS: $who needs help at $time.';
+      final core = '$head Live: $live Lat ${lat.toStringAsFixed(5)} Lng ${lng.toStringAsFixed(5)}';
+      var out = parts('$core Map: $link') == 1 ? '$core Map: $link' : core;
+      if (ride.isNotEmpty && parts('$out Ride: $ride.') == parts(out)) out = '$out Ride: $ride.';
+      return out;
     }
     final head = auto
         ? 'CoRoute automatic alert: $who may have crashed at $time and did not answer.'
@@ -168,6 +181,16 @@ class SmsText {
   }
 
   static String _two(int v) => v < 10 ? '0$v' : '$v';
+
+  /// The live link for an SOS text: `<origin>/e/<token>` for an https origin and a 22-character
+  /// token (PendingSos.linkToken), else null (the text then carries the map link only).
+  static String? liveLinkFor(String origin, String token) {
+    final o = origin.trim().replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.tryParse(o);
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty) return null;
+    if (!RegExp(r'^[A-Za-z0-9_-]{22}$').hasMatch(token)) return null;
+    return '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}/e/$token';
+  }
 
   // GSM 03.38 basic set, and the extension set (each counts twice).
   static const String _gsm = '@£\$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?'

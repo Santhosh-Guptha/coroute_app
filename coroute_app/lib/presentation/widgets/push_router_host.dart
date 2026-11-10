@@ -7,11 +7,14 @@ import '../../data/services/admin_warnings_service.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/crews_service.dart';
 import '../../data/services/friends_service.dart';
+import '../../data/services/membership_service.dart';
 import '../../data/services/push_service.dart';
 import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/notify/push_routing.dart';
 import '../social/crew_detail_screen.dart';
 import '../social/crews_screen.dart';
+import '../rider/trip_history_screen.dart';
+import '../settings/settings_screen.dart';
 import '../social/friends_screen.dart';
 import '../subscription/membership_dashboard_screen.dart';
 
@@ -125,7 +128,17 @@ class _PushRouterHostState extends State<PushRouterHost> {
       case PushDestination.adminWarnings:
         context.read<AdminWarningsService?>()?.refresh().ignore();
       case PushDestination.membership:
+        // A plan change (for example a plan activated in the rider's CoRoute account): re-read it,
+        // then show the read-only "Your plan" screen.
+        context.read<MembershipService?>()?.fetchMyMembership().ignore();
         await Navigator.of(navContext).push(MaterialPageRoute<void>(builder: (_) => const MembershipDashboardScreen()));
+      // 3.56 admin "News and updates" pushes: the target screen chosen in the web admin.
+      case PushDestination.home:
+        Navigator.of(navContext).popUntil((r) => r.isFirst);
+      case PushDestination.rideHistory:
+        await Navigator.of(navContext).push(MaterialPageRoute<void>(builder: (_) => const TripHistoryScreen()));
+      case PushDestination.settings:
+        await SettingsScreen.open(navContext);
       case PushDestination.none:
         return;
     }
@@ -143,8 +156,13 @@ class _PushRouterHostState extends State<PushRouterHost> {
         context.read<CrewsService?>()?.refresh().ignore();
       case PushDestination.adminWarnings:
         context.read<AdminWarningsService?>()?.refresh().ignore();
-      case PushDestination.rideInvite:
       case PushDestination.membership:
+        // Plan changed while the app is open (its socket was not connected): unlock at once.
+        context.read<MembershipService?>()?.fetchMyMembership().ignore();
+      case PushDestination.rideInvite:
+      case PushDestination.home:
+      case PushDestination.rideHistory:
+      case PushDestination.settings:
       case PushDestination.none:
         break;
     }

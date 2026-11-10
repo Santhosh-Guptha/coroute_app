@@ -72,10 +72,17 @@ class EmergencySmsGateway {
     this.outbox = [];
     this.maxOutboxSize = 1000;
     this.liveLinks = new Map(); // tokenHash -> { tripId, riderId, ... }
+    // 3.56 server SOS SMS (src/sos_sms.js), attached by app.js: provider texts with DLT templates,
+    // receipts, retries, caps and the "safe now" follow-up. Null (or provider "off") = the paths below.
+    this.sosSms = null;
     // "I'm safe" / resolved: the rider's standalone tracking links stop working at once.
     if (convoys && typeof convoys.on === 'function') {
       convoys.on('emergency', (gid, alert, kind) => {
         if (kind === 'RESOLVED' && alert && alert.userId) this.revokeLinksFor(alert.userId);
+        // 3.56: the contacts who got the SOS text hear that it is over (not for an alert that only expired).
+        if (kind === 'RESOLVED' && alert && alert.alertId && this.sosSms && alert.status !== 'EXPIRED') {
+          this.sosSms.dispatchSafe(alert.alertId).catch((e) => this.log.warn(`[emergency_gateway] safe-now SMS failed: ${redactPhones(e.message)}`));
+        }
       });
     }
   }
@@ -84,8 +91,9 @@ class EmergencySmsGateway {
    * Generates a secure live tracking URL for the emergency event.
    * Can be viewed by emergency services and guardians via /e/<token>.
    */
-  generateTrackingUrl({ tripId, riderId, riderName, lat, lng, speedKmh = 0, severity = 'CRITICAL', bloodGroup = '' }) {
-    const token = crypto.randomBytes(24).toString('base64url');
+  generateTrackingUrl({ tripId, riderId, riderName, lat, lng, speedKmh = 0, severity = 'CRITICAL', bloodGroup = '', tokenBytes = 24 }) {
+    // 24 bytes = 32 characters; 16 bytes = 22 characters (fits a DLT SMS variable, 30 at most).
+    const token = crypto.randomBytes(tokenBytes === 16 ? 16 : 24).toString('base64url');
     const hash = crypto.createHash('sha256').update(token).digest('hex');
     const now = Date.now();
     const expiryMin = this.config.liveLinkMin || 30;
@@ -113,6 +121,25 @@ class EmergencySmsGateway {
 
     const origin = this.config.publicOrigin || this.config.linkOrigin || require('./domains').FALLBACK_ORIGIN;
     return `${origin}/e/${token}`;
+  }
+
+  /**
+   * 3.56: the live link code the rider's PHONE put in its own SOS text (msg.smsLinkToken, 22 random
+   * characters made when the SOS was raised). Registered when the SOS reaches the gateway, so
+   * /e/<token> in that text shows the rider's live position from then on. Never replaces a link.
+   */
+  registerClientLink({ token, tripId, riderId, riderName, lat, lng }) {
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{22}$/.test(token)) return false;
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    if (this.liveLinks.has(hash)) return false;
+    const now = Date.now();
+    this._pruneLinks(now);
+    this.liveLinks.set(hash, {
+      tokenHash: hash, tripId: tripId || `standalone-${now}`, riderId: riderId || 'rider', riderName: riderName || 'Rider in distress',
+      firstName: String(riderName || 'Rider').trim().split(/\s+/)[0].slice(0, 20), lat: Number(lat) || 0, lng: Number(lng) || 0,
+      speedKmh: 0, severity: 'CRITICAL', bloodGroup: '', createdAt: now, expiresAt: now + (this.config.liveLinkMin || 30) * 60000,
+    });
+    return true;
   }
 
   /**
@@ -193,6 +220,7 @@ class EmergencySmsGateway {
     severity = 'CRITICAL',
     bloodGroup = '',
     trackingUrl = null,
+    sosKey = null,
   }) {
     // Validate coordinates
     const numLat = Number(lat);
@@ -239,7 +267,11 @@ class EmergencySmsGateway {
       };
     }
 
-    // Generate live link if missing
+    // 3.56: a configured SMS provider (src/sos_sms.js) texts the contacts with the DLT template.
+    let viaProvider = false;
+    try { viaProvider = !!(this.sosSms && sosKey && await this.sosSms.isActive()); } catch { viaProvider = false; }
+
+    // Generate live link if missing (22 characters for the DLT SMS variable)
     const liveTrackingUrl = trackingUrl || this.generateTrackingUrl({
       tripId,
       riderId,
@@ -249,6 +281,7 @@ class EmergencySmsGateway {
       speedKmh,
       severity,
       bloodGroup,
+      tokenBytes: viaProvider ? 16 : 24,
     });
 
     // Format body
@@ -276,12 +309,18 @@ class EmergencySmsGateway {
 
     // Sub-10 second delivery target: parallel dispatch across all contacts and channels
     const dispatches = [];
+    if (viaProvider) {
+      const token = String(liveTrackingUrl).split('/e/')[1] || '';
+      dispatches.push(this.sosSms.dispatchSos({ sosKey, userId: riderId, riderName, lat: numLat, lng: numLng, token, contacts: validContacts })
+        .then((out) => out.results.map((r) => ({ contact: r.to, name: 'Emergency Contact', channel: 'sms', success: r.status === 'SENT' || r.status === 'QUEUED', provider: 'sos_sms', status: r.status, messageId: r.messageId || null })))
+        .catch((err) => [{ contact: 'contacts', channel: 'sms', success: false, provider: 'sos_sms', error: redactPhones(err.message) }]));
+    }
     for (const c of validContacts) {
       const phone = c.phone || c.number;
       const contactName = c.name || 'Emergency Contact';
 
-      // 1. SMS Dispatch with automatic fallback
-      dispatches.push(
+      // 1. SMS Dispatch with automatic fallback (the earlier path, when no SMS provider is configured)
+      if (!viaProvider) dispatches.push(
         this.sendSms({ to: phone, contactName, body, metadata }).catch((err) => ({
           contact: phone,
           name: contactName,
@@ -305,7 +344,7 @@ class EmergencySmsGateway {
       );
     }
 
-    const results = await Promise.all(dispatches);
+    const results = (await Promise.all(dispatches)).flat();
     const sentCount = results.filter((r) => r && r.success).length;
     const usedProvider = results.find((r) => r && r.success)?.provider || 'outbox_queue';
 
@@ -322,6 +361,10 @@ class EmergencySmsGateway {
    * Automatic trigger for convoy / safety network SOS events.
    */
   async dispatchForSos({ groupId, user, alert, msg = {} }) {
+    // 3.56: the link in the phone's own SOS text works from the moment the SOS reaches us.
+    if (alert && msg && typeof msg.smsLinkToken === 'string') {
+      this.registerClientLink({ token: msg.smsLinkToken, tripId: groupId, riderId: user?.userId || alert.userId, riderName: user?.name || alert.userName, lat: alert.lat, lng: alert.lng });
+    }
     if (!alert || alert.serverDispatchedByGateway) return null;
     alert.serverDispatchedByGateway = true;
     // One SMS round per rider per minute while their earlier alert is still open (a second SOS of the
@@ -388,6 +431,7 @@ class EmergencySmsGateway {
       severity: alert.severity || alert.alertType || 'CRITICAL',
       bloodGroup: userDoc?.bloodGroup || alert.medical?.bloodGroup || '',
       trackingUrl,
+      sosKey: alert.alertId || null,
     });
   }
 

@@ -449,7 +449,7 @@ class AlarmNotifier {
   }
 
   /// A plan reminder at the absolute instant [at]. Inexact (no exact-alarm
-  /// permission); a few minutes late is fine for a renewal nudge. Instants in
+  /// permission); a few minutes late is fine for a reminder. Instants in
   /// the past are skipped (the plugin refuses them).
   static Future<void> schedulePlanReminder({
     required int id,

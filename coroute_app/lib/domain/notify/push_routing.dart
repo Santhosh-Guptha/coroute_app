@@ -24,6 +24,11 @@ enum PushDestination {
   /// Plan / membership page.
   membership,
 
+  /// 3.56 admin "News and updates" targets (a fixed list; never a plans or offers screen).
+  home,
+  rideHistory,
+  settings,
+
   /// Unknown type or bad ids: nothing happens.
   none,
 }
@@ -54,6 +59,16 @@ class PushRouting {
     'POLL_CREATED',
     'RIDE_INVITE',
     'ADMIN_WARNING',
+    'NEWS',
+  };
+
+  /// Screens an admin push (NEWS) may open: the `target` data field. Anything else opens Home.
+  static const Map<String, PushDestination> newsTargets = {
+    'home': PushDestination.home,
+    'friends': PushDestination.friends,
+    'crews': PushDestination.crewInvites,
+    'rides': PushDestination.rideHistory,
+    'settings': PushDestination.settings,
   };
 
   static final RegExp _id = RegExp(r'^[A-Za-z0-9_\-:.]{1,80}$');
@@ -104,6 +119,8 @@ class PushRouting {
         return PushRoute(PushDestination.rideInvite, inviteId: inviteId);
       case 'ADMIN_WARNING':
         return const PushRoute(PushDestination.adminWarnings);
+      case 'NEWS':
+        return PushRoute(newsTargets[payload['target']] ?? PushDestination.home);
     }
     if (type.startsWith('SUBSCRIPTION')) return const PushRoute(PushDestination.membership);
     return PushRoute.nowhere;

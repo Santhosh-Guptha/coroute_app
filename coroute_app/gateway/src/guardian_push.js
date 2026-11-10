@@ -26,8 +26,10 @@ function stateOf(view) {
 
 /** Durable current-state delivery; failures never run on the rider SOS path. */
 class GuardianPush {
-  constructor({ repo, service, send, publicKey, clock = Date.now }) {
+  constructor({ repo, service, send, publicKey, clock = Date.now, texts = null }) {
     this.repo = repo; this.service = service; this.send = send; this.publicKey = publicKey;
+    // 3.56: admin-edited arrival words (templates.js guardian_arrival): () => {title, body} | null, synchronous.
+    this.texts = typeof texts === 'function' ? texts : null;
     this.workerId = crypto.randomUUID();
     this.clock = clock; this.running = false; this.stopped = false; this.offset = 0;
   }
@@ -105,8 +107,10 @@ class GuardianPush {
                 job.state = 'CANCELLED'; await this.repo.finishGuardianJob(job, this.workerId); continue;
               }
               const arrived = job.target.arrived === true && !job.target.emergency;
-              await this.send(sub.subscription, JSON.stringify({ title: arrived ? 'CoRoute: arrived safely' : 'CoRoute trip update',
-                body: arrived ? 'The rider arrived safely. Location sharing has stopped.' : 'Open Ride Guardian for the latest shared update.', tag: job.jobId,
+              let custom = null;
+              if (arrived && this.texts) { try { custom = this.texts(); } catch { custom = null; } }
+              await this.send(sub.subscription, JSON.stringify({ title: arrived ? ((custom && custom.title) || 'CoRoute: arrived safely') : 'CoRoute trip update',
+                body: arrived ? ((custom && custom.body) || 'The rider arrived safely. Location sharing has stopped.') : 'Open Ride Guardian for the latest shared update.', tag: job.jobId,
                 url: `/watch#ticket=${ticket.credential}` }), {
                 TTL: 300, urgency: job.target.emergency ? 'high' : 'normal', topic: job.jobId.slice(0, 32), timeout: 8000 });
               job.state = 'SENT';

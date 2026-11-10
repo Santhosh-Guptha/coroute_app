@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import 'network_wire.dart';
@@ -43,6 +44,21 @@ class PendingSos {
   final Map<String, dynamic>? biometrics;
   final String? traumaLevel;
 
+  /// 3.56: 22 random characters for the live link in this phone's own SOS text
+  /// (`https://<site>/e/<linkToken>`). Sent with the SOS as `smsLinkToken`; the gateway
+  /// registers it when the SOS arrives, so the link shows the live position from then on.
+  /// Empty for an SOS stored by an older version (no link in its text).
+  final String linkToken;
+
+  /// A new random link code (16 bytes, base64url without padding = 22 characters).
+  static String newLinkToken([Random? random]) {
+    final r = random ?? Random.secure();
+    final bytes = List<int>.generate(16, (_) => r.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
+  static final RegExp _linkTokenRe = RegExp(r'^[A-Za-z0-9_-]{22}$');
+
   const PendingSos({
     required this.clientId,
     required this.groupId,
@@ -59,6 +75,7 @@ class PendingSos {
     this.accuracyM,
     this.biometrics,
     this.traumaLevel,
+    this.linkToken = '',
   });
 
   /// The same SOS (same [clientId]) with a newer position, or upgraded to a crash.
@@ -93,6 +110,7 @@ class PendingSos {
         accuracyM: accuracyM ?? this.accuracyM,
         biometrics: biometrics ?? this.biometrics,
         traumaLevel: traumaLevel ?? this.traumaLevel,
+        linkToken: linkToken,
       );
 
   /// The message the gateway expects. Older gateways ignore the extra fields.
@@ -112,6 +130,7 @@ class PendingSos {
         if (accuracyM != null) 'accuracyM': accuracyM!.round().clamp(0, 5000),
         if (biometrics != null) 'biometrics': biometrics,
         if (traumaLevel != null) 'traumaLevel': traumaLevel,
+        if (_linkTokenRe.hasMatch(linkToken)) 'smsLinkToken': linkToken,
       };
 
   Map<String, dynamic> toJson() => {
@@ -130,6 +149,7 @@ class PendingSos {
         'accuracyM': ?accuracyM,
         if (biometrics != null) 'biometrics': biometrics,
         if (traumaLevel != null) 'traumaLevel': traumaLevel,
+        if (linkToken.isNotEmpty) 'linkToken': linkToken,
       };
 
   static PendingSos? fromJson(Object? json) {
@@ -153,6 +173,7 @@ class PendingSos {
       accuracyM: (json['accuracyM'] as num?)?.toDouble(),
       biometrics: (json['biometrics'] is Map) ? Map<String, dynamic>.from(json['biometrics'] as Map) : null,
       traumaLevel: json['traumaLevel']?.toString(),
+      linkToken: _linkTokenRe.hasMatch(json['linkToken']?.toString() ?? '') ? json['linkToken'].toString() : '',
     );
   }
 

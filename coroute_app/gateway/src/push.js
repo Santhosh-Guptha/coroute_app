@@ -66,7 +66,85 @@ const DEFAULTS = Object.freeze({
   CREW_INVITE: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   POLL_CREATED: { ttlSec: 24 * 3600, priority: 'normal' },
   DIAG_LOG_REQUEST: { ttlSec: 7 * 24 * 3600, priority: 'normal' },
+  SUBSCRIPTION_ACTIVATED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
+  SUBSCRIPTION_EXPIRING: { ttlSec: 24 * 3600, priority: 'normal' },
+  SUBSCRIPTION_EXPIRED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
+  SUBSCRIPTION_REVOKED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
+  // 3.56 admin "News and updates" campaigns (src/push_campaigns.js): opt-out category, big picture.
+  NEWS: { ttlSec: 2 * 24 * 3600, priority: 'normal' },
 });
+
+/*
+ * 3.56 admin-editable plan notice texts (src/templates.js push_plan_active / push_plan_ending).
+ * setPlanTextProvider(fn): fn(templateId, vars) -> {title, body} | null, synchronous (a cached copy).
+ * A provider answer with a forbidden word (PLAN_TEXT_FORBIDDEN) is ignored: the built-in text is used.
+ */
+let planTextProvider = null;
+function setPlanTextProvider(fn) { planTextProvider = typeof fn === 'function' ? fn : null; }
+function providedPlanText(id, vars) {
+  if (!planTextProvider) return null;
+  try {
+    const t = planTextProvider(id, vars);
+    if (!t || typeof t.title !== 'string' || typeof t.body !== 'string' || !t.title.trim() || !t.body.trim()) return null;
+    if (PLAN_TEXT_FORBIDDEN.test(`${t.title} ${t.body}`)) return null;
+    return { title: t.title.slice(0, 65), body: t.body.slice(0, 240) };
+  } catch { return null; }
+}
+
+/** Deep-link targets an admin push may open (app: lib/domain/notify/push_routing.dart). No plans / offers screen. */
+const NEWS_TARGETS = Object.freeze(['home', 'friends', 'crews', 'rides', 'settings']);
+/** https image URL of a push (served by push_campaigns.js), checked again here before it is sent. */
+const IMAGE_URL_RE = /^https:\/\/[A-Za-z0-9.-]{1,253}(?::\d{2,5})?\/media\/push\/pi_[a-f0-9]{24}\.(?:jpg|png|webp)$/;
+
+/*
+ * Plan notices (SUBSCRIPTION_*) reach the Play app, which is consumption-only
+ * (docs/features_355/play_payments_policy.md): neutral account status only. Never a price, never
+ * "renew", "upgrade", "buy" or "pay", never a link or a hint to pay elsewhere. E-mail / SMS texts
+ * (outside the app) are not built here.
+ */
+const PLAN_NAMES = Object.freeze({
+  community: 'Community', group_small: 'Small Group', group_large: 'Large Group', individual: 'Individual',
+  proRider: 'CoRoute Pro', roadCaptain: 'Road Captain', tourOperator: 'Tour Operator',
+});
+/** "Small Group" from a plan notice payload (`plan`, `category` or `tier`), else "Your". */
+function planNameOf(p) {
+  const id = [p && p.plan, p && p.category, p && p.tier].find((v) => typeof v === 'string' && PLAN_NAMES[v]);
+  if (id) return PLAN_NAMES[id];
+  const n = p && typeof p.planName === 'string' ? p.planName.replace(/\s*\(.*?\)\s*/g, ' ').trim() : '';
+  return n && n.length <= 40 && !PLAN_TEXT_FORBIDDEN.test(n) ? n : '';
+}
+/** "12 Dec" (India time), or '' for no date. */
+function planDate(ms) {
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }).formatToParts(new Date(t));
+    const day = parts.find((x) => x.type === 'day');
+    const month = parts.find((x) => x.type === 'month');
+    return day && month ? `${day.value} ${month.value}` : '';
+  } catch { return ''; }
+}
+/** Words a plan notice in the app must never contain (checked by the tests). */
+const PLAN_TEXT_FORBIDDEN = /(₹|\bINR\b|price|pricing|per month|upgrade|purchase|\bbuy\b|checkout|coupon|discount|renew|payment|\bpay\b|website)/i;
+/** The neutral title and body of a plan notice. */
+function planNotice(p) {
+  const name = planNameOf(p);
+  switch (p && p.type) {
+    case 'SUBSCRIPTION_ACTIVATED':
+      return (name && providedPlanText('push_plan_active', { plan: name })) || { title: 'Your plan', body: name ? `Your ${name} plan is active.` : 'Your plan is active.' };
+    case 'SUBSCRIPTION_EXPIRING': {
+      const d = planDate(p.validUntil);
+      return (d && providedPlanText('push_plan_ending', { date: d })) || { title: 'Your plan', body: d ? `Your plan ends on ${d}.` : 'Your plan ends soon.' };
+    }
+    case 'SUBSCRIPTION_EXPIRED':
+      return { title: 'Your plan', body: 'Your plan has ended. Solo riding and every safety feature stay free.' };
+    case 'SUBSCRIPTION_REVOKED':
+      return { title: 'Your plan', body: 'Your plan has changed. Solo riding and every safety feature stay free.' };
+    default:
+      return null;
+  }
+}
+const planEvent = (p) => ({ ...planNotice(p), data: {}, collapse: 'plan', always: true });
 const FALLBACK = { ttlSec: 24 * 3600, priority: 'normal' };
 /** Socket events that become pushes (title + body from the event; ids only in data). */
 const SOCKET_EVENTS = Object.freeze({
@@ -77,7 +155,32 @@ const SOCKET_EVENTS = Object.freeze({
   // 3.55 diagnostics: an admin asked for the rider's app log (the rider must tap Send in the app).
   DIAG_LOG_REQUEST: (p) => ({ title: 'CoRoute support', body: 'Support asked for your app log to fix a problem. Open CoRoute to send it.', data: { requestId: p.requestId }, collapse: 'diag_request' }),
   RIDE_INVITE: (p) => ({ title: 'Ride invitation', body: `${p.username || 'A rider'} invited you to a ride${p.rideName ? `: ${p.rideName}` : ''}`, data: { inviteId: p.inviteId, groupId: p.groupId }, collapse: `ride_${p.inviteId || ''}`, always: true }),
+  // Plan notices: the app re-reads the plan on them (socket or push) and the push text is neutral.
+  // Always pushed: the socket message itself shows nothing in the app.
+  SUBSCRIPTION_ACTIVATED: planEvent,
+  SUBSCRIPTION_EXPIRING: planEvent,
+  SUBSCRIPTION_EXPIRED: planEvent,
+  SUBSCRIPTION_REVOKED: planEvent,
 });
+
+/**
+ * Tells a rider's app that their plan changed (`payload.type` SUBSCRIPTION_*): the socket message
+ * (the app re-reads the plan at once, so a plan activated in the CoRoute account unlocks without a
+ * restart) and the neutral push. Sockets go through `hub.sendToUser` when a hub is given, else
+ * through `convoys.emit('userMessage', ...)` (the hub forwards it). Never throws.
+ */
+function notifyPlanChange({ hub = null, convoys = null, push = null } = {}, userId, payload) {
+  if (!userId || !payload || !/^SUBSCRIPTION_[A-Z]+$/.test(String(payload.type || ''))) return;
+  try {
+    stampEvent(payload);
+    if (hub && typeof hub.sendToUser === 'function') hub.sendToUser(userId, payload);
+    else if (convoys && typeof convoys.emit === 'function') convoys.emit('userMessage', undefined, userId, payload);
+  } catch { /* best effort */ }
+  try {
+    const p = push || (hub && hub.push) || (convoys && convoys.push);
+    if (p && typeof p.onSocketEvent === 'function') p.onSocketEvent(userId, payload, { delivered: 0 }).catch(() => {});
+  } catch { /* best effort */ }
+}
 
 // Words (camelCase / snake_case parts of a data key) that never travel in a push.
 const SENSITIVE_WORDS = new Set(['phone', 'mobile', 'tel', 'email', 'mail', 'medical', 'blood', 'allergy', 'allergies', 'condition', 'conditions',
@@ -132,7 +235,7 @@ function safeText(v, n) {
 }
 
 /** The FCM HTTP v1 message for one token. */
-function buildMessage(token, { type, title, body, data, ttlSec, priority, collapseKey }) {
+function buildMessage(token, { type, title, body, data, ttlSec, priority, collapseKey, imageUrl, target }) {
   const d = DEFAULTS[type] || FALLBACK;
   const ttl = Math.max(0, Math.min(28 * 24 * 3600, Math.round(Number(ttlSec) || d.ttlSec)));
   const prio = (priority || d.priority) === 'high' ? 'HIGH' : 'NORMAL';
@@ -144,7 +247,12 @@ function buildMessage(token, { type, title, body, data, ttlSec, priority, collap
   return {
     message: {
       token,
-      data: { ...clean, type, title: safeText(title || 'CoRoute', 80) || 'CoRoute', body: safeText(body || '', 200) },
+      data: {
+        ...clean, type, title: safeText(title || 'CoRoute', 80) || 'CoRoute', body: safeText(body || '', 240),
+        // 3.56 admin pushes: a big picture (https, our own /media/push/) and a fixed deep-link target.
+        ...(typeof imageUrl === 'string' && IMAGE_URL_RE.test(imageUrl) ? { imageUrl } : {}),
+        ...(typeof target === 'string' && NEWS_TARGETS.includes(target) ? { target } : {}),
+      },
       android: { priority: prio, ttl: `${ttl}s`, collapse_key: collapse },
     },
   };
@@ -351,7 +459,7 @@ class PushService {
         if (!this._allow(uid)) { out.skipped++; continue; }
         for (const t of tokens) {
           const r = await this._sendOne(buildMessage(t.token, { ...opts, type }));
-          if (r === 'sent') out.sent++; else out.failed++;
+          if (r === 'sent') out.sent++; else { out.failed++; if (r === 'pruned') out.pruned = (out.pruned || 0) + 1; }
         }
       }
     } catch (e) {
@@ -419,4 +527,4 @@ function attachPush({ app = null, repo, hub = null, convoys = null, featureFlags
   return push;
 }
 
-module.exports = { PushService, attachPush, registerPushRoutes, buildMessage, safeData, stampEvent, fcmErrorCode, serviceAccountFromEnv, COLLECTION, MAX_TOKENS_PER_USER, SOCKET_EVENTS, HOSTS };
+module.exports = { PushService, attachPush, registerPushRoutes, buildMessage, safeData, stampEvent, fcmErrorCode, serviceAccountFromEnv, COLLECTION, MAX_TOKENS_PER_USER, SOCKET_EVENTS, HOSTS, notifyPlanChange, planNotice, PLAN_TEXT_FORBIDDEN, setPlanTextProvider, NEWS_TARGETS, IMAGE_URL_RE };
