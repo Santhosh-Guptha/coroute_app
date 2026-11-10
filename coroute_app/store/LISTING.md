@@ -44,8 +44,8 @@ AFTER THE RIDE
 BATTERY AND SIGNAL
 GPS slows down when you stop and audio is sent only while someone talks. Without signal your route is kept on the phone and sent later.
 
-FREE AND NON-PROFIT
-CoRoute is made by riders at devmonks.space as a public service. There is no subscription, no advertising, no trackers and no sale of data.
+FREE SOLO RIDING AND SAFETY
+CoRoute is made by riders at devmonks.space. Solo riding and every safety feature are free. Joining a group ride is free. There is no advertising, no trackers and no sale of data.
 
 PRIVACY
 Your position is shared only with the convoy you are in, and only while you are in it. In an emergency you raise, riders of other groups who are asked to help see the emergency point only. Voice is relayed live and never stored. Recorded routes are deleted after 90 days; your account and ride summaries stay until you delete them, which you can do in the app. Full policy: https://coroute.duckdns.org/privacy

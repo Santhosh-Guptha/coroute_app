@@ -165,7 +165,7 @@ There is no chat and no free-text reply anywhere. A poll is a question with fixe
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /crews` | `{crews:[{crewId, name, description, memberCount, myRole, admin, openPolls, pendingVotes, canInvite, canCreatePoll, settings}], invites:[{inviteId, crewId, crewName, description, memberCount, invitedBy:{username, avatarUrl}, createdAt, expiresAt}], limits}` |
+| `GET /crews` | `{crews:[{crewId, name, description, memberCount, myRole, admin, openPolls, pendingVotes, nextPollClosesAt, canInvite, canCreatePoll, settings}], invites:[{inviteId, crewId, crewName, description, memberCount, invitedBy:{username, avatarUrl}, createdAt, expiresAt}], limits}` |
 | `POST /crews {name, description?}` | Creates a crew; I am the admin. Answers `201 {crew}`. |
 | `GET /crews/:crewId` | `{crew, members, invites}` (`invites` only for managers). Removes suspended or deleted riders. |
 | `PATCH /crews/:crewId {name?, description?, membersCanCreatePolls?}` | Admin only. |
@@ -231,18 +231,21 @@ Pushes go to the rider's open sockets. When the rider is connected to the other 
 
 | File | What it holds |
 | --- | --- |
+| `lib/domain/social/people_models.dart` | `crewHint`, `mergeRequests` (crew invites in the one Requests list), `PeopleBadges`, friend picker filter / select all (tested in `test/people_hub_355_test.dart`) |
 | `lib/domain/social/crew_rules.dart` | Pure rules: limits, name, description and poll checks, `checkVote`, `PollTally` (result math), the "Ride date" template, "Closes in" label |
 | `lib/data/services/crews_service.dart` | `CrewsService` and its models: list, invites, detail, invitable friends, invite, accept and decline, leave, remove, roles, transfer, settings, delete, polls, vote, retract, close, delete; socket pushes; badge |
-| `lib/presentation/social/crews_screen.dart` | Crews list, invitations (Join crew / Decline), Create a crew sheet, `CrewsEntryRow` (profile row with badge) |
-| `lib/presentation/social/crew_detail_screen.dart` | Crew screen: polls with live result bars (tap to vote; multiple choice: tick and "Save my vote"; "Who voted"), New poll sheet, riders (role chips; admin actions), waiting invites (cancel), invite-friends picker (friends only), settings, leave (hand-over picker), delete, all with confirmations |
+| `lib/presentation/social/people_screen.dart` | People hub: the **Crews** segment (Create crew, crew cards with rider count and a hint from `crewHint`: ride invite waiting, polls to vote, "Poll closes in 5 h") and crew invitations under **Requests** (Join / Decline, swipe) next to friend requests and ride invites |
+| `lib/presentation/social/crew_create_flow.dart` | "Create crew" in 2 steps (name, then friends to invite with search and "Select all"); `FriendPickerList` shared with the crew invite picker |
+| `lib/presentation/social/crews_screen.dart` | Thin redirect kept for old entry points (crew pushes): opens the People hub on Requests (invites waiting) or Crews |
+| `lib/presentation/social/crew_detail_screen.dart` | Crew screen with tabs **Members · Polls · Rides** (opens on Polls when a vote waits). Header: Invite friends (and settings for the admin). Members: prominent Invite friends button, riders (tap = profile, ⋮ = admin actions), waiting invites (cancel), leave / delete. Polls: New poll, live result bars (tap to vote; multiple choice: tick and "Save my vote"; "Who voted"). Rides: Start a ride / Invite crew to my ride, ride invites from this crew |
 | `lib/presentation/admin/admin_crews_screen.dart` | Admin console: crews list with search, crew detail, delete a poll or a crew |
 | `test/crews_polls_355_test.dart` | Dart tests: rules, result math, payload parsing, template, labels |
 
 Wiring (small additive edits):
 
 - `main.dart`: the `CrewsService` provider, next to `FriendsService`.
-- `profile_screen.dart`: a "Crews" row in the Friends card, shown when the `crews` switch is on.
-- `account_screen.dart`: the profile row badge adds the crews badge.
+- `rider_home_screen.dart`: the People tab (bottom bar); its badge adds crew invites and polls to vote (`PeopleBadges`).
+- `profile_screen.dart`: a "Friends & crews" shortcut row with the same badge.
 - `master_admin_dashboard.dart`: a "Crews" admin row.
 
 The live result bars come from a `POLL_UPDATED` push, which makes an open crew screen reload. Reloads are debounced by 400 ms.

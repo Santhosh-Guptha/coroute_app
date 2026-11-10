@@ -419,11 +419,12 @@ void main() {
       await tester.tap(find.byIcon(Icons.menu_rounded));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      for (final label in ['Overview', 'Riders', 'Rides & safety', 'Plans & payments', 'Content', 'System']) {
+      for (final label in ['Overview', 'Riders', 'Rides & safety', 'Content', 'System']) {
         expect(find.text(label), findsWidgets, reason: label);
       }
-      // Merged away: plans and coupons are tabs of Payments, phone reports are in Usage.
-      for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides']) {
+      // Merged away: phone reports are in Usage. Removed (Play payments policy): payments, coupons,
+      // plan prices and marketing are managed in the web admin.
+      for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides', 'Plans & payments', 'Payments', 'Marketing', 'Revenue']) {
         expect(find.text(gone), findsNothing, reason: gone);
       }
       expect(tester.takeException(), isNull);
@@ -492,10 +493,10 @@ void main() {
       // Verification: On wide screen, MasterAdminDashboard lays its charts out two by two
       expect(find.byType(AdminTwoUp), findsWidgets);
       // Verification: Desktop nav rail items are present
-      for (final label in ['Overview', 'Riders', 'Rides & safety', 'Plans & payments', 'Content', 'System']) {
+      for (final label in ['Overview', 'Riders', 'Rides & safety', 'Content', 'System']) {
         expect(find.text(label), findsWidgets, reason: label);
       }
-      for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides']) {
+      for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides', 'Plans & payments', 'Payments', 'Marketing']) {
         expect(find.text(gone), findsNothing, reason: gone);
       }
     });

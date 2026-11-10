@@ -19,9 +19,7 @@ class _FakeMembership extends MembershipService {
   @override
   PlanAccess get planAccess => _access;
   @override
-  bool get paymentsEnabled => payments;
-  @override
-  int? get groupFromPrice => 49;
+  bool get plansEnforced => payments;
 }
 
 Map<String, dynamic> _rider(String id) => {'userId': id, 'name': 'Rider $id'};
@@ -46,15 +44,14 @@ void main() {
       expect(a.canHostGroup, isFalse);
     });
 
-    test('no plan (unknown, older gateway): join free, host from the cheapest group plan', () {
-      expect(PlanAccess.none.statusLine(groupFromPrice: 49), 'No plan · Join rides free · Host a group from ₹49');
-      expect(PlanAccess.none.statusLine(), 'No plan · Join rides free · Host a group');
+    test('no plan (unknown, older gateway): reads as Community, never a price', () {
+      expect(PlanAccess.none.statusLine(), 'Community · Solo rides free');
       expect(PlanAccess.none.canStartTrip, isFalse);
     });
 
     test('Community: free for every rider, solo rides, never ends', () {
       final c = PlanAccess.fromJson({'source': 'community', 'category': 'community', 'name': 'Community', 'seats': 1, 'validUntil': 0, 'isFree': true});
-      expect(c.statusLine(groupFromPrice: 49, now: now), 'Community · Solo rides free · Host a group from ₹49');
+      expect(c.statusLine(now: now), 'Community · Solo rides free');
       expect(c.shortName, 'Community');
       expect([c.canStartTrip, c.canHostGroup, c.isPaid, c.isCommunity], [true, false, false, true]);
       expect(PlanAccess.community.canStartTrip, isTrue);
@@ -73,7 +70,7 @@ void main() {
       final a = PlanAccess(source: 'legacy', category: 'group_large', name: 'Road Captain', seats: 12,
           validUntil: DateTime.now().millisecondsSinceEpoch - 1000);
       expect(a.hasPlan, isFalse);
-      expect(a.statusLine(groupFromPrice: 49), startsWith('Community'));
+      expect(a.statusLine(), startsWith('Community'));
       expect(a.current.canStartTrip, isTrue);
       expect(a.current.canHostGroup, isFalse);
     });
@@ -145,21 +142,23 @@ void main() {
           ),
         ));
 
-    testWidgets('shows the membership, not a tier badge', (tester) async {
+    testWidgets('shows the plan name only (Play payments policy)', (tester) async {
       final until = DateTime.now().add(const Duration(days: 20)).millisecondsSinceEpoch;
       final access = PlanAccess(source: 'membership', category: 'group_small', name: 'Small Group (2–6)', seats: 6, validUntil: until);
       await pump(tester, _FakeMembership(access));
-      expect(find.text('Small Group · up to 6 riders · until ${PlanAccess.untilLabel(until)}'), findsOneWidget);
-      expect(find.textContaining('COMMUNITY'), findsNothing);
+      expect(find.text('Small Group'), findsOneWidget);
+      expect(find.textContaining('₹'), findsNothing);
       expect(find.textContaining('Convoy limit'), findsNothing);
     });
 
-    testWidgets('no plan: join free, host from ₹49', (tester) async {
+    testWidgets('no plan or Community: "Community", no price', (tester) async {
       await pump(tester, _FakeMembership(PlanAccess.none));
-      expect(find.text('No plan · Join rides free · Host a group from ₹49'), findsOneWidget);
+      expect(find.text('Community'), findsOneWidget);
+      expect(find.textContaining('₹'), findsNothing);
+      expect(find.textContaining('Host a group'), findsNothing);
     });
 
-    testWidgets('hidden when payments are off', (tester) async {
+    testWidgets('hidden when the server runs without plans', (tester) async {
       await pump(tester, _FakeMembership(PlanAccess.none, payments: false));
       expect(find.byKey(const Key('home_membership_status')), findsNothing);
     });

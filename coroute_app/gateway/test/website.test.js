@@ -332,9 +332,10 @@ test('terms agree with the privacy policy on who an SOS reaches; iOS wording is 
 });
 
 // ---------------------------------------------------------------------------
-// Website = information + live pricing + payment handover. Prices appear ONLY as rendered from the app's plan list
-// (GET /api/membership/catalog, admin-editable): no price is written into any page. No coupons or admin UI;
-// /checkout only pays an order the app created.
+// Website = information + live pricing + the 3.56 rider shop (/plans, /signin, /account, /receipt: see
+// web_plans_355.test.js). Prices appear ONLY as rendered from the plan list (GET /api/membership/catalog,
+// admin-editable): no price is written into any page. Coupons only on /plans; /checkout only pays an order an
+// older app created (a plain visit goes to /plans).
 // ---------------------------------------------------------------------------
 test('pricing comes only from the catalog API: no hard-coded prices, coupons or admin UI on public pages', async () => {
   for (const p of ['/pricing-admin', '/pricing-admin.html']) assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 404, p);
@@ -344,7 +345,7 @@ test('pricing comes only from the catalog API: no hard-coded prices, coupons or 
     const html = await (await fetch(base + p)).text();
     assert.ok(!/href="\/checkout|href="\/pricing-admin/.test(html), `${p}: links to checkout or admin`);
     assert.ok(!/Choose Pro|Plans &amp; Pay|hm-plan\b|id="plans"/.test(html), `${p}: old plan section or CTA`);
-    assert.ok(!/coupon/i.test(html), `${p}: coupon UI`);
+    assert.ok(!/coupon/i.test(html), `${p}: coupon UI (coupons live on /plans only)`);
     assert.ok(!html.includes('/api/subscription/config') && !html.includes('/api/create-order'), `${p}: order calls`);
     if (p !== '/terms' && p !== '/privacy') assert.ok(!/&#8377;\s?\d|\u20B9\s?\d|Rs\.? ?\d|INR ?\d|\d+\s*(?:\/|per) ?month/i.test(html), `${p}: hard-coded price`);
   }
@@ -355,7 +356,8 @@ test('pricing comes only from the catalog API: no hard-coded prices, coupons or 
   assert.ok(sec.includes('data-pricing') && sec.includes('id="pricing-list"'), 'home: pricing frame');
   assert.ok(!/\d/.test(sec.replace(/<[^>]+>/g, '')), 'home: no number written into the pricing section');
   assert.ok(sec.includes('Join a ride you are invited to: Free.'), 'home: joining is free');
-  assert.ok(/href="\/#pricing"/.test(home), 'header links to pricing');
+  assert.ok(/href="\/plans" data-nav="plans"/.test(home), 'header links to the plans page');
+  assert.ok(/href="\/account" data-nav="account"/.test(home), 'header links to the account');
   const fs = require('fs');
   const path = require('path');
   const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'home.js'), 'utf8');
@@ -370,19 +372,22 @@ test('pricing comes only from the catalog API: no hard-coded prices, coupons or 
   for (const c of Object.values(cat.categories)) assert.equal(typeof c.monthlyPriceInr, 'number');
 });
 
-test('checkout page: app-order payment only, noindex, return link to the app', async () => {
-  const r = await fetch(base + '/checkout');
+test('checkout page: older app orders only (signed link), noindex, return link to the app; a plain visit goes to /plans', async () => {
+  const plain = await fetch(base + '/checkout', { redirect: 'manual' });
+  assert.equal(plain.status, 302);
+  assert.equal(plain.headers.get('location'), '/plans');
+  const r = await fetch(base + '/checkout.html?order=x&t=y&e=1');
   assert.equal(r.status, 200);
   const html = await r.text();
   assert.ok(html.includes('<meta name="robots" content="noindex, nofollow">'));
-  assert.ok(html.includes('Choose a plan in the CoRoute app') && html.includes('href="/get"'), 'fallback without an order');
+  assert.ok(html.includes('Choose a plan on the plans page') && html.includes('href="/plans"'), 'fallback for a link that is not valid any more');
   assert.ok(html.includes('href="coroute://subscription"') && html.includes('Return to the CoRoute app'));
-  assert.ok(html.includes("'/api/checkout/order/'") && html.includes("'&e='"), 'loads the app order with its signed expiry');
-  assert.ok(html.includes('upi: true, card: false'), 'UPI only');
+  const js = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'assets', 'checkout.js'), 'utf8');
+  assert.ok(js.includes("'/api/checkout/order/'") && js.includes("'&e='"), 'loads the app order with its signed expiry');
+  assert.ok(js.includes('upi: true, card: false'), 'UPI only');
   for (const gone of ['plan-card', 'rider-name', 'coupon', 'test-creds', 'offer-banner', '/api/create-order', '/api/subscription/offers', '/api/subscription/config', 'pricing-admin', 'Test Card']) {
-    assert.ok(!html.toLowerCase().includes(gone.toLowerCase()), `checkout still has ${gone}`);
+    assert.ok(!(html + js).toLowerCase().includes(gone.toLowerCase()), `checkout still has ${gone}`);
   }
-  assert.equal((await fetch(base + '/checkout.html?order=x&t=y&e=1')).status, 200);
 });
 
 test('website index contains community stories container and small square checkbox consent', async () => {

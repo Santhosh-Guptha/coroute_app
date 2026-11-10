@@ -15,7 +15,7 @@ void main() {
       };
       final ind = MembershipCategory.fromJson(indJson);
       expect(ind.id, 'individual');
-      expect(ind.priceRupees, 9);
+      expect(ind.toJson().containsKey('priceRupees'), isFalse, reason: 'the app keeps no price (Play payments policy)');
       expect(ind.capacity, 1);
       expect(ind.isIndividual, isTrue);
       expect(ind.isGroup, isFalse);
@@ -30,7 +30,7 @@ void main() {
       };
       final grp = MembershipCategory.fromJson(grpJson);
       expect(grp.id, 'group_small');
-      expect(grp.priceRupees, 49);
+      expect(grp.isGroupPlan, isTrue);
       expect(grp.capacity, 6);
       expect(grp.isIndividual, isFalse);
       expect(grp.isGroup, isTrue);

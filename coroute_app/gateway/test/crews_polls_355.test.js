@@ -479,6 +479,8 @@ test('poll lifecycle: who may create, push, vote / change / retract, named resul
   // The list shows a pending vote for b.
   const lb = (await t.api('GET', '/crews', null, b.token)).json.crews.find((x) => x.crewId === crew.crewId);
   assert.deepEqual([lb.openPolls, lb.pendingVotes], [1, 1]);
+  // 3.55 People hub: when the next open poll closes ("Poll closes in 5 h" in the Crews list).
+  assert.ok(lb.nextPollClosesAt > Date.now(), 'nextPollClosesAt is the open poll\'s closing time');
 
   const vote = (who, ids) => t.api('POST', `/crews/${crew.crewId}/polls/${poll.pollId}/vote`, { optionIds: ids }, who.token);
   assert.equal((await vote(b, ['o1', 'o2'])).json.code, 'VOTE_INVALID', 'single choice');

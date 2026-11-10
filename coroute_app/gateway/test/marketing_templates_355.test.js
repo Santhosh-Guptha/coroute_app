@@ -141,7 +141,10 @@ test('coupon binding: only active coupons; placeholders filled; never internal i
   for (const leak of ['"key"', 'usages', 'allowedUserIds', 'internalNotes', 'secret marketing note', '"_id"']) assert.ok(!raw.includes(leak), `no ${leak}`);
   const fest = list.json.coupons.find((c) => c.code === 'FEST40');
   const { plan, ...rest } = fest.placeholders;
-  assert.deepEqual(rest, { code: 'FEST40', discount: '40% off', validUntil: '30 Nov 2030', name: 'FEST40 name', cap: 'up to ₹60' });
+  // 3.56: {link} / the QR open the website plans page with the code filled in.
+  assert.deepEqual(rest, { code: 'FEST40', discount: '40% off', validUntil: '30 Nov 2030', name: 'FEST40 name', cap: 'up to ₹60', link: `${t.base.replace(/\/api$/, '')}/plans?coupon=FEST40` });
+  assert.equal(mk.couponLink('https://coroute.devmonks.space/', 'fest40'), 'https://coroute.devmonks.space/plans?coupon=FEST40');
+  assert.equal(mk.couponLink('https://coroute.devmonks.space', '<x>'), 'https://coroute.devmonks.space/plans');
   assert.match(plan, /^Small Group.* plan$/, 'the plan label comes from the plan catalog');
 
   for (const code of ['OLDOFF', 'PAUSE10']) {

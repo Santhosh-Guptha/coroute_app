@@ -481,6 +481,11 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
   // =========================================================================
 
   await t.test('POST /api/membership/webhook rejects bad signature and processes valid event', async () => {
+    // 3.56: only one webhook URL is live; this test runs with the membership URL chosen.
+    const inactive = await env.api('POST', '/membership/webhook', { event: 'payment.captured' }, null, { 'x-razorpay-signature': 'bad_sig' });
+    assert.equal(inactive.status, 410, 'membership URL inactive by default');
+    process.env.RAZORPAY_WEBHOOK_URL = 'membership';
+    t.after(() => { delete process.env.RAZORPAY_WEBHOOK_URL; });
     // Bad signature
     const badRes = await env.api('POST', '/membership/webhook', { event: 'payment.captured' }, null, {
       'x-razorpay-signature': 'bad_sig',
@@ -526,6 +531,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
     assert.ok(r3Mem);
     assert.equal(r3Mem.status, 'ACTIVE');
     assert.equal(r3Mem.category, 'group_small');
+    delete process.env.RAZORPAY_WEBHOOK_URL;
   });
 
   // =========================================================================

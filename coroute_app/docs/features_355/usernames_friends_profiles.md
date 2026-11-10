@@ -46,11 +46,13 @@ Each module creates its own collections and indexes on first use. `repo.migrate(
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /me/profile` | `{profile:{username, name, avatarUrl, publicLeaderboard, usernameChangedAt, nextUsernameChangeAt, memberSince, inviteCode, inviteLink, shareText}, stats}` |
+| `GET /me/profile` | `{profile:{username, name, avatarUrl, publicLeaderboard, discoverable, usernameChangedAt, nextUsernameChangeAt, memberSince, inviteCode, inviteLink, shareText}, stats}` |
 | `GET /me/stats[?fresh=1]` | `{stats:{trips, totalKm, ridingHours, longestTripKm, largestGroup, memberSince}}`, built from stored trips (see below). Cached for 2 minutes. |
 | `GET /users/username-available?u=` | `{available, code?, message?}`. Rate limited to 30 per minute per rider. The rider's own name counts as available. |
 | `PATCH /me/username {username}` | Changes the username. Errors: 422 (`USERNAME_FORMAT`, `_RESERVED`, `_NOT_ALLOWED`, `_CONTACT`), 409 `USERNAME_TAKEN`, 429 `USERNAME_COOLDOWN` with `nextChangeAt`. Rate limited to 10 per hour. |
-| `PATCH /me/privacy {publicLeaderboard}` | Sets the leaderboard toggle. |
+| `PATCH /me/privacy {publicLeaderboard?, discoverable?}` | Sets the leaderboard toggle and/or "Let riders find me" (`discoverable`, default on). At least one boolean; answers both values. |
+| `GET /users/search?q=` | People hub search by **username prefix** (2-20 of `A-Z a-z 0-9 _`, capitals and a leading `@` ignored). `{results:[{username, avatarUrl, relation}]}`, at most 10, exact username first. `relation` is `FRIENDS`, `PENDING_OUT`, `PENDING_IN` or `NONE`. 400 `QUERY_TOO_SHORT` below 2 characters (an e-mail or phone number never matches: `@`, `+` and spaces are refused). 30 per minute per rider. Switch: `friends`. |
+| `GET /friends/suggestions` | "People you rode with": `{suggestions:[{username, avatarUrl, relation, rides}]}`, at most 10, most rides together first. Riders of my group rides in the last 180 days (their trip records of the same ride, plus the stored ride member list) who are not friends yet. Switch: `friends`. |
 | `POST /me/avatar` (raw bytes) / `DELETE /me/avatar` | Uploads or removes the profile picture. Uploads are rate limited to 10 per hour. Switch: `profilePhotos`. |
 | `GET /avatars/:avatarId` | Serves a picture to signed-in riders. Answers 404 to a rider the owner blocked. Switch: `profilePhotos`. |
 | `GET /users/:username/profile` | Another rider's profile. See the privacy rules below. |
@@ -114,6 +116,21 @@ server (`report.js`) or the phone (`POST /trips`).
 - **Storage:** OCI Object Storage (`avatars/<id>.<ext>`) when `REVIEW_PHOTO_STORE=par`, otherwise the `avatars` collection (base64), so both VMs serve the same file. Every upload gets a new random id, so the URL changes and caches never show an old picture. The previous picture is deleted.
 - **Default:** a circle with initials (`UserAvatar`). It is also shown when the picture fails to load or the switch is off.
 
+## People hub (search, suggestions)
+
+Search and suggestions return **username + picture + my relationship only** (never a name, e-mail,
+phone, userId, location or anything else), and:
+
+- never show riders who blocked me or whom I blocked (both directions; a block is never revealed);
+- never show suspended accounts, stale username reservations or myself;
+- respect `discoverable` (user document, default on; app switch "Let riders find me" on My profile):
+  when off, the rider appears in search only for their **exact** username (adding by exact username
+  works anyway) or when we already have a friendship or a request, and is never suggested;
+- search matches only the unique lowercase username key (range query `usernameKey >= q, < q+'~'`),
+  so it cannot enumerate e-mails or phones; 30 searches a minute per rider, 10 results max.
+
+Tests: `gateway/test/user_search_355.test.js`.
+
 ## Friends and invites
 
 - Friendship needs both riders to agree. If the other rider already sent me a request, my request to them becomes an acceptance.
@@ -133,24 +150,49 @@ server (`report.js`) or the phone (`POST /trips`).
 | `lib/domain/social/username_rules.dart` | Pure rules: username check with the gateway's codes, cooldown, invite code parsing, initials, km format |
 | `lib/domain/social/friends_models.dart` | Pure parsing of the gateway's friend JSON: `FriendsSnapshot` (GET /friends), `FriendRequestResult` (POST /friends/requests, with the sender's confirmation line), `FriendPush` (socket FRIEND_REQUEST / FRIEND_ACCEPTED), `usernameInput` (drops a leading `@`). Re-exported by `friends_service.dart`. |
 | `lib/data/services/friends_service.dart` | `FriendsService`: profile, stats, score, friends, requests, blocks, avatar upload, group usernames, pending invites, socket pushes, badge count |
-| `lib/presentation/social/friend_requests_card.dart` | "Friend requests" card with Accept / Decline per request: top of the Friends screen and of My profile |
-| `lib/presentation/social/profile_screen.dart` | My profile: picture, username editor with live availability, analytics grid, leaderboard privacy toggle, invite sharing |
-| `lib/presentation/social/friends_screen.dart` | Friends list, requests, sent requests, blocked riders, add by username or code |
-| `lib/presentation/social/rider_profile_screen.dart` | Another rider's profile |
+| `lib/domain/social/people_models.dart` | Pure People hub logic: `peopleSearchKey`, `PeopleSearch` (300 ms debounce, 2+ characters, newest query wins), `RelationChip` (Friend / Requested / Accept / Add), `liveRelation` (chips follow the live friends lists), `PersonCard` parsing, `mergeRequests` (friend requests + crew invites + ride invites, incoming first then sent), `PeopleBadges` (one badge sum), `crewHint`, friend picker filter / select all |
+| `lib/presentation/social/people_screen.dart` | **People hub**: search box, Friends · Crews · Requests segments with badges, `PersonRow`, `RelationButton`, `PeopleNavIcon`, `peopleBadgesOf` |
+| `lib/presentation/social/profile_screen.dart` | My profile: picture, username editor with live availability, analytics grid, privacy (leaderboard, "Let riders find me"), a "Friends & crews" shortcut row |
+| `lib/presentation/social/friends_screen.dart` | Thin redirect kept for old entry points: opens the People hub (Requests when requests wait, else Friends) |
+| `lib/presentation/social/rider_profile_screen.dart` | Another rider's profile (opened by tapping any avatar or username: search, friends, requests, crew members, the ride's rider card) |
 | `lib/presentation/social/user_avatar.dart`, `rider_username_line.dart` | Avatar widget; `@username` line on the ride rider card |
+
+Navigation (3.55 People hub, owner feedback "too complex to search and open"):
+
+- Bottom bar: **Home · Trips · People · Alerts · Profile**. The People tab badge = requests waiting
+  (friend requests + crew invites + ride invites) + crew polls to vote; the hub's Requests and Crews
+  segments show the same two numbers (`PeopleBadges`), so the badges always agree. The Profile tab has
+  no social badge any more.
+- People hub, top to bottom: header with "Share my invite link"; one search box ("Search by username",
+  results as you type with avatar, username and a one-tap chip: Add / Accept / Requested / Friend);
+  segments **Friends · Crews · Requests**. First open lands on Requests when something waits.
+  - Friends: "Invite link" (share sheet) and "Enter code"; "People you rode with" cards (one-tap Add);
+    the friends list (tap = profile, ⋮ = remove / block); "Blocked (n)".
+  - Crews: "Create crew" (2 steps: name, then pick friends with search and "Select all"); crew cards
+    with initials, rider count and a hint ("2 polls to vote", "Poll closes in 5 h", "Ride invite waiting").
+  - Requests: incoming first (ride invites on top), each with big **Decline / Accept** (Join for crews,
+    Open for rides) and swipe right = accept, left = decline; then "Sent" with Cancel. Accepting shows
+    a short toast and the rider moves to Friends.
+  - Empty parts show one line and one button ("No friends yet" + "Share your invite link").
+- `PeopleScreen.open(context, segment:)` switches to the People tab when the home shell is up (else
+  pushes the hub); old `FriendsScreen.open` / `CrewsScreen.open` (pushes, notices) go through it.
+- My profile no longer lists requests; the "My profile" row on the Profile tab opens it.
+- QR: no QR scanner or encoder package is in `pubspec.yaml`, so "Scan QR" / "My QR" are not offered;
+  the invite link and code cover the same need.
+- Live: the hub watches `FriendsService`, `CrewsService` and `RideInvitesService`, which refresh on the
+  existing socket events (FRIEND_REQUEST / FRIEND_ACCEPTED, CREW_*, POLL_*, RIDE_INVITE*), on resume and
+  on socket reconnect; pull to refresh re-reads all three plus suggestions.
 
 Wiring:
 
 - `main.dart`: the `FriendsService` provider, plus the invite branch in `_DeepLinkListener`.
 - `auth_service.dart`: a `username` getter, and `inviteCode` sent at registration.
-- Profile tab: a badge with the number of waiting friend requests (plus crew invitations and polls) on the bottom-bar Profile icon, and a "My profile & friends" row that says "1 friend request" / "N friend requests" (or "N new" when crew items wait too).
-- My profile: the "Friend requests" card at the top (first three, then "See all"); the Friends row shows "N new".
-- Friends screen, top to bottom: "Friend requests" (Accept / Decline / Block), invite button, "Sent" (Cancel), "My friends", "Blocked". Sending shows "Request sent to X. It is under Sent until they answer." and the row appears under "Sent" at once (from the 202 `request`).
+- Tests: `test/people_hub_355_test.dart` (search key, debounce, chips, request merging, badges, crew hint, picker).
 - Admin users list: searches and shows the username.
 - Admin user detail: shows `@username` and a "Remove profile picture" button.
 - `test/username_rules_test.dart`: Dart tests.
 
-Notifications: an in-app badge. `FriendsService` reads GET /friends at app start (also with a saved session: `ApiClient.init()` now tells its listeners that a saved token was loaded; before, services created before the token was read never loaded anything, so incoming requests stayed invisible until the rider happened to open the Friends screen), at sign-in, on resume, whenever the socket (re)connects, and on every FRIEND_REQUEST push (which also adds the row at once, before GET /friends answers). A push that arrives
+Notifications: the People tab badge. `FriendsService` reads GET /friends at app start (also with a saved session: `ApiClient.init()` now tells its listeners that a saved token was loaded; before, services created before the token was read never loaded anything, so incoming requests stayed invisible until the rider happened to open the friends list), at sign-in, on resume, whenever the socket (re)connects, and on every FRIEND_REQUEST push (which also adds the row at once, before GET /friends answers). A push that arrives
 while the app is open shows "X wants to be friends" / "X accepted your friend request" as a snackbar
 (`FriendNoticeHost` in `MaterialApp.builder`); in the background (socket still open, e.g. during a
 ride) it is a local system notification on the `coroute_social` channel (`AlarmNotifier.showSocialNotice`).

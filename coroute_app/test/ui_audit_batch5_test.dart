@@ -20,7 +20,6 @@ import 'package:coroute_app/presentation/admin/admin_settings_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_users_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_user_details_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_convoy_inspector.dart';
-import 'package:coroute_app/presentation/admin/admin_plans_pricing_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_device_compatibility_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_emergencies_panel.dart';
 
@@ -153,21 +152,8 @@ void main() {
       outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-070_admin_convoy_inspector.png',
     );
 
-    // SCR-071: Admin Plans & Pricing Screen
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.plans),
-      outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-071_admin_plans_pricing_screen.png',
-    );
-
-    // SCR-072: Admin Promotions / Offers Tab
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.coupons),
-      outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-072_admin_promotions_tabs.png',
-    );
+    // SCR-071, SCR-072, SCR-075, SCR-076 (plans and prices, coupons, revenue, payments) retired:
+    // managed in the web admin (Play payments policy).
 
     // SCR-073: Admin Device Compatibility Screen
     await renderAndSaveScreen(
@@ -189,23 +175,7 @@ void main() {
       outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-074_admin_emergencies_panel.png',
     );
 
-    // SCR-075: Admin Payment Analytics Tab
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.revenue),
-      outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-075_admin_payment_analytics_tab.png',
-    );
-
-    // SCR-076: Admin Payments list (the coupon usage tab was retired; coupons used are under Revenue)
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.payments),
-      outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-076_admin_payments_list.png',
-    );
-
-    // SCR-077: Admin Settings (website numbers, gateway, audit log, tools)
+    // SCR-077: Admin Settings (website numbers, audit log, web admin note, tools)
     await renderAndSaveScreen(
       tester: tester,
       env: env,

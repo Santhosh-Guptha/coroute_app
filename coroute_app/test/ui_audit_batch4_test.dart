@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:coroute_app/data/models/membership_model.dart';
 import 'package:coroute_app/presentation/settings/settings_screen.dart';
 import 'package:coroute_app/presentation/safety/sos_hold_screen.dart';
 import 'package:coroute_app/presentation/safety/crash_alarm_screen.dart';
@@ -10,8 +9,6 @@ import 'package:coroute_app/presentation/safety/oem_battery_guide.dart';
 import 'package:coroute_app/presentation/widgets/emergency_sos_sheet.dart';
 import 'package:coroute_app/presentation/garage/garage_screen.dart';
 import 'package:coroute_app/presentation/subscription/membership_dashboard_screen.dart';
-import 'package:coroute_app/presentation/subscription/payment_success_screen.dart';
-import 'package:coroute_app/presentation/subscription/payment_history_screen.dart';
 import 'ui_audit_helper.dart';
 
 void main() {
@@ -106,35 +103,8 @@ void main() {
 
     // SCR-056 (Plan Selector) retired: it was an alias of the membership dashboard (SCR-055).
 
-    // SCR-058: Payment Success Screen
-    const membership = UserMembership(
-      membershipId: 'mem_lg_01',
-      ownerUserId: 'rider_dev_01',
-      category: 'group_large',
-      categoryName: 'Large Group (7–12)',
-      capacity: 12,
-      priceRupees: 99,
-      status: 'ACTIVE',
-      validUntil: 1772496000000,
-    );
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const PaymentSuccessScreen(
-        membership: membership,
-        transactionReference: 'pay_RC_982401',
-        amountPaidInRupees: 99,
-      ),
-      outputPath: '../docs/ui-audit/screenshots/11_membership_payments/SCR-058_payment_success_screen.png',
-    );
-
-    // SCR-059: Payment History Screen
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const PaymentHistoryScreen(),
-      outputPath: '../docs/ui-audit/screenshots/11_membership_payments/SCR-059_payment_history_screen.png',
-    );
+    // SCR-058 (payment success) and SCR-059 (payment history) retired: the app sells nothing
+    // (Play payments policy, docs/features_355/play_payments_policy.md).
 
     // SCR-060 (legacy tier expiry banner) retired with the legacy tiers.
 

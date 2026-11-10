@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/data/services/api_client.dart';
+import 'package:coroute_app/presentation/admin/admin_settings_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_ride_reports.dart';
 import 'package:coroute_app/presentation/admin/admin_ui.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
@@ -40,7 +41,7 @@ void main() {
           return const SizedBox();
         }),
       ));
-      expect(nav.map((n) => n.label).toList(), ['Overview', 'Riders', 'Rides & safety', 'Plans & payments', 'Content', 'System']);
+      expect(nav.map((n) => n.label).toList(), ['Overview', 'Riders', 'Rides & safety', 'Content', 'System']);
       expect(AdminSection.values.length, lessThanOrEqualTo(9));
       expect(AdminSection.values.length, nav.length);
       for (final n in nav) {
@@ -59,7 +60,15 @@ void main() {
       }
       expect(AdminSection.values.expand((s) => s.pages).length, AdminPage.values.length);
       // The screens that used to be top level (or hidden in a menu) are all still reachable.
-      expect(AdminPage.values.map((p) => p.label), containsAll(['Riders', 'Rides', 'Safety', 'Payments', 'Marketing', 'Ride reviews', 'Place photos', 'Crews', 'Features', 'Usage', 'Settings']));
+      expect(AdminPage.values.map((p) => p.label), containsAll(['Riders', 'Rides', 'Safety', 'Ride reviews', 'Place photos', 'Crews', 'Features', 'Usage', 'Settings']));
+      // Play payments policy: payments, coupons, prices and marketing are in the web admin only.
+      for (final gone in ['Payments', 'Marketing', 'Revenue', 'Coupons', 'Plans & payments']) {
+        expect(AdminPage.values.map((p) => p.label), isNot(contains(gone)));
+        expect(AdminSection.values.map((s) => s.label), isNot(contains(gone)));
+      }
+      // One staff-only note says where they went: no URL, no link.
+      expect(adminWebAdminNote, 'Payments, coupons and marketing are managed in the web admin.');
+      expect(adminWebAdminNote, isNot(matches(RegExp(r'https?:|www\.|\.(com|org|space|in)\b'))));
     });
   });
 

@@ -55,8 +55,8 @@ offer re-laid as a banner, Weekend flash sale.*
 
 Every layer: position, size, rotation, opacity, hidden, locked, editor-only name.
 
-**Link and QR code.** `{link}` is the template's link, or (empty) `<server>/get?coupon=<CODE>`, the
-download page. A custom link may contain `{code}`. The code from that link is applied in the app
+**Link and QR code.** `{link}` is the template's link, or (empty) `<server>/plans?coupon=<CODE>` since 3.56
+(the website plans page, [web_payments.md](web_payments.md); older `/get?coupon=` links forward there). A custom link may contain `{code}`. The code from that link is applied in the app
 automatically (see "Coupon from the QR / link" below). The QR encoder is pure Dart
 (`lib/domain/marketing/qr_encoder.dart`: byte mode, level M, versions 1-10, up to 213 bytes), checked
 module for module against the Python `qrcode` reference encoder for versions 1, 4, 7, 8, 9 and 10
@@ -64,7 +64,7 @@ and all eight masks.
 
 ## Coupon from the QR / link (3.55)
 
-The QR code and `{link}` open `<server>/get?coupon=CODE`. The code is filled in for the rider; nothing
+The QR code and `{link}` open `<server>/plans?coupon=CODE` (3.56; `/get?coupon=CODE` forwards there). The code is filled in for the rider; nothing
 is bought by itself.
 
 - **Website `/get`** (`gateway/public/get.html` + `assets/get.js`): reads `coupon` from the address,

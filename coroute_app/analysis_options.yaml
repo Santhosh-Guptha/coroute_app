@@ -20,6 +20,7 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    - docs/**
     - _to_delete/**
 
 linter:

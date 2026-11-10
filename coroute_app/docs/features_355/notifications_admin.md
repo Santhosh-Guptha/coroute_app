@@ -1,0 +1,170 @@
+# Admin push notifications and message templates (3.56)
+
+The web admin (`/admin`) has two new sections:
+
+- **Notifications**: compose and send "News and updates" pushes, see the history with delivery
+  counts, and set up the server SOS SMS (see [sos_sms.md](sos_sms.md)).
+- **Templates**: edit the words of the receipt and refund e-mails, the SOS SMS, the plan push
+  notices and the guardian arrival message.
+
+Related: [push_notifications.md](push_notifications.md) (the FCM pipeline),
+[purchase_email.md](purchase_email.md), [sos_sms.md](sos_sms.md),
+[play_payments_policy.md](play_payments_policy.md).
+
+## Notifications > Compose push
+
+| Field | Rule |
+| --- | --- |
+| Title | 1 to 65 characters, one line |
+| Message | 1 to 240 characters |
+| Big picture | Optional. JPEG, PNG or WebP, at most 1 MB. Recognised by its bytes. EXIF, GPS, XMP and PNG text are removed by the review photo pipeline (`review_photos.preparePhoto`). Stored with a random name and served at `https://<PUBLIC_ORIGIN>/media/push/pi_<id>.<ext>`. Needs an https `PUBLIC_ORIGIN`. |
+| Opens | A fixed list: Home, Friends and people, Crews, Ride history, Settings. There is no plans, offers or in-app updates target. |
+| Audience | All riders with the app, riders active in the last N days (1 to 365), plan type (Community, Small Group, Large Group; active owners of a plan), a list of up to 200 usernames, or **Send test to me** (the admin's own phones). |
+| When | Now, or a date and time in India time (at most 60 days ahead). |
+
+- The preview shows an Android-style card in the light and the dark theme.
+- **Count riders** shows how many riders the audience reaches and how many turned News off.
+- The title and message are checked as you type (`POST /api/admin/push/check`).
+
+### Play policy guard
+
+Pushes reach the Google Play app, which must not show prices, coupons, discounts, offers, buying
+or upgrade words, or links to the plans page. The server refuses such a push with HTTP 422
+`PLAY_POLICY` and this message: *"This push mentions "coupon". ... Put offers on the website board
+or in an e-mail instead."*
+
+- The terms are in `gateway/src/policy_terms.js`. They include every term of
+  `tool/play_policy_scan.dart` (a test reads the Dart file, so the lists cannot drift), plus
+  `pay`, `paid`, `offer(s)`, `sale`, `% off`, `deal(s)`, `cashback`, `free trial`, `subscribe`,
+  `subscription`, `offer code`, `plans page`, `/mo`, `Rs 99` and links to `/plans`,
+  `/checkout`, `/get?coupon`, `/receipt`.
+- Links of any kind are refused (`NO_LINKS`). A push opens an app screen, not a URL.
+- An e-mail address or phone number in the text is refused (`PERSONAL_DATA`).
+- The test send is guarded too.
+
+### Delivery
+
+- Message: an FCM data message of type `NEWS` with `title`, `body`, `imageUrl` (only an https
+  `/media/push/pi_<24 hex>.<jpg|png|webp>` URL passes `push.js`), `target` (one of the fixed
+  list), `campaignId` and `eventId`. The collapse key is one per campaign.
+- Riders can turn off **Settings > App & privacy > News and updates** in the app
+  (`PUT /api/me/push-prefs {news:false}`). The server skips them, and Android drops a NEWS push
+  while the switch is off. Safety, ride, social and plan pushes are not in this category and
+  cannot be turned off there.
+- Frequency cap: at most **2** campaign pushes per rider per India day
+  (`PUSH_NEWS_DAILY_CAP`; collection `push_news_caps`). A test send ignores the cap and the
+  opt-out.
+- Scheduling: the leased job `push-campaigns` runs every 30 s on one node.
+  - It claims a due campaign with a compare-and-replace lease (2 min, renewed after every
+    batch). A crashed worker's campaign is taken over when the lease ends and resumes at its
+    cursor.
+  - It resolves the audience once, then sends in batches of 100 riders at
+    `PUSH_CAMPAIGN_RATE` tokens per second (default 50; FCM allows far more).
+  - The FCM sender retries 429 / 5xx with backoff (`push.js`).
+- The campaign fails with a clear reason when FCM is not configured or the admin switch "Push
+  notifications" is off.
+
+### Android
+
+`CoRouteMessagingService.kt` handles `NEWS` like this:
+
+- It posts on the channel **"News and updates"** (`coroute_news`). Riders can also mute this
+  channel in Android settings.
+- With `imageUrl`, it shows `BigPictureStyle`. The image download is https only, with no
+  redirects, 5 s connect / read timeouts, an 8 s deadline and at most 1 MB. It is decoded
+  downscaled to at most about 2048 px. On any problem it falls back to the text notification.
+- The tap opens the `target` screen (`push_routing.dart` `newsTargets`, anything else opens
+  Home). In the foreground the push is a snackbar with "View".
+
+## Notifications > History
+
+The table lists every campaign, including test sends. Columns:
+
+| Column | Meaning |
+| --- | --- |
+| Riders | Riders in the audience (with a push token) |
+| Reached | Riders with at least one device sent |
+| Sent | Devices sent |
+| Failed | Device sends that failed (not counting invalid tokens) |
+| Invalid tokens | Tokens FCM called UNREGISTERED / INVALID_ARGUMENT. They are deleted. |
+| News off | Riders skipped because they turned News off |
+| Capped | Riders skipped by the daily cap |
+
+A scheduled campaign can be cancelled until it starts.
+
+## Templates
+
+| Template | Channel | Variables |
+| --- | --- | --- |
+| Purchase receipt e-mail | e-mail | name, plan, period, amount, orderId, paymentId, date, receiptUrl, supportEmail |
+| Refund e-mail | e-mail | name, plan, amount, orderId, paymentId, refundId, date, receiptUrl, supportEmail |
+| SOS SMS (DLT) | SMS | name, token, lat, lng, time; `{{origin}}` = the site address (fixed) |
+| SOS safe-now SMS (DLT) | SMS | name, time |
+| Push: plan active | push | plan |
+| Push: plan ending | push | date |
+| Guardian: arrived safely | browser push | none |
+
+- Placeholders are `{{variable}}`. Each template's variable list is fixed: an unknown variable
+  (a typo such as `{{nmae}}`) or a stray `{ }` is refused.
+- **E-mail**: the subject, heading, intro and footer are editable. The layout and the payment
+  lines are built by the server, and every value is HTML-escaped.
+- **DLT SMS**: the variables and their order must stay exactly as registered. Each value is cut
+  to 30 characters (the DLT `{#var#}` limit). Saving a changed text shows a warning that the new
+  text must be registered first (and its template id set in Notifications > SMS). Non-GSM
+  characters produce a warning (70 characters per part).
+- **Push templates** go through the same Play policy guard as admin pushes.
+  - `push.js` uses them for `SUBSCRIPTION_ACTIVATED` / `SUBSCRIPTION_EXPIRING` through
+    `setPlanTextProvider`, from a cached copy refreshed every minute and after each save.
+  - An answer with a forbidden word falls back to the built-in text.
+- Versions: collection `message_templates` keeps the current fields and the last 20 versions.
+  - **History** can load an older version into the editor.
+  - **Reset to default** stores the defaults as a new version.
+  - Every save and reset writes an admin audit entry.
+- Preview: the rendered text with sample values. The SMS preview shows the character and part
+  count.
+
+## Endpoints
+
+All `/api/admin/*` endpoints are MASTER_ADMIN only (`requireAuth` + `requireAdmin`).
+
+| Method and path | What |
+| --- | --- |
+| `GET /api/admin/push/config` | FCM ready, targets, plan types, daily cap, limits, images allowed |
+| `POST /api/admin/push/images` | raw image bytes (Content-Type image/*) -> `{image: {imageId, url, bytes, width, height}}` |
+| `POST /api/admin/push/check` | `{title, body, target}` -> ok, or 400 / 422 with the reason |
+| `POST /api/admin/push/audience-count` | `{audience}` -> `{riders, optedOut}` |
+| `POST /api/admin/push/test` | campaign fields -> sends to the admin's phones, `{result}` |
+| `POST /api/admin/push/campaigns` | `{title, body, target, imageId?, audience, sendAt?}` -> 201 `{campaign}` |
+| `GET /api/admin/push/campaigns[?limit]`, `GET /api/admin/push/campaigns/:id` | history |
+| `POST /api/admin/push/campaigns/:id/cancel` | scheduled only |
+| `GET /api/admin/templates` | all templates (current, defaults, variables, version) |
+| `POST /api/admin/templates/:id/preview` | `{fields?}` -> `{rendered, errors, warnings}` |
+| `PUT /api/admin/templates/:id` | `{fields}` -> `{version, warnings}` (400 with the errors) |
+| `POST /api/admin/templates/:id/reset` | defaults as a new version |
+| `GET /api/admin/templates/:id/history` | the last 20 versions |
+| `GET` / `PUT /api/me/push-prefs` | rider: `{news}` (safety pushes always on) |
+| `GET /media/push/:file` | public image (cached 30 days, nosniff, `default-src 'none'`) |
+
+## Environment
+
+| Variable | Default | What |
+| --- | --- | --- |
+| `FCM_SERVICE_ACCOUNT_JSON` / `FCM_SERVICE_ACCOUNT_FILE`, `FCM_PROJECT_ID` | none | FCM sender ([push_notifications.md](push_notifications.md)) |
+| `PUBLIC_ORIGIN` | none | Must be https for push images |
+| `PUSH_IMAGE_DIR` | `<data>/push-images` (next to `REVIEW_PHOTO_DIR`) | Disk store for images. With `REVIEW_PHOTO_STORE=par` the images go to the bucket under `push-images/`. |
+| `PUSH_CAMPAIGN_RATE` | 50 | Tokens per second |
+| `PUSH_NEWS_DAILY_CAP` | 2 | Campaign pushes per rider per India day |
+
+## Files
+
+- Gateway:
+  - `src/push_campaigns.js`, `src/policy_terms.js`, `src/templates.js`
+  - `src/notifications.js` (wiring, jobs)
+  - `src/push.js` (NEWS type, imageUrl / target, body 240, pruned count, plan text provider)
+- Web admin: `public/admin/notify.js`, `public/admin/templates.js`, `public/admin/notify.css`
+- App:
+  - `lib/domain/notify/push_routing.dart`, `lib/presentation/widgets/push_router_host.dart`
+  - `lib/data/services/push_service.dart` (`newsEnabled`)
+  - Settings row "News and updates"
+- Android: `CoRouteMessagingService.kt`, `PushChannel.kt` (`setNewsEnabled`)
+- Tests: `gateway/test/push_campaigns_355.test.js`, `test/sos_sms_text_356_test.dart` (NEWS routing)

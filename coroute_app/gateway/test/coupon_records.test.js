@@ -65,8 +65,10 @@ test('launch coupons are admin-managed records with plan binding, limits and val
     assert.equal((await repo.findCoupon('WELCOME50')).status, 'ARCHIVED');
     assert.equal(await repo.findCoupon('CAPTAIN100'), null);
     const archived = await env.api('POST', '/membership/validate-coupon', { code: 'WELCOME50', category: 'group_large' }, A);
-    assert.equal(archived.status, 400);
+    // 3.56: an archived code reads exactly like a missing one (no enumeration of retired codes).
+    assert.equal(archived.status, 404);
     assert.equal(archived.json.valid, false);
+    assert.equal(archived.json.reason, 'COUPON_NOT_FOUND');
   });
 
   await t.test('a store without the record knows no such coupon (no built-in fallback)', async () => {

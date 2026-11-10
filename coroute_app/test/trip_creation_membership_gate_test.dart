@@ -128,7 +128,6 @@ void main() {
     category: 'individual',
     categoryName: 'Individual Solo Rider',
     capacity: 1,
-    priceRupees: 9,
     status: 'ACTIVE',
     validUntil: futureTime,
   );
@@ -139,7 +138,6 @@ void main() {
     category: 'group_small',
     categoryName: 'Group Membership (2–6)',
     capacity: 6,
-    priceRupees: 49,
     status: 'ACTIVE',
     validUntil: futureTime,
   );
@@ -150,7 +148,6 @@ void main() {
     category: 'group_large',
     categoryName: 'Extended Group (7–12)',
     capacity: 12,
-    priceRupees: 99,
     status: 'ACTIVE',
     validUntil: futureTime,
   );
@@ -161,7 +158,6 @@ void main() {
     category: 'individual',
     categoryName: 'Individual Solo Rider',
     capacity: 1,
-    priceRupees: 9,
     status: 'ENDED',
     validUntil: pastTime,
   );
@@ -207,7 +203,7 @@ void main() {
       // Null overview
       expect(ms.hasActivePlan, isFalse);
 
-      // Active Individual: ₹9/month, capacity 1 (Solo)
+      // Active Individual: capacity 1 (Solo)
       mockApi.mockGetResponses = {
         '/membership/my': {
           'owned': individualMembership.toJson(),
@@ -219,35 +215,32 @@ void main() {
       // Set directly in overview to test getters
       final activeSoloOverview = MyMembershipOverview(
         ownedMembership: individualMembership,
-        paymentsEnabled: true,
+        plansEnforced: true,
       );
       expect(activeSoloOverview.hasValidEntitlement, isTrue);
       expect(activeSoloOverview.ownedMembership!.capacity, 1);
-      expect(activeSoloOverview.ownedMembership!.priceRupees, 9);
       expect(activeSoloOverview.ownedMembership!.isExpired, isFalse);
 
-      // Small Group: ₹49/month, capacity 6
+      // Small Group: capacity 6
       final activeSmallGroupOverview = MyMembershipOverview(
         ownedMembership: smallGroupMembership,
-        paymentsEnabled: true,
+        plansEnforced: true,
       );
       expect(activeSmallGroupOverview.hasValidEntitlement, isTrue);
       expect(activeSmallGroupOverview.ownedMembership!.capacity, 6);
-      expect(activeSmallGroupOverview.ownedMembership!.priceRupees, 49);
 
-      // Large Group: ₹99/month, capacity 12
+      // Large Group: capacity 12
       final activeLargeGroupOverview = MyMembershipOverview(
         ownedMembership: largeGroupMembership,
-        paymentsEnabled: true,
+        plansEnforced: true,
       );
       expect(activeLargeGroupOverview.hasValidEntitlement, isTrue);
       expect(activeLargeGroupOverview.ownedMembership!.capacity, 12);
-      expect(activeLargeGroupOverview.ownedMembership!.priceRupees, 99);
 
       // Expired plan
       final expiredOverview = MyMembershipOverview(
         ownedMembership: expiredMembership,
-        paymentsEnabled: true,
+        plansEnforced: true,
       );
       expect(expiredOverview.hasValidEntitlement, isFalse);
       expect(expiredOverview.ownedMembership!.isExpired, isTrue);
@@ -288,32 +281,6 @@ void main() {
       expect(offlineMs.ownedMembership?.capacity, 6);
       expect(offlineMs.ownedMembership?.isExpired, isFalse);
       expect(offlineMs.lastError, contains('Network timeout'));
-    });
-
-    test('3. Duplicate payment orders prevention: deduplicates concurrent createOrder calls', () async {
-      final ms = MembershipService(mockApi, prefs);
-
-      mockApi.mockPostResponses = {
-        '/membership/order': {
-          'orderId': 'order_123',
-          'keyId': 'rzp_key_test',
-          'amountInPaise': 4900,
-        }
-      };
-
-      // Call createOrder concurrently twice
-      final f1 = ms.createOrder(categoryId: 'group_small');
-      final f2 = ms.createOrder(categoryId: 'group_small');
-
-      final results = await Future.wait([f1, f2]);
-
-      expect(results[0], isNotNull);
-      expect(results[1], isNotNull);
-      expect(results[0]?['orderId'], results[1]?['orderId']);
-
-      // Only one network order endpoint call made!
-      final orderCalls = mockApi.calledEndpoints.where((e) => e == '/membership/order').length;
-      expect(orderCalls, 1);
     });
   });
 
@@ -356,7 +323,7 @@ void main() {
       expect(find.text('Solo Morning Commute'), findsWidgets);
     });
 
-    testWidgets('5. Active Small Group (₹49) membership allows direct trip creation without payment prompt', (tester) async {
+    testWidgets('5. Active Small Group membership allows direct trip creation without payment prompt', (tester) async {
       tester.view.physicalSize = const Size(800, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -393,7 +360,7 @@ void main() {
       expect(find.text('Weekend Ghats Group Ride'), findsWidgets);
     });
 
-    testWidgets('6. Active Large Group (₹99) membership allows direct trip creation without payment prompt', (tester) async {
+    testWidgets('6. Active Large Group membership allows direct trip creation without payment prompt', (tester) async {
       tester.view.physicalSize = const Size(800, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -438,7 +405,7 @@ void main() {
       // Seed local SharedPreferences cache
       final cachedOverview = MyMembershipOverview(
         ownedMembership: smallGroupMembership,
-        paymentsEnabled: true,
+        plansEnforced: true,
       );
       await prefs.setString(AppConstants.keyMembershipCache, jsonEncode(cachedOverview.toJson()));
 
@@ -565,7 +532,7 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('11. Active membership shows upgrade accordion with clear pricing', (tester) async {
+    testWidgets('11. Active membership shows the read-only plan card, no pricing', (tester) async {
       tester.view.physicalSize = const Size(800, 1400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -586,30 +553,20 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // 1. Verify Active Membership Card
-      expect(find.text('ACTIVE PLAN'), findsOneWidget);
-      expect(find.text('Legacy plan (Individual)'), findsOneWidget);
-      expect(find.text('₹9 / month'), findsOneWidget);
-
-      // 2. Verify Upgrade Accordion is collapsed initially
-      final expansionTile = find.byKey(const Key('upgrade_capacity_expansion_tile'));
-      expect(expansionTile, findsOneWidget);
-      expect(find.text('Change plan or seats'), findsOneWidget);
-      expect(find.text('Buy for ₹49'), findsNothing);
-
-      // 3. Expand accordion and verify clear pricing for all tiers
-      await tester.tap(expansionTile);
-      await tester.pumpAndSettle();
-
-      // The retired ₹9 Individual is honoured until it ends but not offered again; Community shows free.
-      expect(find.text('Your plan'), findsNothing);
-      // 3.55: upgrade only while a paid plan runs: Community (smaller) is hidden.
-      expect(find.byKey(const Key('membership_community_card')), findsNothing);
-      expect(find.text('Upgrade to Group Membership (2–6) (₹49)'), findsOneWidget);
-      expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
+      // Read-only "Your plan" card (Play payments policy): name, what it includes, end date.
+      expect(find.byKey(const Key('your_plan_card')), findsOneWidget);
+      expect(find.text('Individual'), findsOneWidget);
+      expect(find.text('Solo rides'), findsOneWidget);
+      expect(find.textContaining('Ends on '), findsOneWidget);
+      expect(find.text('Your plan is managed in your CoRoute account.'), findsOneWidget);
+      // No prices, no plan lists, no buying buttons.
+      expect(find.textContaining('₹'), findsNothing);
+      expect(find.byKey(const Key('upgrade_capacity_expansion_tile')), findsNothing);
+      expect(find.textContaining('Upgrade'), findsNothing);
+      expect(find.textContaining('Group Membership'), findsNothing);
     });
 
-    testWidgets('12. Expired membership prominently displays renewal options', (tester) async {
+    testWidgets('12. Expired membership: Community card names the plan that ended, no renewal', (tester) async {
       tester.view.physicalSize = const Size(800, 1400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -630,14 +587,12 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Verify Expired Card & Renewal Options
-      expect(find.text('ENDED'), findsOneWidget);
-      expect(find.text('Renew plan'), findsOneWidget);
-      expect(find.text('Your plan has ended'), findsOneWidget);
-      // The retired Individual cannot be renewed: the banner offers the cheapest group plan.
-      expect(find.text('Renew plan (₹9 / mo)'), findsNothing);
-      expect(find.text('Host a group from ₹49'), findsOneWidget);
-      expect(find.text('Renew or change plan'), findsOneWidget);
+      expect(find.text('Community'), findsOneWidget);
+      expect(find.textContaining('Your Individual plan ended on '), findsOneWidget);
+      expect(find.text('Solo riding and every safety feature are free.'), findsOneWidget);
+      expect(find.textContaining('Renew'), findsNothing);
+      expect(find.textContaining('₹'), findsNothing);
+      expect(find.byType(ElevatedButton), findsNothing);
     });
   });
 
@@ -662,7 +617,7 @@ void main() {
       expect(joined, isNotNull);
       expect(mockApi.calledEndpoints, contains('/convoys/join'));
       expect(convoyService.activeConvoy?.groupId, 'GRP-TEST-100');
-      // Invited rider joins and participates at ₹0 without requiring an owned paid plan
+      // Invited rider joins and participates free, without an owned group plan
       expect(ms.planAccess.isPaid, isFalse);
       expect(ms.planAccess.source, 'community');
     });

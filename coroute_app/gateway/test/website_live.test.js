@@ -172,12 +172,12 @@ test('pricing cards show exactly what the catalog says, cheapest first', async (
   assert.equal(again.text(again.cards[1]).amount, '₹59');
 });
 
-test('pricing: no catalog means no prices, only a pointer to the app', async () => {
+test('pricing: no catalog means no prices, only a pointer to the plans page', async () => {
   for (const routes of [{}, { '/api/membership/catalog': new Error('down') }, { '/api/membership/catalog': { categories: {} } }, { '/api/membership/catalog': { nope: 1 } }]) {
     const { list, cards } = await runHome(routes);
     assert.equal(cards.length, 0);
     assert.ok(['error', 'empty'].includes(list.getAttribute('data-state')));
-    assert.ok(/CoRoute app/.test(list.textContent));
+    assert.ok(/plans page/.test(list.textContent)); // 3.56: plans are bought on /plans
     assert.ok(!/\d/.test(list.textContent), 'no number shown');
   }
 });
@@ -206,7 +206,7 @@ test('homepage budgets: JS at most 250 KB gzip with the 3D scene, CSS at most 60
   const gz = (rel) => zlib.gzipSync(fs.readFileSync(path.join(PUB, rel)), { level: 9 }).length;
   const html = await (await fetch(base + '/')).text();
   const js = [...html.matchAll(/<script[^>]+src="\/assets\/([^"?]+\.js)/g)].map((m) => m[1]);
-  assert.deepEqual(js.sort(), ['home.js', 'site.js']);
+  assert.deepEqual(js.sort(), ['board.js', 'home.js', 'site.js']); // 3.56: board.js fills "Latest from CoRoute"
   const jsTotal = [...js, 'hero3d.js'].reduce((s, f) => s + gz(`assets/${f}`), 0);
   assert.ok(jsTotal <= 250 * 1024, `homepage JS ${jsTotal} bytes gzip`);
   const css = [...html.matchAll(/<link rel="stylesheet" href="\/assets\/([^"?]+\.css)/g)].map((m) => m[1]);
