@@ -289,6 +289,8 @@
 .px-card__seats { display: inline-flex; align-items: center; gap: 8px; color: var(--c-text-2); font-weight: 700; font-size: var(--fs-small); }
 .px-card__seats .icon { width: 18px; height: 18px; color: var(--c-brand); }
 .px-card__price { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-8); }
+.px-card__was { color: var(--c-text-3); font-weight: 700; font-size: 1.25rem; text-decoration-thickness: 2px; }
+.px-card__offer { display: inline-block; margin-top: var(--sp-8); padding: 3px 10px; border-radius: 999px; background: var(--c-safety-light); color: var(--c-safety-ink); border: 1px solid var(--c-safety-line); font-weight: 800; font-size: var(--fs-small); }
 .px-card__amount { font-size: clamp(2.25rem, 1.8rem + 2vw, 3rem); line-height: 1; font-weight: 800; letter-spacing: -0.04em; color: var(--c-text); font-variant-numeric: tabular-nums; }
 .px-card__per { color: var(--c-text-3); font-weight: 700; font-size: var(--fs-small); }
 .px-card__desc { color: var(--c-text-2); font-size: var(--fs-small); line-height: var(--lh-snug); }

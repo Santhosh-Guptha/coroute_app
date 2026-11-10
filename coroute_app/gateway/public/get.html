@@ -50,9 +50,7 @@
             <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
             <a class="btn btn--ghost btn--lg" href="/download/32bit">32-bit Android</a>
           </div>
-          <!-- 3.55: a code from a QR / share link shows here; get.js fills it with textContent only. -->
-          <div class="code-chip" id="code-chip" role="status" hidden></div>
-          <!--play--><span id="play-store" data-href="__PLAY_STORE_URL__" hidden></span><!--/play-->
+          <!-- 3.56: marketing code links on /get are forwarded to /plans by the server (get.js is the fallback). -->
           <div class="pg-dl__meta">
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><!--ios-->Android 6.0+ &amp; iOS 14.0+<!--/ios--><!--no-ios-->Android 6.0+<!--/no-ios--></span>
             <!--no-ios--><span>iOS app, building now <span class="soon-pill">Coming soon</span></span><!--/no-ios-->
@@ -193,7 +191,7 @@
           <div class="card">
             <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div>
             <h3>Privacy</h3>
-            <p>Your location is shared only with your ride group and the guardians you choose, only during the ride. Voice is never recorded. No ads, no trackers, no sale of data. Memberships are chosen and paid for by UPI in the app.</p>
+            <p>Your location is shared only with your ride group and the guardians you choose, only during the ride. Voice is never recorded. No ads, no trackers, no sale of data. Group plans are chosen and paid for on the <a class="link" href="/plans">plans page</a>.</p>
             <p><a class="link" href="/privacy">Read the privacy policy</a></p>
           </div>
         </div>

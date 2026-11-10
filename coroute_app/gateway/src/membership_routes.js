@@ -8,6 +8,25 @@ const { safeCommunityStats } = require('./public_privacy');
 const reviewPhotos = require('./review_photos');
 const { CATALOG_PLANS, COMMUNITY_PLAN, LEGACY_INDIVIDUAL_PLAN, planFrom, entitlementsFor, effectiveMembership, isLegacyMembershipPlan, belongsToAccount } = require('./entitlements');
 const pricing = require('./plan_pricing');
+const { notifyPlanActivated } = require('./web_shop');
+const sec = require('./payment_security');
+
+/** Pricing rules (3.56: the price floor); never in the way when the store cannot answer. */
+async function rulesOf(repo) {
+  if (!repo || typeof repo.getPricingRules !== 'function') return { minPayableInr: 0 };
+  return repo.getPricingRules().catch(() => ({ minPayableInr: 0 }));
+}
+
+/** Coupon lookups (quote, validate, order): 20 a minute per rider (or IP); unknown codes also feed CouponGuard. */
+const couponLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `cpn:${(req.user && req.user.userId) || req.ip}`,
+  skip: (req) => !(req.query && (req.query.coupon || req.query.code)) && !(req.body && (req.body.code || req.body.offerCode || req.body.couponCode)),
+  message: { valid: false, error: 'Too many codes tried. Try again in a minute.', reason: 'COUPON_ATTEMPTS', code: 'RATE_LIMITED' },
+});
 
 // Review photos live outside public/ (config.reviewPhotoDir); every read goes through a checked route.
 const photoStore = reviewPhotos.createPhotoStore(config.reviewPhotoDir);
@@ -65,9 +84,10 @@ function couponMakesFree(coupon, priceInr) {
  * plan binding, then the rider rules. Null when it can.
  */
 function freeCouponBlock(coupon, { uid, userDoc, category, plan }) {
-  const chk = pricing.checkCoupon(coupon, { uid, userDoc, planId: category, baseInr: plan.monthlyPriceInr });
-  if (!chk.ok) return { error: chk.error, reason: chk.reason };
-  if (!couponMakesFree(coupon, plan.monthlyPriceInr)) {
+  const price = pricing.effectivePrice(plan);
+  const chk = pricing.checkCoupon(coupon, { uid, userDoc, planId: category, baseInr: price.priceInr, offerActive: !!price.offer });
+  if (!chk.ok) return sec.couponRefusal(chk);
+  if (!couponMakesFree(coupon, price.priceInr)) {
     return { error: `Coupon ${coupon.code} does not provide a 100% discount. Payment required.`, reason: 'PARTIAL_COUPON' };
   }
   return null;
@@ -109,13 +129,20 @@ async function priceFor(repo, { uid, userDoc, category, rawCode, catalog, now = 
   let couponError = null;
   let couponDiscount = 0;
   const clean = typeof rawCode === 'string' ? rawCode.trim().toUpperCase() : '';
+  const rules = await rulesOf(repo);
+  const price = pricing.effectivePrice(plan, now);
+  let guess = false;
   if (clean) {
-    const found = typeof repo.findCoupon === 'function' ? await repo.findCoupon(clean).catch(() => null) : null;
-    const chk = pricing.checkCoupon(found, { uid, userDoc, planId: category, baseInr: plan.monthlyPriceInr });
-    if (chk.ok) { coupon = found; couponDiscount = chk.discountInr; } else couponError = { code: clean, error: chk.error, reason: chk.reason };
+    const found = typeof repo.findCoupon === 'function' && /^[A-Z0-9_-]{1,32}$/.test(clean) ? await repo.findCoupon(clean).catch(() => null) : null;
+    const chk = pricing.checkCoupon(found, { uid, userDoc, planId: category, baseInr: price.priceInr, offerActive: !!price.offer, minPayableInr: rules.minPayableInr });
+    if (chk.ok) { coupon = found; couponDiscount = chk.discountInr; } else {
+      // 3.56: a code that does not exist, or is not public yet, reads the same (no enumeration).
+      couponError = { code: clean.slice(0, 32), ...sec.couponRefusal(chk) };
+      guess = sec.isGuess(chk);
+    }
   }
-  const quote = pricing.computeQuote({ catalog, planId: category, membership, coupon, couponDiscount, now });
-  return { quote, coupon, couponError, membership };
+  const quote = pricing.computeQuote({ catalog, planId: category, membership, coupon, couponDiscount, now, minPayableInr: rules.minPayableInr });
+  return { quote, coupon, couponError, membership, guess };
 }
 
 /**
@@ -310,10 +337,80 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
   return membershipDoc;
 }
 
+/** An order as its rider may see it (no webhook ids, no store key, no settle bookkeeping). */
+function publicOrder(o) {
+  if (!o) return null;
+  const { key, k, webhookEvents, settlingBy, settlingSince, settlingPaymentId, statusBeforeSettle, keyId, ...rest } = o;
+  void key; void k; void webhookEvents; void settlingBy; void settlingSince; void settlingPaymentId; void statusBeforeSettle; void keyId;
+  return rest;
+}
+
+/** 'web' when the request came from the website shop (header X-CoRoute-Client: web), else 'app'. */
+function orderChannel(req) {
+  return String((req && typeof req.get === 'function' && req.get('x-coroute-client')) || '').trim().toLowerCase() === 'web' ? 'web' : 'app';
+}
+
+/**
+ * A captured Razorpay payment for a membership order that is not PAID yet (either webhook URL):
+ * activates the plan, confirms the coupon redemption and tells the rider's app. Returns the membership.
+ */
+async function settleMembershipPayment({ repo, order, payment = {}, convoys = null, hub = null, source = 'razorpay_webhook' }) {
+  const out = await settlePaidOrder({
+    repo, order, paymentId: payment.id || '', payment, method: String(payment.method || 'upi').toUpperCase(), source, convoys, hub,
+  });
+  return out.membership || null;
+}
+
+/**
+ * 3.56: the one way a paid membership order becomes active (/membership/verify, /membership/purchase,
+ * the webhooks, the legacy verify-payment / callback). Order: (1) the Razorpay payment, when known,
+ * must match the ledger order (order id, amount in paise, currency, captured); (2) the order is
+ * CLAIMED atomically (repo.claimRazorpayOrder): one settle wins, a concurrent or repeated one sees
+ * 'already' / 'busy', a refunded order is never activated; (3) activation, the coupon use (counted
+ * once per order), the app notification. A failure gives the claim back.
+ * Returns { status: 'activated' | 'already' | 'busy' | 'refunded' | 'mismatch' | 'missing', membership?, order?, reason? }.
+ */
+async function settlePaidOrder({ repo, order, paymentId, payment = null, method = 'RAZORPAY', source = 'verify', userDoc = null, convoys = null, hub = null }) {
+  const mismatch = sec.paymentMismatch(payment, order);
+  if (mismatch) {
+    await repo.updateRazorpayOrder(order.orderId, { paymentMismatch: mismatch, lastPaymentId: String(paymentId || '').slice(0, 80) }).catch(() => {});
+    return { status: 'mismatch', reason: mismatch, order };
+  }
+  let claimed = order;
+  if (typeof repo.claimRazorpayOrder === 'function') {
+    const c = await repo.claimRazorpayOrder(order.orderId, { paymentId, by: source });
+    if (!c.order) {
+      const status = { ALREADY_PAID: 'already', REFUNDED: 'refunded', ORDER_NOT_FOUND: 'missing' }[c.reason] || 'busy';
+      return { status, reason: c.reason, order: c.current };
+    }
+    claimed = c.order;
+  } else if (order.status === 'PAID') {
+    return { status: 'already', reason: 'ALREADY_PAID', order };
+  }
+  try {
+    const membership = await activateMembershipFromOrder({ repo, order: claimed, paymentId, method, source, userDoc, convoys });
+    if (claimed.offerCode) {
+      if (typeof repo.confirmCouponRedemption === 'function') {
+        await repo.confirmCouponRedemption(claimed.orderId, { paymentId, method: 'RAZORPAY', paidAt: Date.now(), userDoc }).catch(() => {});
+      } else if (typeof repo.recordCouponUsage === 'function') {
+        await repo.recordCouponUsage(claimed.offerCode, { userId: claimed.userId, orderId: claimed.orderId, discountAmount: claimed.discountAmount || 0 }).catch(() => {});
+      }
+    }
+    notifyPlanActivated({ hub, userId: claimed.userId, membership, order: claimed, source });
+    return { status: 'activated', membership, order: claimed };
+  } catch (e) {
+    if (typeof repo.releaseRazorpayOrderClaim === 'function') await repo.releaseRazorpayOrderClaim(claimed.orderId).catch(() => {});
+    throw e;
+  }
+}
+
+/** True for a ledger order made by POST /membership/order (a plan category, no legacy subscription tier). */
+const isMembershipOrder = (order) => !!(order && order.category && !order.planTier && order.mode !== 'manual');
+
 /**
  * Public membership routes: catalog, categories and HMAC webhook.
  */
-function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
+function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null, hub = null }) {
   const WEBHOOK_MAX_BYTES = 1024 * 1024;
   const seenWebhookIds = new Set();
   const seenWebhookQueue = [];
@@ -343,7 +440,16 @@ function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
     }
     const onSale = {};
     // Community (free, every rider has it) is listed for display; it is never sold.
-    for (const [id, c] of Object.entries(catalog || {})) if (planOnSale(c) || id === COMMUNITY_PLAN) onSale[id] = c;
+    // 3.56: each plan carries its price NOW, computed here (server time): list price, the price to pay,
+    // and the running offer (label, until when). A scheduled offer is not shown before it starts.
+    const now = Date.now();
+    for (const [id, c] of Object.entries(catalog || {})) {
+      if (!(planOnSale(c) || id === COMMUNITY_PLAN)) continue;
+      const p = pricing.effectivePrice(c, now);
+      const { offer: storedOffer, ...rest } = c;
+      void storedOffer;
+      onSale[id] = { ...rest, listPriceInr: p.listPriceInr, priceInr: p.priceInr, activeOffer: p.offer ? { priceInr: p.offer.priceInr, label: p.offer.label, endsAt: p.offer.endAt } : null };
+    }
     res.json({
       categories: onSale,
       offers: activeOffers.map((o) => ({
@@ -415,6 +521,8 @@ function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
    * Public webhook endpoint from Razorpay with cryptographic HMAC signature verification.
    */
   r.post('/membership/webhook', wrap(async (req, res) => {
+    // 3.56: only one webhook URL is live (RAZORPAY_WEBHOOK_URL, default the subscription URL).
+    if (sec.refuseInactiveWebhook(res, 'membership')) return;
     const rawBuf = Buffer.isBuffer(req.body)
       ? req.body
       : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}), 'utf8');
@@ -449,21 +557,22 @@ function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
       rememberWebhook(eventId);
       return res.status(200).json({ status: 'duplicate' });
     }
+    // 3.56: replay protection that holds across both URLs, every node and restarts (unique event id).
+    if (eventId && typeof repo.claimWebhookEvent === 'function' && !(await repo.claimWebhookEvent(eventId, { event: eventType, orderId: order ? order.orderId : '', url: 'membership' }))) {
+      rememberWebhook(eventId);
+      return res.status(200).json({ status: 'duplicate' });
+    }
 
-    if (order && order.userId) {
+    // A test-mode event never settles a live order (and the other way round).
+    if (order && order.userId && (!order.mode || order.mode === mode || !['test', 'live'].includes(order.mode))) {
       if (eventType === 'payment.captured' || eventType === 'order.paid') {
         if (order.status !== 'PAID') {
-          await activateMembershipFromOrder({
-            repo,
-            order,
-            paymentId: payment.id || '',
-            method: String(payment.method || 'upi').toUpperCase(),
-            source: 'razorpay_webhook',
-            convoys,
-          });
+          // 3.56: the same settle as /api/subscription/webhook for a membership order (website or app):
+          // amount check, atomic claim, activation, coupon redemption, SUBSCRIPTION_ACTIVATED to the app.
+          await settlePaidOrder({ repo, order, paymentId: payment.id || '', payment, method: String(payment.method || 'upi').toUpperCase(), source: 'razorpay_webhook', convoys, hub });
         }
       } else if (eventType === 'payment.failed') {
-        if (order.status !== 'PAID') {
+        if (order.status !== 'PAID' && order.status !== 'SETTLING') {
           await repo.updateRazorpayOrder(order.orderId, {
             status: 'FAILED',
             failureReason: String(payment.error_description || payment.error_reason || 'Payment failed').slice(0, 300),
@@ -484,7 +593,8 @@ function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
         });
         if (fullyRefunded) {
           const mem = await repo.findMembershipByOwner(order.userId);
-          if (mem && mem.category === order.category) {
+          // Only the plan this order bought (a later order's plan is not touched).
+          if (mem && mem.category === order.category && (!mem.orderId || mem.orderId === order.orderId)) {
             mem.status = 'EXPIRED';
             mem.validUntil = Date.now();
             mem.statusReason = 'REFUNDED';
@@ -520,7 +630,7 @@ async function inHostedGroupRide(repo, uid, activeTrip) {
   return !Number.isFinite(cap) || cap >= 2;
 }
 
-function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) {
+function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin, hub = null }) {
   /**
    * GET /api/membership/my
    */
@@ -594,8 +704,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
    * The order uses the same computation. A refused coupon never blocks the quote: the answer is the
    * full price with `couponError` ({ code, error, reason }) so the app can show it under the field.
    */
-  r.get('/membership/quote', wrap(async (req, res) => {
+  r.get('/membership/quote', couponLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
+    if ((req.query.coupon || req.query.code) && sec.refuseCouponGuessing(res, req)) return;
     const category = String(req.query.plan || req.query.category || '').trim();
     const catalog = await repo.getMembershipCatalog();
     if (refusePlan(res, category, catalog)) return;
@@ -604,7 +715,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     }
     // Only a bigger plan while a paid plan runs (3.55).
     if (refuseChange(res, await repo.findMembershipByOwner(uid).catch(() => null), category)) return;
-    const { quote, couponError } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: req.query.coupon || req.query.code, catalog });
+    const rawCode = typeof (req.query.coupon || req.query.code) === 'string' ? (req.query.coupon || req.query.code) : '';
+    const { quote, couponError, guess } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode, catalog });
+    if (guess) sec.couponGuard.failed(req);
     res.set('Cache-Control', 'no-store').json({ ...quote, couponError, paymentsEnabled: config.paymentsEnabled });
   }));
 
@@ -614,11 +727,12 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
    * discount plus the full quote (credit included) the order would charge. A refused code answers
    * 400 { valid: false, error, reason } (404 when the code does not exist).
    */
-  r.post('/membership/validate-coupon', wrap(async (req, res) => {
+  r.post('/membership/validate-coupon', couponLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
     const { code } = req.body || {};
+    if (sec.refuseCouponGuessing(res, req)) return;
     const category = String((req.body || {}).category || (req.body || {}).categoryId || '').trim();
-    if (!code || !String(code).trim() || !category) {
+    if (typeof code !== 'string' || !code.trim() || !category) {
       return res.status(400).json({ valid: false, error: 'code and category are required', reason: 'BAD_REQUEST' });
     }
     const catalog = await repo.getMembershipCatalog();
@@ -628,7 +742,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       return res.status(status).json({ valid: false, ...body });
     }
     if (refuseChange(res, await repo.findMembershipByOwner(uid).catch(() => null), category, Date.now(), { valid: false })) return;
-    const { quote, coupon, couponError } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: String(code), catalog });
+    const { quote, coupon, couponError, guess } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: String(code), catalog });
+    if (guess) sec.couponGuard.failed(req);
     if (couponError) {
       return res.status(couponError.reason === 'COUPON_NOT_FOUND' ? 404 : 400).json({ valid: false, error: couponError.error, reason: couponError.reason, quote });
     }
@@ -658,9 +773,10 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
    * Dedicated, secure zero-payment activation for a 100% coupon record (bound to the plan, once per rider).
    * Does NOT create a Razorpay order or invoke gateway checkout.
    */
-  r.post('/membership/activate-free', actionLimiter, wrap(async (req, res) => {
+  r.post('/membership/activate-free', actionLimiter, couponLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
     const { category, couponCode } = req.body || {};
+    if (sec.refuseCouponGuessing(res, req)) return;
 
     if (!category) {
       return res.status(400).json({ error: 'category is required', reason: 'BAD_REQUEST' });
@@ -700,25 +816,36 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       if (refuseChange(res, existing, category, now)) return;
 
       // Every free activation is paid for by a real coupon record (no built-in shortcut codes).
-      const matchedCoupon = await repo.findCoupon(cleanCoupon);
+      const matchedCoupon = /^[A-Z0-9_-]{1,32}$/.test(cleanCoupon) ? await repo.findCoupon(cleanCoupon) : null;
       if (!matchedCoupon) {
-        return res.status(404).json({ error: `Coupon ${cleanCoupon} not found`, reason: 'COUPON_NOT_FOUND' });
+        sec.couponGuard.failed(req);
+        return res.status(404).json({ error: "We couldn't find that code", reason: 'COUPON_NOT_FOUND' });
       }
       const block = freeCouponBlock(matchedCoupon, { uid, userDoc: req.dbUser, category, plan });
-      if (block) return res.status(400).json(block);
-
+      if (block) {
+        if (block.reason === 'COUPON_NOT_FOUND') { sec.couponGuard.failed(req); return res.status(404).json(block); }
+        return res.status(400).json(block);
+      }
       if (existing && existing.members && Object.keys(existing.members).length + 1 > plan.capacity) {
         return res.status(409).json({
           error: `Cannot switch to ${plan.name}: current group has ${Object.keys(existing.members).length + 1} members which exceeds new capacity of ${plan.capacity}. Please remove members first.`,
           reason: 'CAPACITY_CONFLICT',
         });
       }
+      const freePrice = pricing.effectivePrice(plan, now).priceInr;
+      // Atomic use of the coupon BEFORE anything is activated (caps hold under concurrency).
+      const freeOrderId = `mem_free_${now}_${crypto.randomBytes(4).toString('hex')}`;
+      if (typeof repo.reserveCouponSlot === 'function') {
+        const resv = await repo.reserveCouponSlot(matchedCoupon.code, { userId: uid, orderId: freeOrderId, category, categoryName: plan.name, originalPrice: freePrice, discountAmount: freePrice, finalAmount: 0, userDoc: req.dbUser });
+        if (!resv.reserved) return res.status(400).json({ error: resv.error || "This code couldn't be applied", reason: 'COUPON_RESERVATION_FAILED' });
+      }
+
 
       const isUpgrade = existing && existing.status === 'ACTIVE' && existing.category !== category;
-      const orderId = `mem_free_${now}_${crypto.randomBytes(4).toString('hex')}`;
+      const orderId = freeOrderId;
       // The same price computation as the order: the coupon pays the whole price, any upgrade credit
       // left over adds days, a downgrade starts when the current paid period ends.
-      const quote = pricing.computeQuote({ catalog, planId: category, membership: existing, coupon: matchedCoupon, couponDiscount: plan.monthlyPriceInr, now });
+      const quote = pricing.computeQuote({ catalog, planId: category, membership: existing, coupon: matchedCoupon, couponDiscount: freePrice, now });
 
       const orderDoc = {
         orderId,
@@ -734,7 +861,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         method: 'COUPON',
         transactionType: isUpgrade ? 'UPGRADE' : 'COUPON_ACTIVATION',
         originalPrice: plan.monthlyPriceInr,
-        discountAmount: plan.monthlyPriceInr,
+        discountAmount: freePrice,
         quote,
         createdAt: now,
         paidAt: now,
@@ -743,11 +870,12 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       const membershipDoc = await activateMembershipFromOrder({
         repo, order: orderDoc, paymentId: `free_${orderId}`, method: 'COUPON', source: 'zero_amount_activation', userDoc: req.dbUser, convoys,
       });
+      notifyPlanActivated({ hub, userId: uid, membership: membershipDoc, order: orderDoc, source: 'activate_free' });
       if (isUpgrade && Array.isArray(membershipDoc.upgradeHistory) && membershipDoc.upgradeHistory.length) {
         membershipDoc.upgradeHistory[membershipDoc.upgradeHistory.length - 1].couponCode = cleanCoupon;
       }
 
-      // Counts the redemption (redemption row + coupon usage) so the per-rider and total limits hold.
+      // The use was counted by the ₹0 reservation above (idempotent per order: never twice).
       if (typeof repo.confirmCouponRedemption === 'function') {
         await repo.confirmCouponRedemption(orderId, {
           paymentId: `free_${orderId}`,
@@ -756,7 +884,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
           userDoc: req.dbUser,
         });
       } else if (typeof repo.recordCouponUsage === 'function') {
-        await repo.recordCouponUsage(matchedCoupon.code, { userId: uid, orderId, discountAmount: plan.monthlyPriceInr });
+        await repo.recordCouponUsage(matchedCoupon.code, { userId: uid, orderId, discountAmount: freePrice });
       }
 
       return res.status(201).json({
@@ -779,11 +907,16 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
    * A typed code that is refused answers 400/404 with its reason (the app then drops the code and
    * the rider can pay the normal price).
    */
-  r.post('/membership/order', actionLimiter, wrap(async (req, res) => {
+  r.post('/membership/order', actionLimiter, couponLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
     const body = req.body || {};
     const category = String(body.category || body.categoryId || '').trim();
+    // One code per order (coupons never stack): a list of codes is refused, never half-applied.
+    if (Array.isArray(body.offerCode) || Array.isArray(body.couponCode) || (body.offerCode && body.couponCode && body.offerCode !== body.couponCode)) {
+      return res.status(400).json({ error: 'Only one code can be used per order', reason: 'ONE_CODE_ONLY' });
+    }
     const offerCode = typeof body.offerCode === 'string' ? body.offerCode : (typeof body.couponCode === 'string' ? body.couponCode : '');
+    if (offerCode.trim() && sec.refuseCouponGuessing(res, req)) return;
 
     const catalog = await repo.getMembershipCatalog();
     if (refusePlan(res, category, catalog)) return;
@@ -811,11 +944,18 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     let matchedCoupon = null;
     let couponDiscount = 0;
     const cleanOffer = offerCode.trim().toUpperCase();
+    // 3.56: the plan's price now (offer within its window, else list) and the price floor.
+    const rules = await rulesOf(repo);
+    const price = pricing.effectivePrice(plan, now);
     if (cleanOffer) {
-      const coup = typeof repo.findCoupon === 'function' ? await repo.findCoupon(cleanOffer) : null;
+      const coup = typeof repo.findCoupon === 'function' && /^[A-Z0-9_-]{1,32}$/.test(cleanOffer) ? await repo.findCoupon(cleanOffer) : null;
       if (coup) {
-        const chk = pricing.checkCoupon(coup, { uid, userDoc: req.dbUser, planId: category, baseInr: plan.monthlyPriceInr });
-        if (!chk.ok) return res.status(400).json({ error: chk.error, reason: chk.reason });
+        const chk = pricing.checkCoupon(coup, { uid, userDoc: req.dbUser, planId: category, baseInr: price.priceInr, offerActive: !!price.offer, minPayableInr: rules.minPayableInr });
+        if (!chk.ok) {
+          const refusal = sec.couponRefusal(chk);
+          if (sec.isGuess(chk)) sec.couponGuard.failed(req);
+          return res.status(refusal.reason === 'COUPON_NOT_FOUND' ? 404 : 400).json(refusal);
+        }
         matchedCoupon = coup;
         appliedOffer = coup.code;
         couponDiscount = chk.discountInr;
@@ -824,22 +964,23 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         if (off && off.isActive !== false && (!off.expiresAt || off.expiresAt > now)) {
           if (off.discountPercent === 100 || off.discountType === 'free') {
             appliedOffer = off.id;
-            couponDiscount = Number(plan.monthlyPriceInr) || 0;
+            couponDiscount = price.priceInr;
           } else if (off.discountPercent) {
             appliedOffer = off.id;
-            couponDiscount = Math.round(((Number(plan.monthlyPriceInr) || 0) * Number(off.discountPercent)) / 100);
+            couponDiscount = pricing.flooredDiscount(null, price.priceInr, rules.minPayableInr, Math.round((price.priceInr * Number(off.discountPercent)) / 100));
           }
         }
       }
       // A code the rider typed that matches no coupon or live offer is refused, never ignored
       // (the rider must not pay full price believing a discount applied).
       if (!appliedOffer) {
+        sec.couponGuard.failed(req);
         return res.status(404).json({ error: "We couldn't find that code", reason: 'COUPON_NOT_FOUND' });
       }
     }
 
     let quote = pricing.computeQuote({
-      catalog, planId: category, membership: existingRaw, coupon: matchedCoupon || (appliedOffer ? { code: appliedOffer } : null), couponDiscount, now,
+      catalog, planId: category, membership: existingRaw, coupon: matchedCoupon || (appliedOffer ? { code: appliedOffer } : null), couponDiscount, now, minPayableInr: rules.minPayableInr,
     });
     if (config.paymentsEnabled === false) quote = { ...quote, payableInr: 0, isFree: true };
     const finalAmountInr = quote.payableInr;
@@ -866,7 +1007,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       orderId: rid,
       category,
       categoryName: plan.name,
-      originalPrice: plan.monthlyPriceInr,
+      originalPrice: price.priceInr,
       discountAmount: quote.couponDiscountInr,
       finalAmount: final,
       userDoc: req.dbUser,
@@ -896,6 +1037,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         discountAmount: quote.couponDiscountInr,
         creditInr: quote.creditInr,
         quote,
+        channel: orderChannel(req),
         transactionType: existing && existing.status === 'ACTIVE' && existing.category !== category ? 'UPGRADE' : 'COUPON_ACTIVATION',
         createdAt: now,
         paidAt: now,
@@ -911,6 +1053,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         userDoc: req.dbUser,
         convoys,
       });
+      notifyPlanActivated({ hub, userId: uid, membership, order: orderDoc, source: 'free_offer' });
 
       // A coupon's usage was counted by its ₹0 reservation above; an offer counts one redemption.
       if (appliedOffer && !matchedCoupon && typeof repo.recordOfferRedemption === 'function') {
@@ -939,6 +1082,10 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     } catch (e) {
       return res.status(e.status || 500).json({ error: e.message, code: e.code || 'GATEWAY_ERROR' });
     }
+    // 3.56: Razorpay's order must say exactly what we priced (amount in paise, INR).
+    if (Number(rzpOrder.amount) !== amountInPaise || String(rzpOrder.currency || 'INR').toUpperCase() !== 'INR' || !sec.RZP_ID.test(String(rzpOrder.id || ''))) {
+      return res.status(502).json({ error: 'The payment provider returned a different amount. Nothing was charged.', code: 'GATEWAY_AMOUNT_MISMATCH' });
+    }
 
     // Concurrency-safe coupon reservation for paid orders using rzpOrder.id
     if (matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
@@ -961,14 +1108,22 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       keyId: rzpOrder.keyId,
       offerCode: appliedOffer,
       originalPrice: plan.monthlyPriceInr,
+      listPriceInr: quote.listPriceInr,
+      offerPriceInr: quote.offer ? quote.offer.priceInr : null,
+      offerLabel: quote.offer ? quote.offer.label : null,
       discountAmount: quote.couponDiscountInr,
       creditInr: quote.creditInr,
       quote,
+      channel: orderChannel(req),
       createdAt: now,
+      // 3.56: payable for ORDER_TTL_MS (Checkout closes itself earlier); the coupon hold lasts as long.
+      expiresAt: now + sec.ORDER_TTL_MS,
     };
     await repo.saveRazorpayOrder(orderDoc);
 
     res.status(201).json({
+      expiresAt: orderDoc.expiresAt,
+      checkoutTimeoutSeconds: sec.CHECKOUT_TIMEOUT_S,
       orderId: rzpOrder.id,
       amountInPaise,
       amountInr: finalAmountInr,
@@ -990,27 +1145,36 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     const uid = req.user.userId;
     const { orderId, paymentId, signature } = req.body || {};
 
-    if (!orderId || !paymentId) {
+    if (typeof orderId !== 'string' || typeof paymentId !== 'string' || !orderId || !paymentId) {
       return res.status(400).json({ error: 'orderId and paymentId are required', reason: 'BAD_REQUEST' });
+    }
+    if (!sec.RZP_ID.test(orderId) || !sec.RZP_ID.test(paymentId)) {
+      return res.status(400).json({ error: 'Invalid payment details', reason: 'BAD_REQUEST' });
     }
 
     const order = await repo.findRazorpayOrder(orderId);
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found in ledger', reason: 'ORDER_NOT_FOUND' });
+    // 3.56: an order is verified only by the rider who created it, for every account (admins included):
+    // a payment is never credited to, or activated for, anyone else.
+    if (!order || order.userId !== uid) {
+      return res.status(order ? 403 : 404).json(order
+        ? { error: 'Order does not belong to this user', reason: 'ORDER_USER_MISMATCH' }
+        : { error: 'Order not found in ledger', reason: 'ORDER_NOT_FOUND' });
+    }
+    if (!isMembershipOrder(order) || order.isFree) {
+      return res.status(400).json({ error: 'This order is not a plan payment', reason: 'NOT_A_PLAN_ORDER' });
     }
 
-    if (order.userId !== uid && req.user.role !== 'MASTER_ADMIN') {
-      return res.status(403).json({ error: 'Order does not belong to this user', reason: 'ORDER_USER_MISMATCH' });
-    }
-
-    // Idempotency: if already paid, return active membership
+    // Idempotency: an order already paid answers the same, and never for a different payment.
     if (order.status === 'PAID') {
+      if (order.paymentId && order.paymentId !== paymentId) {
+        return res.status(409).json({ error: 'This order was paid with another payment.', reason: 'REPLAY_ATTACK_DETECTED' });
+      }
       const existing = await repo.findMembershipByOwner(uid);
       return res.json({
         success: true,
         message: 'Order already processed and membership active',
         membership: existing,
-        order,
+        order: publicOrder(order),
       });
     }
 
@@ -1025,9 +1189,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       }
     }
 
-    // Cryptographic HMAC signature check
+    // Cryptographic HMAC signature check (constant time, the keys of the order's own mode)
     const gateway = getRazorpayGateway(repo);
-    const isValid = await gateway.verifySignature({
+    const isValid = typeof signature === 'string' && sec.SIGNATURE.test(signature) && await gateway.verifySignature({
       orderId,
       paymentId,
       signature,
@@ -1035,14 +1199,16 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     });
 
     if (!isValid) {
-      await repo.updateRazorpayOrder(order.orderId, {
-        status: 'FAILED',
-        failureReason: 'Invalid cryptographic HMAC signature',
-        lastPaymentId: paymentId,
-        updatedAt: Date.now(),
-      });
-      if (order.offerCode && typeof repo.releaseCouponReservation === 'function') {
-        await repo.releaseCouponReservation(order.orderId);
+      if (order.status !== 'SETTLING') {
+        await repo.updateRazorpayOrder(order.orderId, {
+          status: 'FAILED',
+          failureReason: 'Invalid cryptographic HMAC signature',
+          lastPaymentId: paymentId,
+          updatedAt: Date.now(),
+        });
+        if (order.offerCode && typeof repo.releaseCouponReservation === 'function') {
+          await repo.releaseCouponReservation(order.orderId);
+        }
       }
       return res.status(400).json({
         error: 'Invalid payment signature. Verification failed.',
@@ -1050,38 +1216,46 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       });
     }
 
-    const membership = await activateMembershipFromOrder({
+    // 3.56: the payment as Razorpay has it must match the order (amount in paise, currency, captured).
+    // When Razorpay cannot be asked right now, the signature (over the order WE created at our amount) stands.
+    let payment = null;
+    if (typeof gateway.fetchPayment === 'function') {
+      try { payment = await gateway.fetchPayment(paymentId, order.mode); } catch { payment = null; }
+    }
+
+    const out = await settlePaidOrder({
       repo,
       order,
       paymentId,
+      payment,
       method: 'RAZORPAY',
-      source: 'app_verification',
+      source: orderChannel(req) === 'web' ? 'web_verification' : 'app_verification',
       userDoc: req.dbUser,
       convoys,
+      hub,
     });
-
-    if (order.offerCode) {
-      if (typeof repo.confirmCouponRedemption === 'function') {
-        await repo.confirmCouponRedemption(orderId, {
-          paymentId,
-          method: 'RAZORPAY',
-          paidAt: Date.now(),
-          userDoc: req.dbUser,
-        });
-      } else if (typeof repo.recordCouponUsage === 'function') {
-        await repo.recordCouponUsage(order.offerCode, {
-          userId: uid,
-          orderId,
-          discountAmount: order.discountAmount || 0,
-        });
+    if (out.status === 'mismatch') {
+      return res.status(400).json({ error: 'The payment does not match this order. Nothing was activated.', reason: out.reason });
+    }
+    if (out.status === 'refunded') {
+      return res.status(409).json({ error: 'This order was refunded.', reason: 'ORDER_REFUNDED' });
+    }
+    if (out.status === 'busy') {
+      return res.status(409).json({ error: 'This payment is being confirmed. Check your plan in a moment.', reason: 'SETTLEMENT_IN_PROGRESS' });
+    }
+    const fresh = await repo.findRazorpayOrder(orderId);
+    if (out.status === 'already') {
+      if (fresh && fresh.paymentId && fresh.paymentId !== paymentId) {
+        return res.status(409).json({ error: 'This order was paid with another payment.', reason: 'REPLAY_ATTACK_DETECTED' });
       }
+      return res.json({ success: true, message: 'Order already processed and membership active', membership: await repo.findMembershipByOwner(uid), order: publicOrder(fresh) });
     }
 
     res.json({
       success: true,
       message: 'Payment verified and membership activated successfully',
-      membership,
-      order: await repo.findRazorpayOrder(orderId),
+      membership: out.membership,
+      order: publicOrder(fresh),
     });
   }));
 
@@ -1133,15 +1307,17 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
           return res.status(409).json({ error: 'This payment has already been credited to another order. Replay rejected.', reason: 'REPLAY_ATTACK_DETECTED' });
         }
       }
-      const isValid = await getRazorpayGateway(repo).verifySignature({ orderId, paymentId, signature, mode: order.mode });
+      const isValid = typeof signature === 'string' && await getRazorpayGateway(repo).verifySignature({ orderId, paymentId, signature, mode: order.mode });
       if (!isValid) {
         return res.status(400).json({ error: 'Invalid payment signature. Verification failed.', reason: 'INVALID_PAYMENT_SIGNATURE' });
       }
-      const membership = await activateMembershipFromOrder({ repo, order, paymentId, method: 'RAZORPAY', source: 'purchase', userDoc: req.dbUser, convoys });
-      if (order.offerCode && typeof repo.confirmCouponRedemption === 'function') {
-        await repo.confirmCouponRedemption(orderId, { paymentId, method: 'RAZORPAY', paidAt: Date.now(), userDoc: req.dbUser });
+      // 3.56: the same atomic settle as /membership/verify (one activation per order, never after a refund).
+      const out = await settlePaidOrder({ repo, order, paymentId, method: 'RAZORPAY', source: 'purchase', userDoc: req.dbUser, convoys, hub });
+      if (out.status === 'refunded') return res.status(409).json({ error: 'This order was refunded.', reason: 'ORDER_REFUNDED' });
+      if (out.status !== 'activated') {
+        return res.json({ message: 'Order already processed and membership active', membership: effectiveMembership(await repo.findMembershipByOwner(uid), Date.now()), isAlreadyActive: true });
       }
-      return res.status(existing ? 200 : 201).json({ message: 'Membership activated successfully', membership });
+      return res.status(existing ? 200 : 201).json({ message: 'Membership activated successfully', membership: out.membership });
     }
 
     // Free activation: a 100% coupon record or free offer (or payments switched off). Never stacks months.
@@ -1156,7 +1332,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       coupon = typeof repo.findCoupon === 'function' ? await repo.findCoupon(cleanOffer) : null;
       if (coupon) {
         const block = freeCouponBlock(coupon, { uid, userDoc: req.dbUser, category, plan });
-        if (block) return res.status(400).json(block);
+        if (block) return res.status(block.reason === 'COUPON_NOT_FOUND' ? 404 : 400).json(block);
       } else if (typeof repo.findOffer === 'function') {
         const off = await repo.findOffer(cleanOffer);
         if (off && off.isActive !== false && (!off.expiresAt || off.expiresAt > now) && (off.discountPercent === 100 || off.discountType === 'free')) {
@@ -1176,6 +1352,11 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
 
     const appliedOffer = coupon ? coupon.code : offerId;
     const freeOrderId = `mem_free_${now}_${crypto.randomBytes(4).toString('hex')}`;
+    if (coupon && typeof repo.reserveCouponSlot === 'function') {
+      const fp = pricing.effectivePrice(plan, now).priceInr;
+      const resv = await repo.reserveCouponSlot(coupon.code, { userId: uid, orderId: freeOrderId, category, categoryName: plan.name, originalPrice: fp, discountAmount: fp, finalAmount: 0, userDoc: req.dbUser });
+      if (!resv.reserved) return res.status(400).json({ error: resv.error || "This code couldn't be applied", reason: 'COUPON_RESERVATION_FAILED' });
+    }
     const orderDoc = {
       orderId: freeOrderId,
       userId: uid,
@@ -1233,6 +1414,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         createdAt: o.createdAt || 0,
         refundStatus: o.refundStatus || null,
         refundedAmount: o.refundedAmount || 0,
+        offerLabel: o.offerLabel || (o.quote && o.quote.offer && o.quote.offer.label) || null,
       })),
       paymentHistory: user?.paymentHistory || [],
     });
@@ -1444,7 +1626,25 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
 
   r.get('/admin/membership/catalog', requireAdmin, wrap(async (req, res) => {
     const catalog = await repo.getMembershipCatalog();
-    res.json({ catalog });
+    const now = Date.now();
+    const effective = {};
+    for (const [id, c] of Object.entries(catalog || {})) effective[id] = pricing.effectivePrice(c, now);
+    res.set('Cache-Control', 'no-store').json({ catalog, effective, rules: await rulesOf(repo) });
+  }));
+
+  // 3.56 pricing rules: the price floor coupons can never go below (₹0 = none; Razorpay's own minimum is ₹1).
+  r.get('/admin/pricing-rules', requireAdmin, wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store').json({ rules: await rulesOf(repo) });
+  }));
+  r.put('/admin/pricing-rules', requireAdmin, wrap(async (req, res) => {
+    const v = Number((req.body || {}).minPayableInr);
+    if (!Number.isInteger(v) || v < 0 || v > 100000) return res.status(400).json({ error: 'minPayableInr must be a whole number of rupees from 0 to 100000', reason: 'INVALID_RULES', field: 'minPayableInr' });
+    const before = await rulesOf(repo);
+    const saved = await repo.setPricingRules({ minPayableInr: v }, req.user.email || req.user.userId);
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({ by: req.user?.email || req.user?.userId || 'admin', byUserId: req.user?.userId || null, action: 'pricing.rules_update', target: 'pricing_rules', details: { minPayableInrBefore: before.minPayableInr, minPayableInr: saved.minPayableInr }, at: Date.now() });
+    }
+    res.json({ rules: { minPayableInr: saved.minPayableInr } });
   }));
 
   r.put('/admin/membership/catalog', requireAdmin, wrap(async (req, res) => {
@@ -1477,7 +1677,35 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         continue;
       }
       if (typeof c.name !== 'string' || !c.name.trim()) return bad('name');
-      if (!Number.isFinite(Number(c.monthlyPriceInr)) || Number(c.monthlyPriceInr) < 0) return bad('monthlyPriceInr');
+      // 3.56: listPriceInr (MRP) is the list price; monthlyPriceInr is kept equal to it for older readers.
+      // When both are sent, the one that was edited (differs from the stored list price) wins.
+      const storedList = current[id] ? Number(current[id].listPriceInr !== undefined ? current[id].listPriceInr : current[id].monthlyPriceInr) : NaN;
+      if (c.listPriceInr !== undefined && c.listPriceInr !== null && c.listPriceInr !== '' && (c.monthlyPriceInr === undefined || Number(c.listPriceInr) !== storedList)) c.monthlyPriceInr = c.listPriceInr;
+      if (!Number.isFinite(Number(c.monthlyPriceInr)) || Number(c.monthlyPriceInr) < 0 || !Number.isInteger(Number(c.monthlyPriceInr))) return bad('listPriceInr');
+      c.listPriceInr = Number(c.monthlyPriceInr);
+      // Offer: { priceInr, label, startAt, endAt } (times: epoch ms, ISO with a zone, or India-time dates).
+      if (c.offer === undefined) {
+        // An editor that does not send the offer keeps the stored one.
+        c.offer = (current[id] && current[id].offer) || null;
+      } else if (c.offer === null || c.offer === false) {
+        c.offer = null;
+      } else {
+        const o = c.offer;
+        if (typeof o !== 'object' || Array.isArray(o)) return bad('offer');
+        const price = Number(o.priceInr);
+        if (!Number.isInteger(price) || price < 1) return bad('offer.priceInr');
+        if (price >= c.listPriceInr) return res.status(400).json({ error: `Plan ${id}: the offer price must be below the list price.`, reason: 'INVALID_CATALOG', plan: id, field: 'offer.priceInr' });
+        const rulesNow = await rulesOf(repo);
+        if (price < rulesNow.minPayableInr) return res.status(400).json({ error: `Plan ${id}: the offer price is below the minimum price (₹${rulesNow.minPayableInr}).`, reason: 'INVALID_CATALOG', plan: id, field: 'offer.priceInr' });
+        const label = typeof o.label === 'string' ? o.label.replace(/[\u0000-\u001f\u007f<>]/g, '').trim() : '';
+        if (!label || label.length > 40) return bad('offer.label');
+        const startAt = o.startAt ? sec.istTime(o.startAt, 'start') : 0;
+        const endAt = o.endAt ? sec.istTime(o.endAt, 'end') : 0;
+        if ((o.startAt && !startAt) || (o.endAt && !endAt)) return bad('offer.window');
+        if (startAt && endAt && endAt <= startAt) return res.status(400).json({ error: `Plan ${id}: the offer must end after it starts.`, reason: 'INVALID_CATALOG', plan: id, field: 'offer.window' });
+        if (endAt && endAt <= Date.now()) return res.status(400).json({ error: `Plan ${id}: the offer end is in the past.`, reason: 'INVALID_CATALOG', plan: id, field: 'offer.window' });
+        c.offer = { priceInr: price, label, startAt: startAt || null, endAt: endAt || null };
+      }
       if (c.billingPeriodDays !== undefined && (!Number.isInteger(Number(c.billingPeriodDays)) || Number(c.billingPeriodDays) < 1 || Number(c.billingPeriodDays) > 3660)) return bad('billingPeriodDays');
       if (c.capacity !== undefined && (!Number.isInteger(Number(c.capacity)) || Number(c.capacity) < 1)) return bad('capacity');
       if (c.features !== undefined && (!Array.isArray(c.features) || c.features.length > 30 || c.features.some((f) => typeof f !== 'string' || f.length > 80))) return bad('features');
@@ -1489,6 +1717,18 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     await repo.setMembershipCatalog(catalog, req.user.email || req.user.userId);
     if (typeof repo.addAuditEntry === 'function') {
       await repo.addAuditEntry({ by: req.user?.email || req.user?.userId || 'admin', action: 'membership.catalog_update', target: 'catalog', details: { catalog }, at: Date.now() });
+      // 3.56: one plain entry per plan whose list price or offer changed (what -> what).
+      for (const [id, c] of Object.entries(catalog)) {
+        const was = current[id] || {};
+        const wasList = Number(was.listPriceInr !== undefined ? was.listPriceInr : was.monthlyPriceInr) || 0;
+        const wasOffer = was.offer || null;
+        if (wasList !== (Number(c.listPriceInr) || 0) || JSON.stringify(wasOffer) !== JSON.stringify(c.offer || null)) {
+          await repo.addAuditEntry({
+            by: req.user?.email || req.user?.userId || 'admin', byUserId: req.user?.userId || null, action: 'pricing.plan_price', target: id,
+            details: { listPriceInrBefore: wasList, listPriceInr: Number(c.listPriceInr) || 0, offerBefore: wasOffer, offer: c.offer || null }, at: Date.now(),
+          });
+        }
+      }
     }
     res.json({ message: 'Membership catalog updated successfully.', catalog });
   }));
@@ -1651,7 +1891,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
 
     if (fullyRefunded && order.userId) {
       const mem = await repo.findMembershipByOwner(order.userId);
-      if (mem && mem.category === order.category) {
+      if (mem && mem.category === order.category && (!mem.orderId || mem.orderId === order.orderId)) {
         mem.status = 'EXPIRED';
         mem.validUntil = Date.now();
         mem.statusReason = 'REFUNDED';
@@ -1995,4 +2235,6 @@ module.exports = {
   registerMembershipPublicRoutes,
   registerMembershipAuthRoutes,
   activateMembershipFromOrder,
+  settleMembershipPayment,
+  isMembershipOrder,
 };

@@ -290,6 +290,18 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
     return { id: data.id, amount: Number(data.amount) || amount, status: String(data.status || 'pending').toLowerCase(), mode: keys.mode };
   }
 
+  /**
+   * 3.56: one payment as Razorpay has it (GET /payments/:id with the keys of [mode]): order_id, amount
+   * (paise), currency, status. Throws a RazorpayError when Razorpay cannot answer.
+   */
+  async function fetchPayment(paymentId, mode) {
+    if (!paymentId || !/^[A-Za-z0-9_]{6,64}$/.test(String(paymentId))) throw new RazorpayError(400, 'Bad payment id', 'BAD_PAYMENT_ID');
+    const keys = await keysFor(mode);
+    const data = await call(keys, 'GET', `/payments/${encodeURIComponent(paymentId)}`);
+    if (!data || typeof data !== 'object' || !data.id) throw new RazorpayError(500, 'Razorpay returned no payment', 'RAZORPAY_ERROR');
+    return data;
+  }
+
   /** Checks the [mode] pair against Razorpay. */
   async function testKeys(mode) {
     const keys = await keysFor(mode);
@@ -329,6 +341,7 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
     update,
     createOrder,
     refundPayment,
+    fetchPayment,
     testKeys,
     verifySignature,
     verifyWebhook,

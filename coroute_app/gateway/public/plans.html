@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plans and pricing | Coroute</title>
+<meta name="description" content="CoRoute plans: solo riding is free in the app; group plans for the host of a group ride. Choose a plan, apply a code and pay securely with Razorpay.">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="__ORIGIN__/plans">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Coroute">
+<meta property="og:title" content="Plans and pricing | Coroute">
+<meta property="og:description" content="Solo riding is free. Group plans for the host of a group ride, paid on the website.">
+<meta property="og:url" content="__ORIGIN__/plans">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Plans and pricing | Coroute">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<!-- Strict CSP on this page: no inline script; Razorpay Checkout is the only third-party script (src/web_shop.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/plans.js" defer></script>
+</head>
+<body data-page="plans">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo sh-hero">
+    <div class="container">
+      <div class="page-hero__inner">
+        <p class="eyebrow">Plans</p>
+        <h1>Plans for every kind of ride.</h1>
+        <p class="t-lead">Solo riding is free in the app, always. A group plan is only for the host of a group ride, and it covers everyone in it. Pay here and the app updates on its own.</p>
+      </div>
+      <!-- Who is signed in (plans.js; textContent only). -->
+      <div class="sh-who" id="pl-who" aria-live="polite">
+        <span class="sh-who__text" id="pl-who-text">Sign in to see your plan and your price.</span>
+        <span class="sh-who__actions" id="pl-who-actions"><a class="btn btn--secondary btn--sm" href="/signin?next=%2Fplans">Sign in</a></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight sh-plans" aria-labelledby="pl-list-title">
+    <div class="container">
+      <h2 class="sr-only" id="pl-list-title">Choose a plan</h2>
+      <ol class="sh-steps" role="list" aria-label="Steps">
+        <li class="is-current" id="pl-step-1"><span>1</span>Choose a plan</li>
+        <li id="pl-step-2"><span>2</span>Review your price</li>
+        <li id="pl-step-3"><span>3</span>Pay</li>
+      </ol>
+      <!-- Plan cards: GET /api/membership/catalog (the same list the app used). No price is written into this page. -->
+      <div class="sh-grid" id="pl-grid" aria-live="polite" aria-busy="true" data-state="loading">
+        <div class="sh-plan sh-plan--skel" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="sh-plan sh-plan--skel" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="sh-plan sh-plan--skel" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="sr-only">Loading plans.</p>
+        <noscript><p class="sh-msg">This page needs JavaScript to show plans and take a payment.</p></noscript>
+      </div>
+      <p class="sh-fine t-small t-muted"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Riders who join a group ride never pay: only the host's plan counts. Plans run for their period and do not renew on their own.</p>
+    </div>
+  </section>
+
+  <!-- Step 2 and 3: the server's quote and the payment. Hidden until a paid plan is chosen. -->
+  <section class="section section--surface sh-checkout" id="checkout" aria-labelledby="co-title" hidden>
+    <div class="container">
+      <div class="sh-co">
+        <div class="sh-co__main">
+          <p class="eyebrow" id="co-eyebrow">Review</p>
+          <h2 class="t-h2" id="co-title">Your plan</h2>
+          <p class="t-muted" id="co-sub"></p>
+
+          <form class="sh-coupon" id="co-coupon" novalidate>
+            <label class="form-label" for="co-code">Coupon code</label>
+            <div class="sh-coupon__row">
+              <input class="form-input" id="co-code" name="coupon" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" placeholder="Optional">
+              <button class="btn btn--secondary" type="submit" id="co-apply">Apply</button>
+              <button class="btn btn--ghost" type="button" id="co-remove" hidden>Remove</button>
+            </div>
+            <p class="sh-coupon__msg" id="co-code-msg" role="status" aria-live="polite"></p>
+          </form>
+
+          <div class="sh-coupon sh-receipt-email">
+            <label class="form-label" for="co-email">Email for your receipt</label>
+            <input class="form-input" id="co-email" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" maxlength="254" placeholder="Optional. Your account email is used otherwise">
+            <p class="t-xs t-faint">We email the receipt with the payment details after payment. Used for this order only.</p>
+          </div>
+
+          <div class="sh-notes" id="co-notes" hidden></div>
+        </div>
+
+        <aside class="sh-card sh-bill" aria-labelledby="co-bill-title">
+          <h3 class="sh-bill__title" id="co-bill-title">Price</h3>
+          <div class="sh-bill__body" id="co-bill" aria-live="polite">
+            <p class="t-small t-muted">Choose a plan above.</p>
+          </div>
+          <p class="sh-status" id="co-status" role="alert" aria-live="assertive"></p>
+          <button class="btn btn--primary btn--lg btn--block" type="button" id="co-pay" disabled>Continue to payment</button>
+          <p class="sh-bill__fine t-xs t-faint"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>Secure payment by Razorpay: UPI, cards or net banking. The amount is set by our server, and you get a receipt.</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- After a payment the server verified. -->
+  <section class="section sh-done" id="done" aria-labelledby="done-title" hidden>
+    <div class="container">
+      <div class="sh-card sh-result is-ok" tabindex="-1" id="done-card">
+        <span class="sh-result__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg></span>
+        <h2 class="t-h2" id="done-title">Payment received</h2>
+        <p class="t-lead" id="done-detail"></p>
+        <p class="t-small t-muted">Your CoRoute app updates on its own within a few seconds. If it was closed, it shows the new plan when you open it.</p>
+        <div class="sh-actions">
+          <a class="btn btn--primary" href="/account">See your account and receipt</a>
+          <a class="btn btn--secondary" href="coroute://subscription">Open the CoRoute app</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

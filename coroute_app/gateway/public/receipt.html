@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Receipt | Coroute</title>
+<meta name="description" content="A receipt for a CoRoute plan.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<!-- Strict CSP on this page: no inline script (src/web_shop.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/receipt.js" defer></script>
+</head>
+<body data-page="receipt" class="sh-receipt-page">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+  <section class="section section--tight">
+    <div class="container">
+      <p class="sh-back"><a class="link-arrow sh-back__link" href="/account"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg><span>Back to your account</span></a></p>
+      <article class="sh-card sh-receipt" id="rc" aria-busy="true" aria-labelledby="rc-title">
+        <header class="sh-receipt__head">
+          <div class="sh-receipt__brand">
+            <svg class="brand__mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><rect width="100" height="100" rx="22" fill="#1C2026"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#5FB3C4" stroke-width="15" stroke-linecap="round"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#1C2026" stroke-width="2.5" stroke-dasharray="5 5"/><circle cx="21.1" cy="72.3" r="9.5" fill="#1C2026"/><circle cx="21.1" cy="72.3" r="7" fill="#E7E3DC"/><circle cx="50" cy="50" r="9.5" fill="#1C2026"/><circle cx="50" cy="50" r="7" fill="#E7E3DC"/><circle cx="78.9" cy="27.7" r="9.5" fill="#1C2026"/><circle cx="78.9" cy="27.7" r="7" fill="#E9A55B"/></svg>
+            <div>
+              <p class="sh-receipt__seller" id="rc-seller">CoRoute</p>
+              <p class="t-xs t-faint" id="rc-site"></p>
+            </div>
+          </div>
+          <div class="sh-receipt__meta">
+            <h1 class="sh-receipt__title" id="rc-title">Receipt</h1>
+            <p class="t-xs t-faint" id="rc-no"></p>
+          </div>
+        </header>
+        <p class="sh-status" id="rc-status" role="alert"></p>
+        <div class="sh-receipt__body" id="rc-body" hidden>
+          <div class="sh-receipt__cols">
+            <div>
+              <p class="sh-receipt__label">Billed to</p>
+              <p id="rc-to"></p>
+            </div>
+            <div>
+              <p class="sh-receipt__label">Paid on</p>
+              <p id="rc-paid"></p>
+            </div>
+          </div>
+          <dl class="sh-bill__lines sh-receipt__lines" id="rc-lines"></dl>
+          <dl class="sh-facts sh-receipt__facts" id="rc-facts"></dl>
+          <p class="t-xs t-faint" id="rc-foot"></p>
+        </div>
+        <div class="sh-actions sh-noprint">
+          <button class="btn btn--primary" type="button" id="rc-print" disabled>Print or save as PDF</button>
+          <a class="btn btn--secondary" href="/account">Your account</a>
+        </div>
+      </article>
+    </div>
+  </section>
+</main>
+<!--#include footer-->
+</body>
+</html>

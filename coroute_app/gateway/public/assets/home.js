@@ -115,11 +115,14 @@
       Object.keys(cats).forEach(function (id) {
         var c = cats[id];
         if (!c || typeof c !== 'object' || c.isActive === false) return;
-        var price = pNum(c.monthlyPriceInr);
-        if (price === null) return;
+        // 3.56: the server's price now (offer within its window) and the list price it replaces.
+        var list = pNum(c.listPriceInr) !== null ? pNum(c.listPriceInr) : pNum(c.monthlyPriceInr);
+        var price = pNum(c.priceInr) !== null ? pNum(c.priceInr) : list;
+        if (price === null || list === null) return;
+        var ao = c.activeOffer && typeof c.activeOffer === 'object' && pNum(c.activeOffer.priceInr) === price && price < list && typeof c.activeOffer.label === 'string' ? c.activeOffer : null;
         var max = pNum(c.maxCapacity) || pNum(c.capacity) || 1;
         var min = pNum(c.minCapacity) || 1;
-        out.push({ id: String(c.id || id), name: cleanName(c), price: price, min: Math.round(min), max: Math.round(max),
+        out.push({ id: String(c.id || id), name: cleanName(c), price: price, list: list, offer: ao ? String(ao.label).slice(0, 40) : '', min: Math.round(min), max: Math.round(max),
           period: pNum(c.billingPeriodDays) || 30, desc: typeof c.description === 'string' ? c.description.trim() : '',
           features: Array.isArray(c.features) ? c.features.filter(function (f) { return typeof f === 'string'; }).slice(0, 8) : [] });
       });
@@ -168,9 +171,11 @@
         seats.appendChild(el('span', null, seatsText(p)));
         card.appendChild(seats);
         var price = el('p', 'px-card__price');
+        if (!free && p.offer) price.appendChild(el('s', 'px-card__was', '₹' + p.list.toLocaleString('en-IN', { maximumFractionDigits: 2 })));
         price.appendChild(el('span', 'px-card__amount', free ? 'Free' : '₹' + p.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })));
         price.appendChild(el('span', 'px-card__per', free ? (p.max <= 1 ? 'for solo riders, forever' : 'no payment needed') : (p.period === 30 ? 'per month' : 'per ' + p.period + ' days')));
         card.appendChild(price);
+        if (!free && p.offer) card.appendChild(el('p', 'px-card__offer', p.offer));
         if (p.desc) card.appendChild(el('p', 'px-card__desc', p.desc));
         if (p.features.length) {
           var ul = el('ul', 'px-card__list');
@@ -186,8 +191,9 @@
           card.appendChild(ul);
         }
         var cta = el('div', 'px-card__cta');
-        var a = el('a', 'btn btn--block ' + (card.classList.contains('px-card--accent') ? 'btn--primary' : 'btn--secondary'), free ? 'Download free' : (p.max > 1 ? 'Host from the app' : 'Choose in the app'));
-        a.setAttribute('href', '/get');
+        // 3.56: paid plans are bought on /plans (the app sells nothing); Community is the free download.
+        var a = el('a', 'btn btn--block ' + (card.classList.contains('px-card--accent') ? 'btn--primary' : 'btn--secondary'), free ? 'Download free' : 'Choose ' + p.name);
+        a.setAttribute('href', free ? '/get' : '/plans?plan=' + encodeURIComponent(p.id));
         cta.appendChild(a);
         card.appendChild(cta);
         priceList.appendChild(card);
@@ -199,7 +205,7 @@
       priceList.textContent = '';
       priceList.removeAttribute('aria-busy');
       priceList.setAttribute('data-state', state);
-      var p = el('p', 'px-msg', state === 'empty' ? 'Plans are being updated. See the current plans in the CoRoute app.' : 'Prices could not load right now. See the current plans in the CoRoute app.');
+      var p = el('p', 'px-msg', state === 'empty' ? 'Plans are being updated. See the plans page in a moment.' : 'Prices could not load right now. See the plans page in a moment.');
       priceList.appendChild(p);
     };
     getJSON('/api/membership/catalog').then(plansFrom).then(renderPlans).catch(function () { priceMessage('error'); });

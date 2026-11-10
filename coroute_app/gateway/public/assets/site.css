@@ -387,6 +387,14 @@ h3, h4, .t-h3, .t-h4 { letter-spacing: -0.01em; }
 .site-header__actions { display: flex; align-items: center; gap: var(--sp-8); }
 .site-header__cta { min-height: 44px; padding: 10px 18px; border-radius: var(--r-full); }
 .site-header__cta[aria-current="page"] { box-shadow: 0 0 0 2px var(--c-bg), 0 0 0 4px var(--c-brand); }
+/* 3.56 rider account (website shop): a quiet text link beside the CTA; in the mobile menu below 980 px. */
+.site-header__account {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: var(--r-full);
+  font-size: var(--fs-small); font-weight: 700; color: var(--c-text-2); text-decoration: none;
+  transition: color var(--d-fast) var(--ease), background-color var(--d-fast) var(--ease);
+}
+.site-header__account:hover { color: var(--c-text); background: var(--c-surface-2); }
+.site-header__account[aria-current="page"] { color: var(--c-brand); background: var(--c-brand-light); font-weight: 800; }
 
 .theme-toggle-btn, .nav-toggle {
   width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
@@ -437,6 +445,7 @@ h3, h4, .t-h3, .t-h4 { letter-spacing: -0.01em; }
   .site-nav { display: none; }
   .nav-toggle { display: inline-flex; }
   .site-header__cta { padding: 10px 14px; }
+  .site-header__account { display: none; }
 }
 @media (max-width: 380px) {
   .brand__word { display: none; }

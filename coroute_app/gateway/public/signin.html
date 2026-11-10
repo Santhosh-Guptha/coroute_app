@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in | Coroute</title>
+<meta name="description" content="Sign in to your CoRoute account to choose a plan, pay and see your receipts. The same account as the app.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="__ORIGIN__/signin">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<!-- Strict CSP on this page: no inline script (src/web_shop.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/signin.js" defer></script>
+</head>
+<body data-page="account">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo sh-hero">
+    <div class="container">
+      <div class="sh-auth">
+        <div class="page-hero__inner sh-auth__intro">
+          <p class="eyebrow">Your account</p>
+          <h1>Sign in to CoRoute.</h1>
+          <p class="t-lead">Use the same account as the app. Here you choose a plan, pay, and keep your receipts.</p>
+          <ul class="sh-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your plan reaches the app on its own, in seconds.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>Signed in for this browser tab only. Closing it signs you out.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>No ride data here: only your plan and payments.</li>
+          </ul>
+        </div>
+
+        <div class="sh-card sh-auth__card">
+          <div class="sh-notice" id="si-notice" role="status" hidden></div>
+
+          <!-- Sign in -->
+          <form id="si-form" class="sh-form" novalidate>
+            <h2 class="sh-card__title">Sign in</h2>
+            <div class="form-group">
+              <label class="form-label" for="si-id">Email or callsign</label>
+              <input class="form-input" id="si-id" name="identifier" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="120" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="si-pw">Password</label>
+              <input class="form-input" id="si-pw" name="password" type="password" autocomplete="current-password" maxlength="200" required>
+            </div>
+            <p class="sh-status" id="si-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="submit" id="si-submit">Sign in</button>
+            <div class="sh-or" id="si-google-wrap" hidden><span>or</span></div>
+            <div class="sh-google" id="si-google" hidden></div>
+            <p class="sh-form__links">
+              <button class="sh-linkbtn" type="button" id="si-forgot" aria-expanded="false" aria-controls="si-forgot-box">Forgot password?</button>
+              <a class="link" href="/get">New to CoRoute? Get the app</a>
+            </p>
+            <div class="sh-help" id="si-forgot-box" hidden>
+              <p>If you signed up with Google, use <b>Sign in with Google</b>.</p>
+              <p>Otherwise e-mail <a class="link" id="si-support" href="/#feedback">the CoRoute team</a> from the address you registered with. We send you a temporary password, and you choose a new one when you sign in.</p>
+            </div>
+          </form>
+
+          <!-- Temporary password: choose a new one (POST /api/me/password) -->
+          <form id="si-change" class="sh-form" novalidate hidden>
+            <h2 class="sh-card__title">Choose a new password</h2>
+            <p class="t-small t-muted">You signed in with a temporary password. Pick a new one to continue. It works in the app too.</p>
+            <div class="form-group">
+              <label class="form-label" for="si-new">New password</label>
+              <input class="form-input" id="si-new" type="password" autocomplete="new-password" minlength="8" maxlength="200" required>
+              <span class="t-xs t-faint">At least 8 characters.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="si-new2">New password again</label>
+              <input class="form-input" id="si-new2" type="password" autocomplete="new-password" minlength="8" maxlength="200" required>
+            </div>
+            <p class="sh-status" id="si-change-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="submit">Save and continue</button>
+          </form>
+
+          <!-- Already signed in in this tab -->
+          <div id="si-already" hidden>
+            <h2 class="sh-card__title">You are signed in</h2>
+            <p class="t-small t-muted" id="si-already-who"></p>
+            <div class="sh-actions">
+              <a class="btn btn--primary" href="/plans">See plans</a>
+              <a class="btn btn--secondary" href="/account">Your account</a>
+              <button class="btn btn--ghost" type="button" data-signout>Sign out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

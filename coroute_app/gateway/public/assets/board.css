@@ -1,0 +1,42 @@
+/* 3.56 "Latest from CoRoute" board (board.js): home page section and /updates. Light and dark come from the
+   site tokens (site.css); nothing here sets a colour of its own. */
+.bd__head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-16); flex-wrap: wrap; margin-bottom: var(--sp-24); }
+.bd__head h2 { font-size: var(--fs-h2); line-height: var(--lh-heading); }
+.bd__head p:not(.eyebrow) { margin-top: var(--sp-8); color: var(--c-text-2); max-width: 40rem; }
+.bd-list { display: grid; gap: var(--sp-20); grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); align-items: start; }
+.bd-list--page { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.bd-card { display: flex; flex-direction: column; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; min-width: 0; }
+.section--surface .bd-card { background: var(--c-bg); }
+.bd-card.is-pinned { border-color: var(--c-accent-line); box-shadow: 0 0 0 3px var(--c-brand-glow); }
+.bd-card__media { aspect-ratio: 16 / 9; background: var(--c-surface-2); overflow: hidden; }
+.bd-card__media img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bd-card__inner { display: flex; flex-direction: column; gap: var(--sp-12); padding: var(--sp-20); min-width: 0; }
+.bd-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--c-text-3); font-weight: 700; }
+.bd-kind { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; background: var(--c-accent-soft); color: var(--c-brand); font-weight: 800; }
+.bd-kind .icon { width: 14px; height: 14px; }
+.bd-kind--offer { background: var(--c-safety-light); color: var(--c-safety-ink); }
+.bd-kind--safety-tip { background: var(--c-green-soft); color: var(--c-success); }
+.bd-kind--event { background: var(--c-nav-soft); color: var(--c-info); }
+.bd-card__pin { padding: 3px 8px; border-radius: 999px; border: 1px solid var(--c-border-strong); color: var(--c-text-2); }
+.bd-card__title { font-size: var(--fs-h3, 1.25rem); line-height: 1.25; overflow-wrap: anywhere; }
+.bd-card__body { color: var(--c-text-2); overflow-wrap: anywhere; }
+.bd-card__body p + p { margin-top: var(--sp-8); }
+.bd-card__link { align-self: flex-start; }
+.bd-card__ends { font-size: var(--fs-xs); color: var(--c-text-3); font-weight: 700; }
+.bd-coupon { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-12); border: 2px dashed var(--c-safety-line); border-radius: var(--r-md); background: var(--c-safety-light); }
+.bd-coupon__code { display: flex; flex-direction: column; min-width: 0; }
+.bd-coupon__label { font-size: var(--fs-xs); font-weight: 800; color: var(--c-safety-ink); }
+.bd-coupon__code b { font-size: 1.25rem; letter-spacing: 0.06em; color: var(--c-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.bd-coupon__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bd-coupon__copy.is-done { border-color: var(--c-success); color: var(--c-success); }
+.bd-coupon__until { flex-basis: 100%; font-size: var(--fs-xs); color: var(--c-text-2); font-weight: 600; }
+.bd-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-24); }
+.bd-filter { min-height: 44px; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--c-border-strong); background: var(--c-surface); color: var(--c-text); font: inherit; font-weight: 700; cursor: pointer; }
+.bd-filter[aria-pressed="true"] { background: var(--c-brand-fill); border-color: var(--c-brand-fill); color: #fff; }
+.bd-filter:focus-visible { outline: 3px solid var(--c-accent-line); outline-offset: 2px; }
+.bd-empty { padding: var(--sp-24); border: 1px dashed var(--c-border-strong); border-radius: var(--r-lg); color: var(--c-text-2); text-align: center; }
+.bd-list[aria-busy="true"] { min-height: 120px; }
+@media (max-width: 560px) {
+  .bd-coupon { flex-direction: column; align-items: stretch; }
+  .bd-coupon__actions .btn { flex: 1 1 auto; }
+}

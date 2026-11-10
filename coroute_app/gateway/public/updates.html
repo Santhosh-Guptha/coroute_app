@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Latest from CoRoute: updates, offers and safety tips | Coroute</title>
+<meta name="description" content="News from the CoRoute team: app updates, current offers and coupon codes for group plans, safety tips for long rides and rider events.">
+<link rel="canonical" href="__ORIGIN__/updates">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CoRoute">
+<meta property="og:title" content="Latest from CoRoute">
+<meta property="og:description" content="App updates, current offers, safety tips and rider events from the CoRoute team.">
+<meta property="og:url" content="__ORIGIN__/updates">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Latest from CoRoute">
+<meta name="twitter:image" content="__ORIGIN__/og-image.png">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/board.css">
+<!-- No inline script on this page (theme bootstrap from a file); the board is written by board.js with textContent only. -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/board.js" defer></script>
+</head>
+<body data-page="updates">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
+    <div class="container">
+      <div class="hm-hero__inner">
+        <p class="eyebrow">Latest from CoRoute</p>
+        <h1 id="hero-title">Updates, offers and safety tips.</h1>
+        <p class="t-lead">What is new in the app, the offers running now, tips for safer long rides and rider events. Codes shown here work on the plans page.</p>
+      </div>
+    </div>
+    <!--#include route-motif-->
+  </section>
+
+  <!-- All posts from GET /api/public/board (published and in their window, pinned first). Filter by kind; ?kind= preselects. -->
+  <section class="section section--surface bd bd--page" id="updates" aria-labelledby="updates-title" data-board data-board-limit="50">
+    <div class="container">
+      <h2 class="sr-only" id="updates-title">All posts</h2>
+      <div class="bd-filters" role="group" aria-label="Show" data-board-filters></div>
+      <div class="bd-list bd-list--page" data-board-list aria-live="polite"></div>
+      <p class="bd-empty" data-board-empty hidden>Nothing here right now. Check back soon, or see the <a href="/plans">plans</a>.</p>
+      <p class="sr-only" role="status" data-board-live></p>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

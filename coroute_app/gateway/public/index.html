@@ -30,9 +30,11 @@
   <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/site.css">
   <link rel="stylesheet" href="/assets/home.css">
+  <link rel="stylesheet" href="/assets/board.css">
   <script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
   <script src="/assets/site.js" defer></script>
   <script src="/assets/home.js" defer></script>
+  <script src="/assets/board.js" defer></script>
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CoRoute","operatingSystem":"Android 6.0 or newer","applicationCategory":"TravelApplication","description":"Group motorcycle touring safety app: live convoy map, push-to-talk, crash detection and SOS, guardian live links, Medical ID, offline maps, fuel and break reminders, trip reports.","url":"__ORIGIN__/","downloadUrl":"__ORIGIN__/get"}</script>
 </head>
 <body data-page="home">
@@ -93,6 +95,22 @@
             <li><a href="#memorable"><span class="motto__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-history"/></svg></span><span><b>Memorable</b>Trip report and replay</span></a></li>
           </ul>
         </div>
+      </div>
+    </section>
+
+    <!-- Latest from CoRoute (3.56 marketing board): the top 3 posts from GET /api/public/board, written by board.js
+         with textContent only; hidden while there is nothing to show. Website only, never in the app. -->
+    <section class="section section--tight bd" id="latest" aria-labelledby="latest-title" data-board data-board-limit="3" data-board-hide-empty hidden>
+      <div class="container">
+        <div class="bd__head">
+          <div>
+            <p class="eyebrow">Latest from CoRoute</p>
+            <h2 id="latest-title">News, offers and safety tips.</h2>
+          </div>
+          <a class="link-arrow" href="/updates"><span>All updates</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+        <div class="bd-list" data-board-list aria-live="polite"></div>
+        <p class="sr-only" role="status" data-board-live></p>
       </div>
     </section>
 
@@ -437,12 +455,12 @@
           <p class="eyebrow eyebrow--safety">For group rides</p>
           <h2 id="group-title">Get safety for your group rides.</h2>
           <p>Solo safety is free. When you ride out with friends, one group plan on the host's phone covers the whole group: everyone on one map, talking, and looking out for each other.</p>
-          <ul class="gx-plans" id="group-plans" role="list" aria-label="Group plans and prices from the app" hidden></ul>
+          <ul class="gx-plans" id="group-plans" role="list" aria-label="Group plans and prices" hidden></ul>
           <div class="gx__cta">
             <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Host a group ride</a>
             <a class="btn btn--ghost btn--lg" href="#pricing">Compare plans</a>
           </div>
-          <p class="gx__fine t-small t-muted">Riders who join a group ride pay nothing. Plans are bought and managed in the app.</p>
+          <p class="gx__fine t-small t-muted">Riders who join a group ride pay nothing. Plans are bought on the <a class="link" href="/plans">plans page</a>.</p>
         </div>
         <ul class="gx-list" role="list">
           <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg></span><div><h3>Live group map</h3><p>Every rider on one map, in road order. Know who is behind, who stopped and whose battery is low.</p></div></li>
@@ -461,7 +479,7 @@
         <div class="hp-head px__head">
           <p class="eyebrow">Pricing</p>
           <h2 id="pricing-title">Simple plans, sized to your group.</h2>
-          <p>Solo riding is free, always. Group plans are only for the host of a group ride. The plans below are read live from the app, so what you see here is what the app charges today.</p>
+          <p>Solo riding is free, always. Group plans are only for the host of a group ride. The plans below are read live from our server, so what you see here is what you pay today.</p>
         </div>
         <div class="px-solo" id="community-free">
           <span class="px-solo__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg></span>
@@ -476,13 +494,13 @@
           <div class="px-card px-card--skel" aria-hidden="true"><i></i><i></i><i></i></div>
           <div class="px-card px-card--skel" aria-hidden="true"><i></i><i></i><i></i></div>
           <p class="sr-only">Loading plans.</p>
-          <noscript><p class="px-msg">Plans and prices are shown in the CoRoute app.</p></noscript>
+          <noscript><p class="px-msg">Plans and prices are on the <a class="link" href="/plans">plans page</a>.</p></noscript>
         </div>
         <div class="px-free">
           <span class="px-free__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span>
           <p><b>Join a ride you are invited to: Free.</b> Riders in a group never pay. Only the host's plan counts, and family who follow on a guardian link need no app and no plan.</p>
         </div>
-        <p class="px-note t-small t-muted" id="pricing-note">Plans are bought and managed inside the app. No ads, ever.</p>
+        <p class="px-note t-small t-muted" id="pricing-note">Plans are bought and managed on the <a class="link" href="/plans">plans page</a>. No ads, ever.</p>
       </div>
     </section>
 
@@ -574,7 +592,7 @@
           </details>
           <details>
             <summary>Is it free?</summary>
-            <div class="hp-faq__a"><p>Yes for solo riders, always. The Community plan gives solo riders every safety feature free, forever: crash detection and SOS, guardians, Medical ID, offline maps, trip reports and your ride analytics. Joining a group ride you are invited to is free too. Only the host of a group ride needs a group plan, shown in the <a class="link" href="#pricing">pricing section</a> and read live from the app. There are no ads.</p></div>
+            <div class="hp-faq__a"><p>Yes for solo riders, always. The Community plan gives solo riders every safety feature free, forever: crash detection and SOS, guardians, Medical ID, offline maps, trip reports and your ride analytics. Joining a group ride you are invited to is free too. Only the host of a group ride needs a group plan, shown in the <a class="link" href="#pricing">pricing section</a> and bought on the <a class="link" href="/plans">plans page</a>. There are no ads.</p></div>
           </details>
           <details>
             <summary>What do the numbers on this site say about me?</summary>

@@ -365,8 +365,16 @@ function planText(tiers, labels = {}) {
   return names.length === 1 ? `${names[0]} plan` : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]} plans`;
 }
 
-/** {code, discount, validUntil, plan, name, cap} for a coupon record (link is added by the app). */
-function couponPlaceholders(c, labels = {}) {
+/**
+ * 3.56: the coupon link of the QR code / {link}: `<origin>/plans?coupon=CODE`, the website plans page with
+ * the code filled in (buying moved from the app to the website). Older links to /get?coupon= forward there.
+ */
+function couponLink(origin, code) {
+  return require('./web_shop').plansLink(origin, code);
+}
+
+/** {code, discount, validUntil, plan, name, cap, link} for a coupon record (link only when the origin is known). */
+function couponPlaceholders(c, labels = {}, origin = '') {
   if (!c) return null;
   const cap = Number(c.maxDiscountCap);
   return {
@@ -376,6 +384,7 @@ function couponPlaceholders(c, labels = {}) {
     plan: planText(c.applicableTiers, labels),
     name: String(c.name || c.code || ''),
     cap: c.discountType === 'percentage' && cap > 0 ? `up to ${inr(cap)}` : '',
+    ...(origin ? { link: couponLink(origin, c.code) } : {}),
   };
 }
 
@@ -390,7 +399,7 @@ const BINDABLE = new Set(['ACTIVE', 'SCHEDULED']);
  * What the editor may see of a coupon: public fields only (never the store key, usages, rider ids
  * or internal notes) + placeholders + a warning when it can no longer be redeemed.
  */
-function couponView(c, labels = {}, now = Date.now()) {
+function couponView(c, labels = {}, now = Date.now(), origin = '') {
   if (!c) return null;
   const status = String(c.status || '').toUpperCase() || 'ACTIVE';
   const bindable = BINDABLE.has(status) && !(c.expiresAt && Number(c.expiresAt) < now);
@@ -413,7 +422,7 @@ function couponView(c, labels = {}, now = Date.now()) {
     bindable,
     warning,
     plans: (Array.isArray(c.applicableTiers) ? c.applicableTiers : ['all']).map(String),
-    placeholders: couponPlaceholders(c, labels),
+    placeholders: couponPlaceholders(c, labels, origin),
   };
 }
 
@@ -493,15 +502,17 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
     } catch { /* fallback labels */ }
     return out;
   };
+  /** The site origin for coupon links (PUBLIC_ORIGIN, else this request's host). */
+  const siteOrigin = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
   const findCoupon = async (code) => (code && typeof repo.findCoupon === 'function' ? repo.findCoupon(code).catch(() => null) : null);
 
   /** The template as the console gets it: the stored doc + the live coupon view (or a missing-coupon warning). */
-  const viewOf = async (t, labels) => {
+  const viewOf = async (t, labels, origin = '') => {
     if (!t) return null;
     let coupon = null;
     if (t.couponCode) {
       const c = await findCoupon(t.couponCode);
-      coupon = c ? couponView(c, labels) : { code: t.couponCode, missing: true, bindable: false, warning: 'This coupon no longer exists.', placeholders: null };
+      coupon = c ? couponView(c, labels, Date.now(), origin) : { code: t.couponCode, missing: true, bindable: false, warning: 'This coupon no longer exists.', placeholders: null };
     }
     return { ...t, coupon };
   };
@@ -546,13 +557,13 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
     const doc = { ...clean, id: newTemplateId(), createdAt: now, updatedAt: now, createdBy: by(req), updatedBy: by(req) };
     await store.saveTemplate(doc);
     await audit(req, 'marketing.template.create', doc.id, { name: doc.name, couponCode: doc.couponCode });
-    res.status(201).set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels()) });
+    res.status(201).set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels(), siteOrigin(req)) });
   }));
 
   r.get('/admin/marketing/templates/:id', requireAdmin, ready, readLimit, wrap(async (req, res) => {
     const t = await store.getTemplate(tplId(req));
     if (!t) return notFound(res);
-    res.set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(t, await planLabels()) });
+    res.set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(t, await planLabels(), siteOrigin(req)) });
   }));
 
   r.put('/admin/marketing/templates/:id', requireAdmin, ready, writeLimit, wrap(async (req, res) => {
@@ -567,7 +578,7 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
     const doc = { ...clean, id: prev.id, createdAt: prev.createdAt, createdBy: prev.createdBy, updatedAt: Math.max(Date.now(), (Number(prev.updatedAt) || 0) + 1), updatedBy: by(req) };
     await store.saveTemplate(doc);
     await audit(req, 'marketing.template.update', doc.id, { name: doc.name, couponCode: doc.couponCode, layers: doc.layers.length });
-    res.set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels()) });
+    res.set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels(), siteOrigin(req)) });
   }));
 
   r.patch('/admin/marketing/templates/:id/status', requireAdmin, ready, writeLimit, wrap(async (req, res) => {
@@ -578,7 +589,7 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
     const doc = { ...prev, status, updatedAt: Math.max(Date.now(), (Number(prev.updatedAt) || 0) + 1), updatedBy: by(req) };
     await store.saveTemplate(doc);
     await audit(req, status === 'archived' ? 'marketing.template.archive' : 'marketing.template.activate', doc.id, { name: doc.name });
-    res.set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels()) });
+    res.set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels(), siteOrigin(req)) });
   }));
 
   r.post('/admin/marketing/templates/:id/duplicate', requireAdmin, ready, writeLimit, wrap(async (req, res) => {
@@ -592,7 +603,7 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
     const doc = { ...prev, id: newTemplateId(), name, status: 'active', createdAt: now, updatedAt: now, createdBy: by(req), updatedBy: by(req) };
     await store.saveTemplate(doc);
     await audit(req, 'marketing.template.duplicate', doc.id, { from: prev.id, name });
-    res.status(201).set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels()) });
+    res.status(201).set('Cache-Control', 'no-store').json({ ok: true, template: await viewOf(doc, await planLabels(), siteOrigin(req)) });
   }));
 
   r.delete('/admin/marketing/templates/:id', requireAdmin, ready, writeLimit, wrap(async (req, res) => {
@@ -606,7 +617,7 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
   r.get('/admin/marketing/coupons', requireAdmin, ready, readLimit, wrap(async (req, res) => {
     const labels = await planLabels();
     const list = typeof repo.listCoupons === 'function' ? await repo.listCoupons(500) : [];
-    const coupons = list.map((c) => couponView(c, labels)).filter((c) => req.query.all === '1' || c.bindable);
+    const coupons = list.map((c) => couponView(c, labels, Date.now(), siteOrigin(req))).filter((c) => req.query.all === '1' || c.bindable);
     res.set('Cache-Control', 'no-store').json({ ok: true, coupons, planLabels: labels });
   }));
 
@@ -663,6 +674,6 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
 
 module.exports = {
   FEATURE_ID, LIMITS, SIZE_PRESETS, LAYER_TYPES, FONTS, SHAPES, PATTERNS, COUPON_STYLES, PLACEHOLDERS, SCHEMA_VERSION,
-  TemplateError, cleanTemplate, imageIdsOf, couponPlaceholders, couponView, substitute, formatDate, discountText, planText,
+  TemplateError, cleanTemplate, imageIdsOf, couponLink, couponPlaceholders, couponView, substitute, formatDate, discountText, planText,
   createMarketingStore, registerMarketingRoutes,
 };

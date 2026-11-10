@@ -9,6 +9,7 @@ const { isStaffAccount, isGuestAccount, staffEmails } = require('./staff');
 const { verifyToken } = require('./auth');
 const { MEMBERSHIP_PLANS, isLegacyTier, normalizePlanId } = require('./entitlements');
 const { couponFitsPlan } = require('./plan_pricing');
+const sec = require('./payment_security');
 
 /**
  * The legacy tiers (CoRoute Pro, Road Captain, Tour Operator) are no longer sold: riders buy the
@@ -158,7 +159,7 @@ function evaluateCoupon(coupon, { userId, planTier, billingCycle = 'monthly', am
   if (coupon.validFrom && now < coupon.validFrom) {
     return { valid: false, error: 'This coupon is not active yet', reason: 'COUPON_SCHEDULED' };
   }
-  if (coupon.expiresAt && now > coupon.expiresAt) {
+  if (coupon.expiresAt && now >= coupon.expiresAt) {
     return { valid: false, error: 'This coupon has expired', reason: 'COUPON_EXPIRED' };
   }
   if (coupon.maxUsageTotal && (coupon.usageCount || 0) >= coupon.maxUsageTotal) {
@@ -622,7 +623,19 @@ async function recordRefund({ repo, auth, hub, order, refundId, amountInPaise, s
     refundedBy: latest.by || fresh.refundedBy || null, refundReason: latest.reason || fresh.refundReason || '',
   };
   let planRevoked = Boolean(fresh.planRevoked);
-  if (fullyRefunded && !fresh.refundRevokedAt && fresh.userId) {
+  if (fullyRefunded && !fresh.refundRevokedAt && fresh.userId && require('./membership_routes').isMembershipOrder(fresh)) {
+    // 3.56: a fully refunded plan order ends the plan it bought (only that one: a later order's plan stays).
+    const mem = typeof repo.findMembershipByOwner === 'function' ? await repo.findMembershipByOwner(fresh.userId) : null;
+    if (mem && mem.orderId === fresh.orderId && mem.status === 'ACTIVE') {
+      await repo.saveMembership({ ...mem, status: 'EXPIRED', validUntil: Date.now(), statusReason: 'REFUNDED', scheduledChange: null });
+      planRevoked = true;
+      if (hub && typeof hub.sendToUser === 'function') {
+        try { hub.sendToUser(fresh.userId, { type: 'SUBSCRIPTION_REVOKED', plan: fresh.category, orderId: fresh.orderId, at: Date.now() }); } catch { /* never in the way */ }
+      }
+    }
+    patch.refundRevokedAt = Date.now();
+    patch.planRevoked = planRevoked;
+  } else if (fullyRefunded && !fresh.refundRevokedAt && fresh.userId) {
     const userDoc = await repo.findUserById(fresh.userId);
     if (userDoc) {
       if (userDoc.pendingTier && userDoc.pendingTier.orderId === fresh.orderId) {
@@ -684,6 +697,12 @@ function webCheckoutUrl(req, orderId, expiresAt) {
 
 /** After a verified payment: grants the plan to the rider who created the order. */
 async function settleVerifiedOrder({ repo, auth, hub, order, paymentId, source }) {
+  // 3.56: a membership order reaching the legacy verify / callback is settled as a membership.
+  const membership = require('./membership_routes');
+  if (order.status !== 'PAID' && membership.isMembershipOrder(order)) {
+    const m = await membership.settleMembershipPayment({ repo, order, payment: { id: paymentId, method: 'razorpay' }, hub, source });
+    return { tier: order.category, validUntil: m && m.validUntil, scheduled: null };
+  }
   const userDoc = order.userId ? await repo.findUserById(order.userId) : null;
   if (userDoc) return activatePlan({ repo, auth, hub, userDoc, order, paymentId, method: 'RAZORPAY', source });
   // The account is gone but the money was taken: the ledger still says PAID.
@@ -745,7 +764,7 @@ async function addAudit(repo, req, action, target, details = {}) {
  * Orders are only ever created by a signed-in rider (POST /subscription/create-order); the
  * endpoints here accept only those ledger orders (order.userId present).
  */
-function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
+function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap, convoys = null }) {
   const gateway = gatewayFor(repo);
   const perIp = (limit) => rateLimit({ windowMs: 60 * 1000, limit, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests. Try again in a minute.', code: 'RATE_LIMITED' } });
   const checkoutLimiter = perIp(30);
@@ -764,6 +783,8 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   };
 
   r.post('/subscription/webhook', wrap(async (req, res) => {
+    // 3.56: only one webhook URL is live (RAZORPAY_WEBHOOK_URL, default this one).
+    if (sec.refuseInactiveWebhook(res, 'subscription')) return;
     // app.js hands this route the raw bytes (1 MB cap); the signature is over exactly those bytes.
     const rawBuf = Buffer.isBuffer(req.body)
       ? req.body
@@ -798,11 +819,21 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       remember(eventId);
       return res.status(200).json({ status: 'duplicate' });
     }
+    // 3.56: replay protection across both webhook URLs, every node and restarts (unique event id).
+    if (eventId && typeof repo.claimWebhookEvent === 'function' && !(await repo.claimWebhookEvent(eventId, { event: eventType, orderId: order ? order.orderId : '', url: 'subscription' }))) {
+      remember(eventId);
+      return res.status(200).json({ status: 'duplicate' });
+    }
 
     let handled = false;
     if (order && order.userId && order.mode === mode) {
       if (eventType === 'payment.captured' || eventType === 'order.paid') {
-        if (order.status !== 'PAID') {
+        // 3.56: a membership order (website shop, or the app's /membership/order) is settled as a
+        // membership: the legacy tier activation below would mark it PAID without giving the plan.
+        const membership = require('./membership_routes');
+        if (order.status !== 'PAID' && membership.isMembershipOrder(order)) {
+          await membership.settleMembershipPayment({ repo, order, payment, convoys, hub, source: 'razorpay_webhook' });
+        } else if (order.status !== 'PAID') {
           const userDoc = await repo.findUserById(order.userId);
           if (userDoc) {
             await activatePlan({
@@ -817,8 +848,8 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
         }
         handled = true;
       } else if (eventType === 'payment.failed') {
-        // One failed attempt never overrides a payment that went through.
-        if (order.status !== 'PAID') {
+        // One failed attempt never overrides a payment that went through (or is being settled).
+        if (order.status !== 'PAID' && order.status !== 'SETTLING') {
           await repo.updateRazorpayOrder(order.orderId, {
             status: 'FAILED',
             failureReason: String(payment.error_description || payment.error_reason || 'Payment failed').slice(0, 300),
@@ -853,13 +884,16 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   // ---------------------------------------------------------------------------
   const handleValidateCoupon = wrap(async (req, res) => {
     const { code, planTier, billingCycle = 'monthly', amount } = req.body || {};
-    if (!code || !String(code).trim()) {
+    if (typeof code !== 'string' || !code.trim()) {
       return res.status(400).json({ valid: false, error: 'Coupon code is required', reason: 'BAD_REQUEST' });
     }
-
-    const coupon = await resolveCoupon(code, repo);
-    if (!coupon) {
-      return res.status(404).json({ valid: false, error: `Coupon '${code}' not found`, reason: 'COUPON_NOT_FOUND' });
+    // 3.56: brute-force brake (per IP, and per rider when a token is sent) and one answer for every
+    // code that is not public (never echoes the typed code).
+    if (sec.refuseCouponGuessing(res, req)) return;
+    const coupon = /^[A-Za-z0-9_-]{1,32}$/.test(code.trim()) ? await resolveCoupon(code, repo) : null;
+    if (!coupon || ['DRAFT', 'ARCHIVED', 'SCHEDULED'].includes(String(coupon.status || '').toUpperCase())) {
+      sec.couponGuard.failed(req);
+      return res.status(404).json({ valid: false, ...sec.couponRefusal(null) });
     }
 
     // Public endpoint: when the app sends its session token the per-rider limit is checked too.
@@ -869,6 +903,11 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       const claims = h.startsWith('Bearer ') ? verifyToken(h.slice(7)) : null;
       if (claims && typeof claims.sub === 'string') riderId = claims.sub;
     }
+    // A private (allow-listed) code reads like a missing one to everyone not on its list.
+    if (Array.isArray(coupon.allowedUserIds) && coupon.allowedUserIds.length && !coupon.allowedUserIds.includes(riderId)) {
+      sec.couponGuard.failed(req);
+      return res.status(404).json({ valid: false, ...sec.couponRefusal(null) });
+    }
     const result = evaluateCoupon(coupon, {
       userId: riderId,
       planTier,
@@ -877,13 +916,21 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
     });
 
     if (!result.valid) {
+      if (sec.isGuess(result)) {
+        sec.couponGuard.failed(req);
+        return res.status(404).json({ valid: false, ...sec.couponRefusal(result) });
+      }
       return res.status(400).json(result);
     }
     return res.status(200).json(result);
   });
 
-  r.post('/subscription/validate-coupon', handleValidateCoupon);
-  r.post('/validate-coupon', handleValidateCoupon);
+  const validateLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false,
+    message: { valid: false, error: 'Too many codes tried. Try again in a minute.', reason: 'COUPON_ATTEMPTS', code: 'RATE_LIMITED' },
+  });
+  r.post('/subscription/validate-coupon', validateLimiter, handleValidateCoupon);
+  r.post('/validate-coupon', validateLimiter, handleValidateCoupon);
 
   // Public config: plans + the ACTIVE mode's key id (never a secret, no payee details).
   const handleGetConfig = wrap(async (req, res) => {
@@ -1589,9 +1636,15 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       }
       const binding = cleanApplicablePlans(body.applicablePlans !== undefined ? body.applicablePlans : body.applicableTiers, await couponPlanOptions(repo));
       if (binding.unknown) return res.status(400).json({ error: `Unknown plan: ${binding.unknown.join(', ')}`, reason: 'UNKNOWN_PLAN', unknown: binding.unknown });
-      if (body.validFrom !== undefined && body.expiresAt !== undefined && Number(body.expiresAt) <= Number(body.validFrom)) {
+      // 3.56: times are epoch ms, ISO with a zone, or India-time dates ('YYYY-MM-DD': from 00:00, until the end of that day).
+      for (const f of ['validFrom', 'expiresAt']) {
+        if (body[f] !== undefined && body[f] !== null && body[f] !== '' && !sec.couponTime(body[f], f === 'expiresAt' ? 'end' : 'start')) return res.status(400).json({ error: `${f} is not a valid date`, reason: 'BAD_WINDOW' });
+        if (body[f] !== undefined && body[f] !== null && body[f] !== '') body[f] = sec.couponTime(body[f], f === 'expiresAt' ? 'end' : 'start');
+      }
+      if (body.validFrom && body.expiresAt && Number(body.expiresAt) <= Number(body.validFrom)) {
         return res.status(400).json({ error: 'The coupon must end after it starts', reason: 'BAD_WINDOW' });
       }
+      if (body.stackWithOffer !== undefined && typeof body.stackWithOffer !== 'boolean') return res.status(400).json({ error: 'stackWithOffer must be true or false' });
       delete body.applicablePlans;
 
       const saved = await repo.saveCoupon({
@@ -1628,6 +1681,15 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       if (binding.unknown) return res.status(400).json({ error: `Unknown plan: ${binding.unknown.join(', ')}`, reason: 'UNKNOWN_PLAN', unknown: binding.unknown });
       delete patch.applicablePlans;
       if (binding.tiers) patch.applicableTiers = binding.tiers;
+      for (const f of ['validFrom', 'expiresAt']) {
+        if (patch[f] === undefined || patch[f] === null || patch[f] === '') continue;
+        const t = sec.couponTime(patch[f], f === 'expiresAt' ? 'end' : 'start');
+        if (!t) return res.status(400).json({ error: `${f} is not a valid date`, reason: 'BAD_WINDOW' });
+        patch[f] = t;
+      }
+      if (patch.stackWithOffer !== undefined && typeof patch.stackWithOffer !== 'boolean') return res.status(400).json({ error: 'stackWithOffer must be true or false' });
+      // Usage, holds and the code itself are server-owned.
+      delete patch.holds; delete patch.code;
       const nextFrom = patch.validFrom !== undefined ? Number(patch.validFrom) : Number(existing.validFrom) || 0;
       const nextTo = patch.expiresAt !== undefined ? Number(patch.expiresAt) : Number(existing.expiresAt) || 0;
       if (nextFrom > 0 && nextTo > 0 && nextTo <= nextFrom) return res.status(400).json({ error: 'The coupon must end after it starts', reason: 'BAD_WINDOW' });

@@ -67,6 +67,41 @@ function siteMaxRiders(catalog, ceiling) {
   return Number.isFinite(cap) && cap >= 1 ? Math.min(most, cap) : most;
 }
 
+/**
+ * 3.56 list price and offer of a catalog plan at `now` (pure; the single source of truth for every
+ * price the website shows, the quote and the order):
+ *   listPriceInr  the plan's list price (MRP): `listPriceInr`, else the stored `monthlyPriceInr`
+ *   offer         { priceInr, label, startAt, endAt } when the plan has an offer and `now` is in
+ *                 [startAt, endAt) (either end may be open) and the offer price is below the list price
+ *   priceInr      the offer price while the offer runs, else the list price
+ */
+function effectivePrice(plan, now = Date.now()) {
+  const list = rupees(plan && (plan.listPriceInr !== undefined && plan.listPriceInr !== null ? plan.listPriceInr : plan.monthlyPriceInr));
+  const o = plan && plan.offer && typeof plan.offer === 'object' ? plan.offer : null;
+  let offer = null;
+  if (o) {
+    const price = Math.round(Number(o.priceInr));
+    const startAt = Number(o.startAt) || 0;
+    const endAt = Number(o.endAt) || 0;
+    if (Number.isFinite(price) && price >= 0 && price < list && (!startAt || now >= startAt) && (!endAt || now < endAt) && o.enabled !== false) {
+      offer = { priceInr: price, label: String(o.label || 'Offer').slice(0, 40), startAt: startAt || null, endAt: endAt || null };
+    }
+  }
+  return { listPriceInr: list, priceInr: offer ? offer.priceInr : list, offer };
+}
+
+/**
+ * What a coupon takes off `baseInr` for this plan, with the price floor (`minPayableInr`): a coupon never
+ * takes the price below the floor (a "free" coupon, the admin's explicit free month, is the exception).
+ */
+function flooredDiscount(coupon, baseInr, minPayableInr = 0, discountInr = null) {
+  const base = rupees(baseInr);
+  const d = discountInr !== null && discountInr !== undefined ? Math.max(0, Math.round(Number(discountInr) || 0)) : couponDiscountInr(coupon, base);
+  if (coupon && coupon.discountType === 'free') return Math.min(base, d);
+  const floor = Math.max(0, Math.floor(Number(minPayableInr) || 0));
+  return Math.max(0, Math.min(d, base - Math.min(base, floor)));
+}
+
 /** Plan ids a coupon is bound to, normalised ('all' when it names every plan or none). */
 function couponPlans(coupon) {
   const raw = Array.isArray(coupon && coupon.applicableTiers) ? coupon.applicableTiers : ['all'];
@@ -122,7 +157,7 @@ function paidPurchases(userDoc) {
  * members / first payment, allow-list and the per-rider limit. Billing cycles do not apply: every
  * plan is one billing period. Returns { ok: true, discountInr } or { ok: false, error, reason }.
  */
-function checkCoupon(coupon, { uid = null, userDoc = null, planId, baseInr }) {
+function checkCoupon(coupon, { uid = null, userDoc = null, planId, baseInr, offerActive = false, minPayableInr = 0 }) {
   if (!coupon) return { ok: false, error: "We couldn't find that code", reason: 'COUPON_NOT_FOUND' };
   const status = String(coupon.status || (coupon.isActive === false ? 'PAUSED' : 'ACTIVE')).toUpperCase();
   if (status !== 'ACTIVE') {
@@ -131,7 +166,8 @@ function checkCoupon(coupon, { uid = null, userDoc = null, planId, baseInr }) {
   }
   const now = Date.now();
   if (coupon.validFrom && Number(coupon.validFrom) > now) return { ok: false, error: "This code isn't active yet", reason: 'COUPON_SCHEDULED' };
-  if (coupon.expiresAt && Number(coupon.expiresAt) < now) return { ok: false, error: 'This code has expired', reason: 'COUPON_EXPIRED' };
+  // The window is [validFrom, expiresAt): at expiresAt the code has ended (3.56).
+  if (coupon.expiresAt && Number(coupon.expiresAt) <= now) return { ok: false, error: 'This code has expired', reason: 'COUPON_EXPIRED' };
   if (!couponFitsPlan(coupon, planId)) return { ok: false, error: "This code isn't for this plan", reason: 'TIER_MISMATCH' };
   const minAmt = Number(coupon.minOrderAmount) || 0;
   if (minAmt > 0 && rupees(baseInr) < minAmt) {
@@ -150,7 +186,11 @@ function checkCoupon(coupon, { uid = null, userDoc = null, planId, baseInr }) {
   const maxPerUser = Number(coupon.maxUsagePerUser) || 1;
   const used = (coupon.usages || []).filter((u) => u.userId === uid).length;
   if (uid && used >= maxPerUser) return { ok: false, error: "You've already used this code", reason: 'PER_USER_LIMIT_REACHED' };
-  return { ok: true, discountInr: couponDiscountInr(coupon, baseInr) };
+  // 3.56: a coupon applies on top of a running plan offer unless it says it does not.
+  if (offerActive && coupon.stackWithOffer === false) {
+    return { ok: false, error: "This code can't be used with the current offer", reason: 'NOT_WITH_OFFER' };
+  }
+  return { ok: true, discountInr: flooredDiscount(coupon, baseInr, minPayableInr) };
 }
 
 /** The paid membership a rider holds now (effective view), or null (Community, ended, free plan). */
@@ -206,11 +246,14 @@ function shortDate(ms) {
  * The price of plan `planId` for this rider now. `coupon` is a coupon record that already passed
  * checkCoupon (or null). Pure: no I/O. Throws { status, reason } for a plan that cannot be bought.
  */
-function computeQuote({ catalog, planId, membership = null, coupon = null, couponDiscount = null, now = Date.now() }) {
+function computeQuote({ catalog, planId, membership = null, coupon = null, couponDiscount = null, now = Date.now(), minPayableInr = 0 }) {
   const plan = catalog && catalog[planId];
   if (!plan) throw Object.assign(new Error('Invalid membership category'), { status: 400, reason: 'INVALID_CATEGORY' });
   const days = billingDaysOf(plan);
-  const base = rupees(plan.monthlyPriceInr);
+  // 3.56: the plan's price now (offer price within its window, else the list price).
+  const price = effectivePrice(plan, now);
+  const base = price.priceInr;
+  const offerOff = price.listPriceInr - base;
   const name = plan.name || planId;
   // "Large Group (7–12)" reads as "Large Group" in the breakdown (the seats are shown elsewhere).
   const shortName = String(name).replace(/\s*\([^)]*\)\s*$/, '') || name;
@@ -225,7 +268,7 @@ function computeQuote({ catalog, planId, membership = null, coupon = null, coupo
     else kind = 'upgrade';
   }
 
-  const discount = Math.min(base, couponDiscount !== null ? Math.max(0, Math.round(couponDiscount)) : couponDiscountInr(coupon, base));
+  const discount = flooredDiscount(coupon, base, minPayableInr, couponDiscount);
   const afterCoupon = base - discount;
   const credit = creditOf({ membership, catalog, now, includeCurrent: kind !== 'downgrade' });
   // Never more credit than is left to pay (so never above the new price).
@@ -238,7 +281,8 @@ function computeQuote({ catalog, planId, membership = null, coupon = null, coupo
   const startsAt = kind === 'downgrade' ? Number(cur.validUntil) : now;
   const endsAt = startsAt + (days + extraDays) * DAY_MS;
 
-  const lines = [{ label: `${shortName} (${days} days)`, amountInr: base }];
+  const lines = [{ label: `${shortName} (${days} days)`, amountInr: price.listPriceInr }];
+  if (offerOff > 0) lines.push({ label: price.offer.label, amountInr: -offerOff, kind: 'offer' });
   if (discount > 0) lines.push({ label: `Coupon ${coupon && coupon.code ? coupon.code : ''}`.trim(), amountInr: -discount });
   if (credit.creditInr > 0) {
     const what = credit.unusedDays > 0
@@ -248,7 +292,7 @@ function computeQuote({ catalog, planId, membership = null, coupon = null, coupo
   }
   lines.push({ label: 'To pay now', amountInr: payable });
 
-  let summary = `${shortName} ${inr(base)}`;
+  let summary = offerOff > 0 ? `${shortName} ${inr(price.listPriceInr)} − ${inr(offerOff)} ${price.offer.label}` : `${shortName} ${inr(base)}`;
   if (discount > 0) summary += ` − ${inr(discount)} coupon`;
   if (creditUsed > 0) {
     summary += credit.unusedDays > 0
@@ -268,6 +312,9 @@ function computeQuote({ catalog, planId, membership = null, coupon = null, coupo
     kind,
     seats: newSeats,
     billingDays: days,
+    listPriceInr: price.listPriceInr,
+    offer: price.offer,
+    offerDiscountInr: offerOff,
     basePriceInr: base,
     couponCode: discount > 0 && coupon ? coupon.code : null,
     couponDiscountInr: discount,
@@ -331,7 +378,7 @@ function orderBlock(planId, catalog) {
 }
 
 module.exports = {
-  DAY_MS, billingDaysOf, couponPlans, couponFitsPlan, couponDiscountInr, checkCoupon, paidPurchases,
+  DAY_MS, billingDaysOf, effectivePrice, flooredDiscount, couponPlans, couponFitsPlan, couponDiscountInr, checkCoupon, paidPurchases,
   currentPaidPeriod, creditOf, computeQuote, orderBlock, siteMaxRiders,
   PLAN_ORDER, planRank, changeBlock, DOWNGRADE_MESSAGE,
 };
