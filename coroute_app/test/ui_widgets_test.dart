@@ -54,7 +54,7 @@ void main() {
     expect(find.text('Hear the group'), findsOneWidget);
   });
 
-  testWidgets('ride SOS: a tap does nothing, a 1.5 s hold sends; screen readers hear the SOS label', (tester) async {
+  testWidgets('ride SOS: a tap does nothing, a 3 s hold sends; screen readers hear the SOS label', (tester) async {
     final handle = tester.ensureSemantics();
     var sent = 0;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Center(child: RideSosButton(onTriggered: () => sent++)))));
@@ -65,9 +65,9 @@ void main() {
     final g = await tester.startGesture(tester.getCenter(find.byType(RideSosButton)));
     // The tap-down fires after the 100 ms press timeout; the hold animation starts on that frame.
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 1500));
     expect(sent, 0);
-    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 1600));
     expect(sent, 1);
     await g.up();
     await tester.pump();

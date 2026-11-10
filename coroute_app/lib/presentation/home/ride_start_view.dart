@@ -124,7 +124,7 @@ class RideStartView extends StatelessWidget {
           title: const Text('Ride solo without internet?'),
           content: Text(
             'Crash detection runs on this phone once you ride (from about 12 km/h). If it senses a crash '
-            'and you do not answer within 15 seconds, your messages app opens with an SOS text and your '
+            'and you do not answer within 30 seconds, your messages app opens with an SOS text and your '
             'location for your emergency contact, and you can call them or 112.'
             '${hasContact ? '' : '\n\nAdd an emergency contact in your profile first, so there is someone to text.'}',
           ),

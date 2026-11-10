@@ -515,11 +515,11 @@ class SettingsService extends ChangeNotifier {
   // ---- 3.55 sound awareness & intercom voice (docs/features_355/sound_awareness_and_intercom.md).
   // Loaded by [loadSoundSettings] (main.dart calls it after [load]); defaults until then.
   static const String keySirenAlerts = 'siren_alerts_v1';
-  static const String keyHornAlerts = 'horn_alerts_mode_v1'; // 0 automatic, 1 on, 2 off
+  /// Removed in 3.55 (horn alerts are gone); the stored value is deleted by [loadSoundSettings].
+  static const String legacyKeyHornAlerts = 'horn_alerts_mode_v1';
   static const String keyVoiceCleanup = 'voice_cleanup_v1';
   static const String keyGiveWaySide = 'give_way_side_v1'; // 'auto', 'left', 'right'
   bool _sirenAlerts = true;
-  int _hornAlertsMode = 0;
   bool _voiceCleanup = true;
   String _giveWaySide = 'auto';
 
@@ -527,10 +527,6 @@ class SettingsService extends ChangeNotifier {
   /// Settings > Ride, on by default; admin switch `sirenDetector`). Off releases the mic at once.
   /// Full spoken alert when the rider may not hear outside sound (earphones, music), else softer.
   bool get sirenAlerts => _sirenAlerts;
-
-  /// Horn alerts: true (On) / false (Off), or null = Automatic (only while earphones, a helmet set,
-  /// music or a call may stop the rider hearing traffic).
-  bool? get hornAlerts => switch (_hornAlertsMode) { 1 => true, 2 => false, _ => null };
 
   /// "Clean up my voice" for the intercom (always on, 3.55).
   bool get voiceCleanup => _voiceCleanup;
@@ -542,7 +538,7 @@ class SettingsService extends ChangeNotifier {
     try {
       final prefs = await _p();
       _sirenAlerts = prefs.getBool(keySirenAlerts) ?? true; // rider's choice, default on
-      _hornAlertsMode = (prefs.getInt(keyHornAlerts) ?? 0).clamp(0, 2);
+      if (prefs.containsKey(legacyKeyHornAlerts)) await prefs.remove(legacyKeyHornAlerts); // horn alerts removed
       _voiceCleanup = true; // always on (3.55)
       final side = prefs.getString(keyGiveWaySide) ?? 'auto';
       _giveWaySide = const {'auto', 'left', 'right'}.contains(side) ? side : 'auto';
@@ -558,19 +554,6 @@ class SettingsService extends ChangeNotifier {
     _sirenAlerts = value;
     notifyListeners();
     await _save(keySirenAlerts, value);
-  }
-
-  Future<void> setHornAlerts(bool? value) async {
-    final mode = value == null ? 0 : (value ? 1 : 2);
-    if (mode == _hornAlertsMode) return;
-    _hornAlertsMode = mode;
-    notifyListeners();
-    try {
-      final prefs = await _p();
-      await prefs.setInt(keyHornAlerts, mode);
-    } catch (e) {
-      debugPrint('settings save note: $e');
-    }
   }
 
   /// Always on (3.55): "off" is ignored.

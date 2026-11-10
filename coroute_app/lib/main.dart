@@ -6,6 +6,7 @@ import 'data/services/garage_binding.dart';
 import 'data/services/garage_service.dart';
 import 'data/services/phone_call_service.dart';
 import 'dart:async';
+import 'dart:isolate';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,7 +35,7 @@ import 'data/services/pending_coupon_store.dart';
 import 'presentation/subscription/membership_dashboard_screen.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
-import 'data/services/alarm_notifier.dart'; // 3.55 siren / horn lock-screen heads-up
+import 'data/services/alarm_notifier.dart'; // 3.55 siren lock-screen heads-up
 import 'data/services/p2p_mesh_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
@@ -67,6 +68,11 @@ import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
 import 'data/services/nav_voice.dart';
 import 'data/services/voice_service.dart';
+import 'domain/audio/audio_diag_log.dart'; // 3.55 audio diagnostics (no personal data)
+import 'domain/diag/diag_log.dart'; // 3.55 persistent diagnostics log (no personal data)
+import 'domain/diag/diag_redact.dart';
+import 'data/services/diag_log_service.dart';
+import 'presentation/settings/diag_prompt_host.dart';
 import 'data/services/weather_service.dart';
 import 'data/services/permission_revocation_safety_service.dart';
 import 'data/services/place_review_service.dart';
@@ -82,8 +88,45 @@ import 'presentation/widgets/push_router_host.dart'; // 3.55 push notifications
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
+/// 3.55: everything runs in a guarded zone so uncaught errors reach the diagnostics log
+/// (docs/features_355/diagnostics_logs.md). The binding is initialised inside the same zone.
+void main() {
+  runZonedGuarded<Future<void>>(_main, (error, stack) {
+    DiagLog.caught(DiagCat.errors, 'uncaught_zone', error, stack);
+    // Still printed to the console / logcat as before the guarded zone.
+    debugPrint('Uncaught error: $error\n$stack');
+  });
+}
+
+/// Flutter framework errors, uncaught platform / async errors and isolate errors go to the
+/// diagnostics log; the previous behaviour (console output, red screen in debug) is kept.
+void _installErrorCapture() {
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    DiagLog.caught(DiagCat.errors, 'flutter_error', details.exception, details.stack, {'lib': details.library});
+    if (previous != null) {
+      previous(details);
+    } else {
+      FlutterError.presentError(details);
+    }
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    DiagLog.caught(DiagCat.errors, 'uncaught_async', error, stack);
+    debugPrint('Uncaught error: $error\n$stack');
+    return true;
+  };
+  try {
+    Isolate.current.addErrorListener(RawReceivePort((Object? pair) {
+      if (pair is List && pair.isNotEmpty) {
+        DiagLog.error(DiagCat.errors, 'isolate_error', {'what': pair.first, 'stack': DiagRedact.stackTop(pair.length > 1 ? pair[1] : null)});
+      }
+    }).sendPort);
+  } catch (_) {}
+}
+
+Future<void> _main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _installErrorCapture();
   // 3.55: a tapped RIDE_INVITE push opens the invitation screen (set before any push can arrive).
   PushRouterHost.openRideInvite = RideInviteScreen.open;
   tz_data.initializeTimeZones();
@@ -92,6 +135,9 @@ void main() async {
   await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   // Light or dark is decided before the first frame, so there is no flash.
   await MetaService.readPackageInfo();
+  // 3.55 persistent diagnostics log: files in <filesDir>/diag, native crashes merged (not awaited:
+  // entries logged before it is ready wait in memory).
+  DiagLogService.instance.init(build: '${MetaService.currentVersion}+${MetaService.currentBuild}').ignore();
   final theme = ThemeController();
   await theme.load();
   // Another rider's SOS over the lock screen (Android full-screen intent, heads-up fallback).
@@ -101,7 +147,7 @@ void main() async {
   // Data saver is known before the first frame, so the first ride already uses it.
   final settings = SettingsService();
   await settings.load();
-  await settings.loadSoundSettings(); // 3.55 sound awareness (mic): siren / horn / voice cleanup settings
+  await settings.loadSoundSettings(); // 3.55 sound awareness (mic): siren / voice cleanup settings
   // Map tiles saved on the phone (3.16): best effort; without it maps use the network.
   try {
     final dir = await SafetyNative.cacheDir();
@@ -129,6 +175,8 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider<ThemeController>.value(value: theme),
         ChangeNotifierProvider<SettingsService>(create: (_) => settings ?? (SettingsService()..load())),
         ChangeNotifierProvider(create: (_) => ApiClient()),
+        // 3.55 diagnostics log (Settings › More › Diagnostics, the post-ride safety prompt).
+        ChangeNotifierProvider<DiagLogService>.value(value: DiagLogService.instance),
         ChangeNotifierProvider<DeviceDiagnosticService>(create: (ctx) => DeviceDiagnosticService(apiClient: ctx.read<ApiClient>())..loadCachedReport()),
         // Weather along the route (3.16): two small requests per ride through the gateway.
         ChangeNotifierProvider<WeatherService>(create: (ctx) => WeatherService(ctx.read<ApiClient>(), ctx.read<SettingsService>())),
@@ -234,15 +282,27 @@ class CoRouteApp extends StatelessWidget {
           phoneCall.addListener(() => intercom.setPhoneCallActive(phoneCall.isCallActive));
           return intercom;
         }),
-        // Spoken alerts (phone text-to-speech). The engine starts with the first alert of a
-        // ride and is released when the ride ends (nothing runs at idle).
+        // Spoken alerts (phone text-to-speech). The engine is warmed up at ride start (the ride
+        // listener in the sound awareness block below; else the first alert starts it) and is
+        // released when the ride ends (nothing runs at idle). 3.55 fix: released only when a group
+        // ride ENDS (it used to be released on every convoy update without a group, i.e. all
+        // through an offline solo ride, so each alert waited for the engine to start again).
         ChangeNotifierProvider<VoiceService>(create: (ctx) {
           final voice = VoiceService(ctx.read<SettingsService>());
           voice.attachPhoneCallService(ctx.read<PhoneCallService>());
+          // Audio output diagnostics (latency, focus, music volume; no text, no names) to logcat.
+          // 3.55: also into the persistent diagnostics log (alert latency, focus, music volume).
+          AudioDiagLog.sink = (line) {
+            debugPrint(line);
+            DiagLog.info(DiagCat.audio, 'audio', {'line': line});
+          };
           final convoys = ctx.read<ConvoyService>();
+          var hadRide = false;
           convoys.addListener(() {
             final c = convoys.activeConvoy;
-            if ((c == null || c.tripStatus == 'ENDED') && voice.started) voice.release().ignore();
+            final ride = c != null && c.tripStatus != 'ENDED';
+            if (hadRide && !ride && voice.started) voice.release().ignore();
+            hadRide = ride;
           });
           return voice;
         }),
@@ -284,8 +344,32 @@ class CoRouteApp extends StatelessWidget {
           },
           dispose: (_, b) => b.dispose(),
         ),
+        // 3.55 diagnostics: ride start / end with battery and permission states, the gateway for
+        // uploads and admin "Ask for logs" requests (socket / push DIAG_LOG_REQUEST).
+        Provider<DiagRideObserver>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final safety = ctx.read<SafetyService>();
+            final settings = ctx.read<SettingsService>();
+            DiagLogService.instance.attach(api: ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>(), push: ctx.read<PushService>());
+            final o = DiagRideObserver(
+              groupId: () => convoys.activeConvoy?.groupId,
+              groupRideActive: () => convoys.activeConvoy?.tripStatus == 'STARTED',
+              soloActive: () => safety.offlineSoloActive,
+              batteryPercent: () => convoys.currentBatteryLevel,
+              charging: () => convoys.isCharging,
+              batterySaver: () => settings.batterySaver || convoys.batterySaverActive,
+              riderCount: () => convoys.activeConvoy?.riders.length ?? 0,
+            );
+            convoys.addListener(o.changed);
+            safety.addListener(o.changed);
+            o.changed();
+            return o;
+          },
+        ),
         // ==== 3.55 sound awareness (mic agent) BEGIN: one shared ride microphone (RideMicHub) for
-        // siren / horn detection and the intercom; alerts through VoiceService's priority manager.
+        // siren detection and the intercom; alerts through VoiceService's priority manager.
         // Audio is analysed on the phone only. docs/features_355/sound_awareness_and_intercom.md
         ChangeNotifierProvider<RideMicHub>(
           lazy: false,
@@ -328,19 +412,18 @@ class CoRouteApp extends StatelessWidget {
                   ))
               ..tone = (() => NativeVoiceEngine.alertTone().ignore())
               ..sirenSettingOn = (() => settings.sirenAlerts)
-              ..hornSetting = (() => settings.hornAlerts)
               ..giveWaySide = (() => settings.giveWaySide == 'auto' ? SirenAcousticDetector.keepSideForCountry(country) : settings.giveWaySide)
-              ..riderTalking = (() => intercom.isTransmitting)
               ..intercomPlaying = (() => intercom.isReceiving)
+              ..ownSpeechActive = (() => voice.priorityManager.isSpeaking)
               // Can the rider hear outside? Headset / music / call from the phone's audio state, no mic.
               ..readListening = NativeVoiceEngine.readListeningState;
-            // 3.55: siren / horn with the screen locked or the app in the background: a heads-up
+            // 3.55: siren with the screen locked or the app in the background: a heads-up
             // with vibration (HapticFeedback may not vibrate then). In front: haptics only.
             d.backgroundAlert = (title, body, {required strong}) => AlarmNotifier.showSoundAwarenessAlert(title, body,
                 showFor: strong ? const Duration(seconds: 60) : const Duration(seconds: 10));
             d.attachHub(hub);
             // 3.55: the ride foreground service starts as location|microphone (when the mic
-            // permission is already granted) if siren / horn alerts are on or the intercom may be used.
+            // permission is already granted) if siren alerts are on or the intercom may be used.
             final safetyForMic = ctx.read<SafetyService>();
             BackgroundService.micMayBeNeeded = () =>
                 d.detectionWanted ||
@@ -353,7 +436,13 @@ class CoRouteApp extends StatelessWidget {
             var wasRiding = false;
             void rideChanged() {
               final riding = hub.rideActive();
-              if (riding && !wasRiding) d.resetForRide();
+              if (riding && !wasRiding) {
+                d.resetForRide();
+                // Speech engine warm for the whole ride (bound, voice set, common lines ready):
+                // the first alert no longer waits for the engine to start.
+                voice.warmUp(phrases: SirenAcousticDetector.allSirenLines(keepSide: d.giveWaySide())).ignore();
+              }
+              if (!riding && wasRiding && voice.started && convoys.activeConvoy == null) voice.release().ignore(); // solo ride ended
               if (riding != wasRiding) d.setRideActive(riding);
               wasRiding = riding;
             }
@@ -565,7 +654,11 @@ class _App extends StatelessWidget {
                 // 3.55 ride invitations: shown by themselves on app open / resume, banner on RIDE_INVITE.
                 child: RideInviteHost(
                   navigatorKey: appNavigatorKey,
-                  child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+                  // 3.55 diagnostics: "send the log of this ride?" after a safety moment; support's log request.
+                  child: DiagPromptHost(
+                    navigatorKey: appNavigatorKey,
+                    child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+                  ),
                 ),
               ),
             ),

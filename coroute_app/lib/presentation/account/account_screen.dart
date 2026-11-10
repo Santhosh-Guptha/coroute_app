@@ -49,6 +49,14 @@ class AccountScreen extends StatelessWidget {
   void _push(BuildContext context, Widget screen) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
+  /// "2 friend requests" when only friend requests wait, else "N new" (crew invites, polls too).
+  static String _socialBadgeText(int friendRequests, int total) {
+    if (friendRequests > 0 && friendRequests == total) {
+      return friendRequests == 1 ? '1 friend request' : '$friendRequests friend requests';
+    }
+    return '$total new';
+  }
+
   static String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return '?';
@@ -342,7 +350,7 @@ class AccountScreen extends StatelessWidget {
                           icon: Icons.account_circle_rounded,
                           title: 'My profile & friends',
                           subtitle: auth.username.isEmpty ? 'Username, picture and friends' : auth.username,
-                          value: socialBadge > 0 ? '$socialBadge new' : null,
+                          value: socialBadge > 0 ? _socialBadgeText(social.badgeCount, socialBadge) : null,
                           color: socialBadge > 0 ? AppTheme.warnText : null,
                           onTap: () => MyProfileScreen.open(context),
                         ),

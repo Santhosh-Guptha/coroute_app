@@ -20,7 +20,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null }) {
   const r = express.Router();
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
@@ -245,6 +245,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./crew_ride_invites').registerCrewRideInviteRoutes({ r, repo, hub, convoys, wrap, flagsOf, ensureProfileComplete: (req) => ensureProfileComplete(req) });
   // 3.55 push notifications: POST / DELETE /me/push-tokens (src/push.js).
   if (hub && hub.push) require('./push').registerPushRoutes({ r, push: hub.push, wrap });
+  // 3.55 diagnostics logs: POST /me/diagnostics (gzip bundle), admin list / view / download / "Ask for logs" (src/diag_logs.js).
+  if (diagLogs) diagLogs.register({ r, wrap, requireAdmin });
   // 3.55 marketing studio: coupon / offer image templates (admin only, switch marketingStudio).
   require('./marketing_templates').registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf });
 

@@ -173,12 +173,17 @@ const config = {
   offlineAlertMinutes: int('OFFLINE_ALERT_MIN', 5),
   // Group speed limit: over (limit + tolerance) for HOLD counts, under the limit for CLEAR ends it.
   overspeedToleranceKmh: int('OVERSPEED_TOLERANCE_KMH', 2),
-  overspeedHoldMs: int('OVERSPEED_HOLD_MS', 3000),
+  // 3.55 alert latency review: 2 s (was 3 s); with fixes every 1-2.5 s that is the second fix over.
+  overspeedHoldMs: int('OVERSPEED_HOLD_MS', 2000),
   overspeedClearMs: int('OVERSPEED_CLEAR_MS', 20000),
   overspeedRenotifyMs: int('OVERSPEED_RENOTIFY_MS', 180000),
   stationaryAlertMinutes: int('STATIONARY_ALERT_MIN', 20),
   reachRadiusM: int('REACH_RADIUS_M', 150),
-  timelineTickMs: int('TIMELINE_TICK_MS', 30000),
+  // 3.55 alert latency review: 2 s (was 30 s). The tick judges what no fix can trigger (OFFLINE, a
+  // stale rider, a parked rider's possible incident, sweeper distress, regroup arrival, the end of
+  // an overspeed episode); it only compares timestamps, about 4 ms per 1,000 riders
+  // (test/timeline_tick_load_355.test.js), and writes only on a change.
+  timelineTickMs: int('TIMELINE_TICK_MS', 2000),
   // Phones get this long to upload their last points before the trip report is built,
   // and late uploads within the grace period rebuild it.
   reportDelayMs: int('REPORT_DELAY_MS', isTest ? 0 : 20000),

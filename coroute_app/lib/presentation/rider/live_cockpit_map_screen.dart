@@ -613,7 +613,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       // calls processPcmChunk), so it was idle memory; the siren pill shows only when an app
       // level SirenAcousticDetector is provided with a real audio source.
       _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
-      _sirenDetector?.hornAlertNotifier.addListener(_onSirenAlert); // 3.55 horn card
       // FEAT-MIC-01: the microphone stays OFF by default; the siren detector is never fed
       // continuous background audio (capture only while the rider holds PTT or uses VOX).
 
@@ -889,7 +888,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       _intercomService?.onMicChunk = null;
     }
     _sirenDetector?.activeSirenNotifier.removeListener(_onSirenAlert);
-    _sirenDetector?.hornAlertNotifier.removeListener(_onSirenAlert);
     if (_ownsSirenDetector) {
       _sirenDetector?.dispose();
     }
@@ -2100,21 +2098,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           event: sirenEvent,
           onDismiss: () => _dismissAlert(key),
         ),
-      ));
-    }
-    // 3.55 horn close by: a glanceable heads-up while the detector holds it (~4 s, it clears
-    // itself). Same priority band as hazards but below the siren and the hazard cards (important
-    // tier, low order), so SOS / crash / siren always win the slot. Not dismissible: nothing is
-    // saved, so the next horn shows again.
-    if (_sirenDetector?.hornAlertNotifier.value != null) {
-      out.add(_Slot(
-        key: 'HORN_NEARBY',
-        tier: AlertTier.important,
-        title: HornHudPill.title,
-        message: HornHudPill.detail,
-        priority: AlertPriority.hazard,
-        order: 150,
-        child: const HornHudPill(),
       ));
     }
     // FEAT-01: BLE Handlebar Wireless Remote Paired Status

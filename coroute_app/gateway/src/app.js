@@ -58,7 +58,7 @@ function createSoda() {
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport } = {}) {
+async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore } = {}) {
   const repo = new Repo(soda);
   const nodeName = config.nodeName || process.env.NODE_NAME || require('os').hostname();
   // Scheduled jobs run on exactly one node of a two-VM deployment (src/job_lease.js, GATEWAY_ROLE).
@@ -168,6 +168,14 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     frameguard: { action: 'deny' },
     xContentTypeOptions: true,
   }));
+  // 3.55: a request id on every request (X-Request-Id from Caddy / the client when well-formed, else a new
+  // one), echoed in the response; server-side errors are logged with it (never bodies or personal data).
+  app.use((req, res, next) => {
+    const given = req.get('x-request-id');
+    req.requestId = typeof given === 'string' && /^[A-Za-z0-9_.:-]{8,64}$/.test(given) ? given : require('crypto').randomBytes(8).toString('hex');
+    res.setHeader('X-Request-Id', req.requestId);
+    next();
+  });
   app.use((req, res, next) => {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(self "https://checkout.razorpay.com" "https://api.razorpay.com")');
     next();
@@ -357,7 +365,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.use('/api', require('./leaderboard').riderScoreRouter({ riderScore, leaderboard, gate, flagsOf: () => featureFlags }));
   // 3.55 usernames, friends, profile pictures: auth hooks, username backfill, erase cleanup, /join/friend/:code page.
   require('./social_routes').attachSocial({ app, repo, auth, hub, lease, featureFlags, logger, site, pageVars });
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats }));
+  // 3.55 diagnostics logs (src/diag_logs.js): rider uploads, admin viewer, erase cascade, leased retention.
+  const diagLogs = require('./diag_logs').attachDiagLogs({ repo, hub, featureFlags, lease, logger, ...(diagObjectStore !== undefined ? { objectStore: diagObjectStore } : {}) });
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -374,6 +384,11 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     }
     const isApi = req.path.startsWith('/api/') || req.path === '/api';
     const status = (typeof err.status === 'number' && err.status >= 400 && err.status < 600) ? err.status : 500;
+    if (status >= 500) {
+      // Method, route template (ids and query left out), request id and the error's first line only.
+      const route = req.route && req.route.path ? `${req.baseUrl || ''}${req.route.path}` : req.path.replace(/\/[^/]*\d[^/]*/g, '/:id');
+      logger.error(`[http] ${req.method} ${route} ${status} req=${req.requestId || '-'}: ${String((err && err.message) || err).split('\n')[0].slice(0, 200)}`);
+    }
     if (isApi) {
       return res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
     }
@@ -390,6 +405,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   retention.start = () => {
     if (jobsStarted) return;
     jobsStarted = true;
+    diagLogs.startJobs();
     const min = 60000;
     lease.run('retention', config.retentionRunEveryMinutes * min, () => retention.runOnce(Date.now(), { autoEnd: false }), { firstDelayMs: min });
     // Ending a stale convoy goes through its room: run it where rooms live.
@@ -427,7 +443,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { push, riderScore, leaderboard, publicStats, featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

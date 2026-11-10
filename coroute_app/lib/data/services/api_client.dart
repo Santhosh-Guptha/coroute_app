@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../../core/config/app_config.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
+import '../../domain/diag/diag_redact.dart';
 
 /// Thrown for any non-2xx gateway response.
 class ApiException implements Exception {
@@ -92,6 +94,10 @@ class ApiClient extends ChangeNotifier {
       }
     }
     _loaded = true;
+    // A saved session counts as "signed in" for the services listening here (friends, crews,
+    // feature switches, push token...). Without this, services created before the token was read
+    // never loaded anything at a cold start (3.55: incoming friend requests stayed invisible).
+    if (hasToken) notifyListeners();
   }
 
   Future<void> setToken(String? token) async {
@@ -120,7 +126,7 @@ class ApiClient extends ChangeNotifier {
       };
 
   Future<dynamic> get(String path, {Duration timeout = const Duration(seconds: 10)}) =>
-      _send(() => _http.get(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()), timeout);
+      _send(() => _http.get(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()), timeout, method: 'GET', path: path);
 
   /// GET for non-JSON bodies (for example a GPX file). Throws [ApiException] on failure.
   Future<String> getText(String path, {Duration timeout = const Duration(seconds: 20)}) async {
@@ -153,17 +159,37 @@ class ApiClient extends ChangeNotifier {
     throw error;
   }
 
+  /// 3.55: GET for binary bodies (an admin downloading a diagnostics log bundle). Throws
+  /// [ApiException] on failure (the body is not read as JSON).
+  Future<Uint8List> getBytes(String path, {Duration timeout = const Duration(seconds: 60)}) async {
+    http.Response res;
+    try {
+      res = await _http.get(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()).timeout(timeout);
+    } on TimeoutException {
+      throw const ApiException(0, 'The server did not respond. Check your connection.');
+    } catch (e) {
+      throw ApiException(0, 'Network error: ${e.runtimeType}');
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) return res.bodyBytes;
+    String? message;
+    try {
+      final d = jsonDecode(res.body);
+      if (d is Map) message = d['error']?.toString();
+    } catch (_) {}
+    throw ApiException(res.statusCode, message ?? 'Request failed (${res.statusCode})');
+  }
+
   Future<dynamic> post(String path, [Object? body, Duration timeout = const Duration(seconds: 12), bool auth = true]) =>
-      _send(() => _http.post(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(auth: auth), body: jsonEncode(body ?? {})), timeout);
+      _send(() => _http.post(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(auth: auth), body: jsonEncode(body ?? {})), timeout, method: 'POST', path: path);
 
   Future<dynamic> put(String path, [Object? body, Duration timeout = const Duration(seconds: 12)]) =>
-      _send(() => _http.put(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(), body: jsonEncode(body ?? {})), timeout);
+      _send(() => _http.put(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(), body: jsonEncode(body ?? {})), timeout, method: 'PUT', path: path);
 
   Future<dynamic> patch(String path, Object? body) =>
-      _send(() => _http.patch(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(), body: jsonEncode(body ?? {})), const Duration(seconds: 12));
+      _send(() => _http.patch(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(), body: jsonEncode(body ?? {})), const Duration(seconds: 12), method: 'PATCH', path: path);
 
   Future<dynamic> delete(String path) =>
-      _send(() => _http.delete(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()), const Duration(seconds: 12));
+      _send(() => _http.delete(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()), const Duration(seconds: 12), method: 'DELETE', path: path);
 
   // ---------- post-trip reviews ----------
 
@@ -213,6 +239,8 @@ class ApiClient extends ChangeNotifier {
       _send(
         () => _http.post(Uri.parse('${AppConfig.apiUrl}$path'), headers: {..._headers(), 'Content-Type': contentType}, body: bytes),
         timeout,
+        method: 'POST',
+        path: path,
       );
 
   /// Full address of a gateway path such as `/admin/reviews/<id>/photos/<photoId>`.
@@ -221,19 +249,30 @@ class ApiClient extends ChangeNotifier {
   /// Headers for an image the gateway only shows to the signed-in rider or an admin (Image.network).
   Map<String, String> get authHeaders => {if (hasToken) 'Authorization': 'Bearer $_token'};
 
-  Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout, {bool retried = false}) async {
+  Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout, {bool retried = false, String method = '?', String path = ''}) async {
     http.Response res;
     // Domain move: the base this attempt used (call() reads AppConfig.apiUrl when it runs).
     final base = AppConfig.apiBaseUrl;
+    final sw = Stopwatch()..start();
     try {
       res = await call().timeout(timeout);
     } on TimeoutException catch (e) {
       AppConfig.gatewayHosts.reportFailure(base, e);
+      DiagLog.warn(DiagCat.network, 'api_timeout', {'method': method, 'path': DiagRedact.pathTemplate(path), 'ms': sw.elapsedMilliseconds});
       throw const ApiException(0, 'The server did not respond. Check your connection.');
     } catch (e) {
       // The host could not be reached at all (DNS / TLS): try the other gateway host once.
-      if (AppConfig.gatewayHosts.reportFailure(base, e) && !retried) return _send(call, timeout, retried: true);
+      if (AppConfig.gatewayHosts.reportFailure(base, e) && !retried) return _send(call, timeout, retried: true, method: method, path: path);
+      DiagLog.warn(DiagCat.network, 'api_offline', {'method': method, 'path': DiagRedact.pathTemplate(path), 'type': e.runtimeType.toString(), 'ms': sw.elapsedMilliseconds});
       throw ApiException(0, 'Network error: ${e.runtimeType}');
+    }
+    final ms = sw.elapsedMilliseconds;
+    if (res.statusCode >= 400) {
+      // Method, path template (no ids, no query), status and time only: never bodies.
+      DiagLog.log(res.statusCode >= 500 ? DiagLevel.error : DiagLevel.warn, DiagCat.network, 'api_error',
+          {'method': method, 'path': DiagRedact.pathTemplate(path), 'status': res.statusCode, 'ms': ms, 'reqId': res.headers['x-request-id']});
+    } else if (ms > 5000) {
+      DiagLog.info(DiagCat.network, 'api_slow', {'method': method, 'path': DiagRedact.pathTemplate(path), 'status': res.statusCode, 'ms': ms});
     }
 
     dynamic decoded;

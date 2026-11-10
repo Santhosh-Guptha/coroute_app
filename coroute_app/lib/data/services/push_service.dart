@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config/app_config.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import '../../domain/notify/push_routing.dart';
 import 'api_client.dart';
 import 'meta_service.dart';
@@ -146,9 +147,11 @@ class PushService extends ChangeNotifier {
         'appVersion': appVersionOf(MetaService.currentVersion),
       });
       _registeredToken = token;
+      DiagLog.info(DiagCat.push, 'token_registered');
       _notify();
     } catch (e) {
       debugPrint('push: register note: $e');
+      DiagLog.warn(DiagCat.push, 'token_register_failed', {'type': e.runtimeType.toString(), 'status': e is ApiException ? e.statusCode : null});
     } finally {
       _registering = false;
     }
@@ -214,6 +217,7 @@ class PushService extends ChangeNotifier {
   Future<dynamic> _onNative(MethodCall call) async {
     switch (call.method) {
       case 'onToken':
+        DiagLog.info(DiagCat.push, 'token_refreshed');
         // A refreshed token: the gateway gets the new one.
         register().ignore();
         return null;
@@ -227,6 +231,7 @@ class PushService extends ChangeNotifier {
           final type = data.remove('type');
           final title = data.remove('title') ?? '';
           final body = data.remove('body') ?? '';
+          DiagLog.info(DiagCat.push, 'received', {'kind': type, 'eventId': data['eventId']});
           if (type != null) _messages.add(PushMessage(type, data, title: title, body: body));
         }
         return null;
@@ -242,6 +247,7 @@ class PushService extends ChangeNotifier {
     final type = m['type'];
     if (type is! String) return;
     final msg = PushMessage(type, PushRouting.decodePayload(m['payload']));
+    DiagLog.info(DiagCat.push, 'opened', {'kind': type});
     if (_opened.hasListener) {
       _opened.add(msg);
     } else {

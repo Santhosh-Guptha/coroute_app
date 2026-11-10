@@ -182,7 +182,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 500));
       expect(count, 0);
-      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 3));
       expect(count, 1);
       expect(haptics.map((c) => c.arguments), contains('HapticFeedbackType.heavyImpact'));
       await tester.pump(const Duration(seconds: 2));

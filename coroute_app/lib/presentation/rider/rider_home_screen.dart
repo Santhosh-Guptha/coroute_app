@@ -10,6 +10,8 @@ import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
 import '../../core/ui/ride_alert.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/crews_service.dart';
+import '../../data/services/friends_service.dart';
 import '../../data/services/place_review_service.dart';
 import '../map_places/after_ride_place_reviews.dart';
 import '../widgets/feature_switch.dart';
@@ -333,13 +335,33 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               label: 'Alerts',
             ),
             NavigationDestination(
-              icon: Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(Icons.person_rounded),
+              icon: _ProfileNavIcon(),
+              selectedIcon: _ProfileNavIcon(selected: true),
               label: 'Profile',
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 3.55: the Profile icon with the number of friend requests (and crew invitations / polls)
+/// waiting for an answer, so a new request is seen from any tab.
+class _ProfileNavIcon extends StatelessWidget {
+  final bool selected;
+  const _ProfileNavIcon({this.selected = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final friends = context.select<FriendsService?, int>((s) => s?.badgeCount ?? 0);
+    final crews = context.select<CrewsService?, int>((s) => s?.badgeCount ?? 0);
+    final n = friends + crews;
+    final icon = Icon(selected ? Icons.person_rounded : Icons.person_outline_rounded);
+    if (n == 0) return icon;
+    return Semantics(
+      label: friends > 0 ? '$friends friend ${friends == 1 ? 'request' : 'requests'} waiting' : '$n new',
+      child: Badge(label: Text(n > 9 ? '9+' : '$n'), child: icon),
     );
   }
 }

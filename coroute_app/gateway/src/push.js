@@ -65,6 +65,7 @@ const DEFAULTS = Object.freeze({
   FRIEND_ACCEPTED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   CREW_INVITE: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   POLL_CREATED: { ttlSec: 24 * 3600, priority: 'normal' },
+  DIAG_LOG_REQUEST: { ttlSec: 7 * 24 * 3600, priority: 'normal' },
 });
 const FALLBACK = { ttlSec: 24 * 3600, priority: 'normal' };
 /** Socket events that become pushes (title + body from the event; ids only in data). */
@@ -73,6 +74,8 @@ const SOCKET_EVENTS = Object.freeze({
   FRIEND_ACCEPTED: (p) => ({ title: 'New friend', body: `${p.username || 'A rider'} accepted your friend request`, data: {}, collapse: 'friends' }),
   CREW_INVITE: (p) => ({ title: 'Crew invite', body: `${p.username || 'A rider'} invited you to the crew ${p.crewName || ''}`.trim(), data: { inviteId: p.inviteId, crewId: p.crewId }, collapse: `crew_${p.crewId || ''}` }),
   POLL_CREATED: (p) => ({ title: p.crewName ? `New poll in ${p.crewName}` : 'New crew poll', body: p.question ? `${p.username || 'A rider'} asks: ${p.question}` : `${p.username || 'A rider'} started a poll`, data: { crewId: p.crewId, pollId: p.pollId } }),
+  // 3.55 diagnostics: an admin asked for the rider's app log (the rider must tap Send in the app).
+  DIAG_LOG_REQUEST: (p) => ({ title: 'CoRoute support', body: 'Support asked for your app log to fix a problem. Open CoRoute to send it.', data: { requestId: p.requestId }, collapse: 'diag_request' }),
   RIDE_INVITE: (p) => ({ title: 'Ride invitation', body: `${p.username || 'A rider'} invited you to a ride${p.rideName ? `: ${p.rideName}` : ''}`, data: { inviteId: p.inviteId, groupId: p.groupId }, collapse: `ride_${p.inviteId || ''}`, always: true }),
 });
 
