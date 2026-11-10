@@ -43,7 +43,7 @@ class BackgroundService {
   /// [updateStatus] and a repeated [start] do not touch the notification.
   static bool get richActive => _richActive;
 
-  /// 3.55: a microphone consumer may need capture during this ride (siren / horn alerts on, or
+  /// 3.55: a microphone consumer may need capture during this ride (siren alerts on, or
   /// the intercom allowed). Set in main.dart; null = no. With it true and RECORD_AUDIO already
   /// granted, [start] starts the service as location|microphone at once (Android 14 needs the
   /// type at start; adding it later means a stop and restart, see [ensureMicrophoneType]).

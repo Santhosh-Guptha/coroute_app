@@ -253,11 +253,11 @@ void main() {
         },
       ));
 
-      // Simulate moving position (65 s before the stopped fix below)
+      // Simulate moving position (185 s before the stopped fix below)
       convoyService.handlePositionForTesting(Position(
         latitude: 12.9716,
         longitude: 77.5946,
-        timestamp: DateTime.now().subtract(const Duration(seconds: 65)),
+        timestamp: DateTime.now().subtract(const Duration(seconds: 185)),
         accuracy: 10.0,
         altitude: 800.0,
         altitudeAccuracy: 5.0,
@@ -268,9 +268,9 @@ void main() {
       ));
       expect(convoyService.isGpsIdleProfile, isFalse);
 
-      // Simulate stationary stop for 65 seconds
+      // Simulate a stationary stop for 185 seconds (3.55: the idle profile starts after 3 min)
       convoyService.setStationarySinceForTesting(
-        DateTime.now().subtract(const Duration(seconds: 65)),
+        DateTime.now().subtract(const Duration(seconds: 185)),
       );
 
       // Next position fix at 0 speed triggers idle profile and dead reckoning accelerometer pause

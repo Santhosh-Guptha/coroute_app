@@ -8,6 +8,7 @@ import '../../core/constants/net_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../models/safety_wire.dart';
 import '../../domain/sync/reconnect_policy.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 
 /// Binary voice packet kinds (must match gateway/src/ws.js).
 class VoiceKind {
@@ -135,6 +136,7 @@ class RealtimeService extends ChangeNotifier {
   }
 
   void _noteConnectFailure(LinkProblem p) {
+    DiagLog.info(DiagCat.realtime, 'connect_failed', {'problem': p, 'ms': _openedAt == 0 ? -1 : DateTime.now().millisecondsSinceEpoch - _openedAt});
     if (p == LinkProblem.serverUnreachable) {
       _unreachableFailures++;
       if (_unreachableFailures >= NetConstants.serverUnreachableAfter) _setLink(LinkProblem.serverUnreachable);
@@ -360,10 +362,16 @@ class RealtimeService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------ internals
+  /// 3.55 diagnostics: when the current connect started and when the socket was last connected.
+  int _openedAt = 0;
+  int _connectedAt = 0;
+
   void _open() {
     if (!_wantConnection || _token == null || _refused) return;
     _closeChannel();
     _setState(RealtimeState.connecting);
+    _openedAt = DateTime.now().millisecondsSinceEpoch;
+    DiagLog.debug(DiagCat.realtime, 'connect_start', {'inRide': _groupId != null});
     final hook = debugOnOpen;
     if (hook != null) {
       hook();
@@ -384,7 +392,16 @@ class RealtimeService extends ChangeNotifier {
         _failureNoted = true;
         _noteConnectFailure(classify(e));
       });
-      _sub = ch.stream.listen(_onData, onError: (_) => _scheduleReconnect(), onDone: () {
+      _sub = ch.stream.listen(_onData, onError: (Object e) {
+        DiagLog.info(DiagCat.realtime, 'socket_error', {'type': e.runtimeType.toString()});
+        _scheduleReconnect();
+      }, onDone: () {
+        if (seq == _channelSeq) {
+          DiagLog.info(DiagCat.realtime, 'closed', {
+            'code': ch.closeCode, 'beforeHello': !_helloOnChannel, 'inRide': _groupId != null,
+            'upMs': _connectedAt == 0 || !_helloOnChannel ? 0 : DateTime.now().millisecondsSinceEpoch - _connectedAt,
+          });
+        }
         // Connected at the TCP/TLS level, then closed before HELLO: the server is not answering properly.
         if (seq == _channelSeq && _readyOnChannel && !_helloOnChannel && !_failureNoted && ch.closeCode != closeSignedOut && ch.closeCode != closeAccountRefused) {
           _failureNoted = true;
@@ -405,10 +422,14 @@ class RealtimeService extends ChangeNotifier {
       _staleTimer?.cancel();
       _staleTimer = Timer.periodic(const Duration(seconds: 40), (_) {
         // The gateway pings every 30 s; if nothing arrived for 100 s the link is dead.
-        if (DateTime.now().difference(_lastMessageAt).inSeconds > 100) _scheduleReconnect();
+        if (DateTime.now().difference(_lastMessageAt).inSeconds > 100) {
+          DiagLog.warn(DiagCat.realtime, 'stale_link', {'silentS': DateTime.now().difference(_lastMessageAt).inSeconds, 'inRide': _groupId != null});
+          _scheduleReconnect();
+        }
       });
     } catch (e) {
       debugPrint('ws connect note: $e');
+      DiagLog.warn(DiagCat.realtime, 'connect_error', {'type': e.runtimeType.toString()});
       _scheduleReconnect();
     }
   }
@@ -429,6 +450,8 @@ class RealtimeService extends ChangeNotifier {
         // Not in a ride: the server has this phone back. In a ride that is the SNAPSHOT (below).
         if (_groupId == null) _policy.reset();
         _helloOnChannel = true;
+        _connectedAt = DateTime.now().millisecondsSinceEpoch;
+        DiagLog.info(DiagCat.realtime, 'connected', {'ms': _openedAt == 0 ? -1 : _connectedAt - _openedAt, 'inRide': _groupId != null});
         final f = msg['features'];
         _features = f is List ? <String>{for (final x in f) x.toString()} : const <String>{};
         _unreachableFailures = 0;
@@ -535,6 +558,7 @@ class RealtimeService extends ChangeNotifier {
     _setState(RealtimeState.disconnected);
     final wait = _policy.nextAfterFailure();
     _lastReconnectDelay = wait;
+    DiagLog.debug(DiagCat.realtime, 'reconnect_wait', {'ms': wait.inMilliseconds});
     _reconnectTimer = Timer(wait, _open);
   }
 
@@ -548,6 +572,7 @@ class RealtimeService extends ChangeNotifier {
     _reconnectTimer?.cancel();
     _closeChannel();
     _serverMovePending = true;
+    DiagLog.info(DiagCat.realtime, 'server_move', {'delayMs': delayMs});
     // At most the subtle "Reconnecting" state, never "Offline" or an error.
     _setState(RealtimeState.connecting);
     final wait = _policy.afterServerRequest(delayMs);

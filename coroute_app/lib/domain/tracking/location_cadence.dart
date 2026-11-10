@@ -53,12 +53,14 @@ class LocationCadence {
     SpeedBand.highway: CadencePlan(500, 0, GpsPrecision.navigation),
   };
 
-  /// Moving, low battery: one step gentler everywhere, never navigation grade, and never slower
-  /// than one fix every 2 s once moving (speed readout and overspeed check stay usable).
+  /// Moving, low battery: never navigation grade (high accuracy instead), the highway band at
+  /// 1 s instead of 500 ms, and stopped at 4 s. 3.55 alert latency review: riding stays at one fix a
+  /// second (town and open road were 2 s, which doubled the overspeed / hazard / crash-stop
+  /// latency exactly when the battery saver kicked in; the GNSS chip runs anyway while riding).
   static const Map<SpeedBand, CadencePlan> lowBattery = {
     SpeedBand.stopped: CadencePlan(4000, 0, GpsPrecision.medium),
-    SpeedBand.city: CadencePlan(2000, 0, GpsPrecision.high),
-    SpeedBand.road: CadencePlan(2000, 0, GpsPrecision.high),
+    SpeedBand.city: CadencePlan(1000, 0, GpsPrecision.high),
+    SpeedBand.road: CadencePlan(1000, 0, GpsPrecision.high),
     SpeedBand.highway: CadencePlan(1000, 0, GpsPrecision.high),
   };
 

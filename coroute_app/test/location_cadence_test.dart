@@ -49,7 +49,9 @@ void main() {
       for (final b in SpeedBand.values) {
         final n = LocationCadence.plan(b, idle: false);
         final l = LocationCadence.plan(b, idle: false, lowBattery: true);
-        expect(l.intervalMs, greaterThan(n.intervalMs));
+        expect(l.intervalMs, greaterThanOrEqualTo(n.intervalMs));
+        // 3.55 alert latency review: riding (town and faster) stays at 1 Hz on the battery saver.
+        if (b != SpeedBand.stopped) expect(l.intervalMs, lessThanOrEqualTo(1000));
         // Riding never uses a distance filter (speed readout, overspeed check, stop -> 0).
         expect(l.distanceFilterM, 0);
         expect(n.distanceFilterM, 0);

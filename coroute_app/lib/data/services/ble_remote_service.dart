@@ -139,8 +139,13 @@ class BleRemoteService extends ChangeNotifier {
   /// Contact bounce suppression window (35ms).
   static const Duration contactDebounceWindow = Duration(milliseconds: 35);
 
-  /// Long press duration required to trigger Emergency SOS (2.5 seconds).
-  static const Duration longPressThreshold = Duration(milliseconds: 2500);
+  /// Long press duration required to trigger Emergency SOS (3 s; 3.55 false-SOS review, was 2.5 s).
+  /// Only a long press raises an SOS, never from a volume key, and always through the crash alarm
+  /// countdown (cancellable) when the safety service runs.
+  static const Duration longPressThreshold = Duration(milliseconds: 3000);
+
+  static bool _isVolumeKey(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.audioVolumeUp || k == LogicalKeyboardKey.audioVolumeDown || k == LogicalKeyboardKey.audioVolumeMute;
 
   void _attachKeyboard() {
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
@@ -255,7 +260,7 @@ class BleRemoteService extends ChangeNotifier {
   void _dispatchGesture(BleRemoteGesture gesture, LogicalKeyboardKey key) {
     if (_isDisposed) return;
     // 3.55 safety review: the admin switch 'bleRemote' stops talk (single press) and the hazard
-    // marker (double press) from the handlebar remote, but never its SOS (triple press / 2.5 s hold):
+    // marker (double press) from the handlebar remote, but never its SOS (the 3 s hold):
     // no feature switch may take an SOS path away from a rider (SOS is a locked feature).
     final remoteOn = FeatureFlagsService.on('bleRemote');
     if (!remoteOn && (gesture == BleRemoteGesture.singlePress || gesture == BleRemoteGesture.doublePress)) return;
@@ -280,7 +285,13 @@ class BleRemoteService extends ChangeNotifier {
         _handleDoublePress();
         break;
       case BleRemoteGesture.triplePress:
+        // 3.55 false-SOS review: three quick presses happen by accident (talk toggled on and off,
+        // a helmet unit's volume / track buttons, a gloved thumb on a bumpy road). No SOS.
+        break;
       case BleRemoteGesture.longPress:
+        // A deliberate 3 s hold. Never from the volume keys: the phone's own volume rocker, a
+        // mount clamp pressing it, or a helmet intercom's volume button send those too.
+        if (_isVolumeKey(key)) break;
         _handleSosTrigger(gesture);
         break;
     }
@@ -320,7 +331,7 @@ class BleRemoteService extends ChangeNotifier {
     }
   }
 
-  /// Triple Press or Long Press: Immediate Emergency SOS Trigger.
+  /// The 3 s hold (not a volume key): the crash alarm countdown, or the SOS when no countdown can open.
   void _handleSosTrigger(BleRemoteGesture gesture) {
     // Heavy haptic confirmation
     HapticFeedback.heavyImpact().ignore();
@@ -338,9 +349,13 @@ class BleRemoteService extends ChangeNotifier {
       );
     }
 
-    // 2. Also trigger via ConvoyService directly if safety service is not active
+    // 2. When no countdown could open (no safety service, crash detection off, outside a ride): the
+    // SOS directly, but once per incident: an open SOS of mine is never raised again (3.55: a
+    // second long press used to create a second SOS; a pending one keeps its id anyway).
     final cs = convoyService;
-    if (cs != null && ss?.alarm == null) {
+    final uidMine = cs?.myUserId;
+    final mineOpen = cs?.activeConvoy?.activeAlerts.any((a) => !a.resolved && a.userId == uidMine) ?? false;
+    if (cs != null && ss?.alarm == null && !mineOpen) {
       final uid = cs.myUserId;
       final me = uid == null ? null : cs.activeConvoy?.riders[uid];
       if (me != null && (me.lat != 0 || me.lng != 0)) {

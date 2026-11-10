@@ -58,6 +58,8 @@ import 'trip_storage_service.dart';
 import '../../domain/ride/ride_roles.dart';
 import '../../domain/ride/vehicle_swap.dart';
 import '../../domain/ride/pillion_seat.dart'; // 3.55 pillion seat
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
+import 'diag_log_service.dart';
 
 /// Convoy state for the signed-in rider.
 ///
@@ -1205,6 +1207,7 @@ class ConvoyService extends ChangeNotifier {
         final pending = _pendingSos;
         if (pending != null && pending.matches(alert.clientId)) {
           // The server has it: delivered to the convoy. Never shown as delivered before this echo.
+          DiagLog.warn(DiagCat.sos, 'ack', {'sinceRaiseMs': _clock() - pending.createdAt, 'sinceSendMs': _sosSentAt == 0 ? -1 : _clock() - _sosSentAt, 'type': pending.type});
           _pendingSos = null;
           _deliveredSosAlertId = alert.alertId;
           PendingSosStore.clear().ignore();
@@ -2143,7 +2146,13 @@ class ConvoyService extends ChangeNotifier {
     final current = convoy.riders[userId];
     final now = position.timestamp.millisecondsSinceEpoch;
     // Every fix, even a degraded one, goes through the estimator (it weighs and rejects by itself).
-    final speedKmh = _speedEst.update(speedFixOf(position)).kmh.clamp(0.0, 300.0).toDouble();
+    final est = _speedEst.update(speedFixOf(position));
+    final speedKmh = est.kmh.clamp(0.0, 300.0).toDouble();
+    // 3.55 diagnostics: fix cadence / accuracy every 30 s; speed outliers (sampled).
+    DiagLog.gpsFix(tMs: now, accuracyM: position.accuracy, rejected: est.rejected, kmh: speedKmh, lat: position.latitude, lng: position.longitude);
+    if (est.rejected && DiagLog.sampler.take('speed_outlier', now)) {
+      DiagLog.info(DiagCat.speed, 'speed_outlier', {'filtered': est.filteredKmh, 'source': est.source, 'acc': position.accuracy, 'gpsSpeed': position.speed * 3.6});
+    }
     // Speed-adaptive GPS cadence: the faster the ride, the more often and finer the fixes. The band
     // has hysteresis and a dwell time, so the stream is re-subscribed only on a real change.
     if (_gpsBand.update(speedKmh, _clock()) && _isRealGpsActive && !_gpsIdleProfile) _subscribeGps();
@@ -2279,8 +2288,12 @@ class ConvoyService extends ChangeNotifier {
       }
     } else {
       _stationarySince ??= DateTime.now();
-      // Throttle GPS polling when stationary: switch to idle profile after 30s (low battery) or 60s (normal)
-      final stationaryThreshold = batterySaverActive ? const Duration(seconds: 30) : const Duration(seconds: 60);
+      // Throttle GPS polling when stationary: switch to the idle profile after 90 s (low battery) or
+      // 3 min (normal). 3.55 alert latency review: was 30 s / 60 s, shorter than many Indian red
+      // lights and railway gates: the idle profile (20 s, 25 m filter, network accuracy) then
+      // delayed the first riding fix by several seconds after every long light (speed readout,
+      // overspeed, hazards ahead) and left the rider-down check without fresh fixes at a stop.
+      final stationaryThreshold = batterySaverActive ? const Duration(seconds: 90) : const Duration(minutes: 3);
       if (!_gpsIdleProfile && DateTime.now().difference(_stationarySince!) >= stationaryThreshold) {
         _gpsIdleProfile = true;
         _subscribeGps();
@@ -3194,6 +3207,11 @@ class ConvoyService extends ChangeNotifier {
     _pendingSos = pending;
     PendingSosStore.save(pending).ignore();
     final sent = _sendPendingSos();
+    DiagLog.warn(DiagCat.sos, 'raise', {
+      'type': type, 'src': source, 'auto': auto, 'sent': sent, 'repeat': existing != null && existing.groupId == gid,
+      'connected': _rt.isConnected, 'acc': accuracy, 'lat': lat, 'lng': lng,
+    });
+    DiagLogService.instance.noteSafetyMoment('sos');
     notifyListeners();
     return sent ? SosDelivery.sent : SosDelivery.queued;
   }
@@ -3582,6 +3600,7 @@ class ConvoyService extends ChangeNotifier {
     if (p == null || p.groupId != _activeGroupId) return false;
     final sent = _rt.send(p.toMessage());
     if (sent) _sosSentAt = _clock();
+    DiagLog.info(DiagCat.sos, 'send', {'ok': sent, 'ageMs': _clock() - p.createdAt});
     return sent;
   }
 
@@ -3617,6 +3636,8 @@ class ConvoyService extends ChangeNotifier {
   /// [reason]: false alarm by default ("I am safe"); "Help reached me" passes [ResolveReason.resolved].
   void cancelMySos({ResolveReason reason = ResolveReason.falseAlarm}) {
     final waiting = _pendingSos;
+    DiagLog.warn(DiagCat.sos, 'cancel', {'reason': reason, 'stillWaiting': waiting != null});
+    if (reason == ResolveReason.falseAlarm) DiagLogService.instance.noteSafetyMoment('sos_false_alarm');
     if (waiting != null) {
       _clearPendingSos();
       notifyListeners();

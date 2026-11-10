@@ -199,7 +199,7 @@ void main() {
       fakeRt.disposeStreams();
     });
 
-    test('TEST-BLE-06: Triple press immediately initiates Emergency SOS trigger', () async {
+    test('TEST-BLE-06: Triple press is recognised at once (3.55: it no longer raises an SOS; only the 3 s hold does)', () async {
       final remote = BleRemoteService(autoAttachKeyboard: false);
       final key = LogicalKeyboardKey.audioVolumeUp;
       const physicalKey = PhysicalKeyboardKey.audioVolumeUp;
@@ -249,7 +249,7 @@ void main() {
       remote.dispose();
     });
 
-    test('TEST-BLE-07: Sustained long press (2.5s hold) initiates Emergency SOS trigger', () async {
+    test('TEST-BLE-07: Sustained long press (3 s hold) initiates Emergency SOS trigger', () async {
       final remote = BleRemoteService(autoAttachKeyboard: false);
       final key = LogicalKeyboardKey.select;
       const physicalKey = PhysicalKeyboardKey.select;
@@ -261,12 +261,12 @@ void main() {
         timeStamp: Duration.zero,
       ));
 
-      // Before 2.5s: no SOS yet
-      await Future<void>.delayed(const Duration(milliseconds: 1000));
+      // Before 3 s: no SOS yet (3.55 false-SOS review: was 2.5 s)
+      await Future<void>.delayed(const Duration(milliseconds: 2600));
       expect(remote.lastEvent, isNull);
 
-      // Wait past 2.5s threshold
-      await Future<void>.delayed(const Duration(milliseconds: 1600));
+      // Wait past the 3 s threshold
+      await Future<void>.delayed(const Duration(milliseconds: 600));
       expect(remote.lastEvent, isNotNull);
       expect(remote.lastEvent!.gesture, equals(BleRemoteGesture.longPress));
 
@@ -274,7 +274,7 @@ void main() {
       final upHandled = remote.handleKeyEvent(KeyUpEvent(
         logicalKey: key,
         physicalKey: physicalKey,
-        timeStamp: const Duration(milliseconds: 2700),
+        timeStamp: const Duration(milliseconds: 3300),
       ));
       expect(upHandled, isTrue);
 

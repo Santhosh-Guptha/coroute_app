@@ -104,8 +104,10 @@ class SpeedEstimator {
   static const double jerkSteady = 0.0005;
   static const double jerkManeuver = 1.5;
 
-  /// Maneuver threshold in noise sigmas of the innovation mean.
-  static const double maneuverSigmas = 2.5;
+  /// Maneuver threshold in noise sigmas of the innovation mean (3.55 alert latency review: 2.0,
+  /// was 2.5; on a phone with noisy Doppler (1 m/s) a gradual speed-up crossed the limit up to
+  /// 3 s before the readout did, now about 2 s at p90; steady-state jitter +0.1 km/h).
+  static const double maneuverSigmas = 2.0;
 
   // Filter state.
   bool _init = false;
@@ -223,7 +225,7 @@ class SpeedEstimator {
     final dt = (f.tMs - _lastT) / 1000.0;
     final vBefore = _v;
     // Maneuver detection from the last innovations (before this fix is used).
-    // Mean of the last innovations (EMA 0.5, so ~1/sqrt(3) of the noise): beyond 2.5 of its own
+    // Mean of the last innovations (EMA 0.5, so ~1/sqrt(3) of the noise): beyond 2 of its own
     // sigmas it is a real change of speed, fully a maneuver one noise-sigma further.
     final noise = math.sqrt(_noiseVar);
     final m = ((_innovMean.abs() - maneuverSigmas * noise / math.sqrt(3)) / noise).clamp(0.0, 1.0).toDouble();

@@ -44,6 +44,11 @@ const AUTO_ROLE_EVERY_MS = 120000;
 const MAX_TS = Number.MAX_SAFE_INTEGER;
 /** Off-route is checked at most this often per rider (HOLD_MS decides anyway; the phone has its own check). */
 const OFF_ROUTE_CHECK_MS = 5000;
+/**
+ * Separation, sweeper, regroup and automatic-role rules run on telemetry at most this often per
+ * convoy (3.55 alert latency review: 2 s, was 5 s; each run is O(riders) plus the sub-cluster check).
+ */
+const GROUP_CHECK_MS = 2000;
 
 const newId = () => `EV-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
@@ -351,8 +356,8 @@ class TimelineEngine {
     // Group speed limit, lowered near stops and in towns (3.16) when the lead set a town limit.
     await this._speed(gid, st, rs, rider, p, t, m.speedLimitKmh || 0, this._activeLimit(m, p));
 
-    // Separation and the sweeper rules, at most every 5 s per convoy, or on same-timestamp batches.
-    if (t - st.lastSepCheck >= 5000 || t === st.lastSepCheck) {
+    // Separation and the sweeper rules, at most every GROUP_CHECK_MS per convoy, or on same-timestamp batches.
+    if (t - st.lastSepCheck >= GROUP_CHECK_MS || t === st.lastSepCheck) {
       st.lastSepCheck = t;
       await this._checkSubClusters(gid, st, room, t);
       await this._checkSeparation(gid, st, room, t);
