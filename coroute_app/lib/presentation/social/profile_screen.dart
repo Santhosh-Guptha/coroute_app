@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -15,10 +14,7 @@ import '../../domain/social/username_rules.dart';
 import '../score/leaderboard_screen.dart';
 import '../score/rider_score_card.dart';
 import '../widgets/feature_switch.dart';
-import '../../data/services/crews_service.dart';
-import 'crews_screen.dart';
-import 'friend_requests_card.dart';
-import 'friends_screen.dart';
+import 'people_screen.dart';
 import 'user_avatar.dart';
 
 /// 3.55 my profile: picture, username (changeable once per 30 days), full name and ride analytics
@@ -117,17 +113,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     if (saved == true && mounted) _say('Username saved');
   }
 
-  Future<void> _shareInvite(MyProfile p) async {
-    final text = p.shareText ?? '';
-    if (text.isEmpty) return;
-    final box = context.findRenderObject() as RenderBox?;
-    await SharePlus.instance.share(ShareParams(
-      text: text,
-      subject: 'Ride with me on CoRoute',
-      sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
-    ));
-  }
-
   @override
   Widget build(BuildContext context) {
     final svc = context.watch<FriendsService>();
@@ -150,12 +135,6 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                 children: [
                   DsScreenHeader(title: 'My profile', onBack: () => Navigator.maybePop(context)),
                   const SizedBox(height: 18),
-                  // 3.55: friend requests waiting for me, answered right here (even if the profile
-                  // itself could not be loaded).
-                  if (friendsOn && svc.badgeCount > 0) ...[
-                    FriendRequestsCard(max: 3, onSeeAll: () => FriendsScreen.open(context)),
-                    const SizedBox(height: Space.s16),
-                  ],
                   if (p == null && svc.loading)
                     const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
                   else if (p == null)
@@ -231,12 +210,24 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                             label: 'Show my username on public leaderboards',
                             subtitle: 'Only your username and rounded totals are shown on the CoRoute website.',
                             value: p.publicLeaderboard,
-                            divider: leaderboardOn,
+                            divider: friendsOn || leaderboardOn,
                             onChanged: (v) async {
                               final err = await svc.setPublicLeaderboard(v);
                               if (err != null && mounted) _say(err);
                             },
                           ),
+                          if (friendsOn)
+                            DsSwitchRow(
+                              key: const Key('profile_discoverable'),
+                              label: 'Let riders find me',
+                              subtitle: 'Search by username and "People you rode with". Off: only your exact username finds you.',
+                              value: p.discoverable,
+                              divider: leaderboardOn,
+                              onChanged: (v) async {
+                                final err = await svc.setDiscoverable(v);
+                                if (err != null && mounted) _say(err);
+                              },
+                            ),
                           if (leaderboardOn)
                             DsListRow(
                               key: const Key('profile_leaderboard'),
@@ -248,32 +239,24 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                         ],
                       ),
                     ),
-                    if (friendsOn) ...[
+                    // 3.55 People hub: friends, crews and every request live there (one tap from the
+                    // bottom bar); this row is a shortcut with the same badge.
+                    if (friendsOn || context.featureOn('crews')) ...[
                       const SizedBox(height: Space.s24),
-                      const DsSectionHeader('Friends'),
-                      const SizedBox(height: Space.s12),
                       DsCard(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        child: Column(
-                          children: [
-                            DsListRow(
-                              icon: Icons.people_alt_rounded,
-                              label: 'Friends',
-                              value: svc.badgeCount > 0 ? '${svc.badgeCount} new' : '${svc.friends.length}',
-                              valueColor: svc.badgeCount > 0 ? AppTheme.warnText : null,
-                              onTap: () => FriendsScreen.open(context),
-                            ),
-                            // 3.55 crews (switch crews): my crews, invitations and polls to answer.
-                            if (context.featureOn(CrewsService.crewsFlag)) const CrewsEntryRow(),
-                            DsListRow(
-                              icon: Icons.share_rounded,
-                              label: 'Invite friends to CoRoute',
-                              value: p.inviteCode,
-                              divider: false,
-                              onTap: () => _shareInvite(p),
-                            ),
-                          ],
-                        ),
+                        child: Builder(builder: (context) {
+                          final b = peopleBadgesOf(context);
+                          return DsListRow(
+                            key: const Key('profile_people'),
+                            icon: Icons.people_alt_rounded,
+                            label: 'Friends & crews',
+                            value: b.total > 0 ? '${b.total} new' : '${svc.friends.length}',
+                            valueColor: b.total > 0 ? AppTheme.warnText : null,
+                            divider: false,
+                            onTap: () => PeopleScreen.open(context, segment: b.requests > 0 ? PeopleSegment.requests : PeopleSegment.friends),
+                          );
+                        }),
                       ),
                     ],
                   ],

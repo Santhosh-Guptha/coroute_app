@@ -19,6 +19,12 @@
  *     unanswered request (202 REQUESTED, shown under "Sent"), so a block is never revealed. An
  *     unknown username or invite code answers 404 (usernames are public through the availability
  *     check anyway), so a typo is never reported as "sent".
+ *   - 3.55 People hub: GET /users/search?q= (username prefix, 2+ characters, 10 results, 30 a
+ *     minute) and GET /friends/suggestions ("People you rode with") answer username + picture +
+ *     my relationship ONLY. Riders who blocked me or whom I blocked never appear; riders who
+ *     turned off "Let riders find me" (user doc `discoverable: false`, default on) appear only for
+ *     their exact username (which adding by username needs anyway) and are never suggested. The
+ *     search never matches e-mails, phones or names: only the username key.
  */
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -107,6 +113,19 @@ function inviteLinkOf(code) {
   const origin = config.publicOrigin || config.linkOrigin;
   return `${origin.replace(/\/+$/, '')}/join/friend/${code}`;
 }
+/**
+ * The username prefix a search box sent (GET /users/search?q=), as the stored lowercase key, or
+ * null when it cannot match a username (fewer than 2 characters after a leading "@", or characters
+ * a username never has, such as "@" inside an e-mail, "+" or spaces in a phone number).
+ */
+function searchKeyOf(raw) {
+  const k = String(raw == null ? '' : raw).trim().replace(/^@+/, '').trim().toLowerCase();
+  return /^[a-z0-9_]{2,20}$/.test(k) ? k : null;
+}
+const SEARCH_MAX = 10;
+const SUGGEST_MAX = 10;
+const SUGGEST_WINDOW_MS = 180 * DAY;
+
 const shareTextOf = (username, code) =>
   `Ride with me on CoRoute! Add me as a friend: ${username} (invite code ${code}). ${inviteLinkOf(code)}`;
 
@@ -194,6 +213,7 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
   const profileLimiter = limiter(60 * 1000, 60, 'Too many requests. Wait a minute.');
   const avatarUploadLimiter = limiter(60 * 60 * 1000, 10, 'Too many picture uploads. Try again later.');
   const avatarReadLimiter = limiter(60 * 1000, 300, 'Too many requests.');
+  const searchLimiter = limiter(60 * 1000, 30, 'Too many searches. Wait a minute.');
   const isOn = (id) => { const fl = flagsOf(); return !fl || fl.isOn(id); };
   const feature = (id) => (req, res, next) => (isOn(id) ? next() : res.status(403).set('Cache-Control', 'no-store').json({ ...FEATURE_OFF, feature: id }));
   const sendErr = (res, e) => {
@@ -227,6 +247,7 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       profile: {
         username: u.username, name: u.name || '', avatarUrl: avatarOf(u, flagsOf),
         publicLeaderboard: u.publicLeaderboard !== false,
+        discoverable: u.discoverable !== false,
         usernameChangedAt: last, nextUsernameChangeAt: last ? last + U.CHANGE_MS : 0,
         memberSince: Number(u.createdAt) || 0,
         inviteCode: code, inviteLink: code ? inviteLinkOf(code) : null, shareText: code ? shareTextOf(u.username, code) : null,
@@ -254,13 +275,21 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
     } catch (e) { sendErr(res, e); }
   }));
 
+  // publicLeaderboard (website leaderboards) and/or discoverable (search by username prefix and
+  // "People you rode with"); both default on.
   r.patch('/me/privacy', friendWriteLimiter, wrap(async (req, res) => {
-    const v = req.body?.publicLeaderboard;
-    if (typeof v !== 'boolean') return res.status(400).json({ error: 'publicLeaderboard must be on or off.', code: 'BAD_REQUEST' });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const patch = {};
+    for (const f of ['publicLeaderboard', 'discoverable']) {
+      if (body[f] === undefined) continue;
+      if (typeof body[f] !== 'boolean') return res.status(400).json({ error: `${f} must be on or off.`, code: 'BAD_REQUEST' });
+      patch[f] = body[f];
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'publicLeaderboard must be on or off.', code: 'BAD_REQUEST' });
     const u = await me(req);
-    await repo.updateUser(u.key, { publicLeaderboard: v });
+    await repo.updateUser(u.key, patch);
     auth.gate?.invalidate?.(u.userId);
-    res.json({ ok: true, publicLeaderboard: v });
+    res.json({ ok: true, publicLeaderboard: patch.publicLeaderboard ?? u.publicLeaderboard !== false, discoverable: patch.discoverable ?? u.discoverable !== false });
   }));
 
   // ---- profile pictures ----
@@ -327,6 +356,88 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
     res.set('Cache-Control', 'private, no-store').json({ ok: true, profile });
   }));
 
+  const usersByIds = async (ids) => {
+    const map = new Map();
+    const list = [...new Set(ids)];
+    for (let i = 0; i < list.length; i += 100) {
+      const rows = await soda.query('users', { userId: { $in: list.slice(i, i + 100) } }, { limit: 100 });
+      for (const row of rows) map.set(row.value.userId, { ...row.value, key: row.key });
+    }
+    return map;
+  };
+
+  // ---- People hub: search by username prefix, "People you rode with" ----
+  /** Hidden from `uid` both ways: riders I blocked and riders who blocked me. */
+  const hiddenFor = async (uid) => new Set([...(await F.blockedBy(soda, uid)).map((b) => b.blocked), ...(await F.blockersOf(soda, uid))]);
+
+  r.get('/users/search', feature('friends'), searchLimiter, wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const key = searchKeyOf(req.query.q);
+    if (!key) return res.status(400).json({ error: 'Type at least 2 letters of a username.', code: 'QUERY_TOO_SHORT', results: [] });
+    const uid = req.user.userId;
+    await U.ensureUsernameStore(soda);
+    // Range on the unique lowercase key: every username starting with `key` ('~' sorts after a-z0-9_).
+    const rows = await soda.query(U.COLL, { usernameKey: { $gte: key, $lt: `${key}~` } }, { limit: 60 });
+    const ids = [...new Set(rows.map((r) => r.value.userId))].filter((id) => id && id !== uid);
+    if (!ids.length) return res.json({ ok: true, results: [] });
+    const [users, hidden, relations] = await Promise.all([usersByIds(ids), hiddenFor(uid), F.relationsOf(soda, uid)]);
+    const results = [];
+    for (const id of ids) {
+      const u = users.get(id);
+      // A stale reservation (name changed since) or a suspended / hidden rider never shows.
+      if (!u || !u.username || !String(u.usernameKey || '').startsWith(key) || u.status === 'BLOCKED' || hidden.has(id)) continue;
+      const relation = relations.get(id) || 'NONE';
+      const exact = u.usernameKey === key;
+      if (u.discoverable === false && !exact && relation === 'NONE') continue;
+      results.push({ ...cardOf(u, flagsOf), relation, _k: u.usernameKey });
+    }
+    results.sort((x, y) => (x._k === key ? -1 : 0) - (y._k === key ? -1 : 0) || x._k.length - y._k.length || x._k.localeCompare(y._k));
+    res.json({ ok: true, results: results.slice(0, SEARCH_MAX).map(({ _k, ...row }) => row) });
+  }));
+
+  r.get('/friends/suggestions', feature('friends'), profileLimiter, wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const uid = req.user.userId;
+    const since = Date.now() - SUGGEST_WINDOW_MS;
+    const trips = await repo.listTripsForUser(uid, 40).catch(() => []);
+    const groups = [...new Set(trips.filter((t) => t && t.groupId && (Number(t.endTimeEpochMs) || Number(t.startTimeEpochMs) || 0) >= since).map((t) => t.groupId))].slice(0, 20);
+    if (!groups.length) return res.json({ ok: true, suggestions: [] });
+    // Co-riders per group: the riders' own trip records of that ride, plus the ride's member list
+    // while it is still stored.
+    const rodeWith = new Map(); // userId -> { rides:Set, last }
+    const add = (id, groupId, at) => {
+      if (!id || id === uid) return;
+      const cur = rodeWith.get(id) || { rides: new Set(), last: 0 };
+      cur.rides.add(groupId);
+      cur.last = Math.max(cur.last, Number(at) || 0);
+      rodeWith.set(id, cur);
+    };
+    const theirTrips = await soda.query('trips', { groupId: { $in: groups } }, { limit: 1000 }).catch(() => []);
+    for (const row of theirTrips) add(row.value.userId, row.value.groupId, row.value.endTimeEpochMs || row.value.startTimeEpochMs);
+    for (const g of groups) {
+      const meta = await repo.getConvoyMeta(g).catch(() => null);
+      if (!meta || !meta.members || !meta.members[uid]) continue;
+      for (const id of Object.keys(meta.members).slice(0, 200)) add(id, g, meta.updatedAt || meta.createdAtEpochMs);
+    }
+    if (!rodeWith.size) return res.json({ ok: true, suggestions: [] });
+    const ids = [...rodeWith.keys()].slice(0, 300);
+    const [users, hidden, relations] = await Promise.all([usersByIds(ids), hiddenFor(uid), F.relationsOf(soda, uid)]);
+    const out = [];
+    for (const id of ids) {
+      const u = users.get(id);
+      const relation = relations.get(id) || 'NONE';
+      // Friends are already friends; a request from them is under Requests; opted-out riders and
+      // blocks either way are never suggested.
+      if (!u || u.status === 'BLOCKED' || u.discoverable === false || hidden.has(id) || relation === 'FRIENDS' || relation === 'PENDING_IN') continue;
+      const named = u.username ? u : await U.ensureUsername(repo, u).catch(() => null);
+      if (!named || !named.username) continue;
+      const w = rodeWith.get(id);
+      out.push({ ...cardOf(named, flagsOf), relation, rides: w.rides.size, _last: w.last });
+    }
+    out.sort((x, y) => y.rides - x.rides || y._last - x._last || x.username.localeCompare(y.username));
+    res.json({ ok: true, suggestions: out.slice(0, SUGGEST_MAX).map(({ _last, ...row }) => row) });
+  }));
+
   // Riders of a ride I am in: username + picture per userId (group riders already know each other's ids).
   r.get('/convoys/:groupId/usernames', profileLimiter, wrap(async (req, res) => {
     const meta = await repo.getConvoyMeta(String(req.params.groupId || ''));
@@ -346,16 +457,6 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
 
   // ---- friends ----
   for (const p of ['/friends', '/friends/*']) r.use(p, feature('friends'));
-
-  const usersByIds = async (ids) => {
-    const map = new Map();
-    const list = [...new Set(ids)];
-    for (let i = 0; i < list.length; i += 100) {
-      const rows = await soda.query('users', { userId: { $in: list.slice(i, i + 100) } }, { limit: 100 });
-      for (const row of rows) map.set(row.value.userId, { ...row.value, key: row.key });
-    }
-    return map;
-  };
 
   r.get('/friends', profileLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
@@ -523,4 +624,4 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
   }));
 }
 
-module.exports = { attachSocial, registerSocialRoutes, rideTotals, firstNameOf, inviteLinkOf, friendInvitePage, _statsCache: statsCache };
+module.exports = { attachSocial, registerSocialRoutes, rideTotals, searchKeyOf, firstNameOf, inviteLinkOf, friendInvitePage, _statsCache: statsCache };

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/services/friends_service.dart';
-import 'friends_screen.dart';
+import 'people_screen.dart';
 
 /// 3.55 friends: shows "X wants to be friends" / "X accepted your friend request" (and the
 /// invite-link outcome) as a snackbar while the app is open. In the background FriendsService
@@ -52,7 +52,7 @@ class _FriendNoticeHostState extends State<FriendNoticeHost> {
                 label: 'View',
                 onPressed: () {
                   final nav = widget.navigatorKey.currentState;
-                  if (nav != null) nav.push(MaterialPageRoute<void>(builder: (_) => const FriendsScreen()));
+                  if (nav != null) PeopleScreen.open(nav.context, segment: PeopleSegment.requests);
                 },
               )
             : null,

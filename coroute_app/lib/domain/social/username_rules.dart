@@ -23,8 +23,8 @@ abstract final class UsernameRules {
   static const List<String> _reserved = [
     'admin', 'administrator', 'coroute', 'support', 'official', 'moderator', 'mod', 'staff', 'system',
     'root', 'help', 'helpdesk', 'security', 'team', 'service', 'null', 'undefined', 'api', 'owner',
-    'devmonks', 'police', 'emergency', 'ambulance', 'sos', 'guardian', 'verified', 'billing', 'payment',
-    'razorpay', 'anonymous', 'everyone', 'nobody', 'test', 'webmaster', 'info', 'noreply', 'contact',
+    'devmonks', 'police', 'emergency', 'ambulance', 'sos', 'guardian', 'verified', 'billing',
+    'anonymous', 'everyone', 'nobody', 'test', 'webmaster', 'info', 'noreply', 'contact',
   ];
   static const List<String> _reservedAnywhere = ['admin', 'coroute', 'support', 'official', 'moderator', 'devmonks', 'staff'];
   static const List<String> _profanity = [

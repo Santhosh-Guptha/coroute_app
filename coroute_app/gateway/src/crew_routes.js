@@ -172,16 +172,19 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     for (const m of memberships) {
       const crew = await CR.getCrew(soda, m.crewId);
       if (!crew) continue;
-      let openPolls = 0, pendingVotes = 0;
+      let openPolls = 0, pendingVotes = 0, nextPollClosesAt = 0;
       if (pollsOn) {
         for (const p of await CR.pollsOf(soda, crew.crewId, now)) {
           if (!CR.pollOpen(p, now)) continue;
           openPolls++;
           if (!voted.has(p.pollId)) pendingVotes++;
+          // 3.55 People hub: "Poll closes in 5 h" under the crew in the app's Crews list.
+          const closes = Number(p.closesAt) || 0;
+          if (closes > now && (!nextPollClosesAt || closes < nextPollClosesAt)) nextPollClosesAt = closes;
         }
       }
       adminIds.push(crew.adminId);
-      crews.push({ ...crewView(crew, m), openPolls, pendingVotes, adminId: crew.adminId });
+      crews.push({ ...crewView(crew, m), openPolls, pendingVotes, nextPollClosesAt, adminId: crew.adminId });
     }
     const invites = await CR.invitesFor(soda, uid, now);
     const inviteCrews = new Map();

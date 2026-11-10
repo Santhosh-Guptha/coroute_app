@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/crew_rules.dart';
+import '../../domain/social/people_models.dart';
 import 'api_client.dart';
 import 'feature_flags_service.dart';
 import 'realtime_service.dart';
@@ -27,6 +28,9 @@ class CrewSummary {
   final String? admin;
   final int openPolls;
   final int pendingVotes;
+
+  /// When the open poll closing soonest closes (0 = none; "Poll closes in 5 h" in the list).
+  final int nextPollClosesAt;
   const CrewSummary({
     required this.crewId,
     required this.name,
@@ -36,6 +40,7 @@ class CrewSummary {
     this.admin,
     this.openPolls = 0,
     this.pendingVotes = 0,
+    this.nextPollClosesAt = 0,
   });
   factory CrewSummary.fromJson(Map m) => CrewSummary(
         crewId: m['crewId']?.toString() ?? '',
@@ -46,6 +51,7 @@ class CrewSummary {
         admin: m['admin']?.toString(),
         openPolls: _i(m['openPolls']),
         pendingVotes: _i(m['pendingVotes']),
+        nextPollClosesAt: _i(m['nextPollClosesAt']),
       );
 }
 
@@ -59,6 +65,7 @@ class CrewInvite {
   final int memberCount;
   final String invitedBy;
   final String? invitedByAvatar;
+  final int createdAt;
   final int expiresAt;
   const CrewInvite({
     required this.inviteId,
@@ -68,6 +75,7 @@ class CrewInvite {
     this.memberCount = 0,
     this.invitedBy = '',
     this.invitedByAvatar,
+    this.createdAt = 0,
     this.expiresAt = 0,
   });
   factory CrewInvite.fromJson(Map m) {
@@ -80,9 +88,21 @@ class CrewInvite {
       memberCount: _i(m['memberCount']),
       invitedBy: by['username']?.toString() ?? '',
       invitedByAvatar: _avatar(by['avatarUrl']),
+      createdAt: _i(m['createdAt']),
       expiresAt: _i(m['expiresAt']),
     );
   }
+
+  /// The row in the People hub's Requests list.
+  RequestItem get asRequest => RequestItem.crewInvite(
+        inviteId: inviteId,
+        crewId: crewId,
+        crewName: crewName,
+        invitedBy: invitedBy,
+        invitedByAvatar: invitedByAvatar,
+        memberCount: memberCount,
+        at: createdAt,
+      );
 }
 
 /// A crew member as the gateway shows it: username, first name, picture, role. Nothing else.

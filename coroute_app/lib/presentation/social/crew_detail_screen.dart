@@ -11,13 +11,17 @@ import '../../data/services/crews_service.dart';
 import '../../data/services/feature_flags_service.dart';
 import '../../domain/social/crew_rules.dart';
 import '../widgets/feature_switch.dart';
-import 'friends_screen.dart';
+import '../../data/services/ride_invites_service.dart';
+import '../../domain/social/ride_invite_rules.dart';
+import 'crew_create_flow.dart';
+import 'people_screen.dart';
 import 'ride_invite_screen.dart';
 import 'rider_profile_screen.dart';
 import 'user_avatar.dart';
 
-/// 3.55 One crew: polls with live result bars (vote, change, close, delete), members, invites
-/// waiting for an answer, invite friends, settings, leave / hand over / delete. No chat.
+/// 3.55 One crew, in three tabs: Members (invite friends, invites waiting, leave / delete), Polls
+/// (live result bars: vote, change, close, delete) and Rides (start a ride with the crew, ride
+/// invites from it). Settings for the admin. No chat.
 class CrewDetailScreen extends StatefulWidget {
   final String crewId;
   const CrewDetailScreen({super.key, required this.crewId});
@@ -29,7 +33,10 @@ class CrewDetailScreen extends StatefulWidget {
   State<CrewDetailScreen> createState() => _CrewDetailScreenState();
 }
 
+enum _CrewTab { members, polls, rides }
+
 class _CrewDetailScreenState extends State<CrewDetailScreen> {
+  _CrewTab? _tab;
   CrewDetail? _crew;
   List<CrewPoll> _polls = const [];
   bool _loading = true;
@@ -75,6 +82,8 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
         _polls = polls;
         _loading = false;
         _gone = false;
+        // First open: the polls when one waits for my vote, else the members.
+        _tab ??= polls.any((p) => p.open && p.myVote.isEmpty) ? _CrewTab.polls : _CrewTab.members;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -279,12 +288,24 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
     }
   }
 
+  List<_CrewTab> _tabs(BuildContext context) => [
+        _CrewTab.members,
+        if (context.featureOn(CrewsService.pollsFlag)) _CrewTab.polls,
+        if (context.featureOn('crewRides')) _CrewTab.rides,
+      ];
+
+  static String _tabLabel(_CrewTab t) => switch (t) {
+        _CrewTab.members => 'Members',
+        _CrewTab.polls => 'Polls',
+        _CrewTab.rides => 'Rides',
+      };
+
   @override
   Widget build(BuildContext context) {
     final c = _crew;
-    final pollsOn = context.featureOn(CrewsService.pollsFlag);
-    final open = _polls.where((p) => p.open).toList();
-    final closed = _polls.where((p) => !p.open).toList();
+    final tabs = _tabs(context);
+    final tab = _tab != null && tabs.contains(_tab) ? _tab! : _CrewTab.members;
+    final toVote = _polls.where((p) => p.open && p.myVote.isEmpty).length;
     return Scaffold(
       backgroundColor: AppTheme.bg,
       body: SafeArea(
@@ -300,7 +321,18 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
                     title: c?.name ?? 'Crew',
                     subtitle: c == null ? null : '${c.members.length} ${c.members.length == 1 ? 'rider' : 'riders'} · ${CrewRoles.label(c.myRole)}',
                     onBack: () => Navigator.maybePop(context),
-                    trailing: c != null && c.isAdmin ? DsRoundButton(icon: Icons.tune_rounded, label: 'Crew settings', size: 48, onTap: () => _settings(c)) : null,
+                    trailing: c == null
+                        ? null
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (c.canInvite) DsRoundButton(icon: Icons.person_add_alt_1_rounded, label: 'Invite friends', size: 48, onTap: () => _invite(c)),
+                              if (c.isAdmin) ...[
+                                const SizedBox(width: 8),
+                                DsRoundButton(icon: Icons.tune_rounded, label: 'Crew settings', size: 48, onTap: () => _settings(c)),
+                              ],
+                            ],
+                          ),
                   ),
                   const SizedBox(height: 18),
                   if (_loading && c == null)
@@ -312,78 +344,20 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
                       Text(c.description, style: AppText.body.copyWith(color: AppTheme.text2)),
                       const SizedBox(height: Space.s16),
                     ],
-                    // 3.55 "Start a ride with this crew": any member can host (the plan rules decide the seats).
-                    if (context.featureOn('crewRides')) ...[
-                      DsButton(
-                        label: _ownsLiveRide(context) ? 'Invite crew to my ride' : 'Start a ride',
-                        icon: Icons.two_wheeler_rounded,
-                        onPressed: () => startRideWithCrew(context, crewId: c.crewId, crewName: c.name),
+                    if (tabs.length > 1) ...[
+                      DsSegment<_CrewTab>(
+                        values: tabs,
+                        selected: tab,
+                        label: (t) => t == _CrewTab.polls && toVote > 0 ? 'Polls ($toVote)' : _tabLabel(t),
+                        onChanged: (t) => setState(() => _tab = t),
                       ),
-                      const SizedBox(height: Space.s12),
+                      const SizedBox(height: Space.s16),
                     ],
-                    if (c.canInvite) DsButton(label: 'Invite friends', icon: Icons.person_add_alt_1_rounded, tone: DsButtonTone.outline, onPressed: () => _invite(c)),
-                    if (pollsOn) ...[
-                      const SizedBox(height: Space.s24),
-                      DsSectionHeader(
-                        'Polls',
-                        trailing: c.canCreatePoll ? TextButton.icon(onPressed: () => _newPoll(c), icon: const Icon(Icons.add_rounded), label: const Text('New poll')) : null,
-                      ),
-                      const SizedBox(height: Space.s12),
-                      if (_polls.isEmpty)
-                        DsCard(
-                          child: Text(
-                            c.canCreatePoll ? 'No polls yet. Ask the crew where or when to ride.' : 'No polls yet. The crew admin can start one.',
-                            style: AppText.body.copyWith(color: AppTheme.text2),
-                          ),
-                        ),
-                      for (final p in open) PollCard(poll: p, onVote: (ids) => _vote(p, ids), onMore: () => _pollMenu(p)),
-                      if (closed.isNotEmpty) ...[
-                        const SizedBox(height: Space.s8),
-                        Text('Closed', style: AppText.label.copyWith(color: AppTheme.text2)),
-                        const SizedBox(height: Space.s8),
-                        for (final p in closed) PollCard(poll: p, onVote: null, onMore: p.canDelete ? () => _pollMenu(p) : null),
-                      ],
-                    ],
-                    const SizedBox(height: Space.s24),
-                    DsSectionHeader('Riders (${c.members.length})'),
-                    const SizedBox(height: Space.s12),
-                    DsCard(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      child: Column(
-                        children: [
-                          for (var i = 0; i < c.members.length; i++)
-                            _MemberRow(member: c.members[i], divider: i < c.members.length - 1, onTap: () => _memberActions(c, c.members[i])),
-                        ],
-                      ),
-                    ),
-                    if (c.canInvite && c.invites.isNotEmpty) ...[
-                      const SizedBox(height: Space.s24),
-                      DsSectionHeader('Invited (${c.invites.length})'),
-                      const SizedBox(height: Space.s12),
-                      DsCard(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        child: Column(
-                          children: [
-                            for (var i = 0; i < c.invites.length; i++)
-                              DsListRow(
-                                label: c.invites[i].username,
-                                value: 'Waiting',
-                                divider: i < c.invites.length - 1,
-                                trailing: TextButton(
-                                  onPressed: () => _after(_svc.cancelInvite(c.crewId, c.invites[i].inviteId), 'Invite cancelled'),
-                                  child: const Text('Cancel'),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: Space.s24),
-                    DsButton(label: 'Leave crew', icon: Icons.logout_rounded, tone: DsButtonTone.outline, onPressed: () => _leave(c)),
-                    if (c.isAdmin) ...[
-                      const SizedBox(height: Space.s12),
-                      DsButton(label: 'Delete crew', icon: Icons.delete_outline_rounded, tone: DsButtonTone.sos, onPressed: () => _delete(c)),
-                    ],
+                    ...switch (tab) {
+                      _CrewTab.members => _membersTab(c),
+                      _CrewTab.polls => _pollsTab(c),
+                      _CrewTab.rides => _ridesTab(c),
+                    },
                   ],
                 ],
               ),
@@ -393,38 +367,165 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
       ),
     );
   }
+
+  List<Widget> _membersTab(CrewDetail c) => [
+        if (c.canInvite) ...[
+          DsButton(key: const Key('crew_invite_friends'), label: 'Invite friends', icon: Icons.person_add_alt_1_rounded, onPressed: () => _invite(c)),
+          const SizedBox(height: Space.s16),
+        ],
+        DsCard(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Column(
+            children: [
+              for (var i = 0; i < c.members.length; i++)
+                _MemberRow(
+                  member: c.members[i],
+                  divider: i < c.members.length - 1,
+                  onTap: () => RiderProfileScreen.open(context, c.members[i].username),
+                  onMore: c.isAdmin && c.members[i].role != CrewRoles.admin ? () => _memberActions(c, c.members[i]) : null,
+                ),
+            ],
+          ),
+        ),
+        if (c.canInvite && c.invites.isNotEmpty) ...[
+          const SizedBox(height: Space.s24),
+          DsSectionHeader('Invited (${c.invites.length})'),
+          const SizedBox(height: Space.s12),
+          DsCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Column(
+              children: [
+                for (var i = 0; i < c.invites.length; i++)
+                  DsListRow(
+                    label: c.invites[i].username,
+                    value: 'Waiting',
+                    divider: i < c.invites.length - 1,
+                    trailing: TextButton(
+                      onPressed: () => _after(_svc.cancelInvite(c.crewId, c.invites[i].inviteId), 'Invite cancelled'),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: Space.s24),
+        DsButton(label: 'Leave crew', icon: Icons.logout_rounded, tone: DsButtonTone.outline, onPressed: () => _leave(c)),
+        if (c.isAdmin) ...[
+          const SizedBox(height: Space.s12),
+          DsButton(label: 'Delete crew', icon: Icons.delete_outline_rounded, tone: DsButtonTone.sos, onPressed: () => _delete(c)),
+        ],
+      ];
+
+  List<Widget> _pollsTab(CrewDetail c) {
+    final open = _polls.where((p) => p.open).toList();
+    final closed = _polls.where((p) => !p.open).toList();
+    return [
+      if (c.canCreatePoll) ...[
+        DsButton(label: 'New poll', icon: Icons.add_rounded, tone: DsButtonTone.outline, onPressed: () => _newPoll(c)),
+        const SizedBox(height: Space.s16),
+      ],
+      if (_polls.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.s16),
+          child: Text(c.canCreatePoll ? 'No polls yet. Ask the crew where or when to ride.' : 'No polls yet.',
+              textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.text2)),
+        ),
+      for (final p in open) PollCard(poll: p, onVote: (ids) => _vote(p, ids), onMore: () => _pollMenu(p)),
+      if (closed.isNotEmpty) ...[
+        const SizedBox(height: Space.s8),
+        Text('Closed', style: AppText.label.copyWith(color: AppTheme.text2)),
+        const SizedBox(height: Space.s8),
+        for (final p in closed) PollCard(poll: p, onVote: null, onMore: p.canDelete ? () => _pollMenu(p) : null),
+      ],
+    ];
+  }
+
+  List<Widget> _ridesTab(CrewDetail c) {
+    final invites = (context.watch<RideInvitesService?>()?.pending ?? const <RideInvite>[]).where((i) => i.crewId == c.crewId).toList();
+    return [
+      // 3.55 "Start a ride with this crew": any member can host (the plan rules decide the seats).
+      DsButton(
+        label: _ownsLiveRide(context) ? 'Invite crew to my ride' : 'Start a ride',
+        icon: Icons.two_wheeler_rounded,
+        onPressed: () => startRideWithCrew(context, crewId: c.crewId, crewName: c.name),
+      ),
+      const SizedBox(height: Space.s16),
+      if (invites.isEmpty)
+        Text('Start a ride and the crew gets an invite to join.', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.text2))
+      else
+        for (final i in invites)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.s8),
+            child: DsCard(
+              onTap: () => RideInviteScreen.open(context, i.inviteId),
+              semanticsLabel: 'Ride invite from ${i.hostUsername}',
+              child: Row(
+                children: [
+                  UserAvatar(label: i.hostUsername, avatarUrl: i.hostAvatarUrl, size: 44),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(i.rideName.isNotEmpty ? i.rideName : 'Group ride', style: AppText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text('${i.hostUsername} invited you', style: AppText.caption.copyWith(color: AppTheme.text2)),
+                      ],
+                    ),
+                  ),
+                  const DsChip('Open'),
+                ],
+              ),
+            ),
+          ),
+    ];
+  }
 }
 
 class _MemberRow extends StatelessWidget {
   final CrewMember member;
   final bool divider;
+
+  /// Opens the member's profile.
   final VoidCallback onTap;
-  const _MemberRow({required this.member, required this.divider, required this.onTap});
+
+  /// Admin actions (null when there are none for me).
+  final VoidCallback? onMore;
+  const _MemberRow({required this.member, required this.divider, required this.onTap, this.onMore});
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 56),
-        decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            UserAvatar(label: member.username, avatarUrl: member.avatarUrl, size: 40),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(member.username, style: AppText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  if (member.displayName.isNotEmpty) Text(member.displayName, style: AppText.caption.copyWith(color: AppTheme.text2)),
-                ],
+    return Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    UserAvatar(label: member.username, avatarUrl: member.avatarUrl, size: 40),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(member.username, style: AppText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          if (member.displayName.isNotEmpty) Text(member.displayName, style: AppText.caption.copyWith(color: AppTheme.text2)),
+                        ],
+                      ),
+                    ),
+                    if (member.role != CrewRoles.member) DsChip(member.role == CrewRoles.admin ? 'Admin' : 'Co-admin'),
+                  ],
+                ),
               ),
             ),
-            if (member.role != CrewRoles.member) DsChip(member.role == CrewRoles.admin ? 'ADMIN' : 'CO-ADMIN'),
-          ],
-        ),
+          ),
+          if (onMore != null) IconButton(tooltip: 'More for ${member.username}', icon: const Icon(Icons.more_vert_rounded), onPressed: onMore),
+        ],
       ),
     );
   }
@@ -798,37 +899,37 @@ class _InvitePickerState extends State<_InvitePicker> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('You can invite your friends only. They join when they accept.', style: AppText.body.copyWith(color: AppTheme.text2)),
-          const SizedBox(height: 8),
           if (f == null && _error == null)
             const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
           else if (f != null && f.isEmpty) ...[
-            Text('No friends yet. Add friends first, then invite them.', style: AppText.body),
+            Text('No friends yet.', style: AppText.body),
             const SizedBox(height: 8),
             DsButton(
-              label: 'Add friends',
+              label: 'Find friends',
               tone: DsButtonTone.outline,
               onPressed: () {
-                Navigator.pop(context);
-                FriendsScreen.open(context);
+                final nav = Navigator.of(context);
+                nav.pop();
+                PeopleScreen.open(nav.context, segment: PeopleSegment.friends);
               },
             ),
           ] else if (f != null)
             Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
+              child: FriendPickerList(
+                friends: [
                   for (final fr in f)
-                    CheckboxListTile(
-                      value: fr.available ? _picked.contains(fr.username) : true,
-                      onChanged: fr.available
-                          ? (v) => setState(() => v == true ? _picked.add(fr.username) : _picked.remove(fr.username))
-                          : null,
-                      secondary: UserAvatar(label: fr.username, avatarUrl: fr.avatarUrl, size: 36),
-                      title: Text(fr.username),
-                      subtitle: Text(fr.status == 'MEMBER' ? 'In the crew' : fr.status == 'INVITED' ? 'Invited' : fr.displayName),
+                    PickableFriend(
+                      username: fr.username,
+                      avatarUrl: fr.avatarUrl,
+                      lockedReason: fr.available ? null : (fr.status == 'MEMBER' ? 'In the crew' : 'Invited'),
                     ),
                 ],
+                picked: _picked,
+                onChanged: (s) => setState(() {
+                  _picked
+                    ..clear()
+                    ..addAll(s);
+                }),
               ),
             ),
           if (_error != null) ...[

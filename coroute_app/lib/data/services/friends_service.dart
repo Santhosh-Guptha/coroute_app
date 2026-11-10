@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/friends_models.dart';
+import '../../domain/social/people_models.dart';
 import '../../domain/social/username_rules.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'alarm_notifier.dart';
@@ -14,6 +15,7 @@ import 'feature_flags_service.dart';
 import 'realtime_service.dart';
 
 export '../../domain/social/friends_models.dart';
+export '../../domain/social/people_models.dart';
 
 /// Ride totals shown on a profile (GET /me/stats, friends' profiles).
 @immutable
@@ -56,6 +58,9 @@ class MyProfile {
   final String name;
   final String? avatarUrl;
   final bool publicLeaderboard;
+
+  /// "Let riders find me": found by username prefix and suggested to riders I rode with (default on).
+  final bool discoverable;
   final int usernameChangedAt;
   final int memberSince;
   final String? inviteCode;
@@ -66,6 +71,7 @@ class MyProfile {
     this.name = '',
     this.avatarUrl,
     this.publicLeaderboard = true,
+    this.discoverable = true,
     this.usernameChangedAt = 0,
     this.memberSince = 0,
     this.inviteCode,
@@ -78,6 +84,7 @@ class MyProfile {
         name: raw['name']?.toString() ?? '',
         avatarUrl: _url(raw['avatarUrl']),
         publicLeaderboard: raw['publicLeaderboard'] != false,
+        discoverable: raw['discoverable'] != false,
         usernameChangedAt: raw['usernameChangedAt'] is num ? (raw['usernameChangedAt'] as num).toInt() : 0,
         memberSince: raw['memberSince'] is num ? (raw['memberSince'] as num).toInt() : 0,
         inviteCode: raw['inviteCode']?.toString(),
@@ -163,6 +170,8 @@ class FriendsService extends ChangeNotifier {
   List<FriendRequestEntry> _outgoing = const [];
   List<String> _blocked = const [];
   bool _loading = false;
+  bool _listsLoaded = false;
+  List<PersonCard> _suggestions = const [];
   String? _lastNotice;
   final Map<String, Map<String, ({String username, String? avatarUrl})>> _groupNames = {};
 
@@ -178,6 +187,25 @@ class FriendsService extends ChangeNotifier {
   List<FriendRequestEntry> get outgoing => _outgoing;
   List<String> get blocked => _blocked;
   bool get loading => _loading;
+
+  /// GET /friends answered at least once since sign-in (search chips then follow the lists).
+  bool get listsLoaded => _listsLoaded;
+
+  /// "People you rode with" (GET /friends/suggestions), friends and requests filtered out live.
+  List<PersonCard> get suggestions => [
+        for (final p in _suggestions)
+          if (relationOf(p.username, p.relation) case final r when r != PeopleRelation.friends && r != PeopleRelation.pendingIn) p.withRelation(r),
+      ];
+
+  /// The chip state for [username] now (search rows, suggestions, profiles).
+  String relationOf(String username, String serverRelation) => liveRelation(
+        username,
+        serverRelation,
+        friends: _friends.map((f) => f.username),
+        incoming: _incoming.map((r) => r.username),
+        outgoing: _outgoing.map((r) => r.username),
+        listsLoaded: _listsLoaded,
+      );
 
   /// Number shown on the Profile tab, the "My profile & friends" row and the Friends row
   /// (incoming requests waiting for an answer).
@@ -278,6 +306,8 @@ class FriendsService extends ChangeNotifier {
     _incoming = const [];
     _outgoing = const [];
     _blocked = const [];
+    _listsLoaded = false;
+    _suggestions = const [];
     _groupNames.clear();
     _notify();
   }
@@ -334,6 +364,7 @@ class FriendsService extends ChangeNotifier {
       _incoming = snap.incoming;
       _outgoing = snap.outgoing;
       _blocked = snap.blocked;
+      _listsLoaded = true;
       _notify();
     } catch (e) {
       debugPrint('Friends not refreshed: $e');
@@ -360,6 +391,35 @@ class FriendsService extends ChangeNotifier {
     if (!local.ok) return local.message;
     try {
       await _api.patch('/me/username', {'username': username.trim()});
+      await refreshProfile();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    }
+  }
+
+  /// GET /users/search?q= (username prefix, 2+ characters, max 10). Throws on a network error so
+  /// the search box can say so; [PeopleSearch] calls it after the debounce.
+  Future<List<PersonCard>> searchUsers(String key) async {
+    final res = await _api.get('/users/search?q=${Uri.encodeQueryComponent(key)}');
+    return PersonCard.parseSearch(res);
+  }
+
+  /// GET /friends/suggestions ("People you rode with"). Keeps the last list on any error.
+  Future<void> refreshSuggestions() async {
+    if (_disposed || !_api.hasToken || !FeatureFlagsService.on(friendsFlag)) return;
+    try {
+      _suggestions = PersonCard.parseSuggestions(await _api.get('/friends/suggestions'));
+      _notify();
+    } catch (e) {
+      debugPrint('Suggestions not refreshed: $e');
+    }
+  }
+
+  /// "Let riders find me" (PATCH /me/privacy {discoverable}).
+  Future<String?> setDiscoverable(bool on) async {
+    try {
+      await _api.patch('/me/privacy', {'discoverable': on});
       await refreshProfile();
       return null;
     } on ApiException catch (e) {

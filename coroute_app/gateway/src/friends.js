@@ -245,6 +245,27 @@ async function blockedBy(soda, me) {
   return (await soda.query(C.blocks, { blocker: me }, { limit: 2000 })).map((r) => r.value);
 }
 
+/** Riders who blocked `me` (their ids). Used to hide them from my search and suggestions. */
+async function blockersOf(soda, me) {
+  await ensureFriendStore(soda);
+  return (await soda.query(C.blocks, { blocked: me }, { limit: 2000 })).map((r) => r.value.blocker);
+}
+
+/**
+ * Map otherUserId -> 'FRIENDS' | 'PENDING_OUT' | 'PENDING_IN' as `me` sees it (one read for many
+ * riders; shadow requests to me are left out, so they read as NONE like relationOf).
+ */
+async function relationsOf(soda, me) {
+  const out = new Map();
+  for (const e of await edgesOf(soda, me)) {
+    const other = e.a === me ? e.b : e.a;
+    if (e.status === 'ACCEPTED') out.set(other, 'FRIENDS');
+    else if (e.from === me) out.set(other, 'PENDING_OUT');
+    else if (!e.shadow) out.set(other, 'PENDING_IN');
+  }
+  return out;
+}
+
 /** { friends, incoming, outgoing } edges for `me` (shadow requests to me are left out). */
 async function listFor(soda, me) {
   const edges = await edgesOf(soda, me);
@@ -269,6 +290,6 @@ module.exports = {
   COLLECTIONS: C, MAX_FRIENDS, MAX_PENDING_OUT, FriendError, ensureFriendStore,
   inviteCodeOf, userIdByInviteCode, isInviteCode, normaliseInvite, isRequestId,
   hasBlocked, blockedEither, relationOf, areFriends, sendRequest, respond, cancelRequest, removeFriend,
-  block, unblock, blockedBy, listFor, forgetFriends, pairKeyOf,
+  block, unblock, blockedBy, blockersOf, relationsOf, listFor, forgetFriends, pairKeyOf,
   _resetForTests: () => { migrated = new WeakSet(); },
 };
