@@ -10,6 +10,7 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../report/trip_report_screen.dart';
 import 'admin_convoy_inspector.dart';
+import 'admin_diag_logs_screen.dart';
 import 'admin_rider_insights.dart';
 import 'admin_ui.dart';
 import '../score/admin_rider_score_section.dart';
@@ -103,6 +104,23 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
       if (!mounted) return;
       adminSnack(context, 'Profile picture removed');
       await _loadDetails();
+    } on ApiException catch (e) {
+      if (mounted) adminSnack(context, e.message, error: true);
+    }
+  }
+
+  /// 3.55 diagnostics: asks the rider's app for its log (socket / push; the rider must tap Send).
+  Future<void> _askForLogs() async {
+    final ok = await confirmAction(context,
+        title: 'Ask for app logs?',
+        message: '$_name gets a request in the app. Nothing is sent unless they tap Send. This is recorded in the audit log.',
+        confirmLabel: 'Ask');
+    if (!ok || !mounted) return;
+    try {
+      final res = await context.read<ApiClient>().post('/admin/diag-logs/request', {'userId': widget.userId});
+      if (!mounted) return;
+      final delivered = res is Map && (res['delivered'] == true);
+      adminSnack(context, delivered ? 'Request sent to the app' : 'Request saved: shown when they next open the app');
     } on ApiException catch (e) {
       if (mounted) adminSnack(context, e.message, error: true);
     }
@@ -501,6 +519,19 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                   tone: _ActionTone.danger,
                   onTap: locked ? null : () => _updateStatus('BLOCKED'),
                 ),
+              // 3.55 diagnostics log: ask the rider's app for its log / see the logs they sent.
+              _ActionButton(
+                icon: Icons.bug_report_outlined,
+                label: 'Ask for logs',
+                tone: _ActionTone.warn,
+                onTap: _isActionInProgress ? null : _askForLogs,
+              ),
+              _ActionButton(
+                icon: Icons.list_alt_rounded,
+                label: 'App logs',
+                tone: _ActionTone.warn,
+                onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AdminDiagLogsScreen(userId: widget.userId, title: '$_name: app logs'))),
+              ),
               _ActionButton(
                 icon: Icons.delete_forever_rounded,
                 label: 'Delete account',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'admin_crews_screen.dart';
+import 'admin_diag_logs_screen.dart';
 import 'admin_features_screen.dart';
 import 'admin_insights_screen.dart';
 import 'admin_place_reviews_screen.dart';
@@ -46,6 +47,7 @@ enum AdminPage {
   crews(AdminSection.content, 'Crews'),
   features(AdminSection.system, 'Features'),
   usage(AdminSection.system, 'Usage'),
+  diagnostics(AdminSection.system, 'Diagnostics'),
   settings(AdminSection.system, 'Settings');
 
   const AdminPage(this.section, this.label);
@@ -77,6 +79,8 @@ Widget adminPageScreen(AdminPage page) {
       return const AdminFeaturesScreen();
     case AdminPage.usage:
       return const AdminInsightsScreen();
+    case AdminPage.diagnostics:
+      return const AdminDiagLogsScreen(); // 3.55 app logs riders sent
     case AdminPage.settings:
       return const AdminSettingsScreen();
   }
