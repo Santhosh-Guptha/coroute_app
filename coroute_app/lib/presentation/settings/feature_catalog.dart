@@ -15,7 +15,7 @@ enum FeatureGroup {
   maps('Maps & offline', Icons.map_rounded),
   trips('Trips & stories', Icons.history_rounded),
   account('Account & privacy', Icons.privacy_tip_rounded),
-  membership('Membership', Icons.card_membership_rounded);
+  membership('Your plan', Icons.card_membership_rounded);
 
   final String label;
   final IconData icon;
@@ -729,12 +729,12 @@ const List<FeatureInfo> featureCatalog = [
     id: 'plans',
     group: FeatureGroup.membership,
     icon: Icons.card_membership_rounded,
-    name: 'Plans and seats',
-    what: 'Every rider gets every feature. Plans only change how many riders you can host.',
-    when: 'Needs internet to buy or renew.',
+    name: 'Plan and riders',
+    what: 'Solo riding and every safety feature are free. A group plan sets how many riders you can host.',
+    when: 'Your plan is managed in your CoRoute account.',
     battery: Impact.none,
     data: Impact.none,
-    privacy: 'Payments are handled by Razorpay (UPI).',
+    privacy: 'The app only reads your plan name, riders and end date.',
     settings: SettingsTarget.membership,
   ),
   FeatureInfo(

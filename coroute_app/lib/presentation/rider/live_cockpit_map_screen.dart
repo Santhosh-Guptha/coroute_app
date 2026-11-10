@@ -105,6 +105,9 @@ import '../../domain/tracking/screen_awake_policy.dart';
 import '../timeline/member_colors.dart';
 import '../trip/trip_feedback_sheet.dart';
 import '../review/app_review_prompt.dart';
+import '../engagement/ride_wrapup_sheet.dart'; // 3.55 after-ride wrap-up (trip + places)
+import '../../data/services/engagement_service.dart';
+import '../../data/local/ride_stats_store.dart';
 import '../trip_planner/route_stops_panel.dart';
 import '../widgets/connection_banner.dart';
 import '../widgets/emergency_sos_sheet.dart';
@@ -1701,43 +1704,59 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final groupId = convoy.groupId;
     // Same id ConvoyService.buildTripHistory gives the rider's trip record.
     final recordId = uid.isEmpty ? '' : 'TRIP-${groupId.replaceAll('GRP-', '')}-$uid';
-    // 3.55: then the place review question for places I stayed at and did not rate in the cockpit
-    // (at most 2, skippable; admin switches placeReviews and reviewPrompt).
+    // 3.55: places I stayed at and did not rate in the cockpit join the wrap-up (at most 2,
+    // skippable; admin switches placeReviews and reviewPrompt).
     final places = context.read<PlaceReviewService?>();
     final placesOn = context.featureOnNow('placeReviews') && context.featureOnNow('reviewPrompt');
     places?.onRideEnded(rideId: groupId);
-    final client = api;
-    unawaited(() async {
-      await _promptTripReview(nav, client, groupId: groupId, recordId: recordId, tripName: convoy.name);
-      if (places != null && placesOn && nav.mounted) {
-        await AfterRidePlaceReviews.show(nav.context, service: places, enabled: placesOn, rideId: groupId);
-      }
-    }());
+    unawaited(_promptWrapUp(nav, api, groupId: groupId, recordId: recordId, tripName: convoy.name, places: places, placesOn: placesOn));
   }
 
-  static Future<void> _promptTripReview(NavigatorState nav, ApiClient api,
-      {required String groupId, required String recordId, required String tripName}) async {
+  /// 3.55 after-ride wrap-up (docs/features_355/ratings_reviews.md): one sheet with "How was the
+  /// ride?" and up to 2 places, then, once it is closed, the "Rate CoRoute" ask on its own rules
+  /// (usually nothing). A clean ride leaves the ask pending for the next app open; a ride with an
+  /// SOS or crash alarm never leads to it.
+  static Future<void> _promptWrapUp(NavigatorState nav, ApiClient api,
+      {required String groupId, required String recordId, required String tripName, PlaceReviewService? places, bool placesOn = false}) async {
     final keys = <String>{'review_prompted_$groupId', if (recordId.isNotEmpty) 'review_prompted_$recordId'};
+    // Let the cockpit close and the server record the end first.
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    if (!nav.mounted) return;
+    var hadProblem = false;
     try {
-      // Let the cockpit close and the server record the end first.
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-      if (!nav.mounted) return;
+      hadProblem = (await RideStatsStore.load(groupId))?.hadEmergency ?? false;
+    } catch (_) {}
+    hadProblem = hadProblem || EngagementService.sessionHealth().safetyProblem;
+    await EngagementService.instance?.onRideEnded(hadProblem: hadProblem);
+    var canReviewTrip = false;
+    var reviewed = false;
+    try {
       final prefs = await SharedPreferences.getInstance();
-      if (keys.any((k) => prefs.getBool(k) == true)) return;
-      // The convoy id is accepted by the gateway at once (the trip record syncs a minute later).
-      final res = await api.getTripReview(groupId);
-      if (res['canReview'] != true || TripReview.tryParse(res['feedback']) != null) return;
-      if (!nav.mounted) return;
-      for (final k in keys) {
-        await prefs.setBool(k, true);
+      if (!keys.any((k) => prefs.getBool(k) == true)) {
+        // The convoy id is accepted by the gateway at once (the trip record syncs a minute later).
+        final res = await api.getTripReview(groupId);
+        canReviewTrip = res['canReview'] == true;
+        reviewed = TripReview.tryParse(res['feedback']) != null;
+        if (canReviewTrip && !reviewed) {
+          for (final k in keys) {
+            await prefs.setBool(k, true);
+          }
+        }
       }
     } catch (_) {
-      return; // Offline or no answer: the trip report screen can still ask later.
+      // Offline or no answer: the trip report offers the trip review later (up to 7 days).
     }
     if (!nav.mounted) return;
-    final saved = await TripFeedbackSheet.show(nav.context, tripId: groupId, tripName: tripName);
-    // After a good ride: the store-rating prompt (its own rules decide; usually nothing).
-    if (nav.mounted) await AppReviewPrompt.maybeShowAfterRide(nav.context, tripId: recordId, groupId: groupId, rating: saved?.rating);
+    await RideWrapUpSheet.show(nav.context,
+        api: api,
+        tripId: groupId,
+        tripName: tripName,
+        canReviewTrip: canReviewTrip,
+        tripReviewed: reviewed,
+        places: places,
+        placesEnabled: placesOn,
+        rideId: groupId);
+    if (nav.mounted) await AppReviewPrompt.maybeAskAfterRide(nav.context);
   }
 
   /// Feeds my newest position to the navigation camera, which follows it

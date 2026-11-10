@@ -363,9 +363,9 @@ class _NoRideHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Community (free) starts solo rides; a group plan (or payments off) hosts a group with a code.
+    // Community (free) starts solo rides; a group plan (or plans off on the server) hosts a group with a code.
     final ms = context.watch<MembershipService?>();
-    final hostsGroup = ms == null || !ms.paymentsEnabled || ms.planAccess.canHostGroup;
+    final hostsGroup = ms == null || !ms.plansEnforced || ms.planAccess.canHostGroup;
     return DsHeroCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

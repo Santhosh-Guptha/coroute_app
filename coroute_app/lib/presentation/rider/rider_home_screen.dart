@@ -10,8 +10,6 @@ import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
 import '../../core/ui/ride_alert.dart';
 import '../../data/services/convoy_service.dart';
-import '../../data/services/crews_service.dart';
-import '../../data/services/friends_service.dart';
 import '../../data/services/place_review_service.dart';
 import '../map_places/after_ride_place_reviews.dart';
 import '../widgets/feature_switch.dart';
@@ -23,11 +21,17 @@ import '../alerts/alerts_screen.dart';
 import '../home/ride_start_view.dart';
 import '../ride/emergency_guidance.dart';
 import '../ride/map_focus.dart';
+import '../social/people_screen.dart';
 import 'live_cockpit_map_screen.dart';
 import 'trip_history_screen.dart';
+import '../engagement/ride_wrapup_sheet.dart';
+import '../review/app_review_prompt.dart';
+import '../../data/services/api_client.dart';
+import '../../data/services/engagement_service.dart';
 
-/// The four tabs of the app, in bottom navigation order.
-enum HomeTab { ride, trips, alerts, profile }
+/// The tabs of the app, in bottom navigation order. 3.55: People (friends, crews, requests) is
+/// one tap away from anywhere.
+enum HomeTab { ride, trips, people, alerts, profile }
 
 /// "Leave ride" from the ride notification (3.16, item 3). The notification
 /// button only sets [ConvoyService.leaveRequestedFromNotification]; this
@@ -47,7 +51,7 @@ Future<void> leaveFromNotification(BuildContext context, ConvoyService convoys, 
   if (!embedded) Navigator.of(context).maybePop();
 }
 
-/// The app shell: Home | Trips | Alerts | Profile in a bottom navigation bar.
+/// The app shell: Home | Trips | People | Alerts | Profile in a bottom navigation bar.
 ///
 /// Ride is selected at start and whenever a ride becomes active (create, join,
 /// restore). When the ride ends the shell stays on Ride, which then offers the
@@ -105,6 +109,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   void initState() {
     super.initState();
     RiderHomeScreen._current = this;
+    // 3.55 People hub: "open friends / crews / requests" from anywhere switches to the People tab.
+    PeopleScreen.tabOpener = _openPeopleTab;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final s = context.read<ConvoyService>();
@@ -123,6 +129,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   /// 3.55 follow-up: after-ride place questions kept from an earlier ride (the app was closed
   /// before they were answered): asked once on this app open, not during a ride or an SOS.
   Future<void> _offerStoredPlaceReviews() async {
+    // 3.55: the admin's engagement templates (texts, chips, rating rules); at most every 6 hours.
+    EngagementService.instance?.refresh().ignore();
     final places = Provider.of<PlaceReviewService?>(context, listen: false);
     if (places == null) return;
     await places.restored;
@@ -130,10 +138,24 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     await Future<void>.delayed(const Duration(seconds: 2));
     if (!mounted) return;
     final on = context.featureOnNow('placeReviews') && context.featureOnNow('reviewPrompt');
-    if (!places.takeOpenPrompt(enabled: on)) return;
     final nav = Navigator.maybeOf(context, rootNavigator: true);
     if (nav == null || !nav.mounted) return;
-    await AfterRidePlaceReviews.show(nav.context, service: places, enabled: on);
+    if (places.takeOpenPrompt(enabled: on)) {
+      // 3.55: the same calm wrap-up as after a ride (places only here), with category chips.
+      ApiClient? api;
+      try {
+        api = context.read<ApiClient>();
+      } catch (_) {
+        api = null;
+      }
+      if (api != null) {
+        await RideWrapUpSheet.show(nav.context, api: api, tripId: '', tripName: '', canReviewTrip: false, tripReviewed: false, places: places, placesEnabled: on);
+      } else {
+        await AfterRidePlaceReviews.show(nav.context, service: places, enabled: on);
+      }
+    }
+    // 3.55 "Rate CoRoute": a finished clean ride still waiting for its ask (its own rules decide).
+    if (mounted && nav.mounted) await AppReviewPrompt.maybeAskAtAppOpen(nav.context);
   }
 
   /// A tap on the ride notification: show the ride map; SOS opens the hold
@@ -194,7 +216,14 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     _rideNotif?.pendingUiAction.removeListener(_onRideNotifAction);
     _mapFocus.dispose();
     if (RiderHomeScreen._current == this) RiderHomeScreen._current = null;
+    if (PeopleScreen.tabOpener == _openPeopleTab) PeopleScreen.tabOpener = null;
     super.dispose();
+  }
+
+  bool _openPeopleTab(BuildContext context) {
+    if (!mounted) return false;
+    RiderHomeScreen.selectTab(context, HomeTab.people);
+    return true;
   }
 
   void _select(HomeTab tab) {
@@ -274,6 +303,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   Widget _body(HomeTab tab, String? groupId) => switch (tab) {
         HomeTab.ride => _rideTab(groupId),
         HomeTab.trips => TripHistoryScreen(embedded: true),
+        HomeTab.people => const PeopleScreen(embedded: true),
         HomeTab.alerts => const AlertsScreen(),
         HomeTab.profile => const AccountScreen(embedded: true),
       };
@@ -330,38 +360,24 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               label: 'Trips',
             ),
             NavigationDestination(
+              key: Key('nav_people'),
+              icon: PeopleNavIcon(),
+              selectedIcon: PeopleNavIcon(selected: true),
+              label: 'People',
+            ),
+            NavigationDestination(
               icon: _AlertsNavIcon(),
               selectedIcon: _AlertsNavIcon(selected: true),
               label: 'Alerts',
             ),
             NavigationDestination(
-              icon: _ProfileNavIcon(),
-              selectedIcon: _ProfileNavIcon(selected: true),
+              icon: Icon(Icons.person_outline_rounded),
+              selectedIcon: Icon(Icons.person_rounded),
               label: 'Profile',
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-/// 3.55: the Profile icon with the number of friend requests (and crew invitations / polls)
-/// waiting for an answer, so a new request is seen from any tab.
-class _ProfileNavIcon extends StatelessWidget {
-  final bool selected;
-  const _ProfileNavIcon({this.selected = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final friends = context.select<FriendsService?, int>((s) => s?.badgeCount ?? 0);
-    final crews = context.select<CrewsService?, int>((s) => s?.badgeCount ?? 0);
-    final n = friends + crews;
-    final icon = Icon(selected ? Icons.person_rounded : Icons.person_outline_rounded);
-    if (n == 0) return icon;
-    return Semantics(
-      label: friends > 0 ? '$friends friend ${friends == 1 ? 'request' : 'requests'} waiting' : '$n new',
-      child: Badge(label: Text(n > 9 ? '9+' : '$n'), child: icon),
     );
   }
 }

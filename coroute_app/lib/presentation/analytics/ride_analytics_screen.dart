@@ -107,7 +107,7 @@ class _RideAnalyticsScreenState extends State<RideAnalyticsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Price per $unit, for a rough cost. Kept on your phone only.', style: AppText.label),
+            Text('Fuel price per $unit, for a rough fuel cost. Kept on your phone only.', style: AppText.label),
             const SizedBox(height: Space.s12),
             TextField(
               controller: ctrl,
@@ -526,8 +526,8 @@ class _FuelCard extends StatelessWidget {
     final cells = <(String, String)>[
       ('Used this month', amount(f.usedThisMonth, f.unit)),
       ('Used in total', amount(f.usedTotal, f.unit)),
-      if (f.costThisMonth != null) ('Cost this month', '≈ ${money(f.costThisMonth!)}'),
-      if (f.costTotal != null) ('Cost in total', '≈ ${money(f.costTotal!)}'),
+      if (f.costThisMonth != null) ('Fuel cost this month', '≈ ${money(f.costThisMonth!)}'),
+      if (f.costTotal != null) ('Fuel cost in total', '≈ ${money(f.costTotal!)}'),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -539,7 +539,7 @@ class _FuelCard extends StatelessWidget {
             Expanded(child: Text('Estimated from your distance and your bike\'s mileage.', style: AppText.caption)),
             TextButton(
               onPressed: onEditPrice,
-              child: Text(f.costTotal == null ? 'Add fuel price' : 'Change price'),
+              child: Text(f.costTotal == null ? 'Add fuel price' : 'Change fuel price'),
             ),
           ],
         ),

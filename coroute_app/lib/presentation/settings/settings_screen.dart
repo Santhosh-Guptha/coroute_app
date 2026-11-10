@@ -23,6 +23,7 @@ import '../widgets/feature_switch.dart';
 import 'diagnostics_screen.dart';
 import 'features_guide_screen.dart';
 import 'push_notifications_tile.dart';
+import '../engagement/rate_and_feedback.dart';
 
 /// The one Settings screen, minimal by design (3.55, docs/SETTINGS_MINIMAL_v3.55.md).
 ///
@@ -225,6 +226,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: push.enabled,
                           onChanged: (on) => push.setEnabled(on),
                         ),
+                      // 3.56: the opt-out category for admin pushes; safety and ride alerts are not in it.
+                      if (push != null && push.available && push.enabled)
+                        _Row(
+                          key: const ValueKey('settings_push_news'),
+                          icon: Icons.campaign_rounded,
+                          title: PushNotificationsTile.newsTitle,
+                          subtitle: PushNotificationsTile.newsSubtitle,
+                          value: push.newsEnabled,
+                          onChanged: (on) => push.setNewsEnabled(on),
+                        ),
                       if (friends != null && profile != null)
                         _Row(
                           key: const ValueKey('settings_public_leaderboard'),
@@ -322,6 +333,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.help_outline_rounded,
             title: 'Features guide',
             onTap: () => _push(const FeaturesGuideScreen()),
+          ),
+          // 3.55 ratings & reviews: always available; straight to Google Play (no "do you like us?" first).
+          _Row(
+            key: const ValueKey('settings_rate_coroute'),
+            icon: Icons.star_outline_rounded,
+            title: RateAndFeedback.rateTitle,
+            subtitle: RateAndFeedback.rateSubtitle,
+            onTap: () => RateAndFeedback.rate(context),
+          ),
+          _Row(
+            key: const ValueKey('settings_send_feedback'),
+            icon: Icons.chat_bubble_outline_rounded,
+            title: RateAndFeedback.feedbackTitle,
+            onTap: () => RateAndFeedback.openFeedback(context),
           ),
           // 3.55 diagnostics log: send / share / view the app log (docs/features_355/diagnostics_logs.md).
           _Row(

@@ -27,6 +27,11 @@ import 'ride_share_card.dart';
 import 'trip_route_map.dart';
 import '../trip/trip_feedback_sheet.dart';
 import '../review/app_review_prompt.dart';
+import '../engagement/ride_wrapup_sheet.dart';
+import '../../core/l10n/l10n.dart';
+import '../../data/services/engagement_service.dart';
+import '../../domain/engagement/engagement_config.dart';
+import '../../domain/engagement/ride_wrapup_flow.dart';
 import '../widgets/feature_switch.dart';
 import 'ride_safety_summary_card.dart';
 
@@ -74,6 +79,10 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   bool _reviewChecked = false;
   bool _canReview = false;
 
+  /// 3.55: the quick "How was the ride?" is offered here for a few days after a skipped wrap-up
+  /// (engagement config reviews.reportDays, default 7), until reviewed or closed with "Not now".
+  bool _offerQuick = false;
+
   /// The review prompt opens by itself once per trip, within this long after the trip ended.
   static const Duration reviewPromptWindow = Duration(days: 3);
 
@@ -97,14 +106,27 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     try {
       final res = await api.getTripReview(id);
       if (!mounted) return;
+      final review = TripReview.tryParse(res['feedback']);
+      final canReview = res['canReview'] == true;
+      final dismissed = await EngagementService.dismissedOnReport({_reviewTripId, widget.trip.groupId});
+      if (!mounted) return;
+      final rules = (EngagementService.instance?.config ?? EngagementConfig.defaults).reviews;
       setState(() {
-        _review = TripReview.tryParse(res['feedback']);
-        _canReview = res['canReview'] == true;
+        _review = review;
+        _canReview = canReview;
         _reviewChecked = true;
+        _offerQuick = RideWrapUpFlow.offerOnReport(
+          rules: rules,
+          endedAtMs: widget.trip.endTimeEpochMs,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+          canReview: canReview,
+          reviewed: review != null,
+          dismissedOnReport: dismissed,
+        );
       });
       if (_review != null || !_canReview) {
-        // No review sheet will open: the store-rating prompt may ask (its own rules decide).
-        _maybeAskAppRating(_review?.rating);
+        // No review sheet will open: the "Rate CoRoute" ask may come (its own rules decide).
+        _maybeAskAppRating();
       } else {
         _maybePromptReview();
       }
@@ -131,21 +153,55 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     if (!mounted) return;
     // Not over another screen or sheet the rider has opened meanwhile.
     if (!(ModalRoute.of(context)?.isCurrent ?? false)) return;
-    await _openReview();
+    await _openQuickReview();
+  }
+
+  /// 3.55: the calm wrap-up for this ride (trip stars + chips + note, and its places).
+  Future<void> _openQuickReview() async {
+    final out = await RideWrapUpSheet.show(
+      context,
+      api: context.read<ApiClient>(),
+      tripId: _reviewTripId,
+      tripName: widget.trip.tripName,
+      canReviewTrip: _canReview,
+      tripReviewed: _review != null,
+      places: Provider.of<PlaceReviewService?>(context, listen: false),
+      placesEnabled: context.featureOnNow('placeReviews') && context.featureOnNow('reviewPrompt'),
+      rideId: widget.trip.groupId.isEmpty ? null : widget.trip.groupId,
+    );
+    if (!mounted) return;
+    if (out?.tripReview != null) {
+      setState(() {
+        _review = out!.tripReview;
+        _offerQuick = false;
+      });
+    }
+    _maybeAskAppRating();
+  }
+
+  Future<void> _dismissQuick() async {
+    setState(() => _offerQuick = false);
+    await EngagementService.dismissOnReport(_reviewTripId);
   }
 
   Future<void> _openReview() async {
     final saved = await TripFeedbackSheet.show(context, tripId: _reviewTripId, tripName: widget.trip.tripName, existing: _review);
-    if (saved != null && mounted) setState(() => _review = saved);
-    if (saved != null && mounted) _maybeAskAppRating(saved.rating);
+    if (saved != null && mounted) {
+      setState(() {
+        _review = saved;
+        _offerQuick = false;
+      });
+    }
+    if (saved != null && mounted) _maybeAskAppRating();
   }
 
-  /// The store-rating prompt after a recent ride's report opens or its review is sent.
-  void _maybeAskAppRating(int? rating) {
+  /// The "Rate CoRoute" ask after a recent ride's report opens or its review closes. Its own rules
+  /// decide (never gated on the rating: AppReviewPrompt does not even get it).
+  void _maybeAskAppRating() {
     if (widget.adminView || !mounted) return;
     final ended = widget.trip.endTimeEpochMs;
     if (ended <= 0 || DateTime.now().millisecondsSinceEpoch - ended > reviewPromptWindow.inMilliseconds) return;
-    AppReviewPrompt.maybeShowAfterRide(context, tripId: widget.trip.tripId, groupId: widget.trip.groupId, rating: rating);
+    AppReviewPrompt.maybeAskAfterRide(context);
   }
 
   Future<void> _loadStats() async {
@@ -620,6 +676,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   /// "Your review": its moderation status (and the admin's reason), or a prompt to write one.
   Widget _reviewCard() {
     final rv = _review;
+    if (rv == null && _offerQuick) return _quickReviewCard();
     return DsCard(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -648,6 +705,33 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             onPressed: _openReview,
             child: Text(rv == null ? 'Review' : 'Edit'),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// 3.55: "How was the ride?" (engagement templates) with "Rate" and "Not now".
+  Widget _quickReviewCard() {
+    final cfg = EngagementService.instance?.config ?? EngagementConfig.defaults;
+    final lang = L10n.current;
+    return DsCard(
+      key: const ValueKey('report_quick_review'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: [
+            Icon(Icons.star_outline_rounded, color: AppTheme.accentText),
+            const SizedBox(width: Space.s12),
+            Expanded(child: Text(cfg.text('tripTitle', lang), style: AppText.title)),
+          ]),
+          const SizedBox(height: Space.s4),
+          Text(cfg.text('tripSubtitle', lang), style: AppText.caption),
+          const SizedBox(height: Space.s12),
+          Row(children: [
+            Expanded(child: DsButton(label: 'Not now', tone: DsButtonTone.outline, onPressed: _dismissQuick)),
+            const SizedBox(width: Space.s12),
+            Expanded(child: DsButton(key: const ValueKey('report_quick_review_rate'), label: 'Rate', icon: Icons.star_rounded, onPressed: _openQuickReview)),
+          ]),
         ],
       ),
     );

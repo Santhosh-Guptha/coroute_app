@@ -13,6 +13,10 @@ class PushNotificationsTile extends StatelessWidget {
   static const String title = 'Push notifications';
   static const String subtitle = 'Invites and requests. Never your location.';
 
+  /// 3.56 "News and updates" (admin pushes). Safety and ride alerts always arrive.
+  static const String newsTitle = 'News and updates';
+  static const String newsSubtitle = 'New features and tips from CoRoute. Safety and ride alerts always arrive.';
+
   @override
   Widget build(BuildContext context) {
     final push = context.watch<PushService?>();
