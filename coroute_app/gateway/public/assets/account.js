@@ -123,6 +123,27 @@
     if (rs[0].status === 401) { window.location.replace('/signin?expired=1&next=%2Faccount'); return; }
     if (!rs[0].ok) { S.$('ac-who').textContent = 'Could not load your account. Refresh the page to try again.'; return; }
     var me = rs[0].json;
+    if (me.role === 'MASTER_ADMIN') {
+      var ab = S.$('ac-admin-banner');
+      if (ab) {
+        S.clear(ab);
+        ab.className = 'sh-notice sh-notice--ok';
+        ab.style.display = 'flex';
+        ab.style.alignItems = 'center';
+        ab.style.justifyContent = 'space-between';
+        ab.style.marginBottom = '24px';
+        ab.style.padding = '14px 20px';
+        ab.style.borderRadius = '12px';
+        var txt = el('div');
+        txt.appendChild(el('strong', null, 'Administrator Access: '));
+        txt.appendChild(document.createTextNode('You are signed in as a Master Administrator.'));
+        var btn = el('a', 'btn btn--primary', 'Open Admin Console');
+        btn.setAttribute('href', '/admin');
+        ab.appendChild(txt);
+        ab.appendChild(btn);
+        ab.hidden = false;
+      }
+    }
     var who = me.username ? '@' + me.username : (me.name || 'Rider');
     S.$('ac-title').textContent = 'Hi, ' + who + '.';
     S.$('ac-who').textContent = [me.name && me.username ? me.name : '', me.email || ''].filter(Boolean).join(' · ') || 'Your plan and payments.';

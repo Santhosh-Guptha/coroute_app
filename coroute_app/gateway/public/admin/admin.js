@@ -131,7 +131,7 @@
   // ------------------------------------------------------------------ session & API
   function store(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* private mode */ } }
   function read(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
-  function token() { return read(TOKEN_KEY); }
+  function token() { return read(TOKEN_KEY) || read('coroute_session'); }
   function tokenExpired(t) {
     try {
       var p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -998,7 +998,25 @@
     initSignIn();
     $('signout').addEventListener('click', function () { signOut(''); });
     var t = token();
-    if (t && !tokenExpired(t) && Date.now() - (Number(read(ACTIVE_KEY)) || 0) <= IDLE_MS) enterShell();
-    else signOut(t ? 'You were signed out after 30 minutes without activity.' : '');
+    if (t && !tokenExpired(t)) {
+      if (!read(USER_KEY)) {
+        fetch('/api/me', { headers: { Authorization: 'Bearer ' + t } })
+          .then(function (r) { return r.json(); })
+          .then(function (u) {
+            if (ADMIN_ROLES.indexOf(u && u.role) >= 0) {
+              store(USER_KEY, JSON.stringify(u));
+              store(TOKEN_KEY, t);
+              touch();
+              enterShell();
+            } else {
+              signOut('This account is not a CoRoute administrator.');
+            }
+          }).catch(function () { enterShell(); });
+      } else {
+        enterShell();
+      }
+    } else {
+      signOut(t ? 'You were signed out after 30 minutes without activity.' : '');
+    }
   });
 })();
