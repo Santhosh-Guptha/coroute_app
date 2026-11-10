@@ -314,7 +314,7 @@ class GroupSafetyService extends ChangeNotifier {
     _answer('CUSTOM', 'Needs help');
   }
 
-  /// "Send SOS" (held for 1.5 s on the card): the card closes as answered and the cockpit raises
+  /// "Send SOS" (held for 3 s on the card): the card closes as answered and the cockpit raises
   /// the real SOS (ConvoyService.triggerSosAlert, the one SOS path). No "I'm OK" check-in is sent:
   /// the lead's "No reply" entry stays until the SOS takes over.
   void answerSos() {

@@ -27,6 +27,15 @@ void main() {
     expect(c.tick(t0 + 200 * min), EtaCheckInAction.none);
   });
 
+  test('3.55 false-SOS review: asked, then riding on without tapping counts as fine (no text)', () {
+    final c = EtaCheckIn()..arm(nowMs: t0, eta: const Duration(hours: 2));
+    expect(c.tick(t0 + 150 * min), EtaCheckInAction.ask);
+    expect(c.ridingOn(nowMs: t0 + 151 * min, eta: const Duration(minutes: 20)), isTrue);
+    expect(c.phase, EtaCheckInPhase.armed);
+    expect(c.tick(t0 + 153 * min), EtaCheckInAction.none, reason: 'never escalates while riding on');
+    expect(c.ridingOn(nowMs: t0 + 154 * min), isFalse, reason: 'only an open question is closed');
+  });
+
   test('ETA updates only move the deadline later, never sooner than 10 min from now', () {
     final c = EtaCheckIn()..arm(nowMs: t0, eta: const Duration(minutes: 60));
     final first = c.deadlineMs!; // t0 + 80 min

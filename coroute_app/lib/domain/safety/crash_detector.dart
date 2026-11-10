@@ -4,6 +4,8 @@ import '../tracking/geo_math.dart';
 import '../tracking/track_point.dart';
 import 'accel_bucket.dart';
 import 'crash_incident.dart';
+import 'riding_motion.dart';
+import '../diag/diag_log.dart'; // 3.55 diagnostics log (numbers only)
 
 /// Thresholds of the crash rule. Defaults come from [SafetyConstants].
 class CrashThresholds {
@@ -29,6 +31,44 @@ class CrashThresholds {
   final Duration settle;
   final Duration cooldown;
 
+  /// 3.55 false-SOS review: a severe impact (raw peak >= [severeImpactG] or dynamic peak >=
+  /// [severeDynG], lasting at least [severeMinDurationMs] when the duration is known) keeps the
+  /// fast path: stop + no riding on is enough. Anything milder also needs post-impact evidence.
+  final double severeImpactG;
+  final double severeDynG;
+  final double severeMinDurationMs;
+
+  /// Post-impact evidence for a non-severe impact: in the [evidenceWindow] after the first
+  /// [settle] following the impact, at least [evidenceMinBuckets] seconds where the phone's tilt is
+  /// [evidenceTiltDeg] or more AND at least [evidenceTiltGainDeg] more than while riding just before
+  /// (the bike or the rider is down; a stale orientation baseline does not count).
+  final double evidenceTiltDeg;
+  final double evidenceTiltGainDeg;
+  final Duration evidenceWindow;
+  final int evidenceMinBuckets;
+
+  /// Repetitive shocks: [repeatMinCount] or more seconds in the [repeatWindow] before the impact
+  /// already reached [repeatShare] of its dynamic peak (rough road, loose phone in a tank bag or a
+  /// pocket). Such an impact needs strong evidence: tilt in [strongTiltBuckets] seconds and the
+  /// phone dead still (std <= [deadStillStdG]) in [strongStillBuckets] seconds after the stop.
+  final Duration repeatWindow;
+  final double repeatShare;
+  final int repeatMinCount;
+  final int strongTiltBuckets;
+  final int strongStillBuckets;
+  final double deadStillStdG;
+
+  /// Riding on after the impact (before any stop): fixes above [rideOnKmh] for [rideOnFor] with no
+  /// collapse in speed drop the candidate at once (a pothole or a speed breaker at speed).
+  final double rideOnKmh;
+  final Duration rideOnFor;
+
+  /// An abrupt stop is post-impact evidence too: from at least [abruptFromKmh] to the stop fix at
+  /// an average deceleration of [abruptStopMps2] or more counted from the impact (a frontal
+  /// collision can leave the bike upright; braking for a red light is 1.5-3 m/s2).
+  final double abruptStopMps2;
+  final double abruptFromKmh;
+
   const CrashThresholds({
     this.armSpeedKmh = SafetyConstants.crashArmSpeedKmh,
     this.armSustain = SafetyConstants.crashArmSustain,
@@ -51,6 +91,23 @@ class CrashThresholds {
     this.resumeKmh = SafetyConstants.crashResumeKmh,
     this.settle = SafetyConstants.crashSettle,
     this.cooldown = SafetyConstants.crashCooldown,
+    this.severeImpactG = SafetyConstants.crashSevereImpactG,
+    this.severeDynG = SafetyConstants.crashSevereDynG,
+    this.severeMinDurationMs = SafetyConstants.crashSevereMinDurationMs,
+    this.evidenceTiltDeg = SafetyConstants.crashEvidenceTiltDeg,
+    this.evidenceTiltGainDeg = SafetyConstants.crashEvidenceTiltGainDeg,
+    this.evidenceWindow = SafetyConstants.crashEvidenceWindow,
+    this.evidenceMinBuckets = SafetyConstants.crashEvidenceMinBuckets,
+    this.repeatWindow = const Duration(seconds: 30),
+    this.repeatShare = 0.7,
+    this.repeatMinCount = 3,
+    this.strongTiltBuckets = 8,
+    this.strongStillBuckets = 5,
+    this.deadStillStdG = 0.05,
+    this.rideOnKmh = SafetyConstants.crashResumeKmh,
+    this.rideOnFor = SafetyConstants.crashRideOnFor,
+    this.abruptStopMps2 = SafetyConstants.crashAbruptStopMps2,
+    this.abruptFromKmh = 20,
   });
 
   Duration stopWithinForSpeed(double speedKmh) =>
@@ -113,6 +170,32 @@ class _Candidate {
   double? stopLng;
   int stillBuckets = 0;
 
+  /// 3.55 false-SOS review (see [CrashThresholds.severeImpactG] and the evidence fields).
+  bool severe = false;
+
+  /// The impact second carried gyro / tilt / dynamic data (extended native format). Legacy
+  /// 4-value buckets have no orientation: the evidence rule cannot apply and the 3.54 rule stays.
+  bool hasOrientation = false;
+
+  /// Median tilt while riding just before the impact (the phone's normal orientation), and its
+  /// 80th percentile (a phone shifting about in a bag or a pocket has a wide spread).
+  double baseTilt = 0;
+  double baseTiltHigh = 0;
+
+  /// Shocks of similar size were already frequent before the impact (rough road, loose phone).
+  bool repetitive = false;
+  int tiltBuckets = 0;
+  int evidenceBuckets = 0;
+
+  /// The GPS stop came faster than any ordinary braking ([CrashThresholds.abruptStopMps2]).
+  bool abruptStop = false;
+
+  /// Speed of the last fix at or just before the impact (the abrupt-stop rule uses it rather
+  /// than the fastest speed of the 10 s before, which a rider already braking would inflate).
+  double speedAtImpact = 0;
+  int deadStillBuckets = 0;
+  final RideOnRun rideOn;
+
   _Candidate({
     required this.impactAt,
     required this.impactG,
@@ -125,6 +208,7 @@ class _Candidate {
     this.confidence = 1.0,
     this.peakJerkGPerS = 0.0,
     this.movementState = MovementState.unknown,
+    required this.rideOn,
   });
 }
 
@@ -185,7 +269,11 @@ class CrashDetector {
   bool standaloneOfflineMode;
 
   final List<TrackPoint> _recent = [];
+  final List<AccelBucket> _recentBuckets = [];
   int? _lastLowSpeedAt;
+
+  /// Why the last candidate was dropped (tests and diagnostics; null after an alarm).
+  String? lastCancel;
 
   /// When the current arming began (null: disarmed).
   int? _armedSince;
@@ -277,12 +365,23 @@ class CrashDetector {
     final stopWithinMs = t.stopWithinForSpeed(c.speedBefore).inMilliseconds;
     if (stopAt == null) {
       if (p.ts - c.impactAt > stopWithinMs) {
-        _c = null; // never came to a stop in time: a pothole or a dropped phone, the ride goes on
+        _drop('no stop'); // never came to a stop in time: a pothole or a dropped phone, the ride goes on
+        return null;
+      }
+      // 3.55 false-SOS review: still riding a few seconds after the "impact" (steady speed above
+      // 15 km/h for 3 s): a pothole, a speed breaker, a kerb or a loose phone. Dropped at once, so a
+      // later ordinary stop (a red light) can never complete it into an alarm.
+      if (c.rideOn.add(p)) {
+        _drop('riding on');
         return null;
       }
       if (p.speedKmh <= t.stopSpeedKmh && isAccurate) {
         c.stopAt = p.ts;
         c.gpsStop = true;
+        final dtS = (p.ts - c.impactAt) / 1000.0;
+        if (c.speedAtImpact >= t.abruptFromKmh && dtS > 0) {
+          c.abruptStop = (c.speedAtImpact - p.speedKmh) / 3.6 / dtS >= t.abruptStopMps2;
+        }
         c.stopLat = p.lat;
         c.stopLng = p.lng;
         c.lat = p.lat;
@@ -293,25 +392,60 @@ class CrashDetector {
     // After the stop only riding on cancels: riding speed, or too far for someone on foot.
     final moved = GeoMath.haversine(c.stopLat ?? p.lat, c.stopLng ?? p.lng, p.lat, p.lng);
     if (p.speedKmh > t.resumeKmh || moved > t.stillMaxMoveM) {
-      _c = null;
+      _drop('rode on after the stop');
       return null;
     }
     return _complete(c, p.ts);
   }
 
+  void _drop(String why) {
+    final c = _c;
+    _c = null;
+    lastCancel = why;
+    if (c != null) {
+      DiagLog.info(DiagCat.crash, 'candidate_dropped', {
+        'why': why, 'scenario': c.scenario, 'g': c.impactG, 'evidence': c.evidenceBuckets, 'tilt': c.tiltBuckets,
+        'still': c.stillBuckets, 'deadStill': c.deadStillBuckets, 'abrupt': c.abruptStop, 'severe': c.severe, 'repetitive': c.repetitive,
+      });
+    }
+  }
+
+  /// Median tilt of the seconds 3-15 s before [tMs] (the phone's riding orientation); 0 when there
+  /// are fewer than 5 such seconds.
+  double _baseTiltBefore(int tMs, {double quantile = 0.5}) {
+    final v = <double>[
+      for (final r in _recentBuckets)
+        if (r.tMs <= tMs - 3000 && r.tMs >= tMs - 15000) r.tiltDeg,
+    ];
+    if (v.length < 5) return 0;
+    v.sort();
+    return v[((v.length - 1) * quantile).round()];
+  }
+
   CrashEvent? onAccel(AccelBucket b) {
     _now = math.max(_now, b.tMs);
+    if (_recentBuckets.isEmpty || b.tMs > _recentBuckets.last.tMs) {
+      _recentBuckets.add(b);
+      while (_recentBuckets.isNotEmpty && _recentBuckets.first.tMs < b.tMs - 35000) {
+        _recentBuckets.removeAt(0);
+      }
+    }
     final c = _c;
     if (c == null) {
       if (b.tMs < _cooldownUntil) return null;
 
       final isArmed = armedAt(b.tMs);
       final isLowSpeedArmed = armedAt(b.tMs, lowSpeed: true);
-      final hasRotationOrTilt = b.peakGyroRadS >= t.rotationRadS || b.tiltDeg >= t.tiltThresholdDeg;
+      // 3.55 false-SOS review: tilt counts from the phone's riding orientation just before (the
+      // native baseline can be stale, e.g. the phone was put in the mount after the sensor started:
+      // then every second reads "tilted" and every 2 g bump looked like a slide).
+      final baseTilt = _baseTiltBefore(b.tMs);
+      final relTilt = math.max(0.0, b.tiltDeg - baseTilt);
+      final hasRotationOrTilt = b.peakGyroRadS >= t.rotationRadS || relTilt >= t.tiltThresholdDeg;
 
       // 1. High-side crash (violent angular snap/rebound + high dynamic shock)
       final isHighside = isArmed &&
-          (b.peakGyroRadS >= SafetyConstants.crashHighsideRotationRadS || b.tiltDeg >= SafetyConstants.crashHighsideTiltDeg) &&
+          (b.peakGyroRadS >= SafetyConstants.crashHighsideRotationRadS || relTilt >= SafetyConstants.crashHighsideTiltDeg) &&
           (b.effectiveDynG >= 2.5 || b.peakG >= 3.0);
 
       // 2. High impact collision (gravity compensated dynamic peak or total peak)
@@ -333,13 +467,13 @@ class CrashDetector {
       final isPotholeOrSpeedBump = b.impactDurationMs > 0 &&
           b.impactDurationMs <= SafetyConstants.crashPotholeMaxDurationMs &&
           b.peakGyroRadS <= SafetyConstants.crashPotholeMaxRotationRadS &&
-          b.tiltDeg <= SafetyConstants.crashPotholeMaxTiltDeg;
+          relTilt <= SafetyConstants.crashPotholeMaxTiltDeg;
 
       // B. Hard braking: pure linear deceleration along travel axis without rotation (< 0.5 rad/s) or tilt (< 12°)
-      final isHardBraking = b.peakGyroRadS < 0.5 && b.tiltDeg < 12.0 && b.effectiveDynG < 2.5;
+      final isHardBraking = b.peakGyroRadS < 0.5 && relTilt < 12.0 && b.effectiveDynG < 2.5;
 
       // C. Normal cornering lean: lean angle present, but low dynamic shock (< 1.0g) and low jerk (< 15 g/s)
-      final isNormalCornering = b.effectiveDynG < 1.0 && b.peakJerkGPerS < 15.0 && b.tiltDeg <= 45.0 && b.peakGyroRadS < 1.2;
+      final isNormalCornering = b.effectiveDynG < 1.0 && b.peakJerkGPerS < 15.0 && relTilt <= 45.0 && b.peakGyroRadS < 1.2;
 
       // Noise rejection: sub-sample spike (< minDurationMs) without rotational evidence is rejected
       final isPebbleNoise = b.impactDurationMs > 0 && b.impactDurationMs < t.minDurationMs && !hasRotationOrTilt;
@@ -368,7 +502,16 @@ class CrashDetector {
           confidence = 0.85;
         }
 
+        final dyn = b.effectiveDynG;
+        var similar = 0;
+        for (final r in _recentBuckets) {
+          if (r.tMs < b.tMs && r.tMs >= b.tMs - t.repeatWindow.inMilliseconds && r.effectiveDynG >= dyn * t.repeatShare) similar++;
+        }
+        final severe = (b.peakG >= t.severeImpactG || b.effectiveDynG >= t.severeDynG) &&
+            (b.impactDurationMs <= 0 || b.impactDurationMs >= t.severeMinDurationMs);
+        lastCancel = null;
         _c = _Candidate(
+          rideOn: RideOnRun(minKmh: t.rideOnKmh, minSpan: t.rideOnFor),
           impactAt: b.tMs,
           impactG: math.max(b.effectiveDynG, b.peakG),
           speedBefore: _speedBefore(b.tMs),
@@ -380,31 +523,51 @@ class CrashDetector {
           confidence: confidence * b.sensorConfidence,
           peakJerkGPerS: b.peakJerkGPerS,
           movementState: MovementState.unknown,
-        );
+        )
+          ..severe = severe
+          ..hasOrientation = b.peakDynG > 0 || b.peakGyroRadS > 0 || b.tiltDeg > 0
+          ..baseTilt = baseTilt
+          ..speedAtImpact = _speedAt(b.tMs)
+          ..baseTiltHigh = _baseTiltBefore(b.tMs, quantile: 0.8)
+          ..repetitive = similar >= t.repeatMinCount;
+        // Sensor summary of the impact second (numbers only).
+        DiagLog.info(DiagCat.crash, 'impact_candidate', {
+          'scenario': scenario, 'conf': confidence * b.sensorConfidence, 'peakG': b.peakG, 'dynG': b.effectiveDynG, 'gyro': b.peakGyroRadS,
+          'relTilt': relTilt, 'durMs': b.impactDurationMs, 'jerk': b.peakJerkGPerS, 'speed': _speedAt(b.tMs), 'severe': severe, 'repeats': similar,
+        });
       }
       return null;
     }
 
     if (b.tMs < c.impactAt) return null;
+    // 3.55 post-impact evidence: is the bike (or the rider) down? Counted in the evidence window
+    // after the settle; dead-still seconds after the stop.
+    final from = c.impactAt + t.settle.inMilliseconds;
+    if (b.tMs >= from && b.tMs <= from + t.evidenceWindow.inMilliseconds) {
+      c.evidenceBuckets++;
+      if (b.tiltDeg >= t.evidenceTiltDeg && b.tiltDeg - c.baseTiltHigh >= t.evidenceTiltGainDeg) c.tiltBuckets++;
+    }
+    final stopSeen = c.stopAt;
+    if (stopSeen != null && b.tMs >= stopSeen + t.settle.inMilliseconds && b.stdG <= t.deadStillStdG) c.deadStillBuckets++;
     var stopAt = c.stopAt;
     final stopWithinMs = t.stopWithinForSpeed(c.speedBefore).inMilliseconds;
     if (stopAt == null) {
       if (b.tMs >= c.impactAt + stopWithinMs) {
         if (c.fixSeen) {
-          _c = null; // fixes kept coming but none was slow: still riding
+          _drop('no stop'); // fixes kept coming but none was slow: still riding
           return null;
         }
 
         // GPS is missing (UNKNOWN): do not assume stopped if riding motion/vibrations continue
         // or if this was just a bump with no rollover/rotation.
         if (b.stdG > t.stillStdG) {
-          _c = null; // motorcycle still moving / vibrating (e.g. tunnel ride on)
+          _drop('moving without GPS'); // motorcycle still moving / vibrating (e.g. tunnel ride on)
           return null;
         }
 
         // Positive evidence required: either high-impact crash or rotational fall
         if (!c.hasRotationOrTilt && c.impactG < t.impactG) {
-          _c = null;
+          _drop('no fall evidence without GPS');
           return null;
         }
 
@@ -421,7 +584,7 @@ class CrashDetector {
     // of the slide); otherwise riding on with the GPS lost (a tunnel) would look the same.
     if (!c.gpsStop && b.tMs >= stopAt + t.settle.inMilliseconds) {
       if (b.stdG > t.stillStdG) {
-        _c = null; // moving: walking about, picked the phone up, riding on
+        _drop('moving without GPS'); // moving: walking about, picked the phone up, riding on
         return null;
       }
       c.stillBuckets++;
@@ -435,6 +598,20 @@ class CrashDetector {
     final need = t.stillFor.inMilliseconds;
     if (tMs - stopAt < need) return null;
     if (!c.gpsStop && c.stillBuckets < (need ~/ 1000) ~/ 2) return null;
+    // 3.55 false-SOS review: a non-severe impact alarms only with post-impact evidence (the phone
+    // turned with a fallen bike or rider and stayed so). A repetitive shock (rough road, a phone
+    // loose in a tank bag or a pocket) needs strong evidence. Severe impacts and legacy buckets
+    // without orientation keep the 3.54 rule, and so does a candidate whose post-impact seconds
+    // never arrived (no sensor data is no proof of riding on: never a veto).
+    final judged = c.evidenceBuckets >= t.evidenceWindow.inSeconds ~/ 3;
+    if (c.hasOrientation && !c.severe && judged) {
+      final evidence = c.tiltBuckets >= t.evidenceMinBuckets || c.abruptStop;
+      final strong = (c.tiltBuckets >= t.strongTiltBuckets && c.deadStillBuckets >= t.strongStillBuckets) || c.abruptStop;
+      if (!evidence || (c.repetitive && !strong)) {
+        _drop(evidence ? 'repetitive shocks without strong evidence' : 'no post-impact evidence');
+        return null;
+      }
+    }
     _c = null;
     _cooldownUntil = tMs + t.cooldown.inMilliseconds;
     return CrashEvent(
@@ -465,6 +642,15 @@ class CrashDetector {
     return any;
   }
 
+  /// Speed of the last fix at most 3 s before [impactAt] (0 when none).
+  double _speedAt(int impactAt) {
+    for (final f in _recent.reversed) {
+      if (f.ts > impactAt) continue;
+      return impactAt - f.ts <= 3000 ? f.speedKmh : 0;
+    }
+    return 0;
+  }
+
   /// Highest speed in the 10 s before the impact (the last fast speed when the GPS was sparse).
   double _speedBefore(int impactAt) {
     var best = 0.0;
@@ -481,6 +667,8 @@ class CrashDetector {
   /// Forgets everything (a new ride, or crash detection switched off).
   void reset() {
     _recent.clear();
+    _recentBuckets.clear();
+    lastCancel = null;
     _lastLowSpeedAt = null;
     _armedSince = null;
     _lastKeepAt = null;

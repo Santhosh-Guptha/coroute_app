@@ -1,5 +1,5 @@
 // 3.55 owner decision: the missing-rider check card keeps "I'm OK" and "Need help" (asks the group
-// to wait) and adds a clearly separate red "Send SOS" button that must be held for 1.5 s.
+// to wait) and adds a clearly separate red "Send SOS" button that must be held for 3 s (3.55, was 1.5 s).
 // Also the compact chip shown instead of a tap card while moving.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,7 +48,7 @@ void main() {
       expect(calls, isEmpty, reason: 'a tap or a bump cannot send an SOS');
     });
 
-    testWidgets('holding Send SOS for 1.5 s raises the SOS; letting go early cancels', (tester) async {
+    testWidgets('holding Send SOS for 3 s raises the SOS; letting go early cancels', (tester) async {
       await tester.pumpWidget(card());
       final at = tester.getCenter(find.byKey(const ValueKey('missingRiderSos')));
       var g = await tester.startGesture(at);
@@ -61,9 +61,9 @@ void main() {
 
       g = await tester.startGesture(at);
       await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pump(const Duration(milliseconds: 1500));
       expect(calls, isEmpty);
-      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pump(const Duration(milliseconds: 1600));
       expect(calls, ['sos']);
       await g.up();
       await tester.pump();

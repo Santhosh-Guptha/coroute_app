@@ -8,18 +8,24 @@
 // with the same countdown, SOS and text fallback.
 //
 // Conservative on purpose (false alarms teach riders to ignore alarms):
-//  * slow: the last fix (at most [fixFreshFor] old) is below [slowKmh] (8 km/h);
+//  * stopped: the last fix (at most [fixFreshFor] old) is below [slowKmh] (5 km/h) and every fix of
+//    the [stoppedFor] (10 s) before the tip was too (3.55 false-SOS review: never while moving; a
+//    fall while still rolling is the crash detector's low-speed path);
 //  * tip-over: within [tipWindow] (~2 s) the tilt rose by more than [tipDeltaDeg] (60 deg), and
 //    the bike reached at least [tipMinTiltDeg] from the riding baseline. A side stand
 //    (10-15 deg) never qualifies;
-//  * a thud: peak >= [thudG] or dynamic peak >= [thudDynG] within the tip window. A phone lifted
-//    out of the mount and slid into a pocket turns as much, but without the impact;
-//  * nobody was walking with the phone before ([walkStdG] in [walkBuckets] of the 5 s before);
+//  * a thud: peak >= [thudG] (2 g) or dynamic peak >= [thudDynG] (1 g) within the tip window. A
+//    phone lifted out of the mount, picked up or slid into a pocket turns as much, but without the
+//    impact of a 150 kg bike hitting the ground (3.55: was 1.5 g / 0.6 g, which a quick pick-up reached);
+//  * nobody was walking with the phone before ([walkStdG] in [walkBuckets] of the 5 s before), and
+//    nobody was handling it (turning faster than [handledGyroRadS] in [handledBuckets] of those
+//    seconds: the phone taken out of a pocket and clipped into the mount at a light);
 //  * then [stillFor] (60 s) without movement, after a [settle] of 3 s: every bucket calm
 //    (std <= [stillStdG], gyro <= [stillGyroRadS]) for at least 75% of the seconds, the bike
 //    still down (tilt >= [downMinTiltDeg]), no fix faster than [slowKmh] and none farther than
 //    [maxMoveM] away. Steps (std > [moveStdG]), body sway in a pocket (gyro above
-//    [bodyGyroRadS] for [bodyBuckets] seconds), the bike lifted back up, or riding on cancel.
+//    [bodyGyroRadS] for [bodyBuckets] seconds), the bike lifted back up (an abrupt or turning drop
+//    of the tilt; a slow drift is the sensor's baseline adapting, not a lift), or riding on cancel.
 import 'dart:math' as math;
 
 import '../tracking/geo_math.dart';
@@ -65,15 +71,18 @@ class _Down {
 
 class RiderDownDetector {
   RiderDownDetector({
-    this.slowKmh = 8,
+    this.slowKmh = 5,
+    this.stoppedFor = const Duration(seconds: 10),
     this.fixFreshFor = const Duration(seconds: 30),
     this.tipWindow = const Duration(seconds: 2),
     this.tipDeltaDeg = 60,
     this.tipMinTiltDeg = 60,
-    this.thudG = 1.5,
-    this.thudDynG = 0.6,
+    this.thudG = 2.0,
+    this.thudDynG = 1.0,
     this.walkStdG = 0.15,
     this.walkBuckets = 3,
+    this.handledGyroRadS = 0.6,
+    this.handledBuckets = 2,
     this.settle = const Duration(seconds: 3),
     this.stillFor = const Duration(seconds: 60),
     this.stillStdG = 0.06,
@@ -88,6 +97,7 @@ class RiderDownDetector {
   });
 
   final double slowKmh;
+  final Duration stoppedFor;
   final Duration fixFreshFor;
   final Duration tipWindow;
   final double tipDeltaDeg;
@@ -96,6 +106,8 @@ class RiderDownDetector {
   final double thudDynG;
   final double walkStdG;
   final int walkBuckets;
+  final double handledGyroRadS;
+  final int handledBuckets;
   final Duration settle;
   final Duration stillFor;
   final double stillStdG;
@@ -109,6 +121,9 @@ class RiderDownDetector {
   final Duration cooldown;
 
   TrackPoint? _fix;
+
+  /// First fix of the current run of slow fixes (null while moving or before any fix).
+  int? _slowSince;
   final List<AccelBucket> _recent = [];
   _Down? _c;
   int _cooldownUntil = 0;
@@ -123,6 +138,11 @@ class RiderDownDetector {
     final last = _fix;
     if (last != null && p.ts < last.ts) return;
     _fix = p;
+    if (p.speedKmh >= slowKmh) {
+      _slowSince = null;
+    } else {
+      _slowSince ??= p.ts;
+    }
     final c = _c;
     if (c == null || p.ts < c.tipAt) return;
     if (p.speedKmh >= slowKmh) {
@@ -154,7 +174,9 @@ class RiderDownDetector {
     final f = _fix;
     if (f == null) return false; // unknown speed (no fix yet, or GPS lost in a tunnel): never
     if (tMs - f.ts > fixFreshFor.inMilliseconds) return false;
-    return f.speedKmh < slowKmh;
+    if (f.speedKmh >= slowKmh) return false;
+    final since = _slowSince;
+    return since != null && tMs - since >= stoppedFor.inMilliseconds;
   }
 
   void _maybeStart(AccelBucket b) {
@@ -173,11 +195,13 @@ class RiderDownDetector {
     if (b.tiltDeg - minTilt <= tipDeltaDeg) return;
     if (!thud) return;
     // Steps before the tip-over: the phone was carried, not on the bike.
-    var walking = 0;
+    var walking = 0, handled = 0;
     for (final r in _recent) {
-      if (r.tMs >= b.tMs - 5000 && r.tMs < from && r.stdG >= walkStdG && r.peakGyroRadS < 1.0) walking++;
+      if (r.tMs < b.tMs - 5000 || r.tMs >= from) continue;
+      if (r.stdG >= walkStdG && r.peakGyroRadS < 1.0) walking++;
+      if (r.peakGyroRadS >= handledGyroRadS) handled++;
     }
-    if (walking >= walkBuckets) return;
+    if (walking >= walkBuckets || handled >= handledBuckets) return;
     final f = _fix;
     var peak = b.peakG;
     for (final r in _recent) {
@@ -205,7 +229,16 @@ class RiderDownDetector {
       return null;
     }
     if (b.tiltDeg < downMinTiltDeg) {
-      _cancel('lifted');
+      // Lifted back up: the tilt drops abruptly or with rotation. A slow drift below the line is
+      // the sensor's orientation baseline adapting while the bike lies there: not a still-down
+      // second, but no cancel either (never miss a bike that is still down).
+      final prev = _recent.isEmpty ? null : _recent.last;
+      final abrupt = prev != null && prev.tiltDeg >= downMinTiltDeg + 20;
+      final turning = b.peakGyroRadS >= 0.3 || (prev != null && prev.peakGyroRadS >= 0.3);
+      if (abrupt || turning) {
+        _cancel('lifted');
+        return null;
+      }
       return null;
     }
     if (b.peakGyroRadS > bodyGyroRadS) {
@@ -246,6 +279,7 @@ class RiderDownDetector {
 
   void reset() {
     _fix = null;
+    _slowSince = null;
     _recent.clear();
     _c = null;
     _cooldownUntil = 0;

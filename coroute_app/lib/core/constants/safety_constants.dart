@@ -84,9 +84,34 @@ class SafetyConstants {
   /// The first seconds after the stop are not judged for stillness (the slide ends, GPS speed lags).
   static const Duration crashSettle = Duration(seconds: 2);
 
+  /// 3.55 false-SOS review (docs/features_355/sensor_safety.md). A severe impact (raw peak at or
+  /// above [crashSevereImpactG] or dynamic peak at or above [crashSevereDynG], lasting at least
+  /// [crashSevereMinDurationMs] when the phone reports the duration) keeps the fast path: a stop
+  /// and no riding on. A milder impact also needs post-impact evidence: in the
+  /// [crashEvidenceWindow] after the settle, at least [crashEvidenceMinBuckets] seconds with the
+  /// phone tilted [crashEvidenceTiltDeg] or more, and [crashEvidenceTiltGainDeg] more than while
+  /// riding just before (a fallen bike or rider). Potholes, speed breakers, kerbs and a loose
+  /// phone followed by an ordinary stop (a red light, a toll) no longer open the alarm.
+  static const double crashSevereImpactG = 7.0;
+  static const double crashSevereDynG = 6.0;
+  static const double crashSevereMinDurationMs = 50.0;
+  static const double crashEvidenceTiltDeg = 40.0;
+  static const double crashEvidenceTiltGainDeg = 30.0;
+  static const Duration crashEvidenceWindow = Duration(seconds: 15);
+  static const int crashEvidenceMinBuckets = 4;
+
+  /// Riding on after an impact (fixes above [crashResumeKmh] for this long, speed not collapsing)
+  /// drops the candidate at once; during the alarm countdown it cancels the alarm.
+  static const Duration crashRideOnFor = Duration(seconds: 3);
+
+  /// An abrupt stop is post-impact evidence as well: from 20 km/h or more down to the stop fix at
+  /// this average deceleration or more, counted from the impact (braking for a light: 1.5-3 m/s2).
+  static const double crashAbruptStopMps2 = 4.5;
+
   /// The alarm ("Possible accident detected. Are you okay?") counts down this long before
-  /// the SOS is sent (3.15: 15 s, was 30 s).
-  static const Duration crashCountdown = Duration(seconds: 15);
+  /// the SOS is sent (3.15: 15 s, was 30 s; 3.55 false-SOS review: 30 s again, so a rider with
+  /// the phone in a pocket or a tank bag has time to hear it and answer; riding away cancels it).
+  static const Duration crashCountdown = Duration(seconds: 30);
 
   /// No new alarm for this long after an alarm was answered.
   static const Duration crashCooldown = Duration(minutes: 2);

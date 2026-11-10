@@ -49,7 +49,7 @@ class AlarmNotifier {
   static const String channelCritical = 'coroute_critical_alerts';
   static const int criticalAlertId = 4711;
 
-  /// 3.55 sound awareness: siren / horn heard by the ride mic while the app is not in front (screen
+  /// 3.55 sound awareness: a siren heard by the ride mic while the app is not in front (screen
   /// locked, phone in a pocket), where app vibration (HapticFeedback) may not work. Heads-up with
   /// VIBRATION ONLY: the spoken alert is the sound (no notification sound on top of it).
   static const String channelSoundAlerts = 'coroute_sound_alerts';
@@ -141,8 +141,8 @@ class AlarmNotifier {
         ));
         await android?.createNotificationChannel(AndroidNotificationChannel(
           channelSoundAlerts,
-          'Siren and horn alerts',
-          description: 'Vibrates when your phone hears a siren or a horn close by while the screen is off.',
+          'Siren alerts',
+          description: 'Vibrates when your phone hears an emergency siren close by while the screen is off.',
           importance: Importance.high,
           playSound: false,
           enableVibration: true,
@@ -300,14 +300,14 @@ class AlarmNotifier {
     }
   }
 
-  /// 3.55: siren / horn heads-up with vibration only, for the lock screen (see [channelSoundAlerts]).
+  /// 3.55: siren heads-up with vibration only, for the lock screen (see [channelSoundAlerts]).
   /// One id: a newer alert replaces the older one. Public on the lock screen (no private data).
   static Future<void> showSoundAwarenessAlert(String title, String body, {Duration showFor = const Duration(seconds: 30)}) async {
     if (!await ensureInitialized()) return;
     final details = AndroidNotificationDetails(
       channelSoundAlerts,
-      'Siren and horn alerts',
-      channelDescription: 'Vibrates when your phone hears a siren or a horn close by while the screen is off.',
+      'Siren alerts',
+      channelDescription: 'Vibrates when your phone hears an emergency siren close by while the screen is off.',
       importance: Importance.high,
       priority: Priority.high,
       category: AndroidNotificationCategory.navigation,

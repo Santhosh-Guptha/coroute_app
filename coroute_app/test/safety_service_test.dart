@@ -455,8 +455,8 @@ void main() {
   });
 
   group('crash alarm', () {
-    test('the countdown is 15 s (3.15, was 30 s)', () {
-      expect(SafetyConstants.crashCountdown, const Duration(seconds: 15));
+    test('the countdown is 30 s (3.55 false-SOS review; 3.15 had 15 s)', () {
+      expect(SafetyConstants.crashCountdown, const Duration(seconds: 30));
     });
 
     testWidgets('counts down from 15; I\'m OK closes it and sends nothing', (tester) async {
@@ -474,7 +474,7 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('no answer in 15 s raises an automatic CRASH SOS with the details (CRASH_AUTO)', (tester) async {
+    testWidgets('no answer in the countdown raises an automatic CRASH SOS with the details (CRASH_AUTO)', (tester) async {
       await setUp0(tester);
       port.convoy = convoyWith({});
       port.changed();

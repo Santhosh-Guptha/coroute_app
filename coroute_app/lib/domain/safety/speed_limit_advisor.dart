@@ -66,12 +66,14 @@ class SpeedLimitWarning {
 /// * Zones: within [zoneM] of a school (cap [schoolKmh], only Mon-Sat 07:00-18:00 local, and only
 ///   where the road limit is unknown or at most [zoneRoadMaxKmh]) or a hospital (cap
 ///   [hospitalKmh], only on a road whose known limit is at most [zoneRoadMaxKmh]).
-/// * Warning: above limit + [toleranceKmh] for [holdFor], then at most once per [cooldown] for
+/// * Warning: above limit + [toleranceKmh] for [holdFor] (2 s), then at most once per [cooldown] for
 ///   the same zone / limit. Another limit (the group or personal limit in SafetyService) that is
 ///   as strict or stricter, or already warning, takes precedence: one prompt only.
 class SpeedLimitAdvisor {
   SpeedLimitAdvisor({
-    this.holdFor = const Duration(seconds: 8),
+    // 3.55 alert latency review: 2 s (was 8 s: at 50 km/h a school zone's 150 m was mostly
+    // ridden through before the warning came).
+    this.holdFor = const Duration(seconds: 2),
     this.cooldown = const Duration(seconds: 60),
   });
 

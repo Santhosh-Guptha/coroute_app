@@ -52,7 +52,7 @@ void main() {
         expect(sent, 0, reason: 'a tap never sends');
         final hold = await tester.startGesture(tester.getCenter(find.byType(SOSButton)));
         await tester.pump(const Duration(milliseconds: 100));
-        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 4));
         await hold.up();
         await tester.pump();
         expect(sent, 1);

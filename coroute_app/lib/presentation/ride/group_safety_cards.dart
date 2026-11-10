@@ -92,7 +92,7 @@ class GroupSafetyCard extends StatelessWidget {
 
 /// The missing-rider check card ("Are you OK? The group is moving on"). Owner decision 3.55:
 /// "I'm OK" and "Need help" (asks the group to wait / regroup) stay as before, and a clearly
-/// separate red "Send SOS" button raises the real SOS. It must be held for 1.5 s, like the big
+/// separate red "Send SOS" button raises the real SOS. It must be held for 3 s, like the big
 /// SOS button, so a glove or a bump cannot send it. Service-free (pure inputs) for tests.
 class MissingRiderCard extends StatelessWidget {
   final String title;

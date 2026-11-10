@@ -55,6 +55,7 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
                 result.success(null)
             }
             "cacheDir" -> result.success(cacheDir())
+            "filesDir" -> result.success(filesDir())
             "networkKind" -> result.success(networkKind())
             "phoneProbe" -> phoneProbe(result)
             "openSoundSettings" -> result.success(start(Intent(Settings.ACTION_SOUND_SETTINGS)))
@@ -198,6 +199,15 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
     private fun cacheDir(): String? {
         return try {
             activity.applicationContext.cacheDir?.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 3.55: the app's private files folder (kept until the app is uninstalled; diagnostics log). */
+    private fun filesDir(): String? {
+        return try {
+            activity.applicationContext.filesDir?.absolutePath
         } catch (e: Exception) {
             null
         }

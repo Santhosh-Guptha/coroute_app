@@ -138,6 +138,9 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
         private var maxDurationMs = 0.0
         private var peakJerk = 0.0
 
+        /// Std (g) of the last closed one-second bucket: below 0.02 g the phone lies dead still.
+        private var lastBucketStd = 1.0
+
         private val closed = ArrayList<Double>(128)
         private var lastFlush = 0L
 
@@ -239,11 +242,17 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 0.0
             }
 
-            // Slowly adapt baseline orientation only during steady upright riding
-            if (gDyn < 0.4 && currentGyroRadS < 0.25) {
-                refGx = 0.995 * refGx + 0.005 * gx
-                refGy = 0.995 * refGy + 0.005 * gy
-                refGz = 0.995 * refGz + 0.005 * gz
+            // Slowly adapt the baseline orientation while riding (calm sample, but the phone vibrates
+            // with the bike: last second's std >= 0.02 g), time constant about 30 s at 50 Hz.
+            // 3.55 false-SOS review: it used to adapt with a ~4 s time constant on ANY calm sample,
+            // including a phone lying dead still on a fallen bike, so the tilt read "upright" again
+            // within seconds of a crash or a tip-over (the rider-down check cancelled as "lifted",
+            // and post-impact orientation could not be judged). A phone clipped into the mount after
+            // the start still re-baselines within about a minute of riding.
+            if (gDyn < 0.4 && currentGyroRadS < 0.25 && lastBucketStd >= 0.02) {
+                refGx = 0.9993 * refGx + 0.0007 * gx
+                refGy = 0.9993 * refGy + 0.0007 * gy
+                refGz = 0.9993 * refGz + 0.0007 * gz
             }
 
             // Event timestamp converted to epoch ms
@@ -317,7 +326,8 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 closed.add((bucketSecond * 1000L).toDouble())
                 closed.add(peakRaw)
                 closed.add(mean)
-                closed.add(sqrt(variance))
+                lastBucketStd = sqrt(variance)
+                closed.add(lastBucketStd)
                 closed.add(peakDyn)
                 closed.add(peakGyro)
                 closed.add(maxTilt)

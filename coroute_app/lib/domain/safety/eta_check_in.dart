@@ -14,7 +14,8 @@ import '../../core/constants/app_constants.dart';
 ///    left alone, so a rider who has fallen and is not moving is still checked on.
 ///  * At the deadline: [EtaCheckInAction.ask] ("Are you OK? Tap if you're fine", voice + prompt),
 ///    then, with no answer within [askFor] (3 min): [EtaCheckInAction.escalate] (text the emergency
-///    contact once, with the last known position link).
+///    contact once, with the last known position link). Riding on while asked ([ridingOn]) counts
+///    as "I'm fine": a moving rider is never reported overdue.
 ///  * [imFine] / [extend] (+30 min) from the prompt; after an escalation [imFine] says that a "fine
 ///    now" text should follow. Arriving or ending the ride: [disarm].
 enum EtaCheckInPhase { idle, armed, asking, escalated }
@@ -129,6 +130,15 @@ class EtaCheckIn {
     _askedAtMs = null;
     _escalatedAtMs = null;
     return told;
+  }
+
+  /// 3.55 false-SOS review: asked, then the rider rode on (fresh fix at riding speed) without
+  /// tapping: they are fine. Armed again as after "I'm fine", so no text goes to the contact while
+  /// they are riding. True when this closed an open question.
+  bool ridingOn({required int nowMs, Duration? eta}) {
+    if (_phase != EtaCheckInPhase.asking) return false;
+    imFine(nowMs: nowMs, eta: eta);
+    return true;
   }
 
   /// Arrived, ride ended, setting off: nothing more happens.

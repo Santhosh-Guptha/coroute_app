@@ -124,6 +124,18 @@ class SafetyNative {
     }
   }
 
+  /// 3.55: the app's private files folder (`context.filesDir`), kept until uninstall; the
+  /// diagnostics log lives in `<filesDir>/diag`. Null off mobile or on an older native side.
+  static Future<String?> filesDir() async {
+    if (!_supported) return null;
+    try {
+      final d = await _channel.invokeMethod<String>('filesDir');
+      return d == null || d.isEmpty ? null : d;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 'wifi', 'mobile' or 'none' (Network monitor; no new permission). 'none' off mobile.
   static Future<String> networkKind() async {
     if (!_supported) return 'none';

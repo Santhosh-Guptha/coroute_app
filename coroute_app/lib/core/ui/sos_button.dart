@@ -7,7 +7,7 @@ import 'ui_tokens.dart';
 /// Press-and-hold SOS button with active confirmation countdown.
 ///
 /// A tap does nothing (so a glove or a bump cannot raise an SOS). Holding
-/// for [RideThresholds.sosHold] (1.5 s) shows an active countdown, fills a ring around the button,
+/// for [RideThresholds.sosHold] (3 s) shows an active countdown, fills a ring around the button,
 /// then gives a heavy haptic and calls [onTriggered]; the caller runs the
 /// existing SOS flow (ConvoyService.triggerSosAlert, EmergencySosSheet.show).
 /// Letting go early cancels immediately. The animation runs only while pressed.

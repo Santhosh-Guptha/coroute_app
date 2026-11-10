@@ -237,6 +237,13 @@ class SoloGuardianService extends ChangeNotifier {
     if (_emergency) return;
     // Riding along: the timer moves with the ETA above, so nothing is asked of a moving rider.
     if (checkIn.phase == EtaCheckInPhase.armed && me.speedKmh >= _movingKmh) return;
+    // 3.55 false-SOS review: asked at a stop, then riding on (a fresh fix at riding speed) without
+    // tapping: fine, armed again; the contact is never texted while the rider rides.
+    if (checkIn.asking && me.speedKmh >= _movingKmh && now - me.at <= 30000 && checkIn.ridingOn(nowMs: now, eta: eta)) {
+      _safety?.removeOwnedPrompt(promptKey);
+      notifyListeners();
+      return;
+    }
     final action = checkIn.tick(now);
     if (action == EtaCheckInAction.ask) {
       _ask(ride, told: false);

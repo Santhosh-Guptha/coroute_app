@@ -22,6 +22,8 @@ class RideThresholds {
   /// Stopped for at least this long: shown as "Resting" instead of "Stopped".
   static const Duration restingAfter = Duration(minutes: 10);
 
-  /// How long the SOS button must be held before the SOS is raised.
-  static const Duration sosHold = Duration(milliseconds: 1500);
+  /// How long the SOS button must be held before the SOS is raised (3.55 false-SOS review: 3 s,
+  /// was 1.5 s, which rain on the screen, a glove resting on the button or a tank-bag window
+  /// pressing on it could reach while riding; the progress ring and countdown show the hold).
+  static const Duration sosHold = Duration(milliseconds: 3000);
 }

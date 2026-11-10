@@ -225,13 +225,13 @@ void main() {
       expect(SpeedLimitAdvisor().limitAt(lat: oLat, lng: oLng, headingDeg: 180, roads: ahead, zones: const [], localNow: monday10), isNull);
     });
 
-    test('warns after 8 s over limit + 5, then not again for 60 s; the stricter other limit wins', () {
+    test('warns after 2 s over limit + 5 (3.55: was 8 s), then not again for 60 s; the stricter other limit wins', () {
       const ctx = LimitContext(limitKmh: 50, reason: LimitReason.road, roadLimitKmh: 50);
       final a = SpeedLimitAdvisor();
       expect(a.onSpeed(context: ctx, speedKmh: 55, nowMs: 0), isNull, reason: 'within the tolerance');
       expect(a.onSpeed(context: ctx, speedKmh: 60, nowMs: 1000), isNull);
-      expect(a.onSpeed(context: ctx, speedKmh: 60, nowMs: 8000), isNull);
-      final w = a.onSpeed(context: ctx, speedKmh: 61, nowMs: 9000);
+      expect(a.onSpeed(context: ctx, speedKmh: 60, nowMs: 2500), isNull);
+      final w = a.onSpeed(context: ctx, speedKmh: 61, nowMs: 3000);
       expect(w?.limitKmh, 50);
       expect(w?.speech, contains('50'));
       expect(a.onSpeed(context: ctx, speedKmh: 61, nowMs: 30000), isNull, reason: 'cooldown');

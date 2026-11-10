@@ -38,8 +38,9 @@ RiderDownEvent? runDown(RiderDownDetector d, List<AccelBucket> buckets, {double 
   return out;
 }
 
-/// Upright at a stop for [pre] s, then the fall at second [pre], then lying still.
-List<AccelBucket> tipOver({int pre = 5, int after = 70, double fallTilt = 80, double thud = 2.2, double lyingStd = 0.01}) => [
+/// Upright at a stop for [pre] s, then the fall at second [pre], then lying still. (3.55 false-SOS
+/// review: the rider-down check needs 10 s stopped before the tip, so [pre] defaults to 10.)
+List<AccelBucket> tipOver({int pre = 10, int after = 70, double fallTilt = 80, double thud = 2.2, double lyingStd = 0.01}) => [
       for (var s = 0; s < pre; s++) b(s, tilt: 4, std: 0.03),
       b(pre, tilt: 35, gyro: 2.0, peak: 1.3, std: 0.3),
       b(pre + 1, tilt: fallTilt, gyro: 1.5, peak: thud, dyn: 1.2, std: 0.4),
@@ -210,10 +211,10 @@ void main() {
     test('a thud while handling the phone, then walking: cancelled', () {
       final d = RiderDownDetector();
       final buckets = [
-        for (var s = 0; s < 5; s++) b(s, tilt: 3, std: 0.03),
-        b(5, tilt: 40, gyro: 2.2, peak: 1.3, std: 0.3),
-        b(6, tilt: 85, gyro: 1.8, peak: 1.8, std: 0.3), // bumped the mount
-        for (var s = 7; s < 90; s++) b(s, tilt: 80, std: 0.3, gyro: 0.8),
+        for (var s = 0; s < 12; s++) b(s, tilt: 3, std: 0.03),
+        b(12, tilt: 40, gyro: 2.2, peak: 1.3, std: 0.3),
+        b(13, tilt: 85, gyro: 1.8, peak: 2.1, std: 0.3), // bumped the mount hard
+        for (var s = 14; s < 90; s++) b(s, tilt: 80, std: 0.3, gyro: 0.8),
       ];
       expect(runDown(d, buckets), isNull);
       expect(d.lastCancel, 'moving');
@@ -222,10 +223,10 @@ void main() {
     test('phone in a pocket of a rider standing still (body sway): cancelled as carried', () {
       final d = RiderDownDetector();
       final buckets = [
-        for (var s = 0; s < 5; s++) b(s, tilt: 3, std: 0.03),
-        b(5, tilt: 40, gyro: 2.2, peak: 1.3, std: 0.3),
-        b(6, tilt: 85, gyro: 1.8, peak: 1.7, std: 0.3),
-        for (var s = 7; s < 90; s++) b(s, tilt: 80, std: 0.04, gyro: 0.45),
+        for (var s = 0; s < 12; s++) b(s, tilt: 3, std: 0.03),
+        b(12, tilt: 40, gyro: 2.2, peak: 1.3, std: 0.3),
+        b(13, tilt: 85, gyro: 1.8, peak: 2.1, std: 0.3),
+        for (var s = 14; s < 90; s++) b(s, tilt: 80, std: 0.04, gyro: 0.45),
       ];
       expect(runDown(d, buckets), isNull);
       expect(d.lastCancel, 'carried');
@@ -251,7 +252,7 @@ void main() {
       final d = RiderDownDetector();
       final lifted = [
         ...tipOver(after: 20),
-        for (var s = 27; s < 90; s++) b(s, tilt: 5, std: 0.02),
+        for (var s = 32; s < 95; s++) b(s, tilt: 5, std: 0.02),
       ];
       expect(runDown(d, lifted), isNull);
       expect(d.lastCancel, 'lifted');

@@ -10,6 +10,8 @@ import '../../core/l10n/l10n.dart';
 import '../../core/ui/ride_alert.dart';
 import '../../domain/safety/accel_bucket.dart';
 import '../../domain/safety/crash_detector.dart';
+import '../../domain/safety/overspeed_gate.dart';
+import '../../domain/safety/riding_motion.dart';
 import '../../domain/safety/fatigue_tracker.dart';
 import '../../domain/places/fuel_advisor.dart';
 import '../../domain/places/fuel_ahead.dart';
@@ -49,6 +51,8 @@ import '../../domain/safety/crash_incident.dart' show CrashScenario, MovementSta
 import 'sensor_safety_hub.dart';
 import 'sos_battery_reserve.dart';
 import 'road_care_service.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
+import 'diag_log_service.dart';
 
 enum SafetyPromptKind { checkIn, fatigue, fuel, followUp, overspeed }
 
@@ -368,7 +372,7 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
       _convoys.updateStatusReason(userId: userId, reason: reason, message: message);
 }
 
-/// Rider safety on the phone: crash detection with a 15 s alarm ("Possible accident
+/// Rider safety on the phone: crash detection with a 30 s alarm ("Possible accident
 /// detected. Are you okay?", [SafetyConstants.crashCountdown]), emergency texts
 /// when an SOS cannot reach the group, the break reminder and the "Are you OK?"
 /// check-in. 3.16 adds the fuel reminder, the hard-stop count (rider only), the
@@ -562,6 +566,14 @@ class SafetyService extends ChangeNotifier {
 
   CrashAlarmState? _alarm;
   CrashEvent? _alarmEvent;
+
+  /// 3.55 false-SOS review: riding away during a phone-detected alarm's countdown (steady speed
+  /// above 15 km/h for 3 s) cancels it: the rider is clearly riding (the light turned green after
+  /// a jolt). Never for an alarm the rider asked for (handlebar remote, wearable).
+  RideOnRun? _alarmRideOn;
+
+  /// Spoken when riding away cancelled a crash alarm.
+  static const String alarmRideOnCancelled = 'Crash alarm cancelled. You are riding.';
   Timer? _alarmTimer;
   Timer? _bystanderSirenTimer;
 
@@ -613,8 +625,9 @@ class SafetyService extends ChangeNotifier {
   bool _rideCrash = false;
   String? _weatherDoneFor;
   String? _tilesDoneFor;
-  int _overspeedSince = 0;
-  int _lastOverspeedAlertMs = 0;
+  /// 3.55 alert latency review: warn at limit + 2 after 1 s, re-arm 5 s under limit - 3, remind
+  /// every 25 s (docs/features_355/alert_latency.md).
+  final OverspeedGate _overspeed = OverspeedGate();
   bool _isOverspeedActive = false;
   int _lastCheckedLimit = 0;
 
@@ -703,6 +716,8 @@ class SafetyService extends ChangeNotifier {
     bool manual = false,
   }) {
     final now = _now();
+    DiagLog.warn(DiagCat.sos, 'solo_sos', {'type': type, 'src': source, 'auto': auto, 'manual': manual, 'first': _soloSos == null});
+    DiagLogService.instance.noteSafetyMoment('sos');
     _soloSos ??= PendingSos(
       clientId: 'solo-${_port.myUserId ?? 'rider'}-$now',
       groupId: offlineSoloGroupId,
@@ -844,6 +859,8 @@ class SafetyService extends ChangeNotifier {
   void alarmImOk() {
     final a = _alarm;
     if (a == null) return;
+    DiagLog.warn(DiagCat.crash, 'alarm_cancel', {'reason': 'im_ok', 'sent': a.sent, 'secondsLeft': a.secondsLeft, 'afterMs': _now() - a.startedAtMs, 'riderDown': _alarmRiderDown});
+    if (!a.sent) DiagLogService.instance.noteSafetyMoment('false_alarm');
     if (a.sent) {
       closeAlarm();
       return;
@@ -949,7 +966,7 @@ class SafetyService extends ChangeNotifier {
         _voice?.speakFatigueConfirmation('Break noted. Rest well.', dedupeKey: 'fatigue_break_ok');
       }
     } else if (key == SafetyConstants.promptOverspeed) {
-      _lastOverspeedAlertMs = _now();
+      _overspeed.acknowledge(_now());
     }
     _removePrompt(key);
   }
@@ -1113,6 +1130,12 @@ class SafetyService extends ChangeNotifier {
   void _onFix(TrackPoint p) {
     if (_disposed || !_rideOn) return;
     _lastFix = p;
+    final a = _alarm;
+    if (a != null && !a.sent && _alarmExternal == null && (_alarmRideOn?.add(p) ?? false)) {
+      DiagLog.warn(DiagCat.crash, 'alarm_ride_on', {'speed': p.speedKmh});
+      alarmImOk(); // also learns the false alarm and asks "Still okay?" at the next stop
+      _voice?.speak(alarmRideOnCancelled, priority: VoicePriority.important, key: 'crash_alarm_ride_on');
+    }
     if (_settings.crashDetection) {
       final ev = _detector.onFix(p);
       // Hard stops are judged only while the detector is armed (the sensor runs then anyway).
@@ -1251,16 +1274,26 @@ class SafetyService extends ChangeNotifier {
 
   void _onFatigue60sTimeout() {
     if (_disposed || !_prompts.containsKey(SafetyConstants.promptFatigue)) return;
-    _voice?.speakFatigueConfirmation(
-      "Safety confirmation required. Ride captain will be notified in 30 seconds.",
-      dedupeKey: 'fatigue_warn_60s',
-    );
-    HapticFeedback.mediumImpact();
+    // 3.55 false-SOS review: a rider who is visibly riding (fresh, accurate fix at riding speed)
+    // cannot tap with gloves on; they are not "unresponsive". No captain warning while riding.
+    if (!ridingNormally(_lastFix, nowMs: _now())) {
+      _voice?.speakFatigueConfirmation(
+        "Safety confirmation required. Ride captain will be notified in 30 seconds.",
+        dedupeKey: 'fatigue_warn_60s',
+      );
+      HapticFeedback.mediumImpact();
+    }
     _fatigueTimer = Timer(const Duration(seconds: 30), _onFatigue90sEscalate);
   }
 
   void _onFatigue90sEscalate() {
     if (_disposed || !_prompts.containsKey(SafetyConstants.promptFatigue)) return;
+    if (ridingNormally(_lastFix, nowMs: _now())) {
+      // Still riding: the prompt stays (answered at the next stop); the captain is not told and
+      // the check runs again in 5 min.
+      _fatigueTimer = Timer(const Duration(minutes: 5), _onFatigue90sEscalate);
+      return;
+    }
     _fatigueEscalated = true;
     _voice?.speakFatigueConfirmation(
       "Rider unconfirmed after break reminder. Notifying ride captain.",
@@ -1356,8 +1389,7 @@ class SafetyService extends ChangeNotifier {
     _darkAt = 0;
     _darkChecks = 0;
     _darkFix = null;
-    _overspeedSince = 0;
-    _lastOverspeedAlertMs = 0;
+    _overspeed.reset();
     _isOverspeedActive = false;
     if (_dark) {
       _dark = false;
@@ -1378,7 +1410,7 @@ class SafetyService extends ChangeNotifier {
   }
 
   /// Sensor on only while needed (battery hard rule). Also while a crash alarm counts down: the
-  /// native sensor session holds the partial wake lock, so the 15 s countdown (a Dart timer) is
+  /// native sensor session holds the partial wake lock, so the 30 s countdown (a Dart timer) is
   /// not frozen by a sleeping CPU when the screen stays off (full-screen alarm denied, Android 14+).
   /// The first bucket after the alarm is answered switches it off again.
   void _updateSensor() {
@@ -1411,6 +1443,7 @@ class SafetyService extends ChangeNotifier {
   void _openAlarm(CrashEvent e) {
     final now = _now();
     if (_alarm != null || _hasOpenSos || !_settings.crashDetection) {
+      DiagLog.info(DiagCat.crash, 'alarm_refused', {'alarmOpen': _alarm != null, 'sosOpen': _hasOpenSos, 'detectionOn': _settings.crashDetection, 'g': e.impactG});
       _detector.cooldown(now);
       return;
     }
@@ -1449,6 +1482,7 @@ class SafetyService extends ChangeNotifier {
       currentBpm: bioSnap?.currentBpm,
       traumaLevel: bioSnap?.traumaLevel,
     );
+    _alarmRideOn = RideOnRun(minKmh: SafetyConstants.crashResumeKmh, minSpan: SafetyConstants.crashRideOnFor);
     _alarmTimer?.cancel();
     _alarmTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickAlarm());
     if (_native) {
@@ -1458,6 +1492,12 @@ class SafetyService extends ChangeNotifier {
         body: L10n.t('notif.crash.body', {'n': seconds}),
       ).ignore();
     }
+    DiagLog.warn(DiagCat.crash, 'alarm_open', {
+      'scenario': e.scenario, 'g': e.impactG, 'speedBefore': e.speedBeforeKmh, 'conf': e.confidence, 'jerk': e.peakJerkGPerS,
+      'rot': e.hasRotationOrTilt, 'slide': e.isSlideFall, 'move': e.movementState, 'riderDown': _alarmRiderDown,
+      'external': _alarmExternal, 'detectMs': now - e.impactAtMs, 'lat': lat, 'lng': lng,
+    });
+    DiagLogService.instance.noteSafetyMoment(_alarmRiderDown ? 'rider_down' : 'crash_alarm');
     _haptic();
     notifyListeners();
   }
@@ -1496,6 +1536,7 @@ class SafetyService extends ChangeNotifier {
     if (!_alarmRiderDown && _alarmExternal == null) sensorSafety.onRealAlarm(e.scenario); // 3.55 learning
     // An impact from outside the phone (wearable hook) is sent as such, whatever the answer.
     final external = _alarmExternal != null;
+    DiagLog.warn(DiagCat.crash, 'alarm_send', {'source': source, 'external': external, 'solo': _soloOnly, 'afterMs': _now() - a.startedAtMs, 'riderDown': _alarmRiderDown});
     _alarmExternal = null;
 
     final biometricsBridge = BiometricSafetyBridge();
@@ -1714,6 +1755,14 @@ class SafetyService extends ChangeNotifier {
   void _onCheckInTimeout() {
     _checkInTimer = null;
     if (_disposed) return;
+    // 3.55 false-SOS review: far from the group but visibly riding (fresh, accurate fix at riding
+    // speed): the phone answers for the rider, the group is not told "No reply" (they see the
+    // live position); no new question for the repeat time.
+    if (ridingNormally(_lastFix, nowMs: _now()) && _checkIn.awaitingAnswer && !_checkIn.noReplySent) {
+      _checkIn.answeredOk(_now());
+      _removePrompt(SafetyConstants.promptCheckIn);
+      return;
+    }
     final step = _checkIn.onTimeout(_now());
     if (step != CheckInStep.noReply) return;
     _port.sendCheckIn(CheckInResult.noReply, awayM: _lastAwayM);
@@ -2013,67 +2062,50 @@ class SafetyService extends ChangeNotifier {
     final convoyLimit = _groupLimitAt(convoy, p);
     final personalLimit = _settings.speedLimitWarningKmh;
     // The stricter of the group and personal limits; read on every fix, so a change in Settings
-    // or by the lead applies on the next GPS fix.
+    // or by the lead applies on the next GPS fix (the gate starts the hold again on a new limit).
     final limit = effectiveSpeedLimit(groupKmh: convoyLimit, personalKmh: personalLimit);
-    if (limit != _lastCheckedLimit) {
-      // The limit changed: start the hold again and let the voice say the new limit.
-      _overspeedSince = 0;
-      _lastOverspeedAlertMs = 0;
-      if (_isOverspeedActive && (limit <= 0 || p.speedKmh <= limit)) {
-        _isOverspeedActive = false;
-        _removePrompt(SafetyConstants.promptOverspeed);
-      }
-    }
     _lastCheckedLimit = limit;
-
-    if (limit <= 0) {
-      if (_isOverspeedActive) {
-        _isOverspeedActive = false;
-        _overspeedSince = 0;
-        _removePrompt(SafetyConstants.promptOverspeed);
-      }
-      return;
-    }
-
     final speed = p.speedKmh;
-    final now = _now();
-
-    if (speed > limit + SafetyConstants.overspeedToleranceKmh) {
-      if (_overspeedSince == 0) {
-        _overspeedSince = now;
-      }
-      final holdElapsed = now - _overspeedSince;
-      final immediate = speed >= limit + SafetyConstants.overspeedImmediateOverKmh;
-
-      if (immediate || holdElapsed >= SafetyConstants.overspeedHoldMs) {
-        final wasActive = _isOverspeedActive;
-        _isOverspeedActive = true;
-
-        final shouldVoice = !wasActive || (now - _lastOverspeedAlertMs >= SafetyConstants.overspeedVoiceRenotifyMs);
-        if (shouldVoice) {
-          _lastOverspeedAlertMs = now;
-          _haptic();
-          _voice?.speakOverspeed(currentSpeedKmh: speed.round(), limitKmh: limit);
-        }
-
-        _showPrompt(
-          SafetyPrompt(
-            key: SafetyConstants.promptOverspeed,
-            kind: SafetyPromptKind.overspeed,
-            title: '⚠️ SLOW DOWN (${speed.round()} km/h)',
-            message: 'You are riding above the limit of $limit km/h. Please slow down safely.',
-            primaryLabel: 'Slowing down',
-          ),
-          notifyAlways: true,
-        );
-      }
-    } else if (speed <= limit) {
-      _overspeedSince = 0;
-      if (_isOverspeedActive) {
-        _isOverspeedActive = false;
+    // Judged on the fix itself, with nothing awaited before the warning (alert first).
+    final step = _overspeed.update(speedKmh: speed, limitKmh: limit, nowMs: _now());
+    _isOverspeedActive = _overspeed.showing; // the card is up (roadCare defers to it)
+    switch (step) {
+      case OverspeedStep.none:
+        return;
+      case OverspeedStep.hide:
+      case OverspeedStep.clear:
+        DiagLog.debug(DiagCat.speed, 'overspeed_${step.name}', {'speed': speed, 'limit': limit});
         _removePrompt(SafetyConstants.promptOverspeed);
-      }
+        return;
+      case OverspeedStep.warn:
+        // Which limit decided, and how old the fix was when it did (speech start: CoRouteAudio lines).
+        DiagLog.info(DiagCat.speed, 'overspeed_warn', {
+          'speed': speed, 'limit': limit,
+          'src': personalLimit > 0 && limit == personalLimit ? 'personal' : (convoy != null && convoy.townLimitKmh > 0 && convoyLimit == convoy.townLimitKmh && convoyLimit != convoy.speedLimitKmh ? 'town' : 'group'),
+          'fixAgeMs': _now() - p.ts,
+        });
+        _haptic();
+        _voice?.speakOverspeed(currentSpeedKmh: speed.round(), limitKmh: limit);
+        _showOverspeedPrompt(speed, limit, notify: true);
+        return;
+      case OverspeedStep.show:
+        // The card follows the speed; the system notification is not re-posted every fix.
+        _showOverspeedPrompt(speed, limit, notify: !_prompts.containsKey(SafetyConstants.promptOverspeed));
+        return;
     }
+  }
+
+  void _showOverspeedPrompt(double speed, int limit, {required bool notify}) {
+    _showPrompt(
+      SafetyPrompt(
+        key: SafetyConstants.promptOverspeed,
+        kind: SafetyPromptKind.overspeed,
+        title: '⚠️ SLOW DOWN (${speed.round()} km/h)',
+        message: 'You are riding above the limit of $limit km/h. Please slow down safely.',
+        primaryLabel: 'Slowing down',
+      ),
+      notifyAlways: notify,
+    );
   }
 
   // ------------------------------------------------------------------ ride start (items 7, 16)
@@ -2154,6 +2186,7 @@ class SafetyService extends ChangeNotifier {
   }
 
   void _setSms(SmsFallbackStatus s, String clientId) {
+    DiagLog.info(DiagCat.sos, 'sms_fallback', {'state': s.state, 'sent': s.sent, 'total': s.total, 'capped': s.capped, 'contactReached': s.contactReached});
     _smsStatus = s;
     _smsStatusFor = clientId;
     if (!_disposed) notifyListeners();

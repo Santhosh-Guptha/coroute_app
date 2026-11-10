@@ -232,7 +232,7 @@ class SosCaption extends StatelessWidget {
 
 /// The SOS screen opened from the ride notification (also over the lock
 /// screen). Nothing is sent by opening it: the rider holds the big SOS
-/// button for 1.5 s ([SOSButton]) or taps Cancel. Full screen, red, big
+/// button for 3 s ([SOSButton]) or taps Cancel. Full screen, red, big
 /// targets, no typing, no scrolling needed. Texts follow the rider's
 /// language ([L10n], 3.16).
 ///
