@@ -63,22 +63,20 @@ New rider-facing labels and phrases from the audio, mic and live-settings work. 
 | **Lower music when speeding** | "Well over the speed limit, music gets quieter, then pauses. Back under the limit, it comes back. CoRoute alerts and the intercom stay loud." | `lowerMusicWhenSpeeding` | `speedAudio` |
 | **Siren alerts** | "Warns you about ambulance, police and fire sirens, even when your earphones block outside sound. Listens on your phone during rides only. Nothing is recorded or sent." | `sirenAlerts` | `sirenDetector` |
 | **Give way to the** | Automatic / Left / Right. "The side the siren alert tells you to keep to." | `giveWaySide` | `sirenDetector` |
-| **Horn alerts** | Automatic / On / Off. "Automatic: only when earphones or music may stop you hearing traffic. Listens on your phone during rides only. Nothing is recorded or sent." | `hornAlerts` | `hornAlert` |
 | **Clean up my voice** | "Takes out breathing, wind and engine noise before the group hears you." | `voiceCleanup` | `voiceCleanup` |
 
 ### Spoken phrases
 
 | Situation | Phrase |
 |---|---|
-| Siren close by (trend not yet known) | "Emergency vehicle siren close by. Keep left and give way." (right-hand-traffic countries or setting Right: "Keep right") |
-| Siren getting louder | "Emergency vehicle approaching, sounds like an ambulance. Keep left and give way." (the kind only when confident, always as "sounds like") |
-| Far siren | "Emergency vehicle siren in the distance." |
-| Same siren clearly closer | "Emergency vehicle getting closer. Keep left and give way." |
-| Horn close by (only when earphones / a helmet set, music, the intercom or a call may stop the rider hearing traffic) | "Horn close by. Check your mirrors." |
+| Siren close by (trend not yet known) | "Ambulance siren close by. Keep left and give way." / "Police siren close by. ..." / "Fire engine siren close by. ..." when the kind is clear, else "Emergency vehicle siren close by. Keep left and give way." (right-hand-traffic countries or setting Right: "Keep right") |
+| Siren getting louder | "Ambulance approaching. Keep left and give way." (or Police / Fire engine / Emergency vehicle) |
+| Far siren | "Ambulance siren in the distance." (or ... / "Emergency vehicle siren in the distance.") |
+| Same siren clearly closer | "Ambulance getting closer. Keep left and give way." (or ... / "Emergency vehicle getting closer. ...") |
 | Far over the limit | "Slow down. 95 km/h, limit 65." |
 | After a call, critical | "Safety alert during your call: …" (+ "And 2 more safety alerts.") |
 | After a call, ordinary | "While you were on the call: 2 road warnings, Asha fell behind." |
-| Mic permission missing (said once) | "Siren and horn alerts need the microphone. Allow it for CoRoute in phone settings to use them." |
+| Mic permission missing (said once) | "Siren alerts need the microphone. Allow it for CoRoute in phone settings to use them." |
 | Crash detection turned off during a countdown (screen + notification) | "Crash detection is off for new alarms. This alarm is still running: tap I'm OK to cancel it." |
 
 ### Lock screen and notifications
@@ -92,8 +90,9 @@ New rider-facing labels and phrases from the audio, mic and live-settings work. 
 
 ### Naming rules for this area
 
-- Say **close by** or **approaching**, never **behind**, for sirens and horns: one phone microphone cannot tell direction.
-- A siren's kind is a likeness ("sounds like an ambulance", "ambulance-like"), never a statement.
+- Say **close by** or **approaching**, never **behind**, for sirens: one phone microphone cannot tell direction.
+- A siren's kind (Ambulance / Police / Fire engine) is said only when the detector is confident; otherwise **Emergency vehicle**. Cockpit card: "AMBULANCE SIREN · GIVE WAY" / "EMERGENCY VEHICLE SIREN · GIVE WAY".
+- Horn alerts were removed in 3.55 (no setting, card, phrase or admin switch).
 - "Music" in rider text means any other app's audio. "Lower" = quieter, "pause" = stopped; don't use "duck" in UI text.
 - Admin-only names (feature switches): "Lower music when speeding", "Calls: hold ride voice, let critical alerts through", "Intercom voice cleanup: noise, wind and breath", "Live bike change", "Siren detector".
 
@@ -324,7 +323,7 @@ Manual / help wording: "If you or your pillion answers “Are you OK?”, it cou
 13. **Admin place reviews** show the raw category id (`fuel`, `other`). Map it with `PoiCategory.singular`.
 
 14. **Round 3 wording to fix (owners of those files).**
-    - Admin switch `hornAlert` is now titled "Horn close by alert" ("Tells the rider when a vehicle honks close by"). The cockpit siren card now reads "EMERGENCY VEHICLE SIREN" with a "GIVE WAY" badge (was "BEHIND"/"YIELD"/"Audio ducked -20dB"). Fixed Nov 9.
+    - (Admin switch `hornAlert` removed later in 3.55 with horn alerts.) The cockpit siren card now reads "EMERGENCY VEHICLE SIREN" with a "GIVE WAY" badge (was "BEHIND"/"YIELD"/"Audio ducked -20dB"). Fixed Nov 9.
     - The cockpit siren card (`siren_hud_pill.dart`) still has the code path for "EMERGENCY SIREN BEHIND" (only when `approachingFromBehind`, which the new mic path never sets), the badge "YIELD", the detail "Audio ducked -20dB", the fallback "Acoustic siren", the tooltip "Dismiss Alert" and the screen-reader hint "Yield right of way." Suggested: "Give way", "Music lowered", "Siren", "Dismiss", and the same "Keep left and give way" wording as the voice.
 
 15. **Missing-rider check: decided by the owner (Nov 9), done.** The card keeps **I'm OK** and **Need help** (asks the group to wait, as before) and adds a separate red **Send SOS** button under it ("Send SOS · hold to send", "Keep holding…" while held), which must be held for 1.5 s like the big SOS button and raises the real SOS. The line above it: "Need help asks the group to wait. For an emergency, hold Send SOS."

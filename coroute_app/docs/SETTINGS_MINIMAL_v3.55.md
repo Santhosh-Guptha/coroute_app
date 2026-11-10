@@ -50,7 +50,6 @@ Screenshots of the HTML replica (390x844, design tokens from `lib/core/theme/app
 | Show me on leaderboards | Profile only (on) | **Visible** (also stays on Profile) | On | Privacy is the user's choice. Shown when the profile is loaded |
 | Pause music for alerts (vs lower) | Switch (off) | **More** | Off (lower) | Comfort |
 | Lower music when speeding | Switch (on), admin `speedAudio` | **More** | On | Comfort. The row hides when the admin switch is off |
-| Horn alerts | Auto/On/Off (Auto), admin `hornAlert` | **More** | Auto | Comfort and mic use. The row hides when the admin switch is off |
 | Give way to the | Auto/Left/Right (Auto), with siren alerts | **More** | Auto | Rarely changed. The row hides when `sirenDetector` is off |
 | Safety report in my score | Score screen only (on), admin `riderScore` | **More** (also stays on the score screen) | On | Privacy is the user's choice. Turning it off deletes the counts already sent |
 | Help nearby riders | Switch (on) | **More** | On | Privacy and consent (assist network) |

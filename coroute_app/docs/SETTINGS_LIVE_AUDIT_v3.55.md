@@ -161,6 +161,6 @@ audio and mic agents are marked "audio/mic round in progress".
    notification is re-posted with the same words. Test: `test/crash_alarm_screen_test.dart`.
 6. **New admin switches** (`gateway/src/feature_flags.js`, default on, not locked; the admin
    console and the `FEATURE_FLAGS` push list them from the catalog; the app treats unknown ids as
-   on): `speedAudio`, `callAwareAlerts`, `hornAlert`, `voiceCleanup`, `riderVehicleLive`;
+   on): `speedAudio`, `callAwareAlerts`, `voiceCleanup`, `riderVehicleLive`;
    `sirenDetector` now mentions ambulance, police and fire sirens. The app-side checks of the
    first four (`FeatureFlagsService.on(id)`) belong to the audio/mic round in progress.

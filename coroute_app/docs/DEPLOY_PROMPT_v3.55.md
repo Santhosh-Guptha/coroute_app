@@ -138,7 +138,7 @@ run them first on their own (`flutter test test/<file>`). Key suites:
   `sensor_safety_355_service_test`, `group_safety_355_test`, `garage_355_test`, `vehicle_swap_355_test`,
   `feature_flags_test`, `solo_eta_check_in_test`, `coverage_log_test`, `roll_call_test`,
   `admin_warnings_service_test`.
-- Round 3 (sound, calls, live settings): `audio_and_calls_355_test`, `siren_horn_detector_355_test`,
+- Round 3 (sound, calls, live settings): `audio_and_calls_355_test`, `siren_detector_355_test`,
   `voice_cleanup_355_test`, `settings_live_355_test`, `group_settings_release_355_test`,
   `rider_vehicle_355_test`, `speed_audio_policy_test`, `call_alert_queue_test`, `crash_alarm_screen_test`,
   `phone_call_and_fuel_safety_test`, `audio_priority_and_fatigue_test`, `speed_estimator_test`.
@@ -264,7 +264,7 @@ Items 2, 3 and 5 must be done before the app build with the new default host goe
    - `POST /api/admin/usernames/backfill` once (idempotent). Confirm every older account has a username.
    - Admin > Plans **Reconcile** once (cleans leftover memberships).
    - Admin > **Feature switches**: all new ids present and on by default: `speedAudio`, `callAwareAlerts`,
-     `hornAlert`, `voiceCleanup`, `riderVehicleLive`, `friends`, `profilePhotos`, `crews`, `crewPolls`,
+     `voiceCleanup`, `riderVehicleLive`, `friends`, `profilePhotos`, `crews`, `crewPolls`,
      `crewRides`, `riderScore`, `leaderboard`, `marketingStudio`, `pillionSeat`, `pushNotifications`,
      besides the earlier 3.55 ids. `sos`, `crashDetection`, `emergencySms`, `medicalId` show as **locked on**
      (try to turn one off: it must be refused).
@@ -350,9 +350,9 @@ in B–E) = stop; do not publish the app to Play.** Detailed steps per check are
 | Sirens on the **phone speaker**, no music | Tone + vibration + card, no speech. |
 | Horns | Two close horns → "Horn close by. Check your mirrors." with earbuds / helmet / music (Automatic); nothing on the speaker with Automatic; own horn ignored; mic indicator off for horns with no headset and no music. |
 | Mic routing | Push-to-talk held → helmet mic; released → built-in; hands-free → phone mic; headset change re-planned within 15 s. |
-| Switches off (`sirenDetector`, `hornAlert`) | Mic indicator off within a second when the intercom is idle. Battery < 15 %: detection pauses, intercom works. |
+| Switch off (`sirenDetector`) | Mic indicator off within a second when the intercom is idle. Battery < 15 %: detection pauses, intercom works. |
 | Intercom voice cleanup at 60–100 km/h | Breathing and wind gusts do not open the hands-free gate; speech opens it within ~40 ms with the first syllable intact; no blasts for listeners; data saver gives 8 kHz voice with no gap. |
-| 20–30 min ride in normal traffic | Count false siren and horn alerts (lab: 0 in 20 min). |
+| 20–30 min ride in normal traffic | Count false siren alerts (lab: 0 in 20 min; musical truck horns, beepers and ringtones must not alert). |
 
 ### F. Group roles, trip head, pillion, bikes (group ride)
 | Check | Pass when |

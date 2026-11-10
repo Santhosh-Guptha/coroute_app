@@ -57,7 +57,7 @@ Each module creates its own collections and indexes on first use. `repo.migrate(
 | `GET /convoys/:groupId/usernames` | `{riders:{userId:{username, avatarUrl}}}` for the members of a ride I am in. Answers 403 otherwise. |
 | `GET /friends` | `{friends, incoming, outgoing, blocked, inviteCode, inviteLink, shareText}`. Switch: `friends`. |
 | `GET /friends/invite` | Invite code, link and share text. |
-| `POST /friends/requests {username}` or `{inviteCode}` | Sends a friend request. Limited to 20 per day per rider. Answers `202 {status:'REQUESTED'}`, or `200 {status:'FRIENDS' / 'ALREADY_FRIENDS', friend}`. |
+| `POST /friends/requests {username}` or `{inviteCode}` | Sends a friend request. The username is matched ignoring capitals and a leading `@`; the code ignoring capitals, spaces and dashes. Limited to 20 per day per rider. Answers `202 {status:'REQUESTED', request:{requestId, username, avatarUrl, at}}` (the sender's own row, the same as in `outgoing`), or `200 {status:'FRIENDS' / 'ALREADY_FRIENDS', friend}`. An unknown username or invite code answers `404 NOT_FOUND` ("No rider has that username. Check the spelling." / "This invite code is not valid."). |
 | `POST /friends/requests/:requestId/accept` and `/decline` | Answers a request. Only the addressee can. |
 | `DELETE /friends/requests/:requestId` | The sender cancels a request. |
 | `DELETE /friends/:username` | Removes a friend. |
@@ -95,12 +95,12 @@ server (`report.js`) or the phone (`POST /trips`).
 - **Ride group members** see each other's username and picture by userId, because they already know each other's userIds during a ride.
 - **Blocking:**
   - A rider who blocked me gets the same 404 as an unknown username, and I cannot load their picture.
-  - A friend request to them gives the same `202 {status:'REQUESTED'}` as a request to an unknown username or an unknown invite code.
-  - Their copy of the request is stored as a `shadow` edge. The requester sees it as "pending" forever, and the target never sees it.
+  - A friend request to them gives the same `202 {status:'REQUESTED', request}` as any other request. It is stored as a `shadow` edge: the requester sees it under "Sent" as pending forever, the target never sees it and gets no push. So a block is never revealed.
+  - Only the blocker's own copy is hidden: once they unblock, a new request from the same rider reaches them normally (tested in `gateway/test/friends_app_contract_355.test.js`).
   - When someone blocks a rider who already has a pending request to them, that request becomes a shadow too.
   - Unblocking drops shadow requests, as if they had been declined.
   - Blocking an unknown username gets the same answer as blocking a real one.
-- **Username enumeration:** `GET /users/username-available` necessarily shows whether a name is taken. It is rate limited, and it never shows who holds the name.
+- **Username enumeration:** `GET /users/username-available` necessarily shows whether a name is taken. It is rate limited, and it never shows who holds the name. Because of that, a friend request to an unknown username answers `404` instead of a fake "sent" (before this fix it answered `202`, so a typo was reported as sent and the request then appeared nowhere, neither under "Sent" nor with anyone). Invite codes cannot be guessed (32^8) and requests are limited to 20 a day, so an unknown code also answers `404`.
 - **Account erase:** the account's username reservations, friend edges, blocks, invite codes and pictures are deleted. `attachSocial` wraps `repo.deleteUserCascade` to do this.
 
 ## Profile pictures
@@ -131,7 +131,9 @@ server (`report.js`) or the phone (`POST /trips`).
 | File | What it holds |
 | --- | --- |
 | `lib/domain/social/username_rules.dart` | Pure rules: username check with the gateway's codes, cooldown, invite code parsing, initials, km format |
+| `lib/domain/social/friends_models.dart` | Pure parsing of the gateway's friend JSON: `FriendsSnapshot` (GET /friends), `FriendRequestResult` (POST /friends/requests, with the sender's confirmation line), `FriendPush` (socket FRIEND_REQUEST / FRIEND_ACCEPTED), `usernameInput` (drops a leading `@`). Re-exported by `friends_service.dart`. |
 | `lib/data/services/friends_service.dart` | `FriendsService`: profile, stats, score, friends, requests, blocks, avatar upload, group usernames, pending invites, socket pushes, badge count |
+| `lib/presentation/social/friend_requests_card.dart` | "Friend requests" card with Accept / Decline per request: top of the Friends screen and of My profile |
 | `lib/presentation/social/profile_screen.dart` | My profile: picture, username editor with live availability, analytics grid, leaderboard privacy toggle, invite sharing |
 | `lib/presentation/social/friends_screen.dart` | Friends list, requests, sent requests, blocked riders, add by username or code |
 | `lib/presentation/social/rider_profile_screen.dart` | Another rider's profile |
@@ -141,12 +143,21 @@ Wiring:
 
 - `main.dart`: the `FriendsService` provider, plus the invite branch in `_DeepLinkListener`.
 - `auth_service.dart`: a `username` getter, and `inviteCode` sent at registration.
-- Profile tab: a "My profile & friends" row with a badge for new requests.
+- Profile tab: a badge with the number of waiting friend requests (plus crew invitations and polls) on the bottom-bar Profile icon, and a "My profile & friends" row that says "1 friend request" / "N friend requests" (or "N new" when crew items wait too).
+- My profile: the "Friend requests" card at the top (first three, then "See all"); the Friends row shows "N new".
+- Friends screen, top to bottom: "Friend requests" (Accept / Decline / Block), invite button, "Sent" (Cancel), "My friends", "Blocked". Sending shows "Request sent to X. It is under Sent until they answer." and the row appears under "Sent" at once (from the 202 `request`).
 - Admin users list: searches and shows the username.
 - Admin user detail: shows `@username` and a "Remove profile picture" button.
 - `test/username_rules_test.dart`: Dart tests.
 
-Notifications: an in-app badge, refreshed by the socket push and on app resume. A push that arrives
+Notifications: an in-app badge. `FriendsService` reads GET /friends at app start (also with a saved session: `ApiClient.init()` now tells its listeners that a saved token was loaded; before, services created before the token was read never loaded anything, so incoming requests stayed invisible until the rider happened to open the Friends screen), at sign-in, on resume, whenever the socket (re)connects, and on every FRIEND_REQUEST push (which also adds the row at once, before GET /friends answers). A push that arrives
 while the app is open shows "X wants to be friends" / "X accepted your friend request" as a snackbar
 (`FriendNoticeHost` in `MaterialApp.builder`); in the background (socket still open, e.g. during a
 ride) it is a local system notification on the `coroute_social` channel (`AlarmNotifier.showSocialNotice`).
+With no open socket (app closed) the gateway sends an FCM push instead (`gateway/src/push.js`, when FCM is
+configured); the socket message and the push share one `eventId`, so the app shows the first and drops the
+second (`NoticeDedupe`), never the first.
+
+Tests: `gateway/test/usernames_friends_355.test.js`, `gateway/test/friends_app_contract_355.test.js` (the
+exact answers the app reads, checked against `test/fixtures/friends_355_gateway.json`, captured from an
+end-to-end run on the real gateway) and `test/friends_parse_355_test.dart` (the app parses that fixture).

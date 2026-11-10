@@ -120,8 +120,8 @@ compiled**. Read first: `docs/V3_55_RELEASE.md`, `docs/FEATURE_STATUS.md`, `docs
 - Horns: two close horns → "Horn close by. Check your mirrors." with earbuds / helmet set / music (Automatic); nothing on the speaker with Automatic, vibration + card with On; own horn ignored.
 - Bluetooth headset: detection keeps music in A2DP stereo (no SCO) and always uses the phone's built-in mic; hands-free uses the phone mic too (Nov 9); push-to-talk uses the helmet mic while held; a headset change re-plans the mic within 15 s.
 - Battery under 15 % (not charging): detection pauses, intercom still works.
-- Admin `sirenDetector` and `hornAlert` off (or both settings off): the Android mic indicator goes off within a second when the intercom is idle; any siren duck is lifted.
-- Ride 20–30 min in normal traffic with detection on: count false siren and horn alerts (lab result was 0 in 20 min of synthetic audio).
+- Admin `sirenDetector` off (or Siren alerts off): the Android mic indicator goes off within a second when the intercom is idle; any siren duck is lifted.
+- Ride 20–30 min in normal traffic with detection on: count false siren alerts (lab result was 0 in 20 min of synthetic audio).
 
 ### Owner decisions round (Nov 9)
 - **Siren with ANC earbuds**: noise cancellation on, music playing, phone on the mount; play a siren recording near the phone (not the earbuds). Music pauses, the line is heard **in the earbuds only** (not on the phone speaker), clearly even with a low media volume; volume and music come back after; lock-screen heads-up with the screen off. Then phone speaker, no music: tone + vibration + card, no speech. No group card is sent.
@@ -152,7 +152,7 @@ Read first: `docs/features_355/usernames_friends_profiles.md`, `rider_score.md`,
 
 1. Bump versions (pubspec and gateway), update SHA256SUMS.
 2. Deploy the gateway to both OCI VMs; run the failover drill and the 30-minute soak; write the measured cap into `LIVE_RIDER_CAP`.
-3. Open Admin > Feature switches once: the new switches `speedAudio`, `callAwareAlerts`, `hornAlert`, `voiceCleanup`, `riderVehicleLive` appear (default on). Run Admin > Plans "Reconcile" once.
+3. Open Admin > Feature switches once: the new switches `speedAudio`, `callAwareAlerts`, `voiceCleanup`, `riderVehicleLive` appear (default on). Run Admin > Plans "Reconcile" once.
    Round 4: the switches `friends`, `profilePhotos`, `crews`, `crewPolls`, `riderScore`, `leaderboard`, `marketingStudio`, `pillionSeat` also appear (default on). Then run the **username backfill once** as master admin: `POST /api/admin/usernames/backfill` (idempotent; the startup job also runs it under the `username-backfill` lease, this makes sure every older account has a username before the website leaderboard and friend search are used). Confirm `GET /api/public/alltime-stats` answers and the `rider-score-daily` and `public-stats` jobs run on one node only.
 4. Rotate the leaked JWT secret and DB password with the short grace window (runbook in platform.md). Do not print secret values anywhere.
 5. Publish the APK; Play Store listing; iPhone TestFlight.
