@@ -36,62 +36,75 @@
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="ph" aria-labelledby="hero-title">
+  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
     <div class="container">
-      <div class="ph__inner">
+      <div class="hm-hero__inner">
         <p class="eyebrow">How it works</p>
-        <h1 id="hero-title">Install. Join. Ride.</h1>
-        <p class="ph__sub">Set it up once at home. The whole group rides with it.</p>
-        <div class="ph__cta"><a class="btn btn--primary btn--lg" href="/get">Get the app</a><a class="link-arrow" href="#faq"><span>Short answers</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></div>
+        <h1 id="hero-title">Install. Join. Ride. <span class="hm-hero__accent">Look back.</span></h1>
+        <p class="t-lead">Four steps from download to trip report. Set it up once at home, and the whole group rides with it, from the first morning to the last stop.</p>
+        <div class="hm-hero__cta">
+          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
+          <a class="link-arrow" href="#faq"><span>Short answers</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
       </div>
     </div>
+    <!--#include route-motif-->
   </section>
-  <section class="section section--alt" aria-labelledby="steps-title">
+
+  <section class="section section--surface" aria-labelledby="steps-title">
     <div class="container">
       <h2 class="sr-only" id="steps-title">The four steps</h2>
-      <ol class="steps" role="list">
-        <li class="step" id="install"><span class="step__n" aria-hidden="true">1</span><h3>Install and sign up</h3><p>Add your bike, a contact and guardians</p></li>
-        <li class="step" id="create"><span class="step__n" aria-hidden="true">2</span><h3>Create or join</h3><p>Share the code, save the map</p></li>
-        <li class="step" id="ride"><span class="step__n" aria-hidden="true">3</span><h3>Ride</h3><p>Map, talk and crash alerts on</p></li>
-        <li class="step" id="after"><span class="step__n" aria-hidden="true">4</span><h3>Look back</h3><p>Trip report and replay</p></li>
+      <ol class="hm-steps" role="list">
+        <li class="hm-step" id="install"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg><h3>1. Install and sign up</h3><p>Download the app, sign up with your phone number or Google, and add your bike, an emergency contact, your medical ID and the guardians who should follow your rides.</p></li>
+        <li class="hm-step" id="create"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg><h3>2. Create or join</h3><p>One rider creates the ride, sets the destination and stops, and shares the code. Others join with the code or the link. Save the map for the route while you are on Wi-Fi.</p></li>
+        <li class="hm-step" id="ride"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg><h3>3. Ride</h3><p>Start the ride. The live map, push-to-talk, crash detection, fuel and break reminders run while the phone is mounted or in your pocket.</p></li>
+        <li class="hm-step" id="after"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-history"/></svg><h3>4. Look back</h3><p>End the ride. The trip report and replay are ready, guardian links stop working, and you can rate the trip and share your story.</p></li>
       </ol>
     </div>
   </section>
 
   <section class="section" id="join" aria-labelledby="setup-title">
     <div class="container">
-      <div class="sh"><p class="eyebrow">First time</p><h2 id="setup-title">What Android will ask.</h2><p>Answer these once at home, not at the first fuel stop.</p></div>
-      <dl class="facts">
-        <div><dt>Location</dt><dd>Choose "Allow all the time"<span>Only during an active ride.</span></dd></div>
-        <div><dt>Microphone</dt><dd>For push-to-talk<span>Only while you hold Talk.</span></dd></div>
-        <div><dt>Battery</dt><dd>Unrestricted<span>So the ride keeps running.</span></dd></div>
-        <div><dt>Notifications</dt><dd>Allow<span>Ride alerts and the crash alarm.</span></dd></div>
+      <div class="hm-head">
+        <p class="eyebrow">First time</p>
+        <h2 id="setup-title">What Android will ask.</h2>
+        <p>Answer these once at home, not at the first fuel stop.</p>
+      </div>
+      <dl class="hm-facts">
+        <div><dt>Location</dt><dd>Choose "Allow all the time"<span>It keeps your group updated while the phone is in your pocket or the screen is locked, only during an active ride.</span></dd></div>
+        <div><dt>Microphone</dt><dd>For the intercom<span>Used only while you hold Talk. Voice is never recorded.</span></dd></div>
+        <div><dt>Battery</dt><dd>Unrestricted<span>So the phone does not close the ride after a few minutes in the background.</span></dd></div>
+        <div><dt>Notifications</dt><dd>Allow<span>For ride alerts, the crash alarm and messages from your group.</span></dd></div>
       </dl>
-      <p class="t-small t-muted" style="margin-top:16px">The full list is on the <a class="link" href="/get#permissions">download page</a>.</p>
+      <p class="t-small t-muted" style="margin-top:var(--sp-16)">The full list, with reasons, is on the <a class="link" href="/get#permissions">download page</a>.</p>
     </div>
   </section>
 
-  <section class="section section--alt" id="faq" aria-labelledby="faq-title">
+  <section class="section section--surface" id="faq" aria-labelledby="faq-title">
     <div class="container">
-      <div class="sh sh--center"><p class="eyebrow">Questions</p><h2 id="faq-title">Short answers.</h2></div>
-      <div class="faq faq--center">
-        <details><summary>Is it free?</summary><div class="faq__a"><p>Yes for solo riders, always: every safety feature, free forever. Joining a ride you are invited to is free too. Only the host of a group ride needs a plan, bought in the app. No ads.</p></div></details>
-        <details><summary>How many riders can join one ride?</summary><div class="faq__a"><p>Up to __MAX_RIDERS__ riders in one ride group.</p></div></details>
-        <details><summary>Does every rider need the app?</summary><div class="faq__a"><p>Yes, each rider needs it. Family follow a guardian link in a browser, no app needed.</p></div></details>
-        <details><summary>Is there an iPhone version?</summary><div class="faq__a"><p><!--ios-->Yes. Get it from the App Store or TestFlight via the Get the app page. It needs iOS 14 or newer.<!--/ios--><!--no-ios-->Not yet. The iOS app is building now and coming soon. Until then, CoRoute runs on Android 6.0 or newer.<!--/no-ios--></p></div></details>
-        <details><summary>Does it work without mobile data?</summary><div class="faq__a"><p>Partly. Saved maps and crash detection work without signal. Live positions and talk need data; your route is sent later and an SOS keeps retrying. Agree on a regroup point before long dead stretches.</p></div></details>
-        <details><summary>What do the numbers on this site say about me?</summary><div class="faq__a"><p>Nothing. They are rounded totals, shown only with at least ten riders or rides behind them. Nothing per city, route or rider. No cookies, no trackers.</p></div></details>
-        <details><summary>How are the rider stories chosen?</summary><div class="faq__a"><p>Only riders who allow it after a trip can appear. Our team reads every story and checks every photo first. We never add our own.</p></div></details>
-        <details><summary>Does Coroute replace calling for help?</summary><div class="faq__a"><p>No. In an emergency in India, call 112 first. Coroute tells your group, guardians and, if you allow it, nearby riders. It cannot promise anyone will come. See <a href="/safety">how safety works</a>.</p></div></details>
+      <div class="hm-head hm-head--center">
+        <p class="eyebrow">Questions</p>
+        <h2 id="faq-title">Short answers.</h2>
+      </div>
+      <div class="pg-faq" style="max-width:760px;margin-inline:auto">
+        <details><summary>Is Coroute free?</summary><div class="pg-faq__a"><p>Downloading the app and joining a ride you are invited to is free. The rider who hosts the ride chooses a membership inside the app. There are no ads.</p></div></details>
+        <details><summary>How many riders can join one ride?</summary><div class="pg-faq__a"><p>Up to __MAX_RIDERS__ riders in one ride group.</p></div></details>
+        <details><summary>Does every rider need the app?</summary><div class="pg-faq__a"><p>Yes. Each rider needs Coroute on an Android phone, an account, and the ride code or invite link. Family can follow a guardian link in a browser without the app.</p></div></details>
+        <details><summary>Is there an iPhone version?</summary><div class="pg-faq__a"><p><!--ios-->Yes. Get it from the App Store or TestFlight via the Get the app page. It needs iOS 14 or newer.<!--/ios--><!--no-ios-->Not yet. The iOS app is building now and coming soon. Until then, CoRoute runs on Android 6.0 or newer.<!--/no-ios--></p></div></details>
+        <details><summary>Does it work without mobile data?</summary><div class="pg-faq__a"><p>Partly. Saved route maps and crash detection work without signal. Live positions and the intercom need data: when the signal drops, your route is kept on the phone and sent later, an SOS waits and retries, and the emergency text option can send your location from your SIM. On long dead stretches, agree on a regroup point first.</p></div></details>
+        <details><summary>Does Coroute replace calling for help?</summary><div class="pg-faq__a"><p>No. In an emergency in India, call 112 first. Coroute tells your group, your guardians and, if you allow it, nearby riders. It cannot promise that anyone will come. See <a href="/safety">how safety works</a>.</p></div></details>
       </div>
     </div>
   </section>
 
   <section class="section section--tight">
     <div class="container">
-      <div class="cta-band">
+      <div class="hm-cta">
         <div><h2>Ready for the next long ride?</h2><p>Android 6.0 or newer. Free to start.</p></div>
-        <div class="cta-band__actions"><a class="btn btn--primary btn--lg" href="/get">Get the app</a><a class="link-arrow" href="/features"><span>All features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></div>
+        <div class="cluster cluster--16">
+          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
+          <a class="link-arrow" href="/features"><span>All features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
       </div>
     </div>
   </section>

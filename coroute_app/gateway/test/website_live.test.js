@@ -183,16 +183,22 @@ test('pricing: no catalog means no prices, only a pointer to the app', async () 
 });
 
 /* ---------- 3D hero and budgets ---------- */
-test('hero: calm static illustration (no 3D scene, no motion), the motto is the headline', async () => {
+test('3D hero: lazy, low-power, reduced-motion and no-WebGL fallbacks; static drawing first', async () => {
   const html = await (await fetch(base + '/')).text();
-  const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('</section>', html.indexOf('<section class="hero"')));
-  assert.ok(hero.length > 200, 'hero section found');
-  assert.match(hero, /<h1 class="hero__title" id="hero-title">Ride Together\. <span>Stay Safe\.<\/span><\/h1>/, 'the motto is the headline');
-  assert.ok(hero.includes('class="hero__art"'), 'static drawing is in the page');
-  assert.ok(!html.includes('data-hero3d') && !/<script[^>]+hero3d/.test(html), 'no 3D scene on the calm home page');
-  // The scene file stays parseable for older cached pages, and still never contacts another site.
+  const hero = html.slice(html.indexOf('<section class="hx"'), html.indexOf('</section>', html.indexOf('<section class="hx"')));
+  assert.match(hero, /data-hero3d data-src="\/assets\/hero3d\.js\?v=[0-9a-f]{10}"/, 'scene script referenced by its hash');
+  assert.ok(hero.includes('class="hx__poster"'), 'static drawing is in the page');
+  assert.match(hero, /<h1 class="hx__title" id="hero-title">Ride Together\. <span>Stay Safe\.<\/span><\/h1>/, 'the motto is the headline');
+  assert.ok(!/<script[^>]+hero3d/.test(html), 'the scene is not a blocking script');
+  const home = read('assets/home.js');
+  assert.ok(home.includes("'(prefers-reduced-motion: reduce)'") && home.includes("'static'") && home.includes('requestIdleCallback') && home.includes("addEventListener('load'"), 'home.js starts the scene late and never with reduced motion');
   const scene = read('assets/hero3d.js');
   assert.doesNotThrow(() => new Function(scene), 'hero3d.js parses');
+  assert.ok(/DPR_CAP = 1\.5/.test(scene), 'device pixel ratio capped at 1.5');
+  assert.ok(/1000 \/ 30/.test(scene), '30 fps on phones');
+  for (const n of ['IntersectionObserver', 'visibilitychange', 'webglcontextlost', "fail('no-webgl')", 'prefers-reduced-motion', "attributeFilter: ['data-theme']"]) {
+    assert.ok(scene.includes(n), `hero3d.js handles ${n}`);
+  }
   assert.ok(!/https?:\/\//.test(scene.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, '')), 'no network URLs in the scene');
 });
 
@@ -212,6 +218,6 @@ test('homepage budgets: JS at most 250 KB gzip with the 3D scene, CSS at most 60
     assert.ok(page.includes('<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>'), `${p}: Manrope preloaded`);
   }
   const site = read('assets/site.css');
-  assert.ok(site.includes('font-family: "Manrope"') && site.includes('--primary: #2B7A8C') && site.includes('--sos: #D93A2F'), 'site.css uses the app tokens (light)');
-  assert.ok(site.includes('--bg: #15181C') && site.includes('--text: #E7E3DC') && site.includes('prefers-color-scheme: dark'), 'site.css has the eye-friendly dark tokens and follows the system');
+  assert.ok(site.includes('font-family: "Manrope"') && site.includes('--c-brand-fill: #2B7A8C') && site.includes('--c-sos: #D93A2F'), 'site.css uses the app tokens (light)');
+  assert.ok(site.includes('--c-bg: #15181C') && site.includes('--c-surface: #1C2026') && site.includes('--c-text: #E7E3DC') && site.includes('prefers-color-scheme: dark'), 'site.css has the eye-friendly dark tokens and follows the system');
 });

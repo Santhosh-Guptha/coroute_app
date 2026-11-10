@@ -146,8 +146,8 @@
   }
   /* 3.55: cards on every page enter like the app's lists, a short stagger per row. Pages only mark their blocks with
      classes; this tags them, and siblings that reveal together get increasing delays (capped, so nothing waits long). */
-  var AUTO_REVEAL = '.tiles > li, .steps > li, .facts > div, .faq details, .cta-band, .note, .pg-perms > li, ' +
-    '.imp-grid > .imp-tile, .imp-safety, .nf__links > li, .px-solo, .px-free, .hb-card';
+  var AUTO_REVEAL = '.hm-features > li, .hm-steps > li, .hm-facts > div, .philosophy-grid > *, .pg-never > *, .pg-perms > *, ' +
+    '.pg-faq details, .hm-cta, .pg-cta, .hm-notice, .pg-dl__card, .legal-summary, .imp-grid > .imp-tile, .imp-safety, .nf__links > li';
   $$(AUTO_REVEAL).forEach(function (el) {
     if (!el.hasAttribute('data-reveal') && !el.closest('[data-pinned]')) el.setAttribute('data-reveal', '');
   });

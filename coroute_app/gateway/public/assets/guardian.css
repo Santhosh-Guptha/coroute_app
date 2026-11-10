@@ -1,44 +1,18 @@
-/* Ride guardian page (/watch): a calm, single-column page for family. Tokens from site.css only. */
-.guardian { width: 100%; max-width: 640px; margin: 0 auto; padding: clamp(24px, 6vw, 56px) 20px 48px; min-height: 100svh; }
-.guardian__brand { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; font-size: 1.125rem; color: var(--text); text-decoration: none; }
-.guardian__eyebrow { margin-top: 28px; color: var(--primary-ink); font-weight: 500; font-size: var(--fs-small); }
-.guardian h1 { font-size: clamp(1.875rem, 1.5rem + 2vw, 2.5rem); margin: 8px 0 8px; }
-.guardian__intro, .guardian__note { color: var(--muted); }
-.guardian__note { font-size: var(--fs-small); }
-.guardian__card { margin: 24px 0; padding: clamp(18px, 4vw, 28px); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow-1); }
-.guardian__card[data-tone="critical"] { border-color: var(--sos); background: var(--sos-soft); }
-.guardian__card[data-tone="unknown"] { border-color: var(--line-strong); background: var(--surface-alt); }
-.guardian__card h2 { font-size: 1.5rem; margin: 10px 0 6px; }
-.guardian__card h3 { font-size: 1rem; margin: 20px 0 8px; }
-.guardian__card p { color: var(--muted); }
-.guardian #connection { display: inline-flex; padding: 4px 10px; border-radius: var(--r-full); background: var(--primary-soft); color: var(--primary-ink); font-size: var(--fs-small); font-weight: 500; }
-.guardian #ride-status { color: var(--text); font-weight: 500; }
-.guardian #incident:not(:empty) { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--sos-soft); color: var(--text); }
-.guardian #timeline { padding-left: 1.2em; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
-.guardian #riders p { margin-top: 6px; }
-.guardian #riders a, .guardian #location { color: var(--primary-ink); }
-.guardian button, .guardian #location { display: inline-flex; align-items: center; min-height: 44px; border: 1px solid var(--line-strong); border-radius: var(--r-btn); padding: 10px 16px; margin: 10px 8px 0 0; background: var(--surface); color: var(--text); font: inherit; font-weight: 500; text-decoration: none; cursor: pointer; }
-.guardian button:hover { border-color: var(--primary); color: var(--primary-ink); }
-.guardian #enable-alerts { background: var(--primary); border-color: transparent; color: var(--on-primary); }
-.guardian #push-controls { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
-.guardian #push-controls label { display: flex; align-items: center; gap: 10px; min-height: 40px; color: var(--text); }
-.guardian #push-controls input { width: 18px; height: 18px; accent-color: var(--primary); }
-.guardian #pin-box label { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-weight: 500; }
-.guardian #pin { min-height: 48px; padding: 10px 14px; border-radius: var(--r-btn); border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); font-size: 1.125rem; letter-spacing: 0.2em; max-width: 200px; }
-.guardian [hidden] { display: none !important; }
-.guardian a:focus-visible, .guardian button:focus-visible, .guardian input:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-.guardian #expiry { margin-top: 12px; font-size: var(--fs-small); color: var(--muted); }
-.guardian__map-box { margin: 18px 0; display: flex; flex-direction: column; gap: 10px; }
-.guardian-map { position: relative; width: 100%; height: 300px; border-radius: 12px; overflow: hidden; background: var(--surface-alt); border: 1px solid var(--line); }
-.guardian-map__tiles { position: absolute; left: 50%; top: 50%; display: grid; width: 768px; height: 768px; transform: translate(-384px, -384px); pointer-events: none; }
-.guardian-map__tiles img { width: 256px; height: 256px; display: block; background: var(--surface-alt); }
-:root[data-theme="dark"] .guardian-map__tiles img { filter: brightness(0.82) contrast(0.95); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .guardian-map__tiles img { filter: brightness(0.82) contrast(0.95); } }
-.guardian-map__marker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; display: flex; flex-direction: column; align-items: center; }
-.guardian-map__pulse { position: absolute; top: -12px; width: 40px; height: 40px; border-radius: 50%; background: var(--primary); opacity: 0.16; }
-.guardian-map__dot { width: 16px; height: 16px; border-radius: 50%; background: var(--primary); border: 3px solid #FFFFFF; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
-.guardian-map__badge { margin-top: 6px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 8px; border: 1px solid var(--line); white-space: nowrap; }
-.guardian-map__controls { display: flex; gap: 8px; flex-wrap: wrap; }
-.guardian .guardian-map__btn { margin: 0; min-height: 40px; padding: 8px 14px; font-size: var(--fs-small); }
-.guardian-map__credit { font-size: var(--fs-xs); color: var(--muted); margin: 0; }
-.guardian-map__credit a { color: inherit; text-decoration: underline; }
+/* Ride guardian page (/watch). Colours from the site.css tokens only, so it follows light / dark (system). */
+.guardian{max-width:640px;margin:auto;padding:clamp(24px,6vw,64px) 24px;min-height:100svh}.guardian__brand{font-weight:800;letter-spacing:.15em;text-decoration:none;color:inherit}.guardian__eyebrow{margin-top:48px;color:var(--c-brand);letter-spacing:.14em;font-size:.85rem}.guardian h1{font-size:clamp(2rem,7vw,3.5rem);line-height:1.06;margin:16px 0}.guardian__intro,.guardian__note{line-height:1.65;color:var(--c-text-2)}.guardian__card{margin:32px 0;padding:clamp(20px,5vw,32px);border:1px solid var(--c-border-strong);border-radius:20px;background:var(--c-surface)}.guardian__card[data-tone="critical"]{border-color:var(--c-sos);background:var(--c-red-soft)}.guardian__card[data-tone="unknown"]{border-color:var(--c-border-strong);background:var(--c-surface-2)}.guardian__card h2{font-size:1.75rem;margin:14px 0}.guardian__card p{line-height:1.6}.guardian #connection{font-weight:600;color:var(--c-brand)}.guardian #location,.guardian button{display:inline-block;border:1px solid var(--c-border-strong);border-radius:10px;padding:12px 16px;margin:12px 0;background:transparent;color:var(--c-text);font:inherit;text-decoration:none;cursor:pointer}.guardian #location:hover,.guardian button:hover{border-color:var(--c-brand);color:var(--c-brand)}.guardian [hidden]{display:none!important}.guardian a:focus-visible,.guardian button:focus-visible{outline:3px solid var(--c-brand);outline-offset:4px}.guardian #expiry{font-size:.85rem;color:var(--c-text-3)}.guardian__note{font-size:.9rem}
+.guardian__map-box{margin:20px 0;display:flex;flex-direction:column;gap:12px}
+.guardian-map{position:relative;width:100%;height:320px;border-radius:14px;overflow:hidden;background:var(--c-surface-2);border:1px solid var(--c-border-strong)}
+.guardian-map__tiles{position:absolute;left:50%;top:50%;display:grid;width:768px;height:768px;transform:translate(-384px,-384px);pointer-events:none}
+.guardian-map__tiles img{width:256px;height:256px;display:block;background:var(--c-surface-2)}
+:root[data-theme="dark"] .guardian-map__tiles img{filter:brightness(.82) contrast(.95)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .guardian-map__tiles img{filter:brightness(.82) contrast(.95)}}
+.guardian-map__marker{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:10;display:flex;flex-direction:column;align-items:center}
+.guardian-map__pulse{position:absolute;width:40px;height:40px;border-radius:50%;background:var(--c-brand-glow);animation:guardian-pulse 2s infinite ease-out}
+.guardian-map__dot{width:16px;height:16px;border-radius:50%;background:var(--c-brand);border:2.5px solid #FFFFFF;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.guardian-map__badge{margin-top:6px;background:var(--c-surface);color:var(--c-text);font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;border:1px solid var(--c-border);white-space:nowrap}
+.guardian-map__controls{display:flex;gap:10px;flex-wrap:wrap}
+.guardian-map__btn{border:1px solid var(--c-border-strong);border-radius:8px;padding:8px 14px;background:var(--c-surface);color:var(--c-text);font:inherit;font-size:.9rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.guardian-map__credit{font-size:.75rem;color:var(--c-text-3);margin:0}
+.guardian-map__credit a{color:inherit;text-decoration:underline}
+@keyframes guardian-pulse{0%{transform:scale(.5);opacity:1}100%{transform:scale(2.2);opacity:0}}
+@media (prefers-reduced-motion:reduce){.guardian-map__pulse{animation:none;opacity:.5}}

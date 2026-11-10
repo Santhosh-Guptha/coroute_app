@@ -20,16 +20,16 @@
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
-<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/live.css">
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/live.js" defer></script>
 </head>
 <body data-page="live">
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="live" aria-labelledby="live-title">
+  <section class="live topo" aria-labelledby="live-title">
     <div class="container live__wrap">
 
       <header class="live__head">
@@ -38,7 +38,7 @@
         <p class="t-lead"><strong class="live__name">__RIDER__</strong> raised an SOS in Coroute and shared this link with you.</p>
       </header>
 
-      <div class="live__card" id="live-card" data-live data-expires="__EXPIRES__">
+      <div class="live__card card card--raised" id="live-card" data-live data-expires="__EXPIRES__">
 
         <div class="live-map" data-lat="__LAT__" data-lng="__LNG__" data-at="__AT__" role="img" aria-label="Map of the rider's last known position">
           <div class="live-map__tiles" data-tiles></div>

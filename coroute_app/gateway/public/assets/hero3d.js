@@ -236,16 +236,16 @@
   /* ---------- Palettes: the app's light and dark tokens ---------- */
   function hex(h) { var n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
   var DAY = {
-    top: hex('#BFDDE4'), hor: hex('#EEF3F5'), fog: hex('#E9F0F3'), low: hex('#D3E4DE'), high: hex('#7E9F9C'), sun: [0.55, 0.7, 0.35],
-    line: hex('#0B6E78'), lineA: 0.26, amb: 0.5, road: hex('#3E4F5C'), edge: hex('#C2CED6'), route: hex('#0B6E78'), dash: hex('#F4F7F9'),
+    top: hex('#D3E6E8'), hor: hex('#F3F1EC'), fog: hex('#F1EFEA'), low: hex('#DCE6E0'), high: hex('#93ABA6'), sun: [0.55, 0.7, 0.35],
+    line: hex('#2B7A8C'), lineA: 0.26, amb: 0.5, road: hex('#4A5058'), edge: hex('#CFC8BD'), route: hex('#2B7A8C'), dash: hex('#F6F4F0'),
     ring: hex('#FFFFFF'), glow: 0.25,
-    members: ['#0B6E78', '#2E7D32', '#9A6A00', '#C2185B', '#1565C0', '#6A1B9A', '#00695C', '#B4541C'].map(hex)
+    members: ['#2B7A8C', '#3E8E5E', '#B9821C', '#B5577A', '#3D7BC8', '#7E6BB0', '#2F8577', '#D9822B'].map(hex)
   };
   var NIGHT = {
-    top: hex('#0B151B'), hor: hex('#1A3A43'), fog: hex('#10202A'), low: hex('#18242C'), high: hex('#2C3E4A'), sun: [-0.35, 0.75, 0.3],
-    line: hex('#5CCAD3'), lineA: 0.3, amb: 0.5, road: hex('#0A1014'), edge: hex('#3A4A55'), route: hex('#5CCAD3'), dash: hex('#C9D4DB'),
-    ring: hex('#0F171D'), glow: 0.9,
-    members: ['#5CCAD3', '#7CFF6B', '#FFD54F', '#FF80AB', '#82B1FF', '#B388FF', '#64FFDA', '#F0A070'].map(hex)
+    top: hex('#121519'), hor: hex('#1D3036'), fog: hex('#171B20'), low: hex('#1E242A'), high: hex('#323A44'), sun: [-0.35, 0.75, 0.3],
+    line: hex('#5FB3C4'), lineA: 0.3, amb: 0.5, road: hex('#101316'), edge: hex('#3E4652'), route: hex('#5FB3C4'), dash: hex('#CFCBC3'),
+    ring: hex('#1C2026'), glow: 0.3,
+    members: ['#5FB3C4', '#6CC08B', '#E0B15A', '#D88AA6', '#79A8E8', '#A99BD6', '#6FBFAE', '#E9A55B'].map(hex)
   };
   function norm3(v) { var l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; }
   DAY.sun = norm3(DAY.sun); NIGHT.sun = norm3(NIGHT.sun);
@@ -435,6 +435,9 @@
     new MutationObserver(function () { nightTarget = isDark() ? 1 : 0; if (!running && drawn) { night = nightTarget; render(tSim); } })
       .observe(root, { attributes: true, attributeFilter: ['data-theme'] });
   }
+  // "System" theme (no data-theme): follow the phone or computer switching between light and dark.
+  var schemeMQ = win.matchMedia ? win.matchMedia('(prefers-color-scheme: dark)') : null;
+  if (schemeMQ && schemeMQ.addEventListener) schemeMQ.addEventListener('change', function () { nightTarget = isDark() ? 1 : 0; if (!running && drawn) { night = nightTarget; render(tSim); } });
   win.addEventListener('resize', function () { if (!running && drawn) render(tSim); }, { passive: true });
 
   host.appendChild(canvas);

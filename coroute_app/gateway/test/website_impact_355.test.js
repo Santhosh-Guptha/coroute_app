@@ -115,8 +115,8 @@ test('home: the impact section is hidden until real numbers load and writes no n
   }
   assert.ok(!/\d/.test(t), 'impact: no number written into the page');
   assert.ok(!/saves? lives|lives saved|guarantee/i.test(t), 'impact: no overpromising');
-  // 3.56 short home page: the impact block is the one live-numbers section (no duplicate usage or ride analytics card).
-  assert.ok(!html.includes('data-usage-stats') && !html.includes('data-ride-analytics'), 'one numbers section only');
+  // The ride analytics card keeps its own hooks (fed by usage-stats).
+  assert.ok(html.includes('data-ride-analytics') && html.includes('id="ra-chart"'));
 });
 
 test('/safety and /features carry a compact impact strip with the same hooks', async () => {
