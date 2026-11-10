@@ -11,6 +11,7 @@ import '../../core/config/app_config.dart';
 import '../../core/config/feature_gates.dart';
 import '../../domain/audio/dsp_core.dart';
 import '../../domain/audio/voice_cleanup.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'background_service.dart';
 import 'realtime_service.dart';
 import 'ride_mic_hub.dart';
@@ -71,7 +72,7 @@ class ActiveSpeakerInfo {
 ///
 /// 3.55 sound awareness (docs/features_355/sound_awareness_and_intercom.md):
 /// * With [micHub] set (main.dart) the intercom does not open its own recorder: it claims the
-///   ride's one shared microphone ([RideMicHub]), which the siren / horn detector also listens to.
+///   ride's one shared microphone ([RideMicHub]), which the siren detector also listens to.
 /// * "Clean up my voice" (setting `voiceCleanup`, admin switch 'voiceCleanup', both default on):
 ///   every frame goes through [VoiceCleanup] before it is sent (high-pass, noise suppression,
 ///   breath and wind-gust suppression, AGC + limiter). In hands-free (VOX) the voice gate decides
@@ -552,10 +553,11 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       _micRate = txSampleRate;
       _decimator = null;
       _micOpen = true; // set first: frames may arrive before claim returns
-      // Hands-free talk shares the phone's own mic with siren / horn detection; push-to-talk
+      // Hands-free talk shares the phone's own mic with siren detection; push-to-talk
       // with a headset uses the headset mic while held (RideMicHub / MicPlan).
       final ok = await hub.claimIntercom(_onHubFrame, handsFree: _mode == IntercomMode.vox);
       if (!ok) {
+        DiagLog.warn(DiagCat.intercom, 'mic_claim_refused', {'mode': _mode});
         _micOpen = false;
         await hub.releaseIntercom();
         return false;
@@ -579,6 +581,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
         _onMicData,
         onError: (e) {
           debugPrint('mic error: $e');
+          DiagLog.warn(DiagCat.intercom, 'mic_error', {'type': e.runtimeType.toString()});
           onMicrophoneRevoked();
         },
         onDone: () => _micOpen = false,
@@ -587,6 +590,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       return true;
     } catch (e) {
       debugPrint('Intercom mic open note: $e');
+      DiagLog.warn(DiagCat.intercom, 'mic_open_failed', {'type': e.runtimeType.toString()});
       _micOpen = false;
       return false;
     }
@@ -636,6 +640,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     _seq = 0;
     _transmitting = true;
     _txStartedAt = DateTime.now();
+    DiagLog.info(DiagCat.intercom, 'talk_start', {'mode': _mode, 'channel': _channel, 'lead': isRoadCaptain, 'direct': _talkTargetUserId != null, 'rate': _micRate});
     final header = <String, dynamic>{
       'to': _talkTargetUserId,
       'sampleRate': _micRate,
@@ -658,6 +663,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _endStream() {
+    DiagLog.info(DiagCat.intercom, 'talk_end', {'ms': _txStartedAt == null ? -1 : DateTime.now().difference(_txStartedAt!).inMilliseconds, 'frames': _seq});
     _transmitting = false;
     audioLevel.value = 0.0;
     _pending.clear();
@@ -784,6 +790,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       _playerReady = true;
     } catch (e) {
       debugPrint('Intercom player setup note: $e');
+      DiagLog.warn(DiagCat.intercom, 'player_setup_failed', {'type': e.runtimeType.toString(), 'rate': sampleRate});
     }
   }
 

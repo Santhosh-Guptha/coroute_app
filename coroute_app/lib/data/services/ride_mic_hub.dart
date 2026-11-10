@@ -1,11 +1,11 @@
 // 3.55 RideMicHub: ONE microphone for the whole ride.
 //
-// Android lets only one app-level capture run reliably, so the siren / horn detector and the
+// Android lets only one app-level capture run reliably, so the siren detector and the
 // intercom share a single `record` stream (16 kHz mono PCM16, re-cut into 20 ms frames) instead
 // of each opening its own AudioRecord.
 //
 // Consumers:
-//  * analysis (SirenAcousticDetector: sirens and horns) gets every RAW frame, while detection is
+//  * analysis (SirenAcousticDetector: sirens) gets every RAW frame, while detection is
 //    wanted (ride active, setting + admin switch on, battery OK, no phone call, permission given,
 //    app in front or the ride's foreground service running);
 //  * the intercom ([claimIntercom] / [releaseIntercom]) gets the same frames and cleans them in
@@ -54,7 +54,7 @@ typedef MicFrameListener = void Function(Int16List frame, MicFrameInfo info);
 
 class MicFrameInfo {
   /// True when the frames come through the OS voice processing (voiceCommunication source with
-  /// noise suppression / helmet headset mic): fine for talk, weaker for siren / horn detection.
+  /// noise suppression / helmet headset mic): fine for talk, weaker for siren detection.
   final bool processed;
 
   /// A Bluetooth / wired headset is the input (best guess from the input device list).
@@ -81,7 +81,7 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
   /// A ride is running (group trip STARTED or an offline solo ride).
   bool Function() rideActive = () => false;
 
-  /// Siren / horn detection is switched on (rider setting AND admin switch).
+  /// Siren detection is switched on (rider setting AND admin switch).
   bool Function() detectionEnabled = () => false;
 
   /// Battery low (< 15 % and not charging), SOS battery reserve or battery saver: detection pauses.
@@ -129,7 +129,7 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
   bool get analysisDegraded => _open && (_config?.processed ?? false);
   bool get detectionActive => _open && _wantDetection;
 
-  /// Analysis consumers (siren / horn). Raw frames, never stored.
+  /// Analysis consumers (siren detector). Raw frames, never stored.
   void addAnalysisListener(MicFrameListener l) {
     if (!_analysis.contains(l)) _analysis.add(l);
   }
@@ -227,7 +227,7 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
         _setState(MicHubState.noPermission);
         if (det && !_noticeGiven) {
           _noticeGiven = true;
-          onNotice?.call('Siren and horn alerts need the microphone. Allow it for CoRoute in phone settings to use them.');
+          onNotice?.call('Siren alerts need the microphone. Allow it for CoRoute in phone settings to use them.');
         }
         return;
       }

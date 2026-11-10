@@ -1,5 +1,5 @@
-// 3.55 sound awareness: synthetic test signals (16 kHz floats) for the siren / horn detector and
-// the intercom voice cleanup tests. Pure Dart, deterministic (seeded).
+// 3.55 sound awareness: synthetic test signals (16 kHz floats) for the siren detector and the
+// intercom voice cleanup tests. Pure Dart, deterministic (seeded).
 
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -41,7 +41,8 @@ class Synth {
   Float64List hiLo(double sec, {double amp = 0.1, double hi = 960, double lo = 770, double dwell = 0.5, double Function(double t)? ampAt, double Function(double t)? doppler}) =>
       siren(sec, (t) => (((t / dwell).floor() % 2 == 0) ? hi : lo) * (doppler?.call(t) ?? 1.0), amp: amp, ampAt: ampAt);
 
-  /// Car horn: two fundamentals with harmonics; blasts = list of (start, dur).
+  /// Car horn (a sound that must NOT be taken for a siren): two fundamentals with harmonics;
+  /// blasts = list of (start, dur).
   Float64List horn(double sec, List<(double, double)> blasts, {double amp = 0.1, double f1 = 420, double f2 = 500}) {
     final n = (sec * fs).round();
     final out = Float64List(n);
@@ -61,6 +62,136 @@ class Synth {
         v += w * math.sin(2 * math.pi * f1 * h * t) + w * 0.8 * math.sin(2 * math.pi * f2 * h * t + 0.5);
       }
       out[i] = amp * on * v / 3.0;
+    }
+    return out;
+  }
+
+  /// Police "wail-yelp": [segment] seconds of wail, then of yelp, alternating.
+  Float64List wailYelp(double sec, {double amp = 0.1, double segment = 3.0, double lo = 650, double hi = 1500, double rate = 5}) {
+    double wailF(double t) => (lo + hi) / 2 + (hi - lo) / 2 * math.sin(2 * math.pi * t / 4.0 - math.pi / 2);
+    double yelpF(double t) {
+      final p = (t * rate) % 1.0;
+      return lo + (hi - lo) * (p < 0.5 ? p * 2 : 2 - p * 2);
+    }
+
+    return siren(sec, (t) => ((t / segment).floor() % 2 == 0) ? wailF(t) : yelpF(t), amp: amp);
+  }
+
+  /// Ambulance (India) switching hi-lo and wail every [segment] seconds.
+  Float64List hiLoWail(double sec, {double amp = 0.1, double segment = 4.0}) => siren(sec, (t) {
+        if ((t / segment).floor() % 2 == 0) return ((t / 0.6).floor() % 2 == 0) ? 960.0 : 770.0;
+        return 1100 + 450 * math.sin(2 * math.pi * t / 4.0 - math.pi / 2);
+      }, amp: amp);
+
+  /// Mechanical fire siren: a slow, low rise and fall (rotor spin-up / coast-down).
+  Float64List mechanicalWail(double sec, {double amp = 0.1, double period = 9, double lo = 380, double hi = 1050}) =>
+      siren(sec, (t) => lo + (hi - lo) * (0.5 - 0.5 * math.cos(2 * math.pi * t / period)), amp: amp);
+
+  /// Musical truck "pressure horn": a tune of loud harmonic notes (irregular lengths, short gaps).
+  Float64List melodyHorn(double sec, {double amp = 0.2, int seed = 1}) {
+    final r = math.Random(seed);
+    const scale = [392.0, 440.0, 494.0, 523.0, 587.0, 659.0, 784.0];
+    final n = (sec * fs).round();
+    final out = Float64List(n);
+    var t0 = 0.0;
+    var ph = 0.0;
+    while (t0 < sec) {
+      final f = scale[r.nextInt(scale.length)];
+      final d = 0.15 + r.nextDouble() * 0.35;
+      final gap = 0.02 + r.nextDouble() * 0.04;
+      final i0 = (t0 * fs).round(), i1 = math.min(n, ((t0 + d) * fs).round());
+      for (var i = i0; i < i1; i++) {
+        final t = (i - i0) / fs;
+        ph += 2 * math.pi * f / fs;
+        final env = math.min(1.0, t / 0.01) * math.min(1.0, (d - t) / 0.01);
+        var v = 0.0;
+        for (var h = 1; h <= 6; h++) {
+          v += math.sin(h * ph) / h;
+        }
+        out[i] = amp * env * v / 2;
+      }
+      t0 += d + gap;
+    }
+    return out;
+  }
+
+  /// Reversing beeper: a constant tone, [on] s on / [off] s off.
+  Float64List beeper(double sec, {double amp = 0.08, double f = 1100, double on = 0.5, double off = 0.5}) =>
+      siren(sec, (t) => f, amp: amp, ampAt: (t) => (t % (on + off)) < on ? 1.0 : 0.0);
+
+  /// Ringtone / chime: struck notes that decay (marimba-like), a short tune repeated; with
+  /// [twoNote] a regular "ding-dong" between two notes.
+  Float64List ringtone(double sec, {double amp = 0.1, bool twoNote = false}) {
+    const tune = [659.0, 784.0, 988.0, 784.0, 880.0, 659.0];
+    const dong = [988.0, 784.0];
+    final notes = twoNote ? dong : tune;
+    const step = 0.3;
+    final n = (sec * fs).round();
+    final out = Float64List(n);
+    for (var i = 0; i < n; i++) {
+      final t = i / fs;
+      final k = (t / step).floor();
+      final f = notes[k % notes.length];
+      final lt = t - k * step;
+      final env = math.min(1.0, lt / 0.005) * math.exp(-lt * 9);
+      out[i] = amp * env * (math.sin(2 * math.pi * f * lt) + 0.3 * math.sin(2 * math.pi * 4 * f * lt));
+    }
+    return out;
+  }
+
+  /// Rain on the helmet / tank bag: dense random drops (short decaying noise bursts) + hiss.
+  Float64List rain(double sec, {double amp = 0.05}) {
+    final n = (sec * fs).round();
+    final out = Float64List(n);
+    var env = 0.0;
+    for (var i = 0; i < n; i++) {
+      if (rnd.nextDouble() < 250 / fs) env = 0.5 + rnd.nextDouble();
+      env *= 0.996;
+      out[i] = amp * (env * gauss() + 0.2 * gauss());
+    }
+    return out;
+  }
+
+  /// Temple / loudspeaker devotional music: a held harmonium chord plus a singer gliding between
+  /// notes (melisma) with vibrato.
+  Float64List templeMusic(double sec, {double amp = 0.1}) {
+    final n = (sec * fs).round();
+    final out = Float64List(n);
+    const contour = [300.0, 360.0, 400.0, 450.0, 400.0, 360.0, 330.0, 450.0, 500.0, 450.0];
+    var ph = 0.0;
+    for (var i = 0; i < n; i++) {
+      final t = i / fs;
+      final k = (t / 0.45).floor();
+      final a = contour[k % contour.length], b = contour[(k + 1) % contour.length];
+      final x = (t / 0.45) - k;
+      final f0 = (a + (b - a) * (0.5 - 0.5 * math.cos(math.pi * x))) * (1 + 0.02 * math.sin(2 * math.pi * 5.5 * t));
+      ph += 2 * math.pi * f0 / fs;
+      var v = 0.0;
+      for (var h = 1; h <= 8; h++) {
+        final hf = h * f0;
+        final g = 1.0 / (1 + math.pow((hf - 800) / 400, 2));
+        v += g * math.sin(h * ph);
+      }
+      var drone = 0.0;
+      for (final f in [261.6, 329.6, 392.0]) {
+        for (var h = 1; h <= 4; h++) {
+          drone += math.sin(2 * math.pi * f * h * t) / (h * 2);
+        }
+      }
+      out[i] = v + 0.3 * drone;
+    }
+    return normalise(out, amp);
+  }
+
+  /// Tunnel / underpass echo: delayed, weaker copies of [x] plus a short diffuse tail.
+  Float64List echo(Float64List x) {
+    final out = Float64List.fromList(x);
+    const taps = [(0.031, 0.6), (0.072, 0.45), (0.118, 0.32), (0.19, 0.22), (0.27, 0.15)];
+    for (final tap in taps) {
+      final d = (tap.$1 * fs).round();
+      for (var i = d; i < x.length; i++) {
+        out[i] += tap.$2 * x[i - d];
+      }
     }
     return out;
   }

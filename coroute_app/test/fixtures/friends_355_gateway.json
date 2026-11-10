@@ -1,0 +1,115 @@
+{
+  "_about": "Captured from the real gateway (scratch end-to-end run, 3.55 friends). Read by test/friends_parse_355_test.dart; gateway/test/friends_app_contract_355.test.js checks live answers keep this shape.",
+  "sendByUsername": {
+    "status": 202,
+    "body": {
+      "ok": true,
+      "status": "REQUESTED",
+      "request": {
+        "requestId": "fr_644cbb99b3bdd8165539",
+        "username": "DustyScout629",
+        "avatarUrl": null,
+        "at": 1794294576021
+      }
+    }
+  },
+  "sendByInviteCode": {
+    "status": 202,
+    "body": {
+      "ok": true,
+      "status": "REQUESTED",
+      "request": {
+        "requestId": "fr_354edf86e8cb1e8a7924",
+        "username": "DustyScout629",
+        "avatarUrl": null,
+        "at": 1794294576029
+      }
+    }
+  },
+  "sendUnknown": {
+    "status": 404,
+    "body": {
+      "error": "No rider has that username. Check the spelling.",
+      "code": "NOT_FOUND"
+    }
+  },
+  "targetFriends": {
+    "ok": true,
+    "friends": [],
+    "incoming": [
+      {
+        "requestId": "fr_354edf86e8cb1e8a7924",
+        "username": "SwiftCanyon924",
+        "avatarUrl": null,
+        "at": 1794294576029
+      },
+      {
+        "requestId": "fr_644cbb99b3bdd8165539",
+        "username": "SteadySpoke1349",
+        "avatarUrl": null,
+        "at": 1794294576021
+      }
+    ],
+    "outgoing": [],
+    "blocked": [],
+    "inviteCode": "6EMBW396",
+    "inviteLink": "https://coroute.duckdns.org/join/friend/6EMBW396",
+    "shareText": "Ride with me on CoRoute! Add me as a friend: DustyScout629 (invite code 6EMBW396). https://coroute.duckdns.org/join/friend/6EMBW396"
+  },
+  "senderFriends": {
+    "ok": true,
+    "friends": [],
+    "incoming": [],
+    "outgoing": [
+      {
+        "requestId": "fr_644cbb99b3bdd8165539",
+        "username": "DustyScout629",
+        "avatarUrl": null,
+        "at": 1794294576021
+      }
+    ],
+    "blocked": [],
+    "inviteCode": "SG9PB3JP",
+    "inviteLink": "https://coroute.duckdns.org/join/friend/SG9PB3JP",
+    "shareText": "Ride with me on CoRoute! Add me as a friend: SteadySpoke1349 (invite code SG9PB3JP). https://coroute.duckdns.org/join/friend/SG9PB3JP"
+  },
+  "senderAfterAccept": {
+    "ok": true,
+    "friends": [
+      {
+        "username": "DustyScout629",
+        "avatarUrl": null,
+        "displayName": "Fixture",
+        "since": 1794294576045,
+        "trips": 0,
+        "totalKm": 0
+      }
+    ],
+    "incoming": [],
+    "outgoing": [],
+    "blocked": [],
+    "inviteCode": "SG9PB3JP",
+    "inviteLink": "https://coroute.duckdns.org/join/friend/SG9PB3JP",
+    "shareText": "Ride with me on CoRoute! Add me as a friend: SteadySpoke1349 (invite code SG9PB3JP). https://coroute.duckdns.org/join/friend/SG9PB3JP"
+  },
+  "socketFriendRequest": {
+    "ts": 1794294576021,
+    "type": "FRIEND_REQUEST",
+    "requestId": "fr_644cbb99b3bdd8165539",
+    "username": "SteadySpoke1349",
+    "via": "username",
+    "eventId": "FRIEND_REQUEST:fr_644cbb99b3bdd8165539"
+  },
+  "socketFriendAccepted": {
+    "ts": 1794294576045,
+    "type": "FRIEND_ACCEPTED",
+    "requestId": "fr_644cbb99b3bdd8165539",
+    "username": "DustyScout629",
+    "eventId": "FRIEND_ACCEPTED:fr_644cbb99b3bdd8165539"
+  },
+  "names": {
+    "sender": "SteadySpoke1349",
+    "target": "DustyScout629",
+    "coder": "SwiftCanyon924"
+  }
+}

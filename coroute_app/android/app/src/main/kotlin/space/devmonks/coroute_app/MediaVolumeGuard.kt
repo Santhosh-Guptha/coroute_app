@@ -9,6 +9,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
+import android.os.SystemClock
 
 /**
  * 3.55 "Lower music when speeding" (native half; the decision is lib/domain/safety/speed_audio_policy.dart).
@@ -28,9 +29,25 @@ import android.os.Handler
  * - The saved volume survives an app kill (SharedPreferences): [restoreLeftovers] at the next start
  *   puts it back when the volume is still the one we set.
  *
+ * - 3.55 fallback so the music ALWAYS gets quieter: the volume we set is read back (now and
+ *   [VERIFY_MS] later). On a fixed-volume device (AudioManager.isVolumeFixed), when setStreamVolume
+ *   throws (Do Not Disturb policy, OEM restriction) or is ignored (some Bluetooth headsets with
+ *   absolute volume keep their own level), a silent transient audio focus is held instead:
+ *   AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK (Android 8+ ducks other apps by itself; apps that handle
+ *   ducking lower themselves) for the 60 % / 30 % steps, AUDIOFOCUS_GAIN_TRANSIENT (pause) for the
+ *   pause step. A headset that reports back a neighbouring index (absolute-volume rounding) is
+ *   taken as the value we set, not as the rider changing the volume.
+ * - Every change is written to the diagnostics callback [log] (logcat tag CoRouteAudio and the
+ *   Dart ride audio log): levels, route kind, focus results. Nothing personal.
+ *
  * Main thread only. Text and nothing personal is ever logged.
  */
-class MediaVolumeGuard(context: Context, private val audio: AudioManager?, private val main: Handler) {
+class MediaVolumeGuard(
+    context: Context,
+    private val audio: AudioManager?,
+    private val main: Handler,
+    private val log: (String) -> Unit = {}
+) {
     private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private var lowered = false
@@ -48,6 +65,12 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     private var pauseRequest: Any? = null
     private var ownFocusRequest: Any? = null
     private var deviceCallback: Any? = null
+
+    /** 3.55: the volume cannot be set here: other apps are ducked / paused by audio focus instead. */
+    private var viaFocus = false
+    private var duckRequest: Any? = null
+    private var ducking = false
+    private var lastSetAt = 0L
 
     private val silentAttributes: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
@@ -67,6 +90,18 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
 
     private val ownFocusListener = AudioManager.OnAudioFocusChangeListener { }
 
+    /** Duck focus (fallback): a permanent loss means another app / the rider took the audio. */
+    private val duckListener = AudioManager.OnAudioFocusChangeListener { change ->
+        if (change == AudioManager.AUDIOFOCUS_LOSS && ducking) {
+            main.post {
+                ducking = false
+                duckRequest = null
+                log("speed music: duck focus lost (other app took audio) -> rider's choice")
+                markUserChanged()
+            }
+        }
+    }
+
     init {
         registerDeviceCallback()
     }
@@ -79,6 +114,8 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     fun apply(fractionIn: Double, pause: Boolean): Map<String, Any> {
         val am = audio ?: return result()
         if (userChanged) return result()
+        if (!lowered && volumeFixed(am)) viaFocus = true
+        if (viaFocus) return applyViaFocus(am, fractionIn, pause)
         val current = currentIndex(am)
         val nowRoute = routeKey(am)
         if (ramping) {
@@ -87,6 +124,11 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
             setIndex = current
         }
         if (!lowered) {
+            if (current <= 2) {
+                // Too few volume steps to make it quieter: duck / pause by focus instead.
+                viaFocus = true
+                return applyViaFocus(am, fractionIn, pause)
+            }
             originalIndex = current
             route = nowRoute
             setIndex = current
@@ -94,17 +136,98 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
         } else if (nowRoute != route) {
             onRouteChanged()
         } else if (ownAudioDepth == 0 && !raisedForOwn && !ramping && setIndex >= 0 && current != setIndex) {
-            markUserChanged()
-            return result()
+            if (!adoptRounding(current)) {
+                log("speed music: volume changed by the rider ($setIndex -> $current), stop lowering")
+                markUserChanged()
+                return result()
+            }
         }
         fraction = fractionIn.coerceIn(0.0, 1.0)
         val target = targetIndex(originalIndex, if (pause) SpeedPauseVolumeFraction else fraction)
         if (target < setIndex || setIndex < 0) {
             setIndex = target
-            if (ownAudioDepth == 0) setVolume(am, target)
+            if (ownAudioDepth == 0) {
+                setAndVerify(am, target, current, fractionIn, pause)
+            } else {
+                // 3.55 fix: our own line is playing at the original volume right now. The lowered
+                // index is applied when it ends (it used to be skipped, and the next status check
+                // then took the unchanged volume for the rider's choice and stopped lowering).
+                raisedForOwn = true
+            }
         }
+        log("speed music apply ${(fractionIn * 100).toInt()}%${if (pause) " pause" else ""} route=$route idx $originalIndex->$setIndex${if (ownAudioDepth > 0) " (after our line)" else ""}")
         if (pause && !paused) requestPause(am)
+        if (viaFocus) return applyViaFocus(am, fractionIn, pause)
         persist()
+        return result()
+    }
+
+    /** True when this device does not let apps change the media volume. */
+    private fun volumeFixed(am: AudioManager): Boolean = try {
+        am.isVolumeFixed
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Sets [index] and checks it took: read back now and [VERIFY_MS] later (Bluetooth absolute
+     * volume reports asynchronously). Ignored or refused -> focus fallback ([applyViaFocus]).
+     */
+    private fun setAndVerify(am: AudioManager, index: Int, before: Int, fractionIn: Double, pause: Boolean) {
+        if (!setVolume(am, index)) {
+            log("speed music: setStreamVolume refused -> focus fallback")
+            viaFocus = true
+            return
+        }
+        lastSetAt = SystemClock.elapsedRealtime()
+        if (index == before) return
+        main.postDelayed({
+            if (!lowered || viaFocus || userChanged || ownAudioDepth > 0 || ramping || setIndex != index) return@postDelayed
+            val now = currentIndex(am)
+            when {
+                now == index -> log("speed music: volume set ok ($before -> $index)")
+                now == before -> {
+                    log("speed music: volume ignored by the device/headset ($before stays) -> focus fallback")
+                    viaFocus = true
+                    applyViaFocus(am, fractionIn, pause)
+                }
+                Math.abs(now - index) <= 1 && now < originalIndex -> {
+                    log("speed music: headset rounded the volume ($index -> $now), kept")
+                    setIndex = now
+                    persist()
+                }
+                else -> Unit // a real change by the rider: status() will see it
+            }
+        }, VERIFY_MS)
+    }
+
+    /** Within [ROUNDING_WINDOW_MS] of our own change, a neighbouring index is the headset's rounding. */
+    private fun adoptRounding(current: Int): Boolean {
+        if (SystemClock.elapsedRealtime() - lastSetAt > ROUNDING_WINDOW_MS) return false
+        if (Math.abs(current - setIndex) > 1 || current > originalIndex) return false
+        setIndex = current
+        return true
+    }
+
+    /** Fallback: the volume cannot be set, so other apps are ducked (or paused) by audio focus. */
+    private fun applyViaFocus(am: AudioManager, fractionIn: Double, pause: Boolean): Map<String, Any> {
+        if (!lowered) {
+            lowered = true
+            route = routeKey(am)
+        }
+        fraction = fractionIn.coerceIn(0.0, 1.0)
+        // Put back any index we changed before falling back (the focus does the lowering now).
+        if (originalIndex >= 0 && setIndex >= 0 && currentIndex(am) == setIndex && setIndex != originalIndex) setVolume(am, originalIndex)
+        originalIndex = -1
+        setIndex = -1
+        raisedForOwn = false
+        if (pause) {
+            abandonDuck(am)
+            if (!paused) requestPause(am)
+        } else if (!ducking && !paused) {
+            requestDuck(am)
+        }
+        clearPrefs()
         return result()
     }
 
@@ -112,6 +235,13 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     fun restore(): Map<String, Any> {
         val am = audio
         abandonPause()
+        if (am != null) abandonDuck(am)
+        if (viaFocus) {
+            log("speed music restore (focus released)")
+            clear()
+            return result()
+        }
+        if (lowered && !userChanged) log("speed music restore idx $setIndex->$originalIndex")
         if (!lowered || am == null || userChanged) {
             clear()
             return result()
@@ -123,6 +253,7 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     /** Episode over and the rider took control: forget everything, touch nothing. */
     fun forget(): Map<String, Any> {
         abandonPause()
+        audio?.let { abandonDuck(it) }
         clear()
         return result()
     }
@@ -130,11 +261,15 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     /** Checks for a manual change (called by Dart on each sample while lowered). */
     fun status(): Map<String, Any> {
         val am = audio
-        if (lowered && am != null && ownAudioDepth == 0 && !raisedForOwn && !ramping && setIndex >= 0) {
+        if (lowered && !viaFocus && am != null && ownAudioDepth == 0 && !raisedForOwn && !ramping && setIndex >= 0) {
             if (routeKey(am) != route) {
                 onRouteChanged()
-            } else if (currentIndex(am) != setIndex) {
-                markUserChanged()
+            } else {
+                val cur = currentIndex(am)
+                if (cur != setIndex && !adoptRounding(cur)) {
+                    log("speed music: volume changed by the rider ($setIndex -> $cur), stop lowering")
+                    markUserChanged()
+                }
             }
         }
         return result()
@@ -143,7 +278,8 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     private fun result(): Map<String, Any> = mapOf(
         "lowered" to lowered,
         "paused" to paused,
-        "userChanged" to userChanged
+        "userChanged" to userChanged,
+        "mode" to (if (viaFocus) (if (paused) "focusPause" else "focusDuck") else "volume")
     ).also { if (userChanged && !lowered) userChanged = false }
 
     // ------------------------------------------------------------------ own audio (never lowered)
@@ -156,7 +292,7 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
         ownAudioDepth++
         val am = audio ?: return
         if (duckOthers) requestOwnFocus(am)
-        if (lowered && !ramping && ownAudioDepth == 1 && originalIndex >= 0 && currentIndex(am) == setIndex) {
+        if (lowered && !viaFocus && !ramping && ownAudioDepth == 1 && originalIndex >= 0 && currentIndex(am) == setIndex) {
             setVolume(am, originalIndex)
             raisedForOwn = true
         }
@@ -169,10 +305,10 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
         if (duckOthers) abandonOwnFocus(am)
         if (ownAudioDepth > 0 || !raisedForOwn) return
         raisedForOwn = false
-        if (!lowered) return
+        if (!lowered || viaFocus) return
         val current = currentIndex(am)
         if (current == originalIndex) {
-            setVolume(am, setIndex)
+            setAndVerify(am, setIndex, current, fraction, paused)
         } else {
             // The rider moved the volume while we were speaking: their choice wins.
             markUserChanged()
@@ -212,6 +348,11 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
             return
         }
         if (nowRoute == route) return
+        if (viaFocus) {
+            route = nowRoute // the focus follows the audio, nothing to move
+            return
+        }
+        log("speed music: route $route -> $nowRoute")
         // The old route keeps its lowered index: remembered, restored when it comes back.
         savePending(route, originalIndex, setIndex)
         route = nowRoute
@@ -278,6 +419,7 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
         deviceCallback = null
         abandonPause()
         if (am != null) {
+            abandonDuck(am)
             abandonOwnFocus(am)
             // The screen's engine goes away: put the rider's volume back now when nobody touched it.
             // (A killed process cannot do this; restoreLeftovers does it at the next start.)
@@ -296,6 +438,8 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
     private fun markUserChanged() {
         userChanged = true
         abandonPause()
+        audio?.let { abandonDuck(it) }
+        viaFocus = false
         lowered = false
         ramping = false
         originalIndex = -1
@@ -305,6 +449,7 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
 
     private fun clear() {
         lowered = false
+        viaFocus = false
         paused = false
         ramping = false
         originalIndex = -1
@@ -372,12 +517,14 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
         0
     }
 
-    private fun setVolume(am: AudioManager, index: Int) {
-        if (index < 0) return
-        try {
+    /** False when the system refused (Do Not Disturb policy, fixed volume, OEM restriction). */
+    private fun setVolume(am: AudioManager, index: Int): Boolean {
+        if (index < 0) return false
+        return try {
             am.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0)
+            true
         } catch (e: Exception) {
-            // DND / fixed volume device: nothing to do
+            false
         }
     }
 
@@ -414,6 +561,7 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
             AudioManager.AUDIOFOCUS_REQUEST_FAILED
         }
         paused = granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        log("speed music: pause focus ${if (paused) "granted" else "failed"}")
     }
 
     @Suppress("DEPRECATION")
@@ -431,6 +579,44 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
             // ignore
         }
         pauseRequest = null
+    }
+
+    /** Fallback duck: a silent transient "may duck" focus held while lowered (Android 8+ auto-ducks). */
+    @Suppress("DEPRECATION")
+    private fun requestDuck(am: AudioManager) {
+        val granted = try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(silentAttributes)
+                    .setWillPauseWhenDucked(false)
+                    .setOnAudioFocusChangeListener(duckListener, main)
+                    .build()
+                duckRequest = req
+                am.requestAudioFocus(req)
+            } else {
+                am.requestAudioFocus(duckListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            }
+        } catch (e: Exception) {
+            AudioManager.AUDIOFOCUS_REQUEST_FAILED
+        }
+        ducking = granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        log("speed music: duck focus ${if (ducking) "granted" else "failed"}")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun abandonDuck(am: AudioManager) {
+        if (!ducking && duckRequest == null) return
+        ducking = false
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                (duckRequest as? AudioFocusRequest)?.let { am.abandonAudioFocusRequest(it) }
+            } else {
+                am.abandonAudioFocus(duckListener)
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        duckRequest = null
     }
 
     @Suppress("DEPRECATION")
@@ -473,6 +659,12 @@ class MediaVolumeGuard(context: Context, private val audio: AudioManager?, priva
         private const val K_SET = "set"
         private const val K_PENDING = "pending_"
         private const val RAMP_STEP_MS = 250L
+
+        /** The volume we set is read back again this long after (Bluetooth absolute volume is async). */
+        private const val VERIFY_MS = 600L
+
+        /** A neighbouring index reported this soon after our change is the headset's rounding. */
+        private const val ROUNDING_WINDOW_MS = 2000L
 
         /** While paused the volume stays at the 30 % step (music resumes quietly if an app ignores focus). */
         private const val SpeedPauseVolumeFraction = 0.3

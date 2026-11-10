@@ -10,13 +10,18 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
+import android.util.Log
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 
 /**
@@ -57,7 +62,18 @@ import java.util.Locale
  *   awareness): whether the rider may not hear outside sound. A cheap AudioManager query, no mic.
  * - alertTone (3.55): one short tone (siren close by while the rider can hear outside sound).
  * - stop, release (unbinds the engine at ride end).
- * Text is cut to 300 characters and never logged.
+ * - 3.55 latency (docs/features_355/alert_latency.md "Speech output"):
+ *     * init picks an installed, offline voice with the lowest latency for the language (a network
+ *       voice can add 0.5-2 s per line);
+ *     * prepare {phrases}: pre-synthesises lines to WAV clips in the cache (one at a time, only
+ *       while nothing is being said) and maps them with addSpeech, so speaking that exact text
+ *       plays the clip at once; a line that STARTS with a clip phrase ("Slow down." + the rest)
+ *       plays the clip while the rest is synthesised;
+ *     * speak {earcon: true}: a 0.16 s two-tone earcon first (same stream and focus), so the rider
+ *       hears something immediately while the words are synthesised (not for clips);
+ *     * events to Dart on the same channel (set [events]): speechEvent {id, event: start|done, ms}
+ *       (ms = speak call to first audio) and diag {line} (focus results, volume changes).
+ * Text is cut to 300 characters and never logged (diagnostics carry no text).
  */
 class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     private val app: Context = context.applicationContext
@@ -65,7 +81,23 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     private val audio: AudioManager? = app.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
     /** 3.55: "Lower music when speeding" (native half). */
-    val volumeGuard = MediaVolumeGuard(app, audio, main)
+    val volumeGuard = MediaVolumeGuard(app, audio, main) { diag(it) }
+
+    /** 3.55: the channel for native -> Dart events (speech start / done, diagnostics); set by MainActivity. */
+    var events: MethodChannel? = null
+
+    /** speak() call time per utterance id (for the start delay), and whether it is a clip. */
+    private val speakAt = HashMap<String, Long>()
+    private val clipIds = HashSet<String>()
+
+    /** 3.55: pre-synthesised clips: text -> file (mapped with addSpeech once written). */
+    private val clips = HashMap<String, File>()
+    private val prepQueue = ArrayList<String>()
+    private val prepById = HashMap<String, Pair<String, File>>()
+    private val prepTries = HashMap<String, Int>()
+    private var prepBusy = false
+    private var prepSeq = 0
+    private var earconReady = false
 
     private var tts: TextToSpeech? = null
     private var ready = false
@@ -158,23 +190,25 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     private val initTimeout = Runnable { if (!ready) finishInit(false) }
 
     private val progress = object : UtteranceProgressListener() {
-        override fun onStart(utteranceId: String?) {}
+        override fun onStart(utteranceId: String?) {
+            main.post { started(utteranceId) }
+        }
 
         override fun onDone(utteranceId: String?) {
-            main.post { finished(utteranceId) }
+            main.post { if (!prepDone(utteranceId, true)) finished(utteranceId) }
         }
 
         @Deprecated("Deprecated in Java")
         override fun onError(utteranceId: String?) {
-            main.post { finished(utteranceId) }
+            main.post { if (!prepDone(utteranceId, false)) finished(utteranceId) }
         }
 
         override fun onError(utteranceId: String?, errorCode: Int) {
-            main.post { finished(utteranceId) }
+            main.post { if (!prepDone(utteranceId, false)) finished(utteranceId) }
         }
 
         override fun onStop(utteranceId: String?, interrupted: Boolean) {
-            main.post { finished(utteranceId) }
+            main.post { if (!prepDone(utteranceId, false)) finished(utteranceId) }
         }
     }
 
@@ -197,13 +231,19 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
                 val pauseOthers = call.argument<Boolean>("pauseOthers") == true
                 val inCall = call.argument<Boolean>("inCall") == true
                 val afterCall = call.argument<Boolean>("afterCall") == true
+                val earcon = call.argument<Boolean>("earcon") == true
                 result.success(
                     when {
                         inCall && isCallConnected() -> speakInCall(text, id)
                         afterCall && isInPhoneCall() -> speakAfterCall(text, id, isEmergency, pauseOthers)
-                        else -> speak(text, id, interrupt, isEmergency, pauseOthers)
+                        else -> speak(text, id, interrupt, isEmergency, pauseOthers, earcon)
                     }
                 )
+            }
+            "prepare" -> {
+                val phrases = call.argument<List<String>>("phrases") ?: emptyList()
+                prepare(phrases)
+                result.success(null)
             }
             "fallbackAlert" -> {
                 val critical = call.argument<Boolean>("critical") == true
@@ -288,8 +328,197 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
             } catch (e: Exception) {
                 // keep the defaults
             }
+            pickOfflineVoice(engine)
+            earconReady = addEarcon(engine)
         }
         finishInit(chosen)
+    }
+
+    /**
+     * 3.55 latency: an installed voice that needs no network, lowest latency first, then the best
+     * quality, for the chosen language (and region when the language has one). The engine default
+     * is kept when it already is such a voice.
+     */
+    private fun pickOfflineVoice(engine: TextToSpeech) {
+        try {
+            val loc = Locale.forLanguageTag(language)
+            val all = engine.voices ?: return
+            val usable = all.filter { v ->
+                v.locale.language == loc.language &&
+                    (loc.country.isEmpty() || v.locale.country == loc.country) &&
+                    !v.isNetworkConnectionRequired &&
+                    !(v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) ?: false)
+            }
+            val current: Voice? = engine.voice
+            if (current != null && !current.isNetworkConnectionRequired && usable.any { it.name == current.name }) {
+                diag("tts voice default offline latency=${current.latency}")
+                return
+            }
+            val best = usable.sortedWith(compareBy<Voice>({ it.latency }, { -it.quality })).firstOrNull()
+            if (best != null) {
+                engine.setVoice(best)
+                diag("tts voice offline picked latency=${best.latency} quality=${best.quality}")
+            } else {
+                diag("tts voice: no offline voice for the language, engine default kept")
+            }
+        } catch (e: Exception) {
+            // keep the engine's default voice
+        }
+    }
+
+    /** 3.55: writes the earcon (two short tones, 22.05 kHz mono PCM16 WAV) and registers it. */
+    private fun addEarcon(engine: TextToSpeech): Boolean {
+        return try {
+            val dir = File(app.cacheDir, CLIP_DIR).apply { mkdirs() }
+            val f = File(dir, "earcon_v1.wav")
+            if (!f.exists() || f.length() < 100) writeEarconWav(f)
+            engine.addEarcon(EARCON, f) == TextToSpeech.SUCCESS
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun writeEarconWav(f: File) {
+        val rate = 22050
+        val tones = listOf(Pair(988.0, 0.07), Pair(1319.0, 0.09))
+        val total = tones.sumOf { (it.second * rate).toInt() }
+        val pcm = ByteArray(total * 2)
+        var i = 0
+        for ((freq, dur) in tones) {
+            val n = (dur * rate).toInt()
+            val fade = (0.006 * rate).toInt()
+            for (k in 0 until n) {
+                val env = minOf(1.0, k / fade.toDouble(), (n - k) / fade.toDouble())
+                val v = (Math.sin(2.0 * Math.PI * freq * k / rate) * env * 0.5 * 32767).toInt()
+                pcm[i++] = (v and 0xff).toByte()
+                pcm[i++] = ((v shr 8) and 0xff).toByte()
+            }
+        }
+        FileOutputStream(f).use { out ->
+            fun le32(v: Int) = byteArrayOf((v and 0xff).toByte(), ((v shr 8) and 0xff).toByte(), ((v shr 16) and 0xff).toByte(), ((v shr 24) and 0xff).toByte())
+            fun le16(v: Int) = byteArrayOf((v and 0xff).toByte(), ((v shr 8) and 0xff).toByte())
+            out.write("RIFF".toByteArray(Charsets.US_ASCII))
+            out.write(le32(36 + pcm.size))
+            out.write("WAVEfmt ".toByteArray(Charsets.US_ASCII))
+            out.write(le32(16))
+            out.write(le16(1))
+            out.write(le16(1))
+            out.write(le32(rate))
+            out.write(le32(rate * 2))
+            out.write(le16(2))
+            out.write(le16(16))
+            out.write("data".toByteArray(Charsets.US_ASCII))
+            out.write(le32(pcm.size))
+            out.write(pcm)
+        }
+    }
+
+    // ------------------------------------------------------------------ 3.55 pre-synthesised clips
+
+    /** Queues [phrases] for synthesis to clips (skips ones already ready). */
+    private fun prepare(phrases: List<String>) {
+        if (!ready || !ok || tts == null) return
+        for (p in phrases) {
+            val t = p.trim().take(MAX_CHARS)
+            if (t.isEmpty() || clips.containsKey(t) || prepQueue.contains(t)) continue
+            prepQueue.add(t)
+        }
+        pumpPrepare()
+    }
+
+    /** Synthesises the next clip, one at a time and only while nothing is being said. */
+    private fun pumpPrepare() {
+        val engine = tts ?: return
+        if (prepBusy || active.isNotEmpty() || prepQueue.isEmpty() || !ready || !ok) return
+        val text = prepQueue.removeAt(0)
+        val dir = File(app.cacheDir, CLIP_DIR).apply { mkdirs() }
+        val name = "clip_" + Integer.toHexString((language + "|" + (engine.voice?.name ?: "") + "|" + text).hashCode()) + ".wav"
+        val file = File(dir, name)
+        if (file.exists() && file.length() > 1000) {
+            if (mapClip(engine, text, file)) {
+                pumpPrepare()
+                return
+            }
+        }
+        val id = PREP_PREFIX + (++prepSeq)
+        prepById[id] = Pair(text, file)
+        prepBusy = true
+        val code = try {
+            engine.synthesizeToFile(text, Bundle(), file, id)
+        } catch (e: Exception) {
+            TextToSpeech.ERROR
+        }
+        if (code != TextToSpeech.SUCCESS) {
+            prepById.remove(id)
+            prepBusy = false
+        }
+    }
+
+    private fun mapClip(engine: TextToSpeech, text: String, file: File): Boolean {
+        return try {
+            if (engine.addSpeech(text, file) == TextToSpeech.SUCCESS) {
+                clips[text] = file
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** A synthesis job ended: map the clip (or retry it later once). True when [id] was one. */
+    private fun prepDone(id: String?, success: Boolean): Boolean {
+        if (id == null || !id.startsWith(PREP_PREFIX)) return false
+        val job = prepById.remove(id) ?: return true
+        prepBusy = false
+        val engine = tts
+        if (success && engine != null && job.second.length() > 1000) {
+            mapClip(engine, job.first, job.second)
+        } else if (!success && !prepQueue.contains(job.first)) {
+            // Flushed by an urgent line (or failed): try again when idle, at most twice.
+            val tries = (prepTries[job.first] ?: 0) + 1
+            prepTries[job.first] = tries
+            if (tries <= 2) prepQueue.add(job.first)
+        }
+        if (prepQueue.isEmpty()) diag("tts clips ready=${clips.size}")
+        main.postDelayed({ pumpPrepare() }, 50L)
+        return true
+    }
+
+    /** The longest clip phrase that [text] is, or starts with (followed by a space). */
+    private fun clipLead(text: String): String? {
+        var best: String? = null
+        for (p in clips.keys) {
+            if ((text == p || text.startsWith("$p ")) && (best == null || p.length > best.length)) best = p
+        }
+        return best
+    }
+
+    /** First audio of an utterance: tells Dart the delay since the speak call. */
+    private fun started(utteranceId: String?) {
+        val id = utteranceId ?: return
+        if (id.startsWith(PREP_PREFIX)) return
+        val base = id.substringBefore('#')
+        val at = speakAt.remove(base) ?: return
+        val ms = SystemClock.elapsedRealtime() - at
+        emit("speechEvent", mapOf("id" to base, "event" to "start", "ms" to ms.toInt(), "clip" to clipIds.contains(base)))
+    }
+
+    private fun emit(method: String, args: Map<String, Any>) {
+        try {
+            events?.invokeMethod(method, args)
+        } catch (e: Exception) {
+            // no listener (engine detached)
+        }
+    }
+
+    /** 3.55: a diagnostic line (no text, no names) to logcat and the Dart ride audio log. */
+    private fun diag(line: String) {
+        try {
+            Log.i(LOG_TAG, line)
+        } catch (e: Exception) {
+            // unit test / no logger
+        }
+        main.post { emit("diag", mapOf("line" to line)) }
     }
 
     /**
@@ -369,11 +598,19 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         return amMode == AudioManager.MODE_IN_CALL || amMode == AudioManager.MODE_IN_COMMUNICATION
     }
 
-    private fun speak(text: String, id: String, interrupt: Boolean, isEmergency: Boolean = false, pauseOthers: Boolean = false): Boolean {
+    private fun speak(
+        text: String,
+        id: String,
+        interrupt: Boolean,
+        isEmergency: Boolean = false,
+        pauseOthers: Boolean = false,
+        earcon: Boolean = false
+    ): Boolean {
         val engine = tts
         if (!ready || !ok || engine == null || text.isBlank()) return false
         // Do not interfere with phone calls unless it is a genuine emergency alert
         if (isInPhoneCall() && !isEmergency) return false
+        val calledAt = SystemClock.elapsedRealtime()
 
         // ALWAYS request audio focus so background audio (Spotify, podcasts, music)
         // is ducked (lowered to quiet background) or paused during spoken alerts,
@@ -405,23 +642,48 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
             // keep existing attributes
         }
 
-        val params = Bundle().apply {
+        fun params(uid: String) = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) // 100% maximum volume gain
-            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, id)
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, uid)
         }
 
-        val code = try {
-            engine.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, params, id)
+        // 3.55 latency: a ready clip starts at once; a line that starts with one plays the clip
+        // while the rest is synthesised; otherwise an earcon (when asked) bridges the synthesis.
+        var mode = if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        val lead = clipLead(text)
+        speakAt[id] = calledAt
+        if (lead != null) clipIds.add(id) else clipIds.remove(id)
+        val parts = ArrayList<Pair<String, String>>() // (utterance id, text)
+        if (lead != null && lead != text) {
+            parts.add(Pair("$id#lead", lead))
+            parts.add(Pair(id, text.substring(lead.length).trim()))
+        } else {
+            parts.add(Pair(id, text))
+        }
+        var code = TextToSpeech.SUCCESS
+        try {
+            if (earcon && lead == null && earconReady) {
+                if (engine.playEarcon(EARCON, mode, params("$id#ear"), "$id#ear") == TextToSpeech.SUCCESS) {
+                    active.add("$id#ear")
+                    mode = TextToSpeech.QUEUE_ADD
+                }
+            }
+            for ((uid, part) in parts) {
+                code = engine.speak(part, mode, params(uid), uid)
+                if (code != TextToSpeech.SUCCESS) break
+                active.add(uid)
+                if (isEmergency) activeCritical.add(uid)
+                mode = TextToSpeech.QUEUE_ADD
+            }
         } catch (e: Exception) {
-            TextToSpeech.ERROR
+            code = TextToSpeech.ERROR
         }
         if (code == TextToSpeech.SUCCESS) {
-            active.add(id)
-            if (isEmergency) activeCritical.add(id)
             main.removeCallbacks(safetyFocusWatchdog)
             main.postDelayed(safetyFocusWatchdog, 25000L)
             return true
         }
+        speakAt.remove(id)
         if (active.isEmpty()) abandonFocus()
         return false
     }
@@ -557,11 +819,15 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         }
     }
 
-    /** 3.55 sound awareness: may the rider be unable to hear outside sound? (no mic needed) */
+    /**
+     * 3.55 sound awareness: may the rider be unable to hear outside sound? (no mic needed)
+     * ownSpeech: CoRoute is speaking (on the speaker the siren detector ignores the mic then).
+     */
     private fun listeningState(): Map<String, Any> = mapOf(
         "headset" to headsetOutput(includeSco = true),
         "musicActive" to (try { audio?.isMusicActive == true } catch (e: Exception) { false }),
-        "inCall" to isInPhoneCall()
+        "inCall" to isInPhoneCall(),
+        "ownSpeech" to active.isNotEmpty()
     )
 
     /** A critical line on a headset: media volume at least [CRITICAL_HEADSET_MIN_FRACTION] of max. */
@@ -601,11 +867,19 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         if (id != null) {
             active.remove(id)
             activeCritical.remove(id)
+            if (!id.contains('#')) {
+                // A whole line ended (its earcon / lead clip parts carry a '#' suffix).
+                speakAt.remove(id)
+                clipIds.remove(id)
+                emit("speechEvent", mapOf("id" to id, "event" to "done", "ms" to 0))
+            }
         }
         if (active.isEmpty()) {
             // Give the next line a moment to arrive before the music comes back up.
             main.removeCallbacks(delayedAbandon)
             main.postDelayed(delayedAbandon, FOCUS_GRACE_MS)
+            // Clips still to synthesise go on while nothing is said.
+            main.postDelayed({ pumpPrepare() }, 300L)
         }
     }
 
@@ -635,6 +909,14 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         tts = null
         active.clear()
         activeCritical.clear()
+        speakAt.clear()
+        clipIds.clear()
+        clips.clear()
+        prepQueue.clear()
+        prepById.clear()
+        prepTries.clear()
+        prepBusy = false
+        earconReady = false
         abandonFocus()
         val wasReady = ready
         ready = false
@@ -695,6 +977,13 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         if (hasFocus) {
             currentFocusGain = targetGain
         }
+        val kind = if (targetGain == AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) "pause" else "duck"
+        val result = when (granted) {
+            AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> "granted"
+            AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> "delayed"
+            else -> "failed"
+        }
+        diag("focus $kind ${if (isEmergency) "critical" else "line"} $result music=${try { am.isMusicActive } catch (e: Exception) { false }}")
     }
 
     @Suppress("DEPRECATION")
@@ -734,5 +1023,10 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
 
         /** How long an after-call line waits for the phone to leave call mode. */
         private const val AFTER_CALL_WAIT_MS = 4000L
+
+        private const val LOG_TAG = "CoRouteAudio"
+        private const val EARCON = "[coroute_alert]"
+        private const val CLIP_DIR = "coroute_tts"
+        private const val PREP_PREFIX = "prep:"
     }
 }

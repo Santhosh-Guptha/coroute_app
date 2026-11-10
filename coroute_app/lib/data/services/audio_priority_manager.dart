@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
+import '../../domain/audio/audio_diag_log.dart';
 import '../../domain/voice/call_alert_queue.dart';
 import 'feature_flags_service.dart';
 import 'phone_call_service.dart';
@@ -24,6 +25,12 @@ import 'voice_service.dart';
 //      - no headset: the ALARM usage, heard on the speaker with media volume 0 and through Do Not
 //        Disturb (when alarms are allowed).
 //  * Focus is given back ~0.7 s after the native queue drains (not between lines: no pumping).
+//  * Latency (3.55, docs/features_355/alert_latency.md "Speech output"): the engine is warm for
+//    the whole ride (VoiceService.warmUp), common lines are pre-synthesised clips, P0-P2 lines
+//    start with a short earcon while the words are synthesised, and a line PREEMPTS what is being
+//    said when everything in the engine's queue is of lower priority (P0 / P1: any lower level;
+//    P2-P5: two levels lower, e.g. a hazard cuts a fuel or group line). Lines cut that way are
+//    said again after it (unless stale); equal priorities queue.
 //  * Phone call (admin switch `callAwareAlerts`, unknown = on): ordinary lines are held and summed up
 //    after the call ("While you were on the call: 2 road warnings, Asha fell behind."), stale ones
 //    (> 60 s) dropped, navigation dropped; critical lines get through as a tone + a very short phrase
@@ -32,7 +39,7 @@ import 'voice_service.dart';
 //  * No speech engine / engine error: a tone + vibration instead (critical also posts a sounding
 //    heads-up notification through [criticalNotifier]).
 //
-// API for services outside the voice stack (horn / siren detector, ...):
+// API for services outside the voice stack (siren detector, ...):
 //    `priorityManager.announce(AudioPriority.p0CriticalEmergency, 'Emergency vehicle siren close by',
 //         key: 'siren_close')`
 //  speaks a line at that priority with the rules above (P0/P1 pause music, others duck it). It does
@@ -71,6 +78,13 @@ enum AudioPriority {
   bool operator <=(AudioPriority other) => level <= other.level;
   bool operator >(AudioPriority other) => level > other.level;
   bool operator >=(AudioPriority other) => level >= other.level;
+}
+
+/// A line handed to the native engine and (by estimate, or until its 'done' event) not finished.
+class _InFlight {
+  final AudioAlertItem item;
+  int endMs;
+  _InFlight(this.item, this.endMs);
 }
 
 /// Represents an item submitted to the [AudioPriorityManager].
@@ -118,6 +132,8 @@ class AudioPriorityManager extends ChangeNotifier {
         _callAware = callAware ?? _callAwareSwitch {
     _phoneCall?.addListener(_onPhoneCallChanged);
     _wasInCall = _phoneCall?.isCallActive ?? false;
+    final e = _engine;
+    if (e is VoiceEngineLive) (e as VoiceEngineLive).onSpeechEvent = _onSpeechEvent;
   }
 
   /// Admin switch `callAwareAlerts` (unknown = on; safety ids are never gated, this is not one).
@@ -175,8 +191,44 @@ class AudioPriorityManager extends ChangeNotifier {
   /// Deduplication history: dedupeKey -> (lastSpokenEpochMs, dedupeWindowMs).
   final Map<String, (int, int)> _dedupeHistory = {};
 
-  /// Estimated end timestamps of utterances passed to engine.
-  final List<int> _queueEnds = [];
+  /// Lines passed to the engine and not finished (estimated end, or until the engine says 'done').
+  final List<_InFlight> _inFlight = [];
+
+  /// Lines cut by a preempting line wait in [_queue] until it ends (estimate or 'done' event).
+  int _holdQueueUntilMs = 0;
+  Timer? _holdTimer;
+  bool _disposed = false;
+
+  /// CoRoute is saying something right now (siren detection ignores the phone's own speaker).
+  bool get isSpeaking {
+    _pruneInFlight(_clock());
+    return _inFlight.isNotEmpty;
+  }
+
+  void _pruneInFlight(int now) => _inFlight.removeWhere((f) => f.endMs <= now);
+
+  /// Native speech progress (real engine only).
+  void _onSpeechEvent(String id, String event, int ms) {
+    if (_disposed) return;
+    final i = _inFlight.indexWhere((f) => f.item.id == id);
+    if (event == 'start') {
+      if (i >= 0) {
+        final it = _inFlight[i].item;
+        AudioDiagLog.add('P${it.priority.level} ${AudioDiagLog.safeKey(it.dedupeKey)} decision->audio ${_clock() - it.createdAtMs}ms');
+        // Re-estimate the end from the real start.
+        _inFlight[i].endMs = math.max(_inFlight[i].endMs, _clock() + VoiceService.estimateMs(it.text) - 600);
+      }
+      return;
+    }
+    if (event == 'done' && i >= 0) {
+      _inFlight.removeRange(0, i + 1); // the engine speaks in order
+      if (_inFlight.isEmpty && _holdQueueUntilMs > 0) {
+        _holdQueueUntilMs = 0;
+        _holdTimer?.cancel();
+        _processNextInQueue();
+      }
+    }
+  }
 
   /// Stream controller broadcasting alerts for visual HUD / toast rendering.
   final StreamController<AudioAlertItem> _visualAlertController = StreamController<AudioAlertItem>.broadcast();
@@ -248,8 +300,8 @@ class AudioPriorityManager extends ChangeNotifier {
       _holdItem(pre, now);
       _preemptedItem = null;
     }
-    if (now >= _criticalUntilMs && _queueEnds.any((e) => e > now) && _engineInitialized) {
-      _queueEnds.clear();
+    if (now >= _criticalUntilMs && _inFlight.any((f) => f.endMs > now) && _engineInitialized) {
+      _inFlight.clear();
       _engine.stop().ignore();
     }
     if (moved.isNotEmpty) notifyListeners();
@@ -343,8 +395,9 @@ class AudioPriorityManager extends ChangeNotifier {
     }
 
     // 2. Queue congestion check for non-critical alerts:
-    _queueEnds.removeWhere((end) => end <= now);
-    if (!priority.isCritical && _queueEnds.length >= NotifConstants.voiceMaxQueued) {
+    _pruneInFlight(now);
+    if (!priority.isCritical && _inFlight.length >= NotifConstants.voiceMaxQueued) {
+      AudioDiagLog.add('P${priority.level} ${AudioDiagLog.safeKey(key)} dropped: queue full');
       return false;
     }
 
@@ -399,7 +452,7 @@ class AudioPriorityManager extends ChangeNotifier {
       if (_current != null) {
         await _engine.stop();
         _current = null;
-        _queueEnds.clear();
+        _inFlight.clear();
       }
       return _playAlert(callItem);
     }
@@ -414,7 +467,7 @@ class AudioPriorityManager extends ChangeNotifier {
         // Stop TTS engine immediately
         await _engine.stop();
         _current = null;
-        _queueEnds.clear();
+        _inFlight.clear();
 
         // Play the higher-priority item directly
         return _playAlert(item);
@@ -424,9 +477,6 @@ class AudioPriorityManager extends ChangeNotifier {
         return true;
       }
     } else {
-      if (priority.isCritical) {
-        _queueEnds.clear();
-      }
       return _playAlert(item);
     }
   }
@@ -448,7 +498,7 @@ class AudioPriorityManager extends ChangeNotifier {
   }
 
   void _pruneDedupeHistory(int now) {
-    _dedupeHistory.removeWhere((_, pair) => now - pair.$1 > max(120000, pair.$2));
+    _dedupeHistory.removeWhere((_, pair) => now - pair.$1 > math.max(120000, pair.$2));
   }
 
   void _triggerHapticsFor(AudioPriority p) {
@@ -486,7 +536,13 @@ class AudioPriorityManager extends ChangeNotifier {
       return false;
     }
 
-    final interrupt = item.priority.isCritical;
+    // Preempt only lower-priority speech (see the header); equal priorities queue.
+    final startMs = _clock();
+    _pruneInFlight(startMs);
+    final margin = item.priority.isCritical ? 1 : 2;
+    final interrupt = _inFlight.isEmpty
+        ? item.priority.isCritical
+        : _inFlight.every((f) => f.item.priority.level >= item.priority.level + margin);
     final said = item.text.length > NotifConstants.voiceMaxChars
         ? item.text.substring(0, NotifConstants.voiceMaxChars)
         : item.text;
@@ -499,7 +555,16 @@ class AudioPriorityManager extends ChangeNotifier {
     bool success = false;
     try {
       final e = _engine;
-      if (e is VoiceEngineExtras && (inCall || afterCall)) {
+      if (e is VoiceEngineLive && !inCall && !afterCall) {
+        success = await (e as VoiceEngineLive).speakAlert(
+          said,
+          interrupt: interrupt,
+          id: item.id,
+          isEmergency: isEmergency,
+          pauseOthers: pauseOthers,
+          earcon: item.priority <= AudioPriority.p2ImmediateHazard,
+        );
+      } else if (e is VoiceEngineExtras && (inCall || afterCall)) {
         success = await (e as VoiceEngineExtras).speakExtended(
           said,
           interrupt: interrupt,
@@ -523,6 +588,7 @@ class AudioPriorityManager extends ChangeNotifier {
     }
 
     if (!success) {
+      AudioDiagLog.add('P${item.priority.level} ${AudioDiagLog.safeKey(item.dedupeKey)} engine refused: fallback tone');
       _dedupeHistory.remove(item.dedupeKey);
       _current = null;
       notifyListeners();
@@ -532,11 +598,21 @@ class AudioPriorityManager extends ChangeNotifier {
     }
 
     final at = _clock();
-    if (interrupt) _queueEnds.clear();
-    final start = _queueEnds.isEmpty ? at : _queueEnds.reduce((a, b) => a > b ? a : b);
+    if (interrupt && _inFlight.isNotEmpty) {
+      // The engine flushed these: said again after this line, unless stale.
+      final cut = _inFlight.map((f) => f.item).where((i) => i.isRecoverable && !i.isExpired(at)).toList();
+      _inFlight.clear();
+      for (final c in cut) {
+        if (!_queue.any((q) => q.id == c.id)) _enqueue(c);
+      }
+    }
+    final start = _inFlight.isEmpty ? at : _inFlight.map((f) => f.endMs).reduce((a, b) => a > b ? a : b);
     final end = start + VoiceService.estimateMs(said);
-    _queueEnds.add(end);
+    _inFlight.add(_InFlight(item, end));
     if (isEmergency && end > _criticalUntilMs) _criticalUntilMs = end;
+    if (interrupt && _queue.isNotEmpty) _holdQueue(end);
+    AudioDiagLog.add('P${item.priority.level} ${AudioDiagLog.safeKey(item.dedupeKey)} to engine: waited ${startMs - item.createdAtMs}ms, '
+        'call ${at - startMs}ms, ${interrupt ? 'preempt' : 'queued behind ${_inFlight.length - 1}'}');
 
     _current = null;
     notifyListeners();
@@ -580,7 +656,7 @@ class AudioPriorityManager extends ChangeNotifier {
   }
 
   /// Speaks [text] at [priority] with the audio rules in the header of this file (for services outside
-  /// the voice stack, e.g. the horn / siren detector). P0 / P1 always pause other apps (alarm stream on
+  /// the voice stack, e.g. the siren detector). P0 / P1 always pause other apps (alarm stream on
   /// the speaker, media speech on a headset); lower priorities duck other apps (or pause them with [pauseOthers]). The rider's voice
   /// settings are NOT applied here (use VoiceService for that). False when not spoken (duplicate key
   /// within the dedupe window, queue full, no engine) or held for a phone call (true for held lines
@@ -602,8 +678,19 @@ class AudioPriorityManager extends ChangeNotifier {
         pauseOthers: pauseOthers,
       );
 
+  /// Queued lines wait until [untilMs] (the end of a preempting line, or its 'done' event).
+  void _holdQueue(int untilMs) {
+    _holdQueueUntilMs = untilMs;
+    _holdTimer?.cancel();
+    _holdTimer = Timer(Duration(milliseconds: math.max(0, untilMs - _clock())), () {
+      _holdQueueUntilMs = 0;
+      _processNextInQueue();
+    });
+  }
+
   void _processNextInQueue() {
-    if (_isProcessing || _current != null) return;
+    if (_disposed || _isProcessing || _current != null) return;
+    if (_holdQueueUntilMs > 0 && _clock() < _holdQueueUntilMs) return; // the hold timer resumes it
     _isProcessing = true;
     _pruneExpiredQueue();
 
@@ -636,7 +723,9 @@ class AudioPriorityManager extends ChangeNotifier {
   /// Stops current speech and clears priority queue.
   Future<void> stop() async {
     _queue.clear();
-    _queueEnds.clear();
+    _inFlight.clear();
+    _holdTimer?.cancel();
+    _holdQueueUntilMs = 0;
     _preemptedItem = null;
     _current = null;
     if (_onEnsureEngine == null && _engineInitialized) {
@@ -659,6 +748,10 @@ class AudioPriorityManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _holdTimer?.cancel();
+    final e = _engine;
+    if (e is VoiceEngineLive) (e as VoiceEngineLive).onSpeechEvent = null;
     _phoneCall?.removeListener(_onPhoneCallChanged);
     _visualAlertController.close();
     super.dispose();

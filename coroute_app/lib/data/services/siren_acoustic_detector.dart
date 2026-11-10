@@ -9,6 +9,7 @@ import '../../core/config/feature_gates.dart';
 import '../../domain/audio/dsp_core.dart';
 import '../../domain/audio/sound_alert_policy.dart';
 import '../../domain/audio/sound_awareness_engine.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (numbers only, never audio)
 import 'feature_flags_service.dart';
 import 'intercom_service.dart';
 import 'ride_mic_hub.dart';
@@ -95,9 +96,6 @@ class SirenDetectionEvent {
   /// 3.55: short trend / nearness / kind words for the cockpit card ('' on the legacy path).
   String get detailText {
     final parts = <String>[
-      if (kindConfident && kind == EmergencyVehicleKind.ambulance) 'ambulance-like',
-      if (kindConfident && kind == EmergencyVehicleKind.police) 'police-like',
-      if (kindConfident && kind == EmergencyVehicleKind.fire) 'fire-engine-like',
       if (trend == SirenTrend.approaching) 'Approaching',
       if (trend == SirenTrend.movingAway) 'Moving away',
       if (nearness == SoundNearness.veryNear) 'Very close',
@@ -109,7 +107,13 @@ class SirenDetectionEvent {
 
   /// Displays the required alert text based on directional verification.
   // 3.55 naming: never "behind" (one mic cannot tell direction); "give way" instead of "yield".
-  String get alertText => '🚨 EMERGENCY VEHICLE SIREN · GIVE WAY';
+  // 3.55: the kind when the engine is confident ("AMBULANCE SIREN"), else "EMERGENCY VEHICLE".
+  String get alertText => switch (kindConfident ? kind : EmergencyVehicleKind.unknown) {
+        EmergencyVehicleKind.ambulance => '🚨 AMBULANCE SIREN · GIVE WAY',
+        EmergencyVehicleKind.police => '🚨 POLICE SIREN · GIVE WAY',
+        EmergencyVehicleKind.fire => '🚨 FIRE ENGINE SIREN · GIVE WAY',
+        EmergencyVehicleKind.unknown => '🚨 EMERGENCY VEHICLE SIREN · GIVE WAY',
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -555,24 +559,27 @@ class SirenAcousticDetector extends ChangeNotifier {
   // ===================================================================== 3.55 ride mic hub path
   //
   // Since 3.55 the detector is fed by the RideMicHub (one shared microphone during a ride) and
-  // runs the SoundAwarenessEngine (lib/domain/audio/sound_awareness_engine.dart: sirens + horns,
-  // pure Dart, on the phone only; audio is never recorded or sent). The legacy
-  // SirenClassifierEngine / processPcmChunk path above stays for compatibility.
+  // runs the SoundAwarenessEngine (lib/domain/audio/sound_awareness_engine.dart: sirens only,
+  // pure Dart, on the phone only; audio is never recorded or sent). Horn alerts were removed
+  // (owner's decision). The legacy SirenClassifierEngine / processPcmChunk path above stays for
+  // compatibility.
   //
   // Purpose: the rider may not hear outside sound (noise-cancelling earbuds, a helmet set, music),
   // but the phone's own microphone does. The rider is warned; the group is not told.
   // How loud an alert is comes from lib/domain/audio/sound_alert_policy.dart, using
-  // [listening] (polled from native without the mic: headset / music / call; plus the intercom):
-  //  * siren, rider isolated: close / approaching / closer = P1 (music paused), "Emergency vehicle
-  //    siren close by. Keep left and give way.", strong vibration, cockpit card, heads-up when the
-  //    app is not in front; far = P2 "Emergency vehicle siren in the distance.";
+  // [listening] (polled from native without the mic: headset / music / call / our own speech;
+  // plus the intercom):
+  //  * siren, rider isolated: close / approaching / closer = P1 (music paused), e.g. "Ambulance
+  //    siren close by. Keep left and give way." (the kind only when the engine is confident, else
+  //    "Emergency vehicle siren ..."), strong vibration, cockpit card, heads-up when the app is not
+  //    in front; far = P2 "... siren in the distance.";
   //  * siren, rider not isolated (phone speaker, no music): card + vibration + a short tone;
   //  * intercom playback ducked -20 dB while a siren episode lasts (both cases);
-  //  * horn (Automatic = only while isolated, On, Off): isolated = "Horn close by. Check your
-  //    mirrors." (P2) + vibration + [hornAlertNotifier]; not isolated (On) = vibration + card.
-  // Admin switches: 'sirenDetector' (sirens), 'hornAlert' (horns). Unknown = on.
+  //  * the phone's own sound on its loudspeaker (music, intercom, our own line) is ignored by the
+  //    engine ([SoundAwarenessEngine.suppress]), so the phone never alerts on itself.
+  // Admin switch: 'sirenDetector'. Unknown = on.
 
-  /// The 3.55 engine (sirens + horns).
+  /// The 3.55 engine (sirens).
   final SoundAwarenessEngine awareness = SoundAwarenessEngine();
 
   RideMicHub? _hub;
@@ -588,17 +595,14 @@ class SirenAcousticDetector extends ChangeNotifier {
   /// Rider setting: siren alerts on (default on). Admin switch 'sirenDetector' applies on top.
   bool Function() sirenSettingOn = () => true;
 
-  /// Rider setting for horns: true (On) / false (Off), or null = Automatic (only while isolated).
-  bool? Function() hornSetting = () => null;
-
   /// 'left' or 'right': the side to keep to when giving way (India and the UK: left).
   String Function() giveWaySide = () => 'left';
 
-  /// The rider is talking on the intercom right now (their voice is never a horn).
-  bool Function() riderTalking = () => false;
-
   /// The intercom is playing a rider's voice (counts as "cannot hear outside").
   bool Function() intercomPlaying = () => false;
+
+  /// CoRoute is speaking a line right now (Dart side, before the next native poll sees it).
+  bool Function() ownSpeechActive = () => false;
 
   /// Reads the phone's audio state (headset / music / call) without the microphone. Wired in
   /// main.dart to NativeVoiceEngine.readListeningState; null = [ListeningState.open] (tests).
@@ -609,36 +613,27 @@ class SirenAcousticDetector extends ChangeNotifier {
   Timer? _listenPoll;
   bool _polling = false;
 
-  /// How often the audio state is read during a ride (a cheap AudioManager query, no mic).
-  static const Duration listeningPollEvery = Duration(seconds: 3);
+  /// How often the audio state is read during a ride (a cheap AudioManager query, no mic). Short,
+  /// so music started on the phone speaker is ignored by detection before it could add up to the
+  /// 2.5 s a siren needs.
+  static const Duration listeningPollEvery = Duration(seconds: 1);
 
   /// The rider's hearing situation right now.
-  ListeningState get listening => _native.withIntercom(intercomPlaying());
+  ListeningState get listening => _native.withIntercom(intercomPlaying()).withOwnSpeech(_native.ownSpeech || ownSpeechActive());
 
   /// The rider likely cannot hear outside sound (earphones / helmet set, music, intercom, call).
   bool get listeningIsolated => listening.isolated;
 
-  /// Test hook / native push: a new audio state. Re-evaluates the mic when horns change.
+  /// Test hook / native push: a new audio state.
   @visibleForTesting
   void setNativeListening(ListeningState s) {
     final changed = s != _native;
     _native = s;
-    _checkHornsChanged();
     if (changed && !_isDisposed) notifyListeners();
   }
 
-  bool _lastHornsOn = false;
-
-  /// Automatic horns follow the audio state (and the intercom playing): open / close the mic.
-  void _checkHornsChanged() {
-    final now = hornAlertsOn;
-    if (now == _lastHornsOn) return;
-    _lastHornsOn = now;
-    settingsChanged();
-  }
-
   /// Starts / stops reading the audio state (main.dart: on ride start and end). Runs only during a
-  /// ride; never needs the microphone, so Automatic horns work even with siren alerts off.
+  /// ride and never needs the microphone.
   void setRideActive(bool riding) {
     if (riding) {
       _listenPoll ??= Timer.periodic(listeningPollEvery, (_) => _pollListening());
@@ -690,25 +685,11 @@ class SirenAcousticDetector extends ChangeNotifier {
     }
   }
 
-  /// Last horn alert (for the cockpit horn card; cleared after [hornCardShowFor]).
-  final ValueNotifier<HornAlert?> hornAlertNotifier = ValueNotifier<HornAlert?>(null);
-
-  /// 3.55: the cockpit horn card is glanceable, so it stays only ~4 s.
-  static const Duration hornCardShowFor = Duration(seconds: 4);
-  Timer? _hornClear;
-
   /// Siren alerts wanted now (setting + admin switch).
   bool get sirenAlertsOn => sirenSettingOn() && FeatureFlagsService.on('sirenDetector');
 
-  /// Horn alerts effectively active now (On, or Automatic while isolated; admin switch on top).
-  bool get hornAlertsOn => SoundAlertPolicy.hornsActive(
-        setting: hornSetting(),
-        isolated: listeningIsolated,
-        adminOn: FeatureFlagsService.on('hornAlert'),
-      );
-
-  /// Something needs the hub's analysis frames (the hub asks this through detectionEnabled).
-  bool get detectionWanted => SoundAlertPolicy.detectionNeedsMic(sirensOn: sirenAlertsOn, hornsActive: hornAlertsOn);
+  /// The hub's analysis frames are needed (the hub asks this through detectionEnabled).
+  bool get detectionWanted => sirenAlertsOn;
 
   /// Connects to the ride mic hub (main.dart). The hub decides when the mic is open.
   void attachHub(RideMicHub hub) {
@@ -728,9 +709,7 @@ class SirenAcousticDetector extends ChangeNotifier {
 
   /// Settings / admin switches / ride changed: lets the hub open or release the mic at once.
   void settingsChanged() {
-    _lastHornsOn = hornAlertsOn;
     if (!sirenAlertsOn) _endSirenEpisode();
-    if (!_lastHornsOn) hornAlertNotifier.value = null;
     _hub?.reevaluate();
   }
 
@@ -743,30 +722,37 @@ class SirenAcousticDetector extends ChangeNotifier {
   /// One 20 ms frame from the hub (raw PCM16, 16 kHz). Also used by tests.
   void onHubFrame(Int16List frame, MicFrameInfo info) {
     if (_isDisposed) return;
-    final sirensOn = sirenAlertsOn;
-    final hornsOn = hornAlertsOn;
-    if (!sirensOn && !hornsOn) {
+    if (!sirenAlertsOn) {
       _endSirenEpisode();
       return;
     }
     // A headset mic (push-to-talk on a helmet set) hears the rider, not the road: those frames are
     // skipped so they never disturb the road noise floor (detection resumes on the phone mic).
     if (info.processed && info.headset) return;
-    awareness.hornEnabled = hornsOn;
-    awareness.suppressHorn = riderTalking();
-    final u = awareness.process(int16ToFloat(frame));
-    if (sirensOn) {
-      _onSirenUpdate(u);
-    } else if (activeSirenNotifier.value != null) {
-      _endSirenEpisode();
+    awareness.suppress = listening.ownSoundOnSpeaker;
+    // 3.55 diagnostics: with detailed logs on, why sound candidates were not sirens (sampled).
+    final why = DiagLog.detailed;
+    awareness.debug = why;
+    _onSirenUpdate(awareness.process(int16ToFloat(frame)));
+    if (why) {
+      final c = awareness.debugClass;
+      if (c.isNotEmpty && !c.startsWith('no run') && DiagLog.sampler.take('siren_reject', DateTime.now().millisecondsSinceEpoch)) {
+        DiagLog.debug(DiagCat.siren, 'candidate_rejected', {'why': c});
+      }
     }
-    final h = u.hornAlert;
-    if (h != null && hornsOn) _onHornAlert(h);
   }
 
   void _onSirenUpdate(SoundAwarenessUpdate u) {
     final obs = u.siren;
     if (obs != null) {
+      if (activeSirenNotifier.value == null) {
+        // First observation of an episode: what was heard and how long it took to be sure.
+        DiagLog.info(DiagCat.siren, 'detected', {
+          'pattern': obs.pattern, 'kind': obs.kind, 'kindSure': obs.kindConfident, 'conf': obs.confidence, 'kindConf': obs.kindConfidence,
+          'snrDb': obs.snrDb, 'hz': obs.centreHz, 'heardS': obs.continuousSec, 'trend': obs.trend, 'near': obs.nearness,
+          'music': listening.musicActive, 'call': listening.inCall,
+        });
+      }
       activeSirenNotifier.value = SirenDetectionEvent.fromObservation(obs);
       if (stateNotifier.value != SirenDetectorState.detected) stateNotifier.value = SirenDetectorState.detected;
       _applyDucking(true);
@@ -778,24 +764,13 @@ class SirenAcousticDetector extends ChangeNotifier {
     final o = alert.observation;
     final style = SoundAlertPolicy.sirenStyle(close: SoundAlertPolicy.sirenClose(alert), isolated: listeningIsolated);
     final line = sirenAlertText(alert, keepSide: giveWaySide());
+    DiagLog.info(DiagCat.siren, 'alert', {'reason': alert.reason, 'speak': style.speak, 'tone': style.tone, 'urgent': style.urgent, 'close': SoundAlertPolicy.sirenClose(alert), 'isolated': listeningIsolated, 'heardS': o.continuousSec});
     if (style.speak) {
       speak?.call(line, urgent: style.urgent, key: 'siren_${alert.reason.name}_${o.timeSec.round()}').ignore();
     } else if (style.tone) {
       tone?.call();
     }
-    _feel('Emergency vehicle', line, strong: style.strongVibration);
-  }
-
-  void _onHornAlert(HornAlert h) {
-    hornAlertNotifier.value = h;
-    _hornClear?.cancel();
-    _hornClear = Timer(hornCardShowFor, () {
-      if (!_isDisposed) hornAlertNotifier.value = null;
-    });
-    if (SoundAlertPolicy.hornStyle(isolated: listeningIsolated).speak) {
-      speak?.call(hornAlertText, urgent: false, key: 'horn_${h.event.timeSec.round()}').ignore();
-    }
-    _feel('Horn close by', 'Check your mirrors.', strong: false);
+    _feel(sirenTitle(o), line, strong: style.strongVibration);
   }
 
   /// 3.55: counts finished siren episodes, so the cockpit can key a dismissed siren card per
@@ -803,6 +778,7 @@ class SirenAcousticDetector extends ChangeNotifier {
   int sirenEpisode = 0;
 
   void _endSirenEpisode() {
+    if (activeSirenNotifier.value != null) DiagLog.info(DiagCat.siren, 'episode_end');
     sirenEpisode++;
     if (activeSirenNotifier.value != null && !_isDisposed) activeSirenNotifier.value = null;
     if (!_isDisposed && stateNotifier.value == SirenDetectorState.detected) stateNotifier.value = SirenDetectorState.inactive;
@@ -833,26 +809,43 @@ class SirenAcousticDetector extends ChangeNotifier {
     return leftHand.contains(cc) ? 'left' : 'right';
   }
 
-  /// What the rider hears. The kind is named only when the engine is confident, and always as a
-  /// likeness ("sounds like an ambulance"): patterns are shared between services and countries.
+  /// The kind said in the line: only when the engine is confident ([SirenObservation.kindConfident]).
+  static EmergencyVehicleKind spokenKind(SirenObservation o) => o.kindConfident ? o.kind : EmergencyVehicleKind.unknown;
+
+  /// Heads-up / notification title.
+  static String sirenTitle(SirenObservation o) => switch (spokenKind(o)) {
+        EmergencyVehicleKind.ambulance => 'Ambulance',
+        EmergencyVehicleKind.police => 'Police',
+        EmergencyVehicleKind.fire => 'Fire engine',
+        EmergencyVehicleKind.unknown => 'Emergency vehicle',
+      };
+
+  /// What the rider hears: "Ambulance siren close by. Keep left and give way.", "Police
+  /// approaching. ...", "Emergency vehicle siren in the distance." The kind is said only when the
+  /// engine is confident; otherwise "Emergency vehicle".
   static String sirenAlertText(SirenAlert a, {String keepSide = 'left'}) {
     final o = a.observation;
-    final like = o.kindConfident
-        ? switch (o.kind) {
-            EmergencyVehicleKind.ambulance => ', sounds like an ambulance',
-            EmergencyVehicleKind.police => ', sounds like police',
-            EmergencyVehicleKind.fire => ', sounds like a fire engine',
-            EmergencyVehicleKind.unknown => '',
-          }
-        : '';
+    final who = sirenTitle(o);
     final giveWay = 'Keep $keepSide and give way.';
-    if (a.reason == SirenAlertReason.closer) return 'Emergency vehicle getting closer$like. $giveWay';
-    if (o.trend == SirenTrend.approaching) return 'Emergency vehicle approaching$like. $giveWay';
-    if (o.nearness == SoundNearness.far) return 'Emergency vehicle siren in the distance$like.';
-    return 'Emergency vehicle siren close by$like. $giveWay';
+    if (a.reason == SirenAlertReason.closer) return '$who getting closer. $giveWay';
+    if (o.trend == SirenTrend.approaching) return '$who approaching. $giveWay';
+    if (o.nearness == SoundNearness.far) return '$who siren in the distance.';
+    return '$who siren close by. $giveWay';
   }
 
-  static const String hornAlertText = 'Horn close by. Check your mirrors.';
+  /// Every line [sirenAlertText] can produce for [keepSide] (pre-synthesised at ride start, so the
+  /// alert starts at once: see VoiceService.warmUp).
+  static List<String> allSirenLines({String keepSide = 'left'}) {
+    final giveWay = 'Keep $keepSide and give way.';
+    return [
+      for (final who in const ['Emergency vehicle', 'Ambulance', 'Police', 'Fire engine']) ...[
+        '$who siren close by. $giveWay',
+        '$who approaching. $giveWay',
+        '$who getting closer. $giveWay',
+        '$who siren in the distance.',
+      ],
+    ];
+  }
 
   /// Starts listening to microphone and processing acoustic frames.
   /// If [injectedStream] is provided (e.g. in tests), uses it instead of hardware mic.
@@ -942,6 +935,7 @@ class SirenAcousticDetector extends ChangeNotifier {
 
   void _onMicError(Object error) {
     debugPrint('SirenAcousticDetector audio stream error: $error');
+    DiagLog.warn(DiagCat.siren, 'mic_error', {'type': error.runtimeType.toString()});
     if (!_isDisposed) {
       stateNotifier.value = SirenDetectorState.unavailable;
       _applyDucking(false);
@@ -977,10 +971,8 @@ class SirenAcousticDetector extends ChangeNotifier {
   void dispose() {
     _hub?.removeAnalysisListener(onHubFrame);
     _hub = null;
-    _hornClear?.cancel();
     _listenPoll?.cancel();
     _listenPoll = null;
-    hornAlertNotifier.dispose();
     _isDisposed = true;
     _isRunning = false;
     if (intercomService?.onMicChunk == processPcmChunk) {

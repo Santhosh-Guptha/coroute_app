@@ -1,5 +1,5 @@
-// 3.55 Siren / horn alert policy (pure Dart, no Flutter): how loud an alert is, based on whether
-// the rider can hear outside sound right now.
+// 3.55 Siren alert policy (pure Dart, no Flutter): how loud an alert is, based on whether the
+// rider can hear outside sound right now.
 //
 // The real scenario: the rider wears noise-cancelling earbuds or a helmet Bluetooth set, or plays
 // music, and does not hear an ambulance. The phone's own microphone (on the mount, in the tank bag
@@ -9,16 +9,16 @@
 //    (A2DP, LE audio, hearing aid, SCO) or wired / USB headset connected, other apps' music
 //    playing, the intercom playing a rider's voice, or a phone call. It comes from the phone's
 //    audio state (no microphone needed), see TtsChannel.kt "listeningState".
-//  * Sirens (setting "Siren alerts", default on): always detected during a ride.
+//  * Sirens (setting "Siren alerts", default on): detected during a ride.
 //      isolated  -> full alert: P1 line (music paused), strong vibration, card, heads-up;
 //                   a far siren gets the short P2 "in the distance" line.
 //      not isolated (phone speaker, no music) -> softer: card + vibration + a short tone, no speech
 //                   (the rider hears the siren); a far siren only vibrates.
-//  * Horns (setting "Horn alerts": Automatic (default) / On / Off):
-//      Automatic = active only while isolated; On = always; Off = never.
-//      isolated -> "Horn close by. Check your mirrors." (P2) + vibration + card;
-//      not isolated (On) -> vibration + card only.
-//  * The microphone is needed for detection while sirens are on, or horns are effectively active.
+//  * The phone's own sound on its loudspeaker (music, a ringtone, our own spoken line, the intercom
+//    without a headset) reaches the microphone: detection ignores those frames
+//    ([ListeningState.ownSoundOnSpeaker]), so the phone never alerts on itself.
+//  * The microphone is needed for detection while siren alerts are on (the hub also checks ride,
+//    battery, call and permission).
 //
 // Rider-facing wording says "close by" or "approaching", never "behind" (one mic has no direction).
 
@@ -40,11 +40,15 @@ class ListeningState {
   /// A phone call rings or is active.
   final bool inCall;
 
+  /// CoRoute itself is speaking an alert right now (native TTS queue not empty).
+  final bool ownSpeech;
+
   const ListeningState({
     this.headset = HeadsetKind.none,
     this.musicActive = false,
     this.intercomPlaying = false,
     this.inCall = false,
+    this.ownSpeech = false,
   });
 
   static const ListeningState open = ListeningState();
@@ -52,7 +56,12 @@ class ListeningState {
   /// The rider likely cannot hear outside sound.
   bool get isolated => headset != HeadsetKind.none || musicActive || intercomPlaying || inCall;
 
-  /// Parses the native map ({headset: 'bluetooth'|'wired'|'hearingAid'|'', musicActive, inCall}).
+  /// The phone plays sound on its own loudspeaker (no headset): music or media, the intercom, or
+  /// our own spoken line. The microphone hears it, so siren detection ignores those frames.
+  bool get ownSoundOnSpeaker => headset == HeadsetKind.none && (musicActive || intercomPlaying || ownSpeech);
+
+  /// Parses the native map ({headset: 'bluetooth'|'wired'|'hearingAid'|'', musicActive, inCall,
+  /// ownSpeech}). Missing keys read as false.
   static ListeningState fromMap(Map<Object?, Object?> m, {bool intercomPlaying = false}) {
     final h = m['headset']?.toString() ?? '';
     return ListeningState(
@@ -65,11 +74,18 @@ class ListeningState {
       musicActive: m['musicActive'] == true,
       intercomPlaying: intercomPlaying,
       inCall: m['inCall'] == true,
+      ownSpeech: m['ownSpeech'] == true,
     );
   }
 
   ListeningState withIntercom(bool playing) =>
-      ListeningState(headset: headset, musicActive: musicActive, intercomPlaying: playing, inCall: inCall);
+      ListeningState(headset: headset, musicActive: musicActive, intercomPlaying: playing, inCall: inCall, ownSpeech: ownSpeech);
+
+  /// The same state with CoRoute's own speech known on the Dart side (it starts before the next
+  /// native poll).
+  ListeningState withOwnSpeech(bool speaking) => speaking == ownSpeech
+      ? this
+      : ListeningState(headset: headset, musicActive: musicActive, intercomPlaying: intercomPlaying, inCall: inCall, ownSpeech: speaking);
 
   @override
   bool operator ==(Object other) =>
@@ -77,13 +93,15 @@ class ListeningState {
       other.headset == headset &&
       other.musicActive == musicActive &&
       other.intercomPlaying == intercomPlaying &&
-      other.inCall == inCall;
+      other.inCall == inCall &&
+      other.ownSpeech == ownSpeech;
 
   @override
-  int get hashCode => Object.hash(headset, musicActive, intercomPlaying, inCall);
+  int get hashCode => Object.hash(headset, musicActive, intercomPlaying, inCall, ownSpeech);
 
   @override
-  String toString() => 'ListeningState(headset: ${headset.name}, music: $musicActive, intercom: $intercomPlaying, call: $inCall)';
+  String toString() =>
+      'ListeningState(headset: ${headset.name}, music: $musicActive, intercom: $intercomPlaying, call: $inCall, ownSpeech: $ownSpeech)';
 }
 
 /// How a siren alert is delivered.
@@ -106,12 +124,6 @@ class SirenAlertStyle {
   String toString() => 'SirenAlertStyle(speak: $speak, urgent: $urgent, strong: $strongVibration, tone: $tone)';
 }
 
-/// How a horn alert is delivered (the card always shows).
-class HornAlertStyle {
-  final bool speak;
-  const HornAlertStyle({required this.speak});
-}
-
 class SoundAlertPolicy {
   SoundAlertPolicy._();
 
@@ -127,15 +139,4 @@ class SoundAlertPolicy {
     }
     return SirenAlertStyle(speak: false, urgent: false, strongVibration: close, tone: close);
   }
-
-  /// Horns effectively active: [setting] true = On, false = Off, null = Automatic (only while isolated).
-  static bool hornsActive({required bool? setting, required bool isolated, bool adminOn = true}) {
-    if (!adminOn) return false;
-    return setting ?? isolated;
-  }
-
-  static HornAlertStyle hornStyle({required bool isolated}) => HornAlertStyle(speak: isolated);
-
-  /// The ride microphone is needed for detection (the hub also checks ride, battery, call, permission).
-  static bool detectionNeedsMic({required bool sirensOn, required bool hornsActive}) => sirensOn || hornsActive;
 }

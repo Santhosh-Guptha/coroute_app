@@ -1,4 +1,4 @@
-// 3.55 sound awareness: small DSP building blocks shared by the siren / horn detector and the
+// 3.55 sound awareness: small DSP building blocks shared by the siren detector and the
 // intercom voice cleanup. Pure Dart (dart:math + dart:typed_data only, no Flutter), so the same
 // code runs in unit tests, in a plain `dart` script and on the phone.
 //

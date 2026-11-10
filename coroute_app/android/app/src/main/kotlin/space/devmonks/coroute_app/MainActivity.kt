@@ -45,7 +45,9 @@ class MainActivity : FlutterActivity() {
         rideChannel.setMethodCallHandler(ride)
         val tts = TtsChannel(applicationContext)
         ttsChannel = tts
-        MethodChannel(messenger, "coroute/tts").setMethodCallHandler(tts)
+        val ttsMethods = MethodChannel(messenger, "coroute/tts")
+        ttsMethods.setMethodCallHandler(tts)
+        tts.events = ttsMethods // 3.55: speech start / done and audio diagnostics back to Dart
 
         val phoneCall = PhoneCallChannel(applicationContext)
         phoneCallChannel = phoneCall
@@ -65,6 +67,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 3.55 diagnostics log: native crashes go to files/diag (merged into the app log next start).
+        CrashLog.install(applicationContext)
         super.onCreate(savedInstanceState)
         // A ride notification button started the app: kept until Dart asks (takeLaunchAction).
         if (savedInstanceState == null) rideNotification?.handleActivityIntent(intent, coldStart = true)
@@ -75,10 +79,12 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         PushChannel.foreground = true
+        CrashLog.startStallWatch() // 3.55: main-thread stalls of 5 s+ while in front (ANR-like)
     }
 
     override fun onPause() {
         PushChannel.foreground = false
+        CrashLog.stopStallWatch()
         super.onPause()
     }
 
@@ -102,6 +108,7 @@ class MainActivity : FlutterActivity() {
         rideNotification?.dispose()
         rideNotification = null
         MethodChannel(messenger, "coroute/ride_notification").setMethodCallHandler(null)
+        ttsChannel?.events = null
         ttsChannel?.dispose() // also gives back music lowered by "Lower music when speeding"
         ttsChannel = null
         MethodChannel(messenger, "coroute/tts").setMethodCallHandler(null)

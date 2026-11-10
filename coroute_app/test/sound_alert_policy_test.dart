@@ -1,4 +1,4 @@
-// 3.55 siren / horn alert policy: how loud an alert is, from whether the rider can hear outside
+// 3.55 siren alert policy: how loud an alert is, from whether the rider can hear outside
 // sound (lib/domain/audio/sound_alert_policy.dart; pure Dart, also sanity-run with plain dart).
 
 import 'package:flutter_test/flutter_test.dart';
@@ -78,25 +78,17 @@ void main() {
     });
   });
 
-  group('horns', () {
-    test('Automatic = only while isolated; On / Off; admin switch', () {
-      expect(SoundAlertPolicy.hornsActive(setting: null, isolated: true), isTrue);
-      expect(SoundAlertPolicy.hornsActive(setting: null, isolated: false), isFalse);
-      expect(SoundAlertPolicy.hornsActive(setting: true, isolated: false), isTrue);
-      expect(SoundAlertPolicy.hornsActive(setting: false, isolated: true), isFalse);
-      expect(SoundAlertPolicy.hornsActive(setting: true, isolated: true, adminOn: false), isFalse);
-    });
-
-    test('spoken only when isolated', () {
-      expect(SoundAlertPolicy.hornStyle(isolated: true).speak, isTrue);
-      expect(SoundAlertPolicy.hornStyle(isolated: false).speak, isFalse);
-    });
-
-    test('mic needed for sirens, or horns effectively active (Automatic + isolated with sirens off)', () {
-      expect(SoundAlertPolicy.detectionNeedsMic(sirensOn: true, hornsActive: false), isTrue);
-      expect(SoundAlertPolicy.detectionNeedsMic(sirensOn: false, hornsActive: false), isFalse);
-      final horns = SoundAlertPolicy.hornsActive(setting: null, isolated: true);
-      expect(SoundAlertPolicy.detectionNeedsMic(sirensOn: false, hornsActive: horns), isTrue);
+  group('own sound on the phone speaker (ignored by detection)', () {
+    test('music, intercom or our own line on the speaker; never with a headset', () {
+      expect(ListeningState.open.ownSoundOnSpeaker, isFalse);
+      expect(const ListeningState(musicActive: true).ownSoundOnSpeaker, isTrue, reason: 'music from the phone speaker reaches the mic');
+      expect(const ListeningState(intercomPlaying: true).ownSoundOnSpeaker, isTrue);
+      expect(const ListeningState(ownSpeech: true).ownSoundOnSpeaker, isTrue, reason: 'our own alert line');
+      expect(const ListeningState(headset: HeadsetKind.bluetooth, musicActive: true, ownSpeech: true).ownSoundOnSpeaker, isFalse,
+          reason: 'with a headset the sound goes to the ears, the mic still hears the road');
+      expect(ListeningState.fromMap({'ownSpeech': true}).ownSpeech, isTrue);
+      expect(ListeningState.open.withOwnSpeech(true).ownSoundOnSpeaker, isTrue);
+      expect(ListeningState.open.withOwnSpeech(true).isolated, isFalse, reason: 'our own speech does not make the rider isolated');
     });
   });
 }

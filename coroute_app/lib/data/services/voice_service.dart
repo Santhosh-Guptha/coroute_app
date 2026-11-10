@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
 import '../../core/l10n/l10n.dart';
+import '../../domain/audio/audio_diag_log.dart';
 import '../../domain/audio/sound_alert_policy.dart';
 import 'audio_priority_manager.dart';
 import 'phone_call_service.dart';
@@ -58,13 +59,68 @@ abstract class VoiceEngineExtras {
   Future<void> fallbackAlert({required bool critical, bool inCall = false});
 }
 
+/// 3.55 alert latency: what only the real (native) engine can do. Fakes in tests do not implement it;
+/// [AudioPriorityManager] checks `engine is VoiceEngineLive`.
+abstract class VoiceEngineLive {
+  /// Like [VoiceEngine.speak]; [earcon] plays a short beep first (at once, while the engine
+  /// synthesises the words) unless the line is pre-synthesised (then it starts instantly anyway).
+  Future<bool> speakAlert(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+    bool earcon = false,
+  });
+
+  /// Pre-synthesises [phrases] to audio clips (ride start), so those exact lines, or lines that
+  /// START with one of them ("Slow down." + the rest), begin playing instantly.
+  Future<void> prepare(List<String> phrases);
+
+  /// Speech progress from the engine: [event] 'start' (with [ms] = delay from the speak call to the
+  /// first audio) or 'done' (finished, stopped or failed).
+  set onSpeechEvent(void Function(String id, String event, int ms)? handler);
+}
+
 /// Android TextToSpeech through MethodChannel `coroute/tts` (TtsChannel.kt): the
 /// language of the app's safety setting (Hindi or Telugu when the phone has the
 /// voice), else Indian English, else US English; ducks other audio while speaking.
-class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage, VoiceEngineExtras {
+class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage, VoiceEngineExtras, VoiceEngineLive {
   NativeVoiceEngine({MethodChannel? channel}) : _ch = channel ?? const MethodChannel(NotifConstants.ttsChannel);
 
   final MethodChannel _ch;
+  void Function(String id, String event, int ms)? _onSpeechEvent;
+  bool _listening = false;
+
+  @override
+  set onSpeechEvent(void Function(String id, String event, int ms)? handler) => _onSpeechEvent = handler;
+
+  /// Native -> Dart calls on `coroute/tts`: 'speechEvent' {id, event, ms} and 'diag' {line}
+  /// (focus results, volume changes; nothing personal). Set once the engine is used.
+  void _listen() {
+    if (_listening) return;
+    _listening = true;
+    try {
+      _ch.setMethodCallHandler((call) async {
+        final a = call.arguments;
+        if (a is! Map) return null;
+        switch (call.method) {
+          case 'speechEvent':
+            final id = a['id']?.toString() ?? '';
+            final ev = a['event']?.toString() ?? '';
+            final ms = (a['ms'] as num?)?.toInt() ?? 0;
+            if (ev == 'start') AudioDiagLog.add('speech start $id +${ms}ms${a['clip'] == true ? ' (clip)' : ''}');
+            _onSpeechEvent?.call(id, ev, ms);
+          case 'diag':
+            final line = a['line']?.toString();
+            if (line != null && line.isNotEmpty) AudioDiagLog.add('native $line');
+        }
+        return null;
+      });
+    } catch (_) {
+      _listening = false; // no binding (unit tests): events are optional
+    }
+  }
 
   /// The language the engine uses ('en-IN', 'hi-IN'), '' before [init] or without a voice.
   @override
@@ -73,6 +129,7 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage, VoiceEngine
   @override
   Future<bool> init() async {
     if (kIsWeb || (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS)) return false;
+    _listen();
     try {
       final r = await _ch.invokeMethod<Object?>('init', {'language': L10n.ttsTag});
       if (r is! Map) return false;
@@ -130,6 +187,37 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage, VoiceEngine
   }
 
   @override
+  Future<bool> speakAlert(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+    bool earcon = false,
+  }) async {
+    try {
+      return (await _ch.invokeMethod<bool>('speak', {
+        'text': text,
+        'id': id,
+        'interrupt': interrupt,
+        'isEmergency': isEmergency,
+        'pauseOthers': pauseOthers,
+        'earcon': earcon,
+      })) == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> prepare(List<String> phrases) async {
+    if (phrases.isEmpty) return;
+    try {
+      await _ch.invokeMethod<void>('prepare', {'phrases': phrases});
+    } catch (_) {}
+  }
+
+  @override
   Future<void> fallbackAlert({required bool critical, bool inCall = false}) async {
     try {
       await _ch.invokeMethod<bool>('fallbackAlert', {'critical': critical, 'inCall': inCall});
@@ -183,7 +271,8 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage, VoiceEngine
 /// - Important alerts (3.16) speak like warnings, and also after dark when "Speak
 ///   more after dark" is on and voice is on at all ("Speak emergency alerts").
 /// - The same key is spoken at most once per [NotifConstants.voiceDedupe].
-/// - The engine starts on the first alert of a ride (nothing at idle) and is
+/// - The engine is warmed up at ride start ([warmUp]: bound, voice chosen, common lines
+///   pre-synthesised) or else starts on the first alert of a ride (nothing at idle), and is
 ///   released at ride end. Without an engine or a usable voice everything is
 ///   silent ([available] false); banners and notifications still show.
 /// - The engine is asked for the safety language (Hindi, Telugu); [speechLang]
@@ -500,6 +589,29 @@ class VoiceService extends ChangeNotifier {
     return true;
   }
 
+  /// 3.55 alert latency: ride start. Binds the engine and picks the voice now (binding the phone's
+  /// text-to-speech and loading a voice takes 0.3-2 s, which the first alert used to wait for),
+  /// then pre-synthesises the common short warnings ([phrases] plus [commonLeadPhrases]) so they
+  /// start instantly (synthesised with the same voice the line would be spoken in). Safe to call
+  /// again (the engine starts once per ride).
+  Future<bool> warmUp({List<String> phrases = const []}) async {
+    final sw = Stopwatch()..start();
+    final ok = await _ensureEngine();
+    AudioDiagLog.add('engine warm ok=$ok lang=$_speechLang ${sw.elapsedMilliseconds}ms');
+    final e = _engine;
+    if (ok && e is VoiceEngineLive && !_prepared) {
+      _prepared = true;
+      await (e as VoiceEngineLive).prepare([...commonLeadPhrases, ...phrases]);
+    }
+    return ok;
+  }
+
+  bool _prepared = false;
+
+  /// Short first sentences of frequent warnings: a line that starts with one of them begins with
+  /// the ready clip while the rest is synthesised (no gap is heard).
+  static const List<String> commonLeadPhrases = ['Slow down.', 'Over limit.', 'Please slow down.'];
+
   Future<bool> _ensureEngine() async {
     final f = _init ??= _start();
     return f;
@@ -546,6 +658,7 @@ class VoiceService extends ChangeNotifier {
     final wasStarted = _init != null;
     _init = null;
     _failed = false;
+    _prepared = false;
     if (_available) {
       _available = false;
       notifyListeners();

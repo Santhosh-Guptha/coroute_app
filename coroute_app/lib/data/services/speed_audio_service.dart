@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
+import '../../domain/audio/audio_diag_log.dart';
 import '../../domain/safety/effective_speed_limit.dart';
 import '../../domain/safety/speed_audio_policy.dart';
 import '../../domain/tracking/track_point.dart';
@@ -24,8 +25,13 @@ class SpeedAudioChannel {
     if (!_supported) return false;
     try {
       final r = await _ch.invokeMethod<Object?>('speedAudio', {'action': action, 'fraction': fraction, 'pause': pause});
+      if (r is Map && action != 'status') {
+        AudioDiagLog.add('speed music $action ${pause ? 'pause' : '${(fraction * 100).round()}%'}: '
+            'lowered=${r['lowered']} paused=${r['paused']} mode=${r['mode']} userChanged=${r['userChanged']}');
+      }
       return r is Map && r['userChanged'] == true;
-    } catch (_) {
+    } catch (e) {
+      AudioDiagLog.add('speed music $action failed: ${e.runtimeType}');
       return false;
     }
   }
@@ -52,10 +58,15 @@ class SpeedAudioChannel {
 }
 
 /// 3.55 "Lower music when speeding" (setting [SettingsService.lowerMusicWhenSpeeding], default on;
-/// admin switch `speedAudio`, unknown = on). Feeds my GPS fixes and the effective speed limit (same
-/// rule as SafetyService: the stricter of the group limit, with the lead's town limit near start,
-/// destination and stops, and my own limit) into [SpeedAudioPolicy] and applies its commands on the
-/// native side. The overspeed voice warning itself stays in SafetyService / VoiceService (far over the
+/// admin switch `speedAudio`, unknown = on). Feeds my GPS fixes and the effective speed limit into
+/// [SpeedAudioPolicy] and applies its commands on the native side. The limit is the strictest
+/// known one, the same values the rider is warned about:
+///  * SafetyService's rule: the group limit (with the lead's town limit near start, destination and
+///    stops) and my own limit (Settings > Speed warning);
+///  * 3.55 fix: the ROAD limit / school or hospital zone from Road care (admin switch
+///    `speedLimits`), which is what most riders are warned at (no group or personal limit is set by
+///    default). Music used to stay loud then, because only the group / personal limit was used.
+/// Solo rides (offline) count as rides too (Road care warns there as well). The overspeed voice warning itself stays in SafetyService / VoiceService (far over the
 /// limit it is a critical line on the alarm stream, so it is never quieted by this).
 ///
 /// Restores the music: after 5 s back under the limit, at ride end, on an SOS / crash alarm, when the
@@ -79,10 +90,12 @@ class SpeedAudioService {
     SpeedAudioPolicy? policy,
     bool Function(String id)? featureOn,
     int Function()? clock,
+    int Function()? roadLimitKmh,
   })  : _channel = channel ?? SpeedAudioChannel(),
         _policy = policy ?? SpeedAudioPolicy(),
         _featureOn = featureOn ?? FeatureFlagsService.on,
-        _clock = clock ?? _wallClock {
+        _clock = clock ?? _wallClock,
+        _roadLimit = roadLimitKmh {
     _fixSub = _convoys.myFixes.listen(onFix, onError: (Object _) {});
     _convoys.addListener(_onState);
     _settings.addListener(_onState);
@@ -107,6 +120,7 @@ class SpeedAudioService {
   final SpeedAudioPolicy _policy;
   final bool Function(String id) _featureOn;
   final int Function() _clock;
+  final int Function()? _roadLimit;
 
   StreamSubscription<TrackPoint>? _fixSub;
   Timer? _staleTimer;
@@ -121,8 +135,24 @@ class SpeedAudioService {
   bool get _emergency => safety?.emergencyOpen ?? false;
 
   bool get _rideActive {
+    if (safety?.offlineSoloActive ?? false) return true;
     final c = _convoys.activeConvoy;
     return c != null && _convoys.myUserId != null && c.tripStatus != 'ENDED';
+  }
+
+  /// The road limit / zone limit where I am (0 = none known): Road care's last context.
+  int _roadLimitHere() {
+    final f = _roadLimit;
+    if (f != null) return f();
+    if (!_featureOn('speedLimits')) return 0;
+    return safety?.roadCare.limitHere?.limitKmh ?? 0;
+  }
+
+  /// The strictest positive limit of [a] and [b] (0 = none).
+  static int stricter(int a, int b) {
+    if (a <= 0) return b > 0 ? b : 0;
+    if (b <= 0) return a;
+    return a < b ? a : b;
   }
 
   /// The effective limit at [p], the same rule SafetyService warns at.
@@ -150,7 +180,7 @@ class SpeedAudioService {
       _end();
       return;
     }
-    final limit = limitAt(_convoys.activeConvoy, p, _settings.speedLimitWarningKmh);
+    final limit = stricter(limitAt(_convoys.activeConvoy, p, _settings.speedLimitWarningKmh), _roadLimitHere());
     final cmd = _policy.onSample(speedKmh: p.speedKmh, limitKmh: limit, nowMs: _clock(), enabled: _enabled, emergency: _emergency);
     if (cmd != null) {
       _send(cmd);
@@ -194,6 +224,7 @@ class SpeedAudioService {
   }
 
   void _send(SpeedAudioCommand cmd) {
+    AudioDiagLog.add('speed music policy: ${cmd.kind.name} ${cmd.level.name}');
     switch (cmd.kind) {
       case SpeedAudioCommandKind.apply:
         _enqueue(() async {

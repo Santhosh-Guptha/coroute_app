@@ -393,11 +393,13 @@ void main() {
       expect(engine.spokenList.any((t) => t.$1.contains('Time for a break')), isTrue);
 
       // 4. Advance timer by 60 seconds (Level 1 escalation)
+      simTime += 60 * 1000;
       await tester.pump(const Duration(seconds: 60));
       expect(engine.spokenList.any((t) => t.$1.contains('Safety confirmation required')), isTrue);
       expect(port.statusReasonUpdates, isEmpty, reason: 'Captain not alerted yet at 60s');
 
       // 5. Advance timer by another 30 seconds (total 90s, Level 2 escalation)
+      simTime += 30 * 1000;
       await tester.pump(const Duration(seconds: 30));
       expect(engine.spokenList.any((t) => t.$1.contains('Rider unconfirmed')), isTrue);
       expect(port.sentCheckIns.any((c) => c.$1 == CheckInResult.noReply && c.$2 == CheckInContext.fatigue), isTrue);
