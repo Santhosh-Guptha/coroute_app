@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../../core/config/app_config.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import '../../domain/diag/diag_redact.dart';
+import '../../domain/membership/plan_gate_messages.dart'; // Play payments policy: neutral plan refusals
 
 /// Thrown for any non-2xx gateway response.
 class ApiException implements Exception {
@@ -150,7 +151,7 @@ class ApiClient extends ChangeNotifier {
         reason = d['reason']?.toString();
       }
     } catch (_) {}
-    final error = ApiException(res.statusCode, message ?? 'Request failed (${res.statusCode})', code, reason);
+    final error = ApiException(res.statusCode, PlanGateMessages.neutral(code, reason, message ?? 'Request failed (${res.statusCode})'), code, reason);
     if (error.endsSession && hasToken) {
       // Same rule as JSON calls: only the gateway saying so ends the session.
       lastSessionEndMessage = error.message;
@@ -303,7 +304,7 @@ class ApiClient extends ChangeNotifier {
             : 'Request failed (${res.statusCode})';
     final code = (fromGateway && decoded is Map && decoded['code'] != null) ? decoded['code'].toString() : null;
     final reason = (fromGateway && decoded is Map && decoded['reason'] != null) ? decoded['reason'].toString() : null;
-    final error = ApiException(res.statusCode, message, code, reason);
+    final error = ApiException(res.statusCode, PlanGateMessages.neutral(code, reason, message), code, reason);
     if (error.endsSession && hasToken) {
       // Only the gateway saying so ends the session; bad networks never sign anyone out.
       lastSessionEndMessage = message;

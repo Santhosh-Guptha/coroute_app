@@ -12,9 +12,13 @@ import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
 
 /// Master admin: settings. What the public website shows (community numbers,
-/// longest trips, anonymous labels), the payment gateway and the audit log,
-/// the rider view of plans, the membership repair tool and sign out.
+/// longest trips, anonymous labels), the audit log, the rider view of "Your plan",
+/// the membership repair tool and sign out. Payments, coupons and marketing are
+/// managed in the web admin (Play payments policy): a note row says so, with no link.
 /// Website settings come from `/admin/community-stats/config`.
+/// The staff-only note shown where the payments, coupons and marketing screens were (no URL, no link).
+const String adminWebAdminNote = 'Payments, coupons and marketing are managed in the web admin.';
+
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
 
@@ -124,7 +128,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     final e = _error;
     return AdminShell(
       title: 'Settings',
-      subtitle: 'Website, payments and tools',
+      subtitle: 'Website, plans and tools',
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
       nav: adminNavItems(context, AdminPage.settings),
       tabs: adminSectionTabs(context, AdminPage.settings),
@@ -188,14 +192,13 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                           ],
                         ),
                       ),
-                      const AdminSectionLabel('Payments'),
+                      const AdminSectionLabel('Plans'),
                       AdminTable(
                         rows: [
-                          AdminRow(
-                            leading: const AdminRowIcon(Icons.account_balance_wallet_outlined),
-                            title: 'Payment gateway',
-                            subtitle: 'Razorpay keys, test or live mode',
-                            onTap: () => _push(const _SettingsPage(title: 'Payment gateway', subtitle: 'Razorpay keys, test or live mode', child: AdminGatewayTab())),
+                          const AdminRow(
+                            key: Key('admin_web_admin_note'),
+                            leading: AdminRowIcon(Icons.info_outline_rounded),
+                            title: adminWebAdminNote,
                           ),
                           AdminRow(
                             leading: const AdminRowIcon(Icons.fact_check_outlined),
@@ -205,8 +208,8 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                           ),
                           AdminRow(
                             leading: const AdminRowIcon(Icons.preview_rounded),
-                            title: 'Rider view of plans',
-                            subtitle: 'What riders see when they pick a plan',
+                            title: 'Rider view of "Your plan"',
+                            subtitle: 'What riders see about their plan',
                             onTap: () => _push(const MembershipDashboardScreen()),
                             divider: false,
                           ),
@@ -241,7 +244,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   }
 }
 
-/// One settings page (payment gateway, audit log) in the console frame, with a back button.
+/// One settings page (audit log) in the console frame, with a back button.
 class _SettingsPage extends StatelessWidget {
   final String title;
   final String subtitle;

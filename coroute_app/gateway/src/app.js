@@ -58,7 +58,7 @@ function createSoda() {
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore } = {}) {
+async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore, mailTransport, smsProviders, smsFetch, pushImageStore } = {}) {
   const repo = new Repo(soda);
   const nodeName = config.nodeName || process.env.NODE_NAME || require('os').hostname();
   // Scheduled jobs run on exactly one node of a two-VM deployment (src/job_lease.js, GATEWAY_ROLE).
@@ -248,9 +248,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     repo.getMembershipCatalog().then((catalog) => { siteMaxRiders = siteMaxRidersOf(catalog, config.maxConvoyRiders); }).catch(() => {});
   };
   const pageVars = (req) => { refreshSiteMaxRiders(); return { __ORIGIN__: originOf(req), __MAX_RIDERS__: String(siteMaxRiders) }; };
-  const sendPage = (res, html) => res.type('html').set('Cache-Control', 'public, max-age=300').send(html);
+  // A Cache-Control set earlier (the 3.56 shop pages: no-store) is kept.
+  const sendPage = (res, html) => res.type('html').set('Cache-Control', res.get('Cache-Control') || 'public, max-age=300').send(html);
   const notFoundPage = (req, res) => res.status(404).type('html').set('Cache-Control', 'no-store').send(site.render('404.html', pageVars(req)));
 
+  // 3.56 rider shop (src/web_shop.js): shop page headers (strict CSP), /get?coupon= -> /plans, /checkout
+  // without an app order -> /plans, /api/web/config and /api/web/receipt/:orderId. Before the page routes.
+  require('./web_shop').attachWebShop({ app, repo, gate, logger });
   for (const [route, file] of Object.entries(SITE_PAGES)) {
     const paths = route === '/' ? ['/', '/index.html'] : [route, `${route}.html`];
     app.get(paths, (req, res) => sendPage(res, site.render(file, pageVars(req))));
@@ -276,7 +280,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     const target = config.appStoreUrl || config.iosTestFlightUrl || config.iosIpaUrl || `${originOf(req)}/get`;
     res.redirect(302, target);
   });
-  app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
+  app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\nSitemap: ${originOf(req)}/sitemap.xml\n`));
   app.get('/sitemap.xml', (req, res) => {
     const o = originOf(req);
     const today = new Date().toISOString().slice(0, 10);
@@ -339,6 +343,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       next(err);
     }
   });
+  // 3.55 web admin (src/web_admin.js): /admin page + assets with their own strict CSP and noindex.
+  app.use(require('./web_admin').webAdminPages({ publicDir: pub('') }));
   // Partials, templates (_*.html) and raw page sources are never served directly: every page has a route above.
   app.use((req, res, next) => (!req.path.startsWith('/api/') && isHiddenPath(req.path) ? notFoundPage(req, res) : next()));
   app.use(express.static(pub(''), {
@@ -360,11 +366,20 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.get('/api/health/live', (req, res) => { const h = mirror.health(); res.status(h.status).set('Cache-Control', 'no-store').json(h.body); });
   // Public ride safety review (reports with their conversation, contact log, suspensions): admins only.
   app.use('/api/admin/public-ride', requireAuth(gate), requireAdmin, publicRideAdminRouter(publicRides));
+  // 3.55 web admin read-only endpoints (config, revenue aggregates): admin only.
+  app.use('/api/admin/web', requireAuth(gate), requireAdmin, require('./web_admin').webAdminApi({ repo, config }));
+  // 3.56 notifications (src/notifications.js): admin push campaigns, purchase / refund e-mails, server SOS SMS
+  // (emergencyGateway.sosSms) and the editable message templates. Jobs start with retention.start().
+  const notifications = require('./notifications').attachNotifications({ app, repo, soda, gate, push, emergencyGateway, lease, config, logger,
+    ...(mailTransport !== undefined ? { mailTransport } : {}), ...(smsProviders ? { smsProviders } : {}), ...(smsFetch ? { smsFetch } : {}), ...(pushImageStore ? { imageStore: pushImageStore } : {}) });
+  if (guardianPush) guardianPush.texts = notifications.guardianArrivalText;
   // 3.55b website all-time totals: one shared aggregate, refreshed by one node under the lease (src/public_stats.js).
   const publicStats = new (require('./public_stats').PublicStatsStore)({ repo, logger });
   app.use('/api', require('./leaderboard').riderScoreRouter({ riderScore, leaderboard, gate, flagsOf: () => featureFlags }));
   // 3.55 usernames, friends, profile pictures: auth hooks, username backfill, erase cleanup, /join/friend/:code page.
   require('./social_routes').attachSocial({ app, repo, auth, hub, lease, featureFlags, logger, site, pageVars });
+  // 3.55 ratings & reviews engagement (src/engagement.js): app config, in-app feedback, admin templates and stats.
+  require('./engagement').attachEngagement({ app, repo, gate, logger });
   // 3.55 diagnostics logs (src/diag_logs.js): rider uploads, admin viewer, erase cascade, leased retention.
   const diagLogs = require('./diag_logs').attachDiagLogs({ repo, hub, featureFlags, lease, logger, ...(diagObjectStore !== undefined ? { objectStore: diagObjectStore } : {}) });
   app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs }));
@@ -397,7 +412,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   const retention = new Retention({ repo, soda, convoys, logger });
   // Subscription expiry warnings (7/3/1 days) and rollback to community, hourly; started with retention.
-  const subscriptions = new SubscriptionSweeper({ repo, auth, hub, logger });
+  // `notify`: the neutral plan push ("Your plan ends on 12 Dec.", push.js SOCKET_EVENTS; Play payments policy).
+  const subscriptions = new SubscriptionSweeper({ repo, auth, hub, logger, notify: (userId, payload) => (push ? push.onSocketEvent(userId, payload, { delivered: 0 }) : null) });
   auth.onUserSeen = (user) => expireIfDue({ repo, auth, hub }, user);
   // Every scheduled job that writes data or sends messages runs under a lease: exactly once per interval
   // across the nodes sharing this database. server.js calls retention.start() after listen().
@@ -413,6 +429,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     lease.run('db-keepalive', config.keepAliveEveryMinutes * min, () => retention.keepAlive());
     lease.run('subscriptions', subscriptions.everyMs, () => subscriptions.runOnce(), { firstDelayMs: 90000 });
     lease.run('rider-score-daily', 24 * 60 * min, ({ signal } = {}) => riderScore.recomputeAll({ signal }), { firstDelayMs: 10 * min });
+    notifications.startJobs();
     publicStats.start(lease);
     if (backupModule && typeof backupModule.startBackupJobs === 'function') {
       backupModule.startBackupJobs({ lease, repo, soda, logger });
@@ -422,6 +439,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   async function shutdown() {
     guardianPush?.stop();
+    notifications.stop();
     featureFlags.stop();
     const leaseStopped = lease.stopAll({ waitMs: 8000 });
     retention.stop();
@@ -443,7 +461,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { notifications, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

@@ -56,6 +56,10 @@ const C = {
   // 3.55: road surface reports saved for future rides (no rider ids) and CoRoute rider place reviews.
   roadHazards: 'road_hazards',
   placeReviews: 'place_reviews',
+  // 3.56 website: Razorpay webhook event ids (both webhook URLs, every node; unique eventId) and the
+  // marketing board posts (src/board.js, website only).
+  paymentEvents: 'payment_events',
+  boardPosts: 'board_posts',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -166,6 +170,9 @@ class Repo {
     await idx(C.placeReviews, 'place_reviews_place_ix', ['placeId', { path: 'createdAt', datatype: 'number' }]);
     await idx(C.placeReviews, 'place_reviews_user_ix', ['userId']);
     await idx(C.placeReviews, 'place_reviews_lat_ix', [{ path: 'lat', datatype: 'number' }]);
+    await idx(C.paymentEvents, 'payment_events_id_ux', ['eventId'], true);
+    await idx(C.paymentEvents, 'payment_events_at_ix', [{ path: 'at', datatype: 'number' }]);
+    await idx(C.boardPosts, 'board_posts_id_ux', ['postId'], true);
   }
 
   // ---------- users ----------
@@ -1133,6 +1140,60 @@ class Repo {
     const r = await this.soda.findOne(C.subscriptionConfig, { k: 'rzp_order', paymentId: String(paymentId) });
     return r ? r.value : null;
   }
+  /**
+   * 3.56: takes the right to settle (activate) one order, atomically (compare-and-replace, any node):
+   * only one of a /verify, a retry and the webhooks of either URL wins; the others see the order busy
+   * or PAID and answer idempotently. Never for a PAID or refunded order. A claim older than `staleMs`
+   * (a crashed settle) may be taken over. Returns { order } (the claimed order) or { order: null, current, reason }.
+   */
+  async claimRazorpayOrder(orderId, { paymentId = '', by = '', staleMs = 120000 } = {}) {
+    for (let i = 0; i < 20; i++) {
+      const r = await this.soda.findOne(C.subscriptionConfig, { k: 'rzp_order', orderId: String(orderId) });
+      if (!r) return { order: null, current: null, reason: 'ORDER_NOT_FOUND' };
+      const cur = r.value;
+      const now = Date.now();
+      if (cur.status === 'PAID') return { order: null, current: cur, reason: 'ALREADY_PAID' };
+      if (cur.fullyRefunded || cur.refundStatus || (Array.isArray(cur.refunds) && cur.refunds.length)) return { order: null, current: cur, reason: 'REFUNDED' };
+      if (cur.status === 'SETTLING' && now - (Number(cur.settlingSince) || 0) < staleMs) return { order: null, current: cur, reason: 'IN_PROGRESS' };
+      const next = { ...cur, status: 'SETTLING', settlingSince: now, settlingBy: String(by).slice(0, 40), settlingPaymentId: String(paymentId).slice(0, 80), statusBeforeSettle: cur.status === 'SETTLING' ? (cur.statusBeforeSettle || 'CREATED') : cur.status, updatedAt: now };
+      if (await this.soda.compareAndReplace(C.subscriptionConfig, r.key, cur, next)) return { order: next };
+    }
+    return { order: null, current: await this.findRazorpayOrder(orderId), reason: 'IN_PROGRESS' };
+  }
+  /** Gives a claim back after a settle that failed before the order became PAID. */
+  async releaseRazorpayOrderClaim(orderId) {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'rzp_order', orderId: String(orderId) });
+    if (!r || r.value.status !== 'SETTLING') return false;
+    const next = { ...r.value, status: r.value.statusBeforeSettle || 'CREATED', settlingSince: 0, updatedAt: Date.now() };
+    return this.soda.compareAndReplace(C.subscriptionConfig, r.key, r.value, next);
+  }
+  /**
+   * 3.56: records a Razorpay webhook event id once for every webhook URL and node (unique eventId).
+   * Returns true the first time, false for a replay.
+   */
+  async claimWebhookEvent(eventId, meta = {}) {
+    const id = String(eventId || '').slice(0, 100);
+    if (!id) return true;
+    if (await this.soda.findOne(C.paymentEvents, { eventId: id })) return false;
+    try {
+      await this.soda.insert(C.paymentEvents, { eventId: id, at: Date.now(), event: String(meta.event || '').slice(0, 40), orderId: String(meta.orderId || '').slice(0, 80), url: String(meta.url || '').slice(0, 40) });
+      return true;
+    } catch (e) {
+      if (await this.soda.findOne(C.paymentEvents, { eventId: id })) return false;
+      throw e;
+    }
+  }
+  /** Pricing rules (3.56): { minPayableInr } (coupons never take a price below it; 0 = no floor). */
+  async getPricingRules() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'pricing_rules' });
+    const v = r ? r.value : {};
+    return { minPayableInr: Math.max(0, Math.floor(Number(v.minPayableInr) || 0)), updatedAt: Number(v.updatedAt) || 0, updatedBy: v.updatedBy || null };
+  }
+  async setPricingRules(rules, updatedBy = 'admin') {
+    const doc = { k: 'pricing_rules', minPayableInr: Math.max(0, Math.floor(Number(rules && rules.minPayableInr) || 0)), updatedAt: Date.now(), updatedBy };
+    await this.soda.upsertBy(C.subscriptionConfig, { k: 'pricing_rules' }, doc);
+    return doc;
+  }
   // ---------- admin audit trail (subscription_config k='audit') ----------
   /** Appends one admin action: { at, by, action, target, details }. */
   async addAuditEntry(entry) {
@@ -1157,7 +1218,8 @@ class Repo {
     const maxTotal = Number(c.maxUsageTotal) || 0;
     const used = Number(c.usageCount) || 0;
     if (c.status === 'USAGE_LIMIT_REACHED' || (maxTotal > 0 && used >= maxTotal)) return 'USAGE_LIMIT_REACHED';
-    if (c.status === 'EXPIRED' || (c.expiresAt && c.expiresAt < now)) return 'EXPIRED';
+    // 3.56: the window is [validFrom, expiresAt): at expiresAt the code has ended.
+    if (c.status === 'EXPIRED' || (c.expiresAt && Number(c.expiresAt) <= now)) return 'EXPIRED';
     if (c.status === 'PAUSED' || c.isActive === false) return 'PAUSED';
     if (c.validFrom && c.validFrom > now) return 'SCHEDULED';
     return 'ACTIVE';
@@ -1190,8 +1252,9 @@ class Repo {
     if (!code) throw new Error('Coupon code is required');
     const now = Date.now();
     const explicitStatus = String(coupon.status || '').trim().toUpperCase();
-    const validFrom = Number(coupon.validFrom) || now;
-    const expiresAt = Number(coupon.expiresAt) || (now + 30 * 86400000);
+    const { couponTime } = require('../payment_security');
+    const validFrom = couponTime(coupon.validFrom, 'start') || now;
+    const expiresAt = couponTime(coupon.expiresAt, 'end') || (now + 30 * 86400000);
     const maxUsageTotal = Number(coupon.maxUsageTotal) > 0 ? Number(coupon.maxUsageTotal) : 100;
     const usageCount = Number(coupon.usageCount) || 0;
 
@@ -1234,10 +1297,61 @@ class Repo {
       createdAt: coupon.createdAt || now,
       updatedAt: now,
       createdBy: coupon.createdBy || 'admin',
+      ...(coupon.stackWithOffer === false ? { stackWithOffer: false } : {}),
     };
+    if (Array.isArray(coupon.holds)) doc.holds = coupon.holds;
 
-    await this.soda.upsertBy(C.coupons, { code }, doc);
-    return doc;
+    return this._writeCoupon(code, doc);
+  }
+
+  /**
+   * 3.56: writes a coupon document without losing a redemption that landed meanwhile. Usage
+   * (`usages`, `usageCount`) and in-flight holds are server-owned: when the stored document already
+   * has any, the stored values win over what the caller read earlier. Compare-and-replace, retried.
+   */
+  async _writeCoupon(code, doc) {
+    for (let i = 0; i < 20; i++) {
+      const row = await this.soda.findOne(C.coupons, { code });
+      if (!row) {
+        await this.soda.insert(C.coupons, doc);
+        return doc;
+      }
+      const cur = row.value || {};
+      const next = { ...doc };
+      delete next.key;
+      // In-flight holds are always the stored ones; usage too once there is any.
+      next.holds = Array.isArray(cur.holds) ? cur.holds : [];
+      const hasUsage = (Number(cur.usageCount) || 0) > 0 || (Array.isArray(cur.usages) && cur.usages.length > 0);
+      if (hasUsage) {
+        next.usages = Array.isArray(cur.usages) ? cur.usages : [];
+        next.usageCount = Number(cur.usageCount) || 0;
+        const max = Number(next.maxUsageTotal) || 0;
+        if (max > 0 && next.usageCount >= max && !['ARCHIVED', 'DRAFT', 'PAUSED'].includes(next.status)) next.status = 'USAGE_LIMIT_REACHED';
+      }
+      if (await this.soda.compareAndReplace(C.coupons, row.key, cur, next)) return next;
+      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 5)));
+    }
+    throw new Error('Coupon is busy, try again');
+  }
+
+  /**
+   * 3.56: one atomic change of a coupon's usage (compare-and-replace on the coupon document, retried
+   * on a conflict, safe across gateway nodes). `fn(current)` returns the next document, or
+   * { refuse: '...' } to stop, or null for "nothing to change".
+   */
+  async _couponAtomic(rawCode, fn) {
+    const code = String(rawCode || '').trim().toUpperCase();
+    for (let i = 0; i < 40; i++) {
+      const row = await this.soda.findOne(C.coupons, { code });
+      if (!row) return { ok: false, error: 'Coupon not found', notFound: true };
+      const cur = row.value;
+      const out = fn(structuredClone(cur), Date.now());
+      if (!out) return { ok: true, unchanged: true, coupon: cur };
+      if (out.refuse) return { ok: false, error: out.refuse };
+      if (await this.soda.compareAndReplace(C.coupons, row.key, cur, out)) return { ok: true, coupon: out };
+      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 4)));
+    }
+    return { ok: false, error: 'This code is busy right now. Try again.' };
   }
 
   async deleteCoupon(rawCode) {
@@ -1255,7 +1369,7 @@ class Repo {
       updatedAt: Date.now(),
     };
     delete archived.key;
-    await this.soda.upsertBy(C.coupons, { code }, archived);
+    await this._writeCoupon(code, archived);
     return true;
   }
 
@@ -1271,8 +1385,7 @@ class Repo {
       updatedAt: Date.now(),
     };
     delete paused.key;
-    await this.soda.upsertBy(C.coupons, { code }, paused);
-    return paused;
+    return this._writeCoupon(code, paused);
   }
 
   async resumeCoupon(rawCode, updatedBy = 'admin') {
@@ -1282,7 +1395,7 @@ class Repo {
     const now = Date.now();
     let status = 'ACTIVE';
     if (existing.validFrom && existing.validFrom > now) status = 'SCHEDULED';
-    else if (existing.expiresAt && existing.expiresAt < now) status = 'EXPIRED';
+    else if (existing.expiresAt && existing.expiresAt <= now) status = 'EXPIRED';
     else if (existing.maxUsageTotal > 0 && (existing.usageCount || 0) >= existing.maxUsageTotal) status = 'USAGE_LIMIT_REACHED';
 
     const resumed = {
@@ -1293,8 +1406,7 @@ class Repo {
       updatedAt: now,
     };
     delete resumed.key;
-    await this.soda.upsertBy(C.coupons, { code }, resumed);
-    return resumed;
+    return this._writeCoupon(code, resumed);
   }
 
   // ---------- coupon redemptions & reservations (k='coupon_redemption') ----------
@@ -1351,46 +1463,55 @@ class Repo {
   }
 
   /**
-   * Safe transaction reservation of a coupon slot (15 min TTL).
-   * Prevents concurrency race conditions without permanently consuming slot on payment abandonment.
+   * Reserves one use of a coupon for an order (3.56: atomic). The total cap, the per-rider cap and
+   * the in-flight holds are checked and written in ONE compare-and-replace of the coupon document,
+   * so concurrent orders (any node) can never take more uses than the caps allow. A paid order holds
+   * its use for COUPON_HOLD_MS (the order's own lifetime); a ₹0 order uses it at once. A rider's own
+   * earlier unpaid hold of the same code is released (they closed the payment page and try again).
+   * The redemption row (k='coupon_redemption') is the record for reports; the coupon document is the truth.
    */
   async reserveCouponSlot(rawCode, { userId, orderId, category, categoryName, originalPrice, discountAmount, finalAmount, userDoc = null }) {
-    const coupon = await this.findCoupon(rawCode);
-    if (!coupon) return { reserved: false, error: 'Coupon not found' };
-
+    const { COUPON_HOLD_MS } = require('../payment_security');
+    const free = Number(finalAmount) === 0;
+    let superseded = [];
+    const res = await this._couponAtomic(rawCode, (c, now) => {
+      const status = this.computeCouponStatus(c, now);
+      if (status !== 'ACTIVE') return { refuse: "This code can't be used right now" };
+      const holds = (Array.isArray(c.holds) ? c.holds : []).filter((h) => h && Number(h.expiresAt) > now && h.orderId !== orderId);
+      superseded = userId ? holds.filter((h) => h.userId === userId).map((h) => h.orderId) : [];
+      const live = holds.filter((h) => !superseded.includes(h.orderId));
+      const usages = Array.isArray(c.usages) ? c.usages : [];
+      if (orderId && usages.some((u) => u && u.orderId === orderId)) return null; // already counted (idempotent)
+      const max = Number(c.maxUsageTotal) || 0;
+      if (max > 0 && (Number(c.usageCount) || 0) + live.length >= max) return { refuse: 'This coupon has reached its maximum total redemptions limit' };
+      const perUser = Number(c.maxUsagePerUser) || 1;
+      if (userId && usages.filter((u) => u && u.userId === userId).length + live.filter((h) => h.userId === userId).length >= perUser) {
+        return { refuse: `You have already redeemed this coupon (limit ${perUser} per rider)` };
+      }
+      const next = { ...c, holds: live, updatedAt: now };
+      if (free) {
+        next.usages = [...usages, { userId: userId || 'guest', orderId: orderId || '', discountAmount: Number(discountAmount) || 0, usedAt: now }];
+        next.usageCount = (Number(c.usageCount) || 0) + 1;
+        if (max > 0 && next.usageCount >= max) next.status = 'USAGE_LIMIT_REACHED';
+      } else {
+        next.holds = [...live, { orderId: orderId || '', userId: userId || 'guest', expiresAt: now + COUPON_HOLD_MS, at: now }];
+      }
+      return next;
+    });
+    if (!res.ok) return { reserved: false, error: res.notFound ? 'Coupon not found' : res.error };
+    const coupon = res.coupon;
     const now = Date.now();
-    const ttlMs = 15 * 60 * 1000;
-
-    // Fetch active reservations for this coupon
-    let allRedemptions = await this.listCouponRedemptions({ couponCode: coupon.code }, 1000);
-    // A rider who closed the payment page and tries again must not be refused by their own earlier,
-    // unpaid hold of the same code: that hold is released (if the old order is paid after all, its
-    // confirmation still counts the redemption).
-    if (userId) {
-      const ownHolds = allRedemptions.filter((r) => r.userId === userId && r.status === 'RESERVED' && r.orderId !== orderId);
-      for (const r of ownHolds) {
-        await this.saveCouponRedemption({ ...r, status: 'CANCELLED', cancelledAt: now, cancelReason: 'SUPERSEDED' });
-      }
-      if (ownHolds.length) allRedemptions = allRedemptions.filter((r) => !ownHolds.includes(r));
-    }
-    const activeReservations = allRedemptions.filter((r) => r.status === 'RESERVED' && r.expiresAt > now && r.orderId !== orderId);
-
-    const totalInFlightOrUsed = (coupon.usageCount || 0) + activeReservations.length;
-    if (coupon.maxUsageTotal > 0 && totalInFlightOrUsed >= coupon.maxUsageTotal) {
-      return { reserved: false, error: 'This coupon has reached its maximum total redemptions limit' };
-    }
-
-    if (userId) {
-      const userRedemptions = allRedemptions.filter((r) => r.userId === userId && (r.status === 'SUCCESS' || (r.status === 'RESERVED' && r.expiresAt > now && r.orderId !== orderId)));
-      const maxPerUser = Number(coupon.maxUsagePerUser) || 1;
-      if (userRedemptions.length >= maxPerUser) {
-        return { reserved: false, error: `You have already redeemed this coupon (limit ${maxPerUser} per rider)` };
+    // Bookkeeping rows (never decide a cap).
+    if (superseded.length) {
+      const rows = await this.listCouponRedemptions({ couponCode: coupon.code, userId }, 1000);
+      for (const r of rows) {
+        if (r.status === 'RESERVED' && superseded.includes(r.orderId)) await this.saveCouponRedemption({ ...r, status: 'CANCELLED', cancelledAt: now, cancelReason: 'SUPERSEDED' });
       }
     }
-
-    const redemptionId = `red_${now.toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`;
+    const prior = orderId ? await this.findCouponRedemptionByOrderId(orderId) : null;
+    if (prior && (prior.status === 'SUCCESS' || prior.status === 'RESERVED')) return { reserved: true, redemption: prior };
     const redemptionDoc = {
-      redemptionId,
+      redemptionId: `red_${now.toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`,
       couponCode: coupon.code,
       campaignName: coupon.campaignName || coupon.name || coupon.code,
       userId: userId || 'guest',
@@ -1404,71 +1525,80 @@ class Repo {
       finalAmount: Number(finalAmount) || 0,
       orderId: orderId || '',
       paymentId: null,
-      status: finalAmount === 0 ? 'SUCCESS' : 'RESERVED',
-      isFree: finalAmount === 0,
+      status: free ? 'SUCCESS' : 'RESERVED',
+      isFree: free,
       reservedAt: now,
-      expiresAt: now + ttlMs,
-      redeemedAt: finalAmount === 0 ? now : null,
-      activatedAt: finalAmount === 0 ? now : null,
+      expiresAt: now + require('../payment_security').COUPON_HOLD_MS,
+      redeemedAt: free ? now : null,
+      activatedAt: free ? now : null,
       createdAt: now,
     };
-
     await this.saveCouponRedemption(redemptionDoc);
-
-    if (finalAmount === 0) {
-      // Free activation completes immediately
-      await this.recordCouponUsage(coupon.code, { userId, orderId, discountAmount });
-    }
-
     return { reserved: true, redemption: redemptionDoc };
   }
 
   /**
-   * Finalizes coupon redemption when payment succeeds.
+   * Counts one use of a coupon for a paid order (3.56: atomic and idempotent by order id: a verify
+   * and a webhook for the same payment, or a retry, count it once). The order's hold is replaced
+   * by the use. A paid order always counts, even if its hold had run out (the rider has paid).
+   */
+  async _commitCouponUse(rawCode, { userId, orderId, discountAmount }) {
+    return this._couponAtomic(rawCode, (c, now) => {
+      const usages = Array.isArray(c.usages) ? c.usages : [];
+      const holds = Array.isArray(c.holds) ? c.holds : [];
+      if (orderId && usages.some((u) => u && u.orderId === orderId)) {
+        return holds.some((h) => h && h.orderId === orderId) ? { ...c, holds: holds.filter((h) => h.orderId !== orderId) } : null;
+      }
+      const next = {
+        ...c,
+        holds: holds.filter((h) => h && h.orderId !== orderId && Number(h.expiresAt) > now),
+        usages: [...usages, { userId: userId || 'guest', orderId: orderId || '', discountAmount: Number(discountAmount) || 0, usedAt: now }],
+        usageCount: (Number(c.usageCount) || 0) + 1,
+        updatedAt: now,
+      };
+      const max = Number(c.maxUsageTotal) || 0;
+      if (max > 0 && next.usageCount >= max && !['ARCHIVED', 'DRAFT'].includes(String(c.status || '').toUpperCase())) next.status = 'USAGE_LIMIT_REACHED';
+      return next;
+    });
+  }
+
+  /**
+   * Finalizes coupon redemption when payment succeeds (idempotent per order).
    */
   async confirmCouponRedemption(orderId, { paymentId, method = 'RAZORPAY', paidAt = Date.now(), userDoc = null }) {
     if (!orderId) return null;
     let existing = await this.findCouponRedemptionByOrderId(orderId);
-    if (!existing) {
-      const rzp = await this.findRazorpayOrder(orderId);
-      if (rzp?.internalOrderId) {
-        existing = await this.findCouponRedemptionByOrderId(rzp.internalOrderId);
-      }
-      if (!existing && rzp?.offerCode) {
-        const coupon = await this.findCoupon(rzp.offerCode);
-        if (coupon) {
-          const discountAmt = Number(rzp.discountAmount) || 0;
-          const plans = await this._membershipPlanMeta();
-          existing = {
-            redemptionId: `red_${Date.now().toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`,
-            couponCode: coupon.code,
-            campaignName: coupon.campaignName || coupon.name || coupon.code,
-            userId: rzp.userId || 'guest',
-            userName: userDoc?.name || 'Rider',
-            userEmail: userDoc?.email || '',
-            userPhone: userDoc?.phone || '',
-            category: rzp.category || 'individual',
-            categoryName: plans[rzp.category] ? plans[rzp.category].name : (rzp.category || 'individual'),
-            originalPrice: this._orderOriginalPrice(rzp, plans),
-            discountAmount: discountAmt || (rzp.isFree ? this._orderOriginalPrice(rzp, plans) : 0),
-            finalAmount: (Number(rzp.amountInPaise) || 0) / 100,
-            orderId,
-            status: 'SUCCESS',
-            isFree: Boolean(rzp.isFree),
-            reservedAt: paidAt,
-            expiresAt: paidAt + 15 * 60 * 1000,
-            redeemedAt: paidAt,
-            activatedAt: paidAt,
-            createdAt: Date.now(),
-          };
-          await this.saveCouponRedemption(existing);
-          await this.recordCouponUsage(coupon.code, { userId: rzp.userId, orderId, discountAmount: discountAmt });
-          return existing;
-        }
-      }
+    const rzp = await this.findRazorpayOrder(orderId);
+    if (!existing && rzp?.internalOrderId) existing = await this.findCouponRedemptionByOrderId(rzp.internalOrderId);
+    if (!existing && rzp?.offerCode) {
+      const coupon = await this.findCoupon(rzp.offerCode);
+      if (!coupon) return null;
+      const discountAmt = Number(rzp.discountAmount) || 0;
+      const plans = await this._membershipPlanMeta();
+      existing = {
+        redemptionId: `red_${Date.now().toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`,
+        couponCode: coupon.code,
+        campaignName: coupon.campaignName || coupon.name || coupon.code,
+        userId: rzp.userId || 'guest',
+        userName: userDoc?.name || 'Rider',
+        userEmail: userDoc?.email || '',
+        userPhone: userDoc?.phone || '',
+        category: rzp.category || 'individual',
+        categoryName: plans[rzp.category] ? plans[rzp.category].name : (rzp.category || 'individual'),
+        originalPrice: this._orderOriginalPrice(rzp, plans),
+        discountAmount: discountAmt || (rzp.isFree ? this._orderOriginalPrice(rzp, plans) : 0),
+        finalAmount: (Number(rzp.amountInPaise) || 0) / 100,
+        orderId,
+        status: 'RESERVED',
+        isFree: Boolean(rzp.isFree),
+        reservedAt: paidAt,
+        expiresAt: paidAt,
+        createdAt: Date.now(),
+      };
     }
     if (!existing) return null;
-
+    await this._commitCouponUse(existing.couponCode, { userId: existing.userId, orderId: existing.orderId || orderId, discountAmount: existing.discountAmount });
+    if (existing.status === 'SUCCESS' && existing.paymentId) return existing;
     const updated = {
       ...existing,
       status: 'SUCCESS',
@@ -1485,14 +1615,6 @@ class Repo {
       if (userDoc.phone) updated.userPhone = userDoc.phone;
     }
     await this.saveCouponRedemption(updated);
-
-    // Increment coupon usage count
-    await this.recordCouponUsage(existing.couponCode, {
-      userId: existing.userId,
-      orderId: existing.orderId,
-      discountAmount: existing.discountAmount,
-    });
-
     return updated;
   }
 
@@ -1503,6 +1625,10 @@ class Repo {
     if (!orderId) return false;
     const existing = await this.findCouponRedemptionByOrderId(orderId);
     if (existing && existing.status === 'RESERVED') {
+      await this._couponAtomic(existing.couponCode, (c) => {
+        const holds = Array.isArray(c.holds) ? c.holds : [];
+        return holds.some((h) => h && h.orderId === orderId) ? { ...c, holds: holds.filter((h) => h.orderId !== orderId) } : null;
+      });
       await this.saveCouponRedemption({
         ...existing,
         status: 'CANCELLED',
@@ -1514,32 +1640,10 @@ class Repo {
     return false;
   }
 
+  /** Counts one use (atomic; a repeat for the same order id is not counted twice). */
   async recordCouponUsage(rawCode, { userId, orderId, discountAmount }) {
-    const code = String(rawCode).trim().toUpperCase();
-    const coupon = await this.findCoupon(code);
-    if (!coupon) return null;
-    const usages = Array.isArray(coupon.usages) ? [...coupon.usages] : [];
-    usages.push({
-      userId: userId || 'guest',
-      orderId: orderId || '',
-      discountAmount: Number(discountAmount) || 0,
-      usedAt: Date.now(),
-    });
-    const nextUsageCount = (coupon.usageCount || 0) + 1;
-    let nextStatus = coupon.status;
-    if (coupon.maxUsageTotal > 0 && nextUsageCount >= coupon.maxUsageTotal) {
-      nextStatus = 'USAGE_LIMIT_REACHED';
-    }
-    const updated = {
-      ...coupon,
-      usageCount: nextUsageCount,
-      status: nextStatus,
-      usages,
-      updatedAt: Date.now(),
-    };
-    delete updated.key;
-    await this.soda.upsertBy(C.coupons, { code }, updated);
-    return updated;
+    const res = await this._commitCouponUse(rawCode, { userId, orderId, discountAmount });
+    return res.ok ? res.coupon : null;
   }
 
   // ---------- payments analytics & searchable transaction history ----------
@@ -1921,10 +2025,12 @@ class Repo {
     if (!stored || typeof stored !== 'object') return defaults;
     const out = {};
     for (const id of Object.keys(defaults)) out[id] = stored[id] && typeof stored[id] === 'object' ? { ...stored[id], id } : defaults[id];
+    // 3.56 migration: the stored price is the list price (MRP); an offer (if any) is kept as stored.
+    for (const id of Object.keys(out)) if (out[id] && out[id].listPriceInr === undefined) out[id] = { ...out[id], listPriceInr: Number(out[id].monthlyPriceInr) || 0 };
     out.community = {
       ...defaults.community,
       ...out.community,
-      id: 'community', monthlyPriceInr: 0, capacity: 1, minCapacity: 1, maxCapacity: 1, purchasable: false, isActive: true,
+      id: 'community', monthlyPriceInr: 0, listPriceInr: 0, offer: null, capacity: 1, minCapacity: 1, maxCapacity: 1, purchasable: false, isActive: true,
       entitlements: defaults.community.entitlements,
     };
     return out;

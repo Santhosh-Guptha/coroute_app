@@ -254,7 +254,8 @@ const ROLES_SETTABLE = new Set(['LEAD', 'SWEEPER', 'PACK']);
 function roleOf(v) { return typeof v === 'string' && ROLES_SETTABLE.has(v) ? v : ''; }
 
 /** Live emergency link token (3.16): exactly 32 of A-Z a-z 0-9 _ - (24 random bytes, base64url). */
-const LIVE_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+// 32 characters (alert / share links) or 22 (3.56: the SOS SMS links, which must fit a 30-character DLT variable).
+const LIVE_TOKEN = /^(?:[A-Za-z0-9_-]{22}|[A-Za-z0-9_-]{32})$/;
 function liveTokenOf(v) { return typeof v === 'string' && LIVE_TOKEN.test(v) ? v : ''; }
 
 /**

@@ -31,7 +31,7 @@ String adminSeen(Object? ms) {
 
 /// One rider's numbers and settings for the admin (inside the user details):
 /// riding totals, SOS, plan and access (change plan, trip limit, role),
-/// payments, devices and the recent admin changes. Data from
+/// devices and the recent admin changes (no payments: they are in the web admin). Data from
 /// `/admin/analytics/riders/:userId`; changes go to `PATCH /admin/users/:userId/config`
 /// (every change is written to the audit log by the server).
 class AdminRiderInsights extends StatefulWidget {
@@ -140,7 +140,7 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
       title: isAdmin ? 'Remove admin access?' : 'Make this rider an admin?',
       message: isAdmin
           ? 'They lose access to the admin console at once.'
-          : 'Admins see every rider, ride, payment and emergency, and can change plans and accounts.',
+          : 'Admins see every rider, ride and emergency, and can change plans and accounts.',
       confirmLabel: isAdmin ? 'Remove admin' : 'Make admin',
       destructive: !isAdmin,
     );
@@ -175,9 +175,7 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
     final rider = _map('rider');
     final plan = _map('plan');
     final limits = _map('limits');
-    final payments = _map('payments');
     final membership = plan['membership'] is Map ? Map<String, dynamic>.from(plan['membership'] as Map) : null;
-    final recent = adminMapList(payments['recent']);
     final devices = adminMapList(data['devices']);
     final audit = adminMapList(data['audit']);
     final isAdmin = rider['role']?.toString() == 'MASTER_ADMIN';
@@ -232,7 +230,6 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
                 ),
               AdminDetailLine('Role', isAdmin ? 'Admin' : 'Rider'),
               AdminDetailLine('Trip limit', maxTrips == null ? 'Default (${adminCount(limits['defaultMaxTrips'])})' : adminCount(maxTrips)),
-              AdminDetailLine('Paid', '${adminInr(adminNum(payments, 'totalPaidInr'))} in ${adminCount(payments['paid'])} payments'),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -258,24 +255,6 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
               ),
             ],
           ),
-        ),
-        AdminSectionLabel('Payments (${adminCount(payments['orders'])})'),
-        AdminTable(
-          empty: Text('No payments.', style: AppText.body.copyWith(color: AppTheme.text2)),
-          rows: [
-            for (var i = 0; i < recent.length; i++)
-              AdminRow(
-                leading: const AdminRowIcon(Icons.receipt_long_rounded),
-                title: '${adminInr(adminNum(recent[i], 'amount'))} · ${adminCapitalize((recent[i]['status']?.toString() ?? '').toLowerCase())}',
-                subtitle: [
-                  adminTierLabel(recent[i]['plan']),
-                  if ((recent[i]['couponCode']?.toString() ?? '').isNotEmpty) 'coupon ${recent[i]['couponCode']}',
-                  if (recent[i]['mode']?.toString() == 'test') 'test',
-                ].join(', '),
-                detail: adminDate(adminEpoch(recent[i]['paidAt']) > 0 ? recent[i]['paidAt'] : recent[i]['createdAt'], time: true),
-                divider: i < recent.length - 1,
-              ),
-          ],
         ),
         AdminSectionLabel('Devices (${devices.length})'),
         AdminTable(
@@ -342,7 +321,7 @@ class _PlanDialog extends StatefulWidget {
 
 class _PlanDialogState extends State<_PlanDialog> {
   /// 3.55: the plans riders have. The rider gets a real membership, so their app shows it at once.
-  static const List<String> _tiers = ['community', ...adminPaidPlanIds];
+  static const List<String> _tiers = ['community', ...adminGroupPlanIds];
   late String _tier = _tiers.contains(widget.currentTier) ? widget.currentTier : adminPlanIdOf(widget.currentTier);
   final TextEditingController _days = TextEditingController(text: '30');
   final TextEditingController _note = TextEditingController();

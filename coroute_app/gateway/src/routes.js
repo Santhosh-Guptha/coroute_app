@@ -213,8 +213,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   const flagsOf = () => convoys.featureFlags || null;
   require('./feature_flags').registerFeatureFlagPublicGuards({ r, flagsOf });
   // Razorpay webhook endpoint (public, HMAC-signature authenticated)
-  registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
-  registerMembershipPublicRoutes({ r, repo, wrap, convoys });
+  registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap, convoys });
+  registerMembershipPublicRoutes({ r, repo, wrap, convoys, hub }); // hub: SUBSCRIPTION_ACTIVATED after a web payment
+  // 3.56 marketing board on the website (public posts; website only, never pushed to the app).
+  require('./board').registerBoardPublicRoutes({ r, repo, wrap });
   // Aggregated, PII-free usage numbers for the website (cached 5 min).
   registerPublicUsageRoutes({ r, repo, wrap, store: publicStats });
   // Rounded count of riders on a ride right now for the website (cached 30 s, no PII).
@@ -1091,7 +1093,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // Subscription and Razorpay UPI-only payment routes (including admin pricing & coupon management)
   registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin });
-  registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin });
+  registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin, hub });
+  // 3.56 marketing board: admin posts (web admin "Board" section).
+  require('./board').registerBoardAdminRoutes({ r, repo, wrap, requireAdmin });
   // 3.55: saved road reports along a ride, CoRoute rider place reviews (+ admin moderation).
   require('./road_and_places').registerRoadAndPlaceRoutes({ r, repo, convoys, wrap, requireAdmin });
   // 3.55 risky-stretch heads-up: anonymous hard-brake cells, served only with k >= 10 riders.

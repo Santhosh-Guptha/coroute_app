@@ -1,3 +1,4 @@
+import '../../domain/membership/plan_gate_messages.dart';
 import '../../domain/tracking/ride_power_policy.dart';
 import '../../domain/tracking/battery_saver.dart';
 import '../../domain/tracking/location_cadence.dart';
@@ -1684,9 +1685,9 @@ class ConvoyService extends ChangeNotifier {
       } else if (e.code == 'ACTIVE_TRIP_CONFLICT') {
         _lastError = 'You are already in an active trip. Please end or leave your current trip first.';
       } else if (e.code == 'MEMBERSHIP_EXPIRED') {
-        _lastError = 'Active membership required. Please renew your membership.';
+        _lastError = PlanGateMessages.hostingNeedsGroupPlan;
       } else if (e.code == 'SOLO_TRIP_ONLY') {
-        _lastError = "This is a solo ride. Others can't join it.";
+        _lastError = PlanGateMessages.soloRideNoJoin;
       } else {
         _lastError = e.message;
       }
@@ -3188,6 +3189,7 @@ class ConvoyService extends ChangeNotifier {
       final who = (idHint != null && idHint.isNotEmpty) ? idHint : (_myUserId ?? 'rider');
       pending = PendingSos(
         clientId: '$who-$now',
+        linkToken: PendingSos.newLinkToken(),
         groupId: gid,
         lat: lat,
         lng: lng,

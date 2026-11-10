@@ -5,24 +5,24 @@ import 'admin_diag_logs_screen.dart';
 import 'admin_features_screen.dart';
 import 'admin_insights_screen.dart';
 import 'admin_place_reviews_screen.dart';
-import 'admin_plans_pricing_screen.dart';
 import 'admin_reviews_screen.dart';
 import 'admin_ride_history_screen.dart';
 import 'admin_safety_screen.dart';
 import 'admin_settings_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
-import 'marketing/marketing_studio_screen.dart';
 
-/// The six top-level sections of the admin console (rail on wide screens, drawer on
+/// The five top-level sections of the admin console (rail on wide screens, drawer on
 /// phones). Each groups one or more pages ([AdminPage]); a section with several pages
 /// shows them as a row of tabs under the title, so every earlier screen is still one
 /// tap away.
+///
+/// Play payments policy (docs/features_355/play_payments_policy.md): payments, coupons, plan
+/// prices and marketing are not in the app; staff manage them in the web admin.
 enum AdminSection {
   dashboard('Overview', Icons.space_dashboard_outlined),
   riders('Riders', Icons.people_alt_outlined),
   ridesSafety('Rides & safety', Icons.shield_outlined),
-  plans('Plans & payments', Icons.payments_outlined),
   content('Content', Icons.rate_review_outlined),
   system('System', Icons.tune_rounded);
 
@@ -40,8 +40,6 @@ enum AdminPage {
   riders(AdminSection.riders, 'Riders'),
   rides(AdminSection.ridesSafety, 'Rides'),
   safety(AdminSection.ridesSafety, 'Safety'),
-  payments(AdminSection.plans, 'Payments'),
-  marketing(AdminSection.plans, 'Marketing'),
   reviews(AdminSection.content, 'Ride reviews'),
   places(AdminSection.content, 'Place photos'),
   crews(AdminSection.content, 'Crews'),
@@ -65,10 +63,6 @@ Widget adminPageScreen(AdminPage page) {
       return const AdminRideHistoryScreen();
     case AdminPage.safety:
       return const AdminSafetyScreen();
-    case AdminPage.payments:
-      return const AdminPlansPricingScreen();
-    case AdminPage.marketing:
-      return const MarketingStudioScreen();
     case AdminPage.reviews:
       return const AdminReviewsScreen();
     case AdminPage.places:

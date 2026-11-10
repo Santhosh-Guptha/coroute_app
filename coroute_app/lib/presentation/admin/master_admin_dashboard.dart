@@ -966,7 +966,6 @@ class _MoreNumbers extends StatelessWidget {
     final riders = part('riders');
     final rides = part('rides');
     final safety = part('safety');
-    final pay = part('payments');
     final response = adminNumOrNull(safety['medianResponseSec']);
     final rows = <(String, String, String)>[
       ('Riders', adminCount(riders['total']), '${adminCount(riders['newInPeriod'])} new'),
@@ -977,8 +976,7 @@ class _MoreNumbers extends StatelessWidget {
       ('Avg group', adminCount(rides['avgGroupSize']), 'riders per ride'),
       ('SOS', adminCount(safety['sosInPeriod']), '${adminCount(safety['resolved'])} resolved, ${adminCount(safety['falseAlarms'])} false'),
       ('SOS answered', response == null ? '—' : formatDuration(Duration(seconds: response.round())), 'median first response'),
-      ('Paying riders', adminCount(riders['paying']), '${adminCount(riders['conversionPct'])}% of riders'),
-      ('Revenue', adminInr(adminNum(pay, 'revenueInPeriodInr')), '${adminInr(adminNum(pay, 'revenueInr'))} all time'),
+      ('On a group plan', adminCount(riders['paying']), '${adminCount(riders['conversionPct'])}% of riders'),
     ];
     return DsCard(
       padding: EdgeInsets.zero,

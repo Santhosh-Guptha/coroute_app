@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>CoRoute Admin</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/admin/admin.css">
+<link rel="stylesheet" href="/admin/notify.css">
+<script defer src="/admin/qr.js"></script>
+<script defer src="/admin/studio_core.js"></script>
+<script defer src="/admin/admin.js"></script>
+<script defer src="/admin/studio.js"></script>
+<script defer src="/admin/notify.js"></script>
+<script defer src="/admin/templates.js"></script>
+<script defer src="/admin/board.js"></script>
+<script defer src="/admin/engagement.js"></script>
+</head>
+<body>
+<noscript><p class="noscript">The CoRoute admin console needs JavaScript.</p></noscript>
+
+<main id="signin" class="signin" hidden>
+  <form id="signin-form" class="signin__card" novalidate>
+    <div class="brandline"><img src="/favicon.svg" alt="" width="36" height="36"><span>CoRoute <b>Admin</b></span></div>
+    <h1>Sign in</h1>
+    <p class="muted">Payments, plans, coupons, revenue and the marketing studio. For CoRoute administrators only.</p>
+    <label class="field"><span>Email</span><input id="signin-id" name="identifier" type="email" autocomplete="username" required></label>
+    <label class="field"><span>Password</span><input id="signin-pw" name="password" type="password" autocomplete="current-password" required></label>
+    <p id="signin-error" class="form-error" role="alert" hidden></p>
+    <button id="signin-btn" class="btn btn--primary btn--block" type="submit">Sign in</button>
+    <p class="muted small">You are signed out after 30 minutes without activity. Everything else stays in the admin console of the app.</p>
+  </form>
+</main>
+
+<div id="shell" class="shell" hidden>
+  <aside class="side">
+    <div class="brandline"><img src="/favicon.svg" alt="" width="28" height="28"><span>CoRoute <b>Admin</b></span></div>
+    <nav id="nav" class="nav" aria-label="Sections">
+      <a href="#/payments" data-section="payments">Payments</a>
+      <a href="#/plans" data-section="plans">Plans &amp; pricing</a>
+      <a href="#/coupons" data-section="coupons">Coupons</a>
+      <a href="#/marketing" data-section="marketing">Marketing studio</a>
+      <a href="#/board" data-section="board">Board</a>
+      <a href="#/revenue" data-section="revenue">Revenue</a>
+      <a href="#/notifications" data-section="notifications">Notifications</a>
+      <a href="#/templates" data-section="templates">Templates</a>
+      <a href="#/engagement" data-section="engagement">Engagement</a>
+    </nav>
+    <div class="side__foot">
+      <div id="whoami" class="whoami"></div>
+      <div class="side__row">
+        <select id="theme" class="select select--sm" aria-label="Theme">
+          <option value="system">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <button id="signout" class="btn btn--ghost btn--sm" type="button">Sign out</button>
+      </div>
+    </div>
+  </aside>
+  <main id="view" class="view" tabindex="-1"></main>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

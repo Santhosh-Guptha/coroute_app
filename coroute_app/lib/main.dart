@@ -30,9 +30,6 @@ import 'data/services/rider_score_service.dart'; // 3.55 rider score sync at rid
 import 'presentation/social/friend_notice_host.dart'; // 3.55 friend request notices
 import 'presentation/social/ride_invite_screen.dart'; // 3.55 crew ride invites
 import 'domain/social/username_rules.dart' show InviteCodes;
-import 'domain/marketing/pending_coupon.dart'; // 3.55 coupon QR / link
-import 'data/services/pending_coupon_store.dart';
-import 'presentation/subscription/membership_dashboard_screen.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
 import 'data/services/alarm_notifier.dart'; // 3.55 siren lock-screen heads-up
@@ -62,6 +59,7 @@ import 'data/services/tile_cache_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/public_ride_service.dart';
 import 'data/services/push_service.dart'; // 3.55 push notifications
+import 'data/services/engagement_service.dart'; // 3.55 ratings & reviews
 import 'data/services/ride_invites_service.dart'; // 3.55 crew ride invites
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
@@ -211,6 +209,8 @@ class CoRouteApp extends StatelessWidget {
         // 3.55 push notifications (FCM via the native coroute/push channel): token registration after
         // sign-in, removal on sign-out, tapped notifications (routed by PushRouterHost).
         ChangeNotifierProvider<PushService>(lazy: false, create: (ctx) => PushService(ctx.read<ApiClient>())..start()),
+        // 3.55 ratings & reviews: admin engagement templates (cached), "Rate CoRoute" state, feedback.
+        ChangeNotifierProvider<EngagementService>(lazy: false, create: (ctx) => EngagementService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) {
           final auth = AuthService(ctx.read<ApiClient>());
           ctx.read<RealtimeService>().onAuthRejected = auth.revalidate;
@@ -765,7 +765,8 @@ class _SessionBinderState extends State<_SessionBinder> {
 }
 
 /// Handles `coroute://join/CODE` and `https://<host>/join/CODE` links, and
-/// `coroute://subscription` (return from the website checkout).
+/// `coroute://subscription` (re-reads the plan). No other link opens a plan screen
+/// (Play payments policy, docs/features_355/play_payments_policy.md).
 class _DeepLinkListener extends StatefulWidget {
   final Widget child;
   const _DeepLinkListener({required this.child});
@@ -785,27 +786,6 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
       if (uri != null) _handle(uri);
     }).catchError((_) {});
     _sub = _appLinks.uriLinkStream.listen(_handle, onError: (_) {});
-    // 3.55 coupon QR: a code passed through the Play Store install (Install Referrer), first launch only.
-    PendingCouponStore.checkInstallReferrerOnce().ignore();
-  }
-
-  /// 3.55 coupon QR / link: keeps the code for the plan payment screen (prefilled, never bought).
-  Future<void> _saveCoupon(String code) async {
-    final saved = await PendingCouponStore.save(code);
-    if (saved == null || !mounted) return;
-    final loggedIn = context.read<AuthService>().isAuthenticated;
-    final ctx = appNavigatorKey.currentContext;
-    if (ctx == null || !ctx.mounted) return;
-    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(SnackBar(
-      content: Text('Code $saved will be applied when you choose a plan.'),
-      action: loggedIn
-          ? SnackBarAction(
-              label: 'Plans',
-              onPressed: () => appNavigatorKey.currentState
-                  ?.push(MaterialPageRoute<void>(builder: (_) => const MembershipDashboardScreen())),
-            )
-          : null,
-    ));
   }
 
   void _handle(Uri uri) {
@@ -814,14 +794,8 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
       return;
     }
     if (uri.scheme == 'coroute' && uri.host == 'subscription') {
-      // Back from the website checkout: re-read the membership (the single source of the plan).
+      // coroute://subscription: re-read the membership (the single source of the plan). Nothing else.
       context.read<MembershipService>().fetchMyMembership().ignore();
-      return;
-    }
-    // 3.55 coupon QR / link (https://<site>/get?coupon=CODE).
-    final coupon = PendingCoupon.fromUri(uri);
-    if (coupon != null) {
-      _saveCoupon(coupon).ignore();
       return;
     }
     // 3.55 friend invite link (https://<site>/join/friend/<CODE>, coroute://join/friend/<CODE>).

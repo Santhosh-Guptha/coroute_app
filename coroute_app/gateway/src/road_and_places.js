@@ -13,7 +13,7 @@
  *  - CoRoute rider place reviews: a rider who spent a while at a restaurant, stay or any place is
  *    asked (politely, once) to rate it for the next riders. Shown in the place card with a rating
  *    and photos:
- *      POST /api/places/reviews            { placeId, placeName, category, lat, lng, rating, text, dwellMin }
+ *      POST /api/places/reviews            { placeId, placeName, category, lat, lng, rating, text, dwellMin, chips? }
  *      POST /api/places/reviews/:id/photo   (image bytes, up to 2 MB; shown after an admin check)
  *      GET  /api/places/reviews?placeId=    { summary: { avg, count }, reviews: [...] }
  *      GET  /api/places/review-summary?s=&w=&n=&e=   per-place averages for the map
@@ -111,6 +111,7 @@ function reviewView(r, { mine = false } = {}) {
   const approved = (Array.isArray(r.uploads) ? r.uploads : []).filter((u) => u && u.approved === true);
   return {
     reviewId: r.reviewId, placeId: r.placeId, placeName: r.placeName, category: r.category, rating: r.rating, text: r.text || '',
+    chips: Array.isArray(r.chips) ? r.chips : [],
     firstName: firstName(r.userName), createdAt: r.createdAt, dwellMin: r.dwellMin || 0,
     photos: approved.map((u) => `/api/places/reviews/${r.reviewId}/photo/${u.id}`),
     ...(mine ? { photosPending: (Array.isArray(r.uploads) ? r.uploads : []).filter((u) => u && u.approved !== true).length, status: r.status } : {}),
@@ -193,7 +194,10 @@ function registerRoadAndPlaceRoutes({ r, repo, convoys, wrap, requireAdmin }) {
       reviewId: prev ? prev.reviewId : `pr_${crypto.randomBytes(12).toString('hex')}`,
       placeId, placeName: name || prev?.placeName || 'Place', category,
       lat: Math.round(lat * 1e5) / 1e5, lng: Math.round(lng * 1e5) / 1e5,
-      rating, text: t.text, dwellMin: Math.max(0, Math.min(24 * 60, Math.round(Number(b.dwellMin) || 0))),
+      rating, text: t.text,
+      // 3.55 quick chips per category ("Clean", "Bike parking"...; ids from the engagement config).
+      chips: (Array.isArray(b.chips) ? b.chips : []).map((x) => (typeof x === 'string' ? x.trim() : '')).filter((x, i, a) => /^[a-z][a-z0-9_]{0,31}$/.test(x) && a.indexOf(x) === i).slice(0, 10),
+      dwellMin: Math.max(0, Math.min(24 * 60, Math.round(Number(b.dwellMin) || 0))),
       userId: req.user.userId, userName: user?.name || 'Rider',
       status: 'PUBLISHED', uploads: prev && Array.isArray(prev.uploads) ? prev.uploads : [],
       createdAt: now, updatedAt: now,

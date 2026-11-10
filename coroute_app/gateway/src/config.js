@@ -77,7 +77,10 @@ const config = {
   jwtSecret: isTest ? 'test-secret-test-secret-test-secret-1234' : required('JWT_SECRET'),
   jwtTtlDays: int('JWT_TTL_DAYS', 30),
   tokenRefreshAfterHours: int('TOKEN_REFRESH_AFTER_HOURS', 24),
-  googleClientIds: list('GOOGLE_CLIENT_IDS'),
+  // 3.56 website sign-in (src/web_shop.js): the OAuth "Web application" client id for the Google button on
+  // /signin. Also accepted as an ID-token audience (added to GOOGLE_CLIENT_IDS below when missing).
+  googleWebClientId: (process.env.GOOGLE_WEB_CLIENT_ID || '').trim(),
+  googleClientIds: [...new Set([...list('GOOGLE_CLIENT_IDS'), ...list('GOOGLE_WEB_CLIENT_ID')])],
   // Seeds the first admin account(s) only; roles are then managed in the database.
   adminEmails: list('BOOTSTRAP_ADMIN_EMAILS', list('ADMIN_EMAILS')),
   // Extra staff accounts (comma list of emails) left out of rider counts and analytics, like admins.
