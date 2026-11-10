@@ -15,8 +15,10 @@
  *     any location, guardian info, plan or payment, or the userId. Non-friends get the username and
  *     picture only; friends also the first name and ride totals (trips, km, hours, score).
  *   - A rider who blocked me is "not found" to me (same answer as an unknown username) and never gets
- *     my picture. Friend requests answer the same for an unknown username and for a rider who blocked
- *     the requester.
+ *     my picture. A friend request to a rider who blocked the requester answers exactly like any
+ *     unanswered request (202 REQUESTED, shown under "Sent"), so a block is never revealed. An
+ *     unknown username or invite code answers 404 (usernames are public through the availability
+ *     check anyway), so a typo is never reported as "sent".
  */
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -401,8 +403,16 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
   }));
 
   /**
-   * Add a friend by username or invite code. Same 202 {status:'REQUESTED'} for an unknown username,
-   * an unknown code and a rider who blocked me (no enumeration).
+   * Add a friend by username or invite code (docs/features_355/usernames_friends_profiles.md).
+   *   - unknown username / invite code: 404 NOT_FOUND with a clear message (whether a username is
+   *     taken is public anyway through GET /users/username-available; an invite code cannot be
+   *     guessed and requests are limited to 20 a day). A silent "sent" for a typo left the request
+   *     nowhere in the app: not under the sender's "Sent", never with the other rider.
+   *   - a rider who blocked me: the same 202 {status:'REQUESTED', request} as any unanswered request
+   *     (a shadow edge the requester sees under "Sent" and the target never sees), so a block is
+   *     never revealed.
+   * The 202 carries the sender's own view of the request (`request`: the same row as GET /friends
+   * `outgoing`), so the app shows it under "Sent" at once.
    */
   r.post('/friends/requests', requestLimiter, wrap(async (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -413,26 +423,34 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       via = 'invite';
       const tid = await F.userIdByInviteCode(soda, body.inviteCode);
       target = tid ? await repo.findUserById(tid) : null;
+      if (!target || target.status === 'BLOCKED') {
+        return res.status(404).json({ error: 'This invite code is not valid. Check it and try again.', code: 'NOT_FOUND' });
+      }
     } else if (typeof body.username === 'string' && body.username.trim()) {
-      const v = U.validateUsername(body.username.trim());
+      // "@SwiftFalcon482" (as the app shows names) and any capitals find the same rider.
+      const name = body.username.trim().replace(/^@+/, '').trim();
+      const v = U.validateUsername(name);
       if (!v.ok && v.code === 'USERNAME_FORMAT') return res.status(400).json({ error: 'Enter a username.', code: 'BAD_USERNAME' });
-      target = await U.findUserByUsername(repo, body.username);
+      target = await U.findUserByUsername(repo, name);
+      if (!target || target.status === 'BLOCKED') {
+        return res.status(404).json({ error: 'No rider has that username. Check the spelling.', code: 'NOT_FOUND' });
+      }
     } else {
       return res.status(400).json({ error: 'Enter a username or an invite code.', code: 'BAD_REQUEST' });
     }
-    if (target && target.userId === uid) return res.status(400).json({ error: 'That is you.', code: 'SELF' });
-    const quiet = () => res.status(202).json({ ok: true, status: 'REQUESTED' });
-    if (!target || target.status === 'BLOCKED') return quiet();
+    if (target.userId === uid) return res.status(400).json({ error: 'That is you.', code: 'SELF' });
     let out;
     try { out = await F.sendRequest(soda, uid, target.userId, { via }); } catch (e) { return sendErr(res, e); }
+    const named = await U.ensureUsername(repo, target);
+    const card = cardOf(named, flagsOf);
     if (out.status === 'REQUESTED') {
       if (out.created && !out.edge.shadow) {
         const mine = await me(req);
         notify(target.userId, { type: 'FRIEND_REQUEST', requestId: out.edge.requestId, username: mine.username, via });
       }
-      return quiet();
+      const edge = out.edge || {};
+      return res.status(202).json({ ok: true, status: 'REQUESTED', request: { requestId: edge.requestId, ...card, at: edge.createdAt || Date.now() } });
     }
-    const card = cardOf(await U.ensureUsername(repo, target), flagsOf);
     if (out.status === 'FRIENDS') {
       const mine = await me(req);
       notify(target.userId, { type: 'FRIEND_ACCEPTED', username: mine.username });

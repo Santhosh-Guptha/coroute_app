@@ -17,6 +17,7 @@ import '../score/rider_score_card.dart';
 import '../widgets/feature_switch.dart';
 import '../../data/services/crews_service.dart';
 import 'crews_screen.dart';
+import 'friend_requests_card.dart';
 import 'friends_screen.dart';
 import 'user_avatar.dart';
 
@@ -149,6 +150,12 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                 children: [
                   DsScreenHeader(title: 'My profile', onBack: () => Navigator.maybePop(context)),
                   const SizedBox(height: 18),
+                  // 3.55: friend requests waiting for me, answered right here (even if the profile
+                  // itself could not be loaded).
+                  if (friendsOn && svc.badgeCount > 0) ...[
+                    FriendRequestsCard(max: 3, onSeeAll: () => FriendsScreen.open(context)),
+                    const SizedBox(height: Space.s16),
+                  ],
                   if (p == null && svc.loading)
                     const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
                   else if (p == null)

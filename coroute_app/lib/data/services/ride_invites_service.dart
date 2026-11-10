@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/ride_invite_rules.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'api_client.dart';
 import 'feature_flags_service.dart';
 import 'realtime_service.dart';
@@ -122,6 +123,9 @@ class RideInvitesService extends ChangeNotifier {
 
   void _onPush(Map<String, dynamic> msg) {
     final type = msg['type']?.toString();
+    if (type == 'RIDE_INVITE' || type == 'RIDE_INVITE_UPDATE') {
+      DiagLog.info(DiagCat.social, 'ride_invite_event', {'kind': type, 'inviteId': msg['inviteId']?.toString(), 'eventId': msg['eventId']?.toString()});
+    }
     if (type == 'RIDE_INVITE') {
       final id = msg['inviteId']?.toString() ?? '';
       if (id.isEmpty) return;

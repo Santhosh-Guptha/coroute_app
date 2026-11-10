@@ -5,11 +5,15 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/notify/notice_dedupe.dart';
+import '../../domain/social/friends_models.dart';
 import '../../domain/social/username_rules.dart';
+import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'alarm_notifier.dart';
 import 'api_client.dart';
 import 'feature_flags_service.dart';
 import 'realtime_service.dart';
+
+export '../../domain/social/friends_models.dart';
 
 /// Ride totals shown on a profile (GET /me/stats, friends' profiles).
 @immutable
@@ -85,46 +89,7 @@ class MyProfile {
   DateTime? get nextUsernameChange => UsernameRules.nextChangeAt(usernameChangedAt);
 }
 
-String? _url(Object? v) {
-  final s = v?.toString() ?? '';
-  return s.startsWith('/api/avatars/') ? s : null;
-}
-
-/// One friend in the list (username, first name, picture, totals).
-@immutable
-class FriendEntry {
-  final String username;
-  final String displayName;
-  final String? avatarUrl;
-  final int since;
-  final int trips;
-  final double totalKm;
-  const FriendEntry({required this.username, this.displayName = '', this.avatarUrl, this.since = 0, this.trips = 0, this.totalKm = 0});
-  factory FriendEntry.fromJson(Map raw) => FriendEntry(
-        username: raw['username']?.toString() ?? '',
-        displayName: raw['displayName']?.toString() ?? '',
-        avatarUrl: _url(raw['avatarUrl']),
-        since: raw['since'] is num ? (raw['since'] as num).toInt() : 0,
-        trips: raw['trips'] is num ? (raw['trips'] as num).toInt() : 0,
-        totalKm: raw['totalKm'] is num ? (raw['totalKm'] as num).toDouble() : 0,
-      );
-}
-
-/// A waiting request (incoming or outgoing).
-@immutable
-class FriendRequestEntry {
-  final String requestId;
-  final String username;
-  final String? avatarUrl;
-  final int at;
-  const FriendRequestEntry({required this.requestId, required this.username, this.avatarUrl, this.at = 0});
-  factory FriendRequestEntry.fromJson(Map raw) => FriendRequestEntry(
-        requestId: raw['requestId']?.toString() ?? '',
-        username: raw['username']?.toString() ?? '',
-        avatarUrl: _url(raw['avatarUrl']),
-        at: raw['at'] is num ? (raw['at'] as num).toInt() : 0,
-      );
-}
+String? _url(Object? v) => avatarPathOf(v);
 
 /// Another rider's profile as the gateway allows me to see it.
 @immutable
@@ -166,15 +131,6 @@ class RiderProfile {
     );
   }
   bool get hasStats => trips != null;
-}
-
-/// Outcome of a friend request ("REQUESTED", "FRIENDS", "ALREADY_FRIENDS") or an error message.
-@immutable
-class FriendRequestResult {
-  final String? status;
-  final String? error;
-  const FriendRequestResult({this.status, this.error});
-  bool get ok => error == null;
 }
 
 /// 3.55 profile, usernames, friends and profile pictures (docs/features_355/usernames_friends_profiles.md).
@@ -223,7 +179,8 @@ class FriendsService extends ChangeNotifier {
   List<String> get blocked => _blocked;
   bool get loading => _loading;
 
-  /// Number shown on the Profile tab badge (incoming requests).
+  /// Number shown on the Profile tab, the "My profile & friends" row and the Friends row
+  /// (incoming requests waiting for an answer).
   int get badgeCount => FeatureFlagsService.on(friendsFlag) ? _incoming.length : 0;
 
   /// 3.55: the system notification for a friend push while the app is in the background
@@ -257,33 +214,50 @@ class FriendsService extends ChangeNotifier {
     if (_started) return;
     _started = true;
     _hadToken = _api.hasToken;
-    _sub = _rt?.events.listen((msg) {
-      final type = msg['type'];
-      if (type != 'FRIEND_REQUEST' && type != 'FRIEND_ACCEPTED') return;
-      // 3.55 follow-up: the same event already shown (its push arrived first): refresh only.
-      if (!NoticeDedupe.shared.firstTime(msg['eventId'])) {
-        refreshFriends();
-        return;
-      }
-      final who = msg['username']?.toString() ?? 'A rider';
-      final line = type == 'FRIEND_REQUEST' ? '$who wants to be friends' : '$who accepted your friend request';
-      // 3.55: in the background a system notification; in the foreground FriendNoticeHost shows
-      // the line as a snackbar (via takeNotice).
-      if (FeatureFlagsService.on(friendsFlag) && !_inForeground()) {
-        _lastNotice = null;
-        systemNotice(type == 'FRIEND_REQUEST' ? 'Friend request' : 'New friend', line).ignore();
-      } else {
-        _lastNotice = line;
-      }
-      refreshFriends();
-    });
+    _sub = _rt?.events.listen(onPush);
     _api.addListener(_onApiChanged);
+    // A request sent while the socket was down is never re-sent: read the list again whenever the
+    // socket (re)connects.
+    _rtWasConnected = _rt?.isConnected ?? false;
+    _rt?.addListener(_onRealtimeChanged);
     try {
       _lifecycle = AppLifecycleListener(onResume: () => refreshFriends());
     } catch (_) {
       // No binding (pure unit tests).
     }
     if (_api.hasToken) refreshAll();
+  }
+
+  bool _rtWasConnected = false;
+  void _onRealtimeChanged() {
+    final now = _rt?.isConnected ?? false;
+    if (now && !_rtWasConnected) refreshFriends();
+    _rtWasConnected = now;
+  }
+
+  /// A socket message: FRIEND_REQUEST / FRIEND_ACCEPTED (anything else is ignored).
+  @visibleForTesting
+  void onPush(Map<String, dynamic> msg) {
+    final push = FriendPush.parse(msg);
+    // Ids only (never the username): did the socket event reach the phone, and was it shown?
+    DiagLog.info(DiagCat.social, 'friend_event', {'kind': msg['type'], 'requestId': push?.requestId, 'eventId': push?.eventId, 'parsed': push != null, 'switchOn': FeatureFlagsService.on(friendsFlag), 'foreground': _inForeground()});
+    if (push == null || !FeatureFlagsService.on(friendsFlag)) return;
+    // The request shows at once (badge, Requests card), before GET /friends answers.
+    final row = push.asIncoming;
+    if (row != null) _incoming = withRequest(_incoming, row);
+    // 3.55 follow-up: the same event already shown (its push arrived first): no second notice.
+    if (NoticeDedupe.shared.firstTime(push.eventId)) {
+      // In the background a system notification; in the foreground FriendNoticeHost shows the
+      // line as a snackbar (via takeNotice).
+      if (!_inForeground()) {
+        _lastNotice = null;
+        systemNotice(push.isRequest ? 'Friend request' : 'New friend', push.line).ignore();
+      } else {
+        _lastNotice = push.line;
+      }
+    }
+    _notify();
+    refreshFriends();
   }
 
   void _onApiChanged() {
@@ -345,18 +319,25 @@ class FriendsService extends ChangeNotifier {
   }
 
   Future<void> refreshFriends() async {
-    if (_disposed || !_api.hasToken || !FeatureFlagsService.on(friendsFlag)) return;
+    if (_disposed || !_api.hasToken || !FeatureFlagsService.on(friendsFlag)) {
+      DiagLog.debug(DiagCat.social, 'friends_refresh_skipped', {'signedIn': _api.hasToken, 'switchOn': FeatureFlagsService.on(friendsFlag)});
+      return;
+    }
     try {
-      final res = await _api.get('/friends');
-      if (res is! Map) return;
-      List<T> list<T>(Object? raw, T Function(Map) f) => raw is List ? raw.whereType<Map>().map(f).toList() : <T>[];
-      _friends = list(res['friends'], FriendEntry.fromJson);
-      _incoming = list(res['incoming'], FriendRequestEntry.fromJson);
-      _outgoing = list(res['outgoing'], FriendRequestEntry.fromJson);
-      _blocked = list(res['blocked'], (m) => m['username']?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+      final snap = FriendsSnapshot.parse(await _api.get('/friends'));
+      if (snap == null) {
+        DiagLog.warn(DiagCat.social, 'friends_unparsed');
+        return;
+      }
+      DiagLog.info(DiagCat.social, 'friends_loaded', {'friends': snap.friends.length, 'incoming': snap.incoming.length, 'outgoing': snap.outgoing.length});
+      _friends = snap.friends;
+      _incoming = snap.incoming;
+      _outgoing = snap.outgoing;
+      _blocked = snap.blocked;
       _notify();
     } catch (e) {
       debugPrint('Friends not refreshed: $e');
+      DiagLog.warn(DiagCat.social, 'friends_refresh_failed', {'type': e.runtimeType.toString(), 'status': e is ApiException ? e.statusCode : null});
     }
   }
 
@@ -419,18 +400,24 @@ class FriendsService extends ChangeNotifier {
   }
 
   /// Add a friend by username or invite code. [byCode] null = guess from [input] (an 8-character
-  /// all-capitals code is a code, anything else a username).
+  /// all-capitals code is a code, anything else a username). A leading "@" is ignored.
   Future<FriendRequestResult> sendRequest(String input, {bool? byCode}) async {
-    final text = input.trim();
+    final text = usernameInput(input);
     if (text.isEmpty) return const FriendRequestResult(error: 'Enter a username or an invite code.');
     final code = InviteCodes.normalise(text);
     final asCode = byCode ?? (code != null && (text == text.toUpperCase() || !UsernameRules.pattern.hasMatch(text)));
     if (asCode && code == null) return const FriendRequestResult(error: 'An invite code has 8 letters and numbers.');
     final body = asCode ? {'inviteCode': code} : {'username': text};
     try {
-      final res = await _api.post('/friends/requests', body);
+      final out = FriendRequestResult.fromJson(await _api.post('/friends/requests', body));
+      // Under "Sent" at once (GET /friends below confirms it).
+      final sent = out.request;
+      if (sent != null) {
+        _outgoing = withRequest(_outgoing, sent);
+        _notify();
+      }
       await refreshFriends();
-      return FriendRequestResult(status: res is Map ? res['status']?.toString() : 'REQUESTED');
+      return out;
     } on ApiException catch (e) {
       return FriendRequestResult(error: e.message);
     }
@@ -525,7 +512,7 @@ class FriendsService extends ChangeNotifier {
     await clearPendingInvite();
     final r = await sendRequest(code, byCode: true);
     if (r.ok) {
-      _lastNotice = r.status == 'FRIENDS' ? 'You are now friends' : 'Friend request sent';
+      _lastNotice = r.confirmation;
       _notify();
     }
   }
@@ -534,6 +521,7 @@ class FriendsService extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _sub?.cancel();
+    _rt?.removeListener(_onRealtimeChanged);
     _lifecycle?.dispose();
     _api.removeListener(_onApiChanged);
     super.dispose();

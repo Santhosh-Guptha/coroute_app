@@ -237,7 +237,10 @@ test('friend request lifecycle, profile privacy and notifications', async () => 
 
   const sent = await t.api('POST', '/friends/requests', { username: b.user.username.toLowerCase() }, a.token);
   assert.equal(sent.status, 202);
-  assert.deepEqual(sent.json, { ok: true, status: 'REQUESTED' });
+  assert.equal(sent.json.status, 'REQUESTED');
+  // The sender's own view of the request (shown under "Sent" at once): the target's card only.
+  assert.deepEqual(Object.keys(sent.json.request).sort(), ['at', 'avatarUrl', 'requestId', 'username']);
+  assert.equal(sent.json.request.username, b.user.username);
   const push = await bWs.next((m) => m.type === 'FRIEND_REQUEST');
   assert.equal(push.username, a.user.username);
   assert.ok(!JSON.stringify(push).includes(a.user.userId), 'no userId in the notification');
@@ -292,7 +295,7 @@ test('friend request lifecycle, profile privacy and notifications', async () => 
   aWs.close(); bWs.close();
 });
 
-test('blocking: no requests, no profile, no picture; unknown and blocked answer the same', async () => {
+test('blocking: no requests, no profile, no picture; a block is never revealed', async () => {
   const a = await t.register('Block Asker', 'blockasker@coroute.test');
   const b = await t.register('Block Target', 'blocktarget@coroute.test');
   assert.equal((await raw('POST', '/me/avatar', PNG_1x1, b.token)).status, 201);
@@ -307,11 +310,19 @@ test('blocking: no requests, no profile, no picture; unknown and blocked answer 
   assert.equal((await t.api('GET', '/friends', null, a.token)).json.outgoing.length, 1, 'a cannot tell');
   assert.deepEqual((await t.api('GET', '/friends', null, b.token)).json.blocked.map((x) => x.username), [a.user.username]);
 
+  // A request to the rider who blocked me looks exactly like an unanswered one (same shape).
   const toBlocked = await t.api('POST', '/friends/requests', { username: b.user.username }, a.token);
+  const c = await t.register('Block Bystander', 'blockbystander@coroute.test');
+  const toNormal = await t.api('POST', '/friends/requests', { username: c.user.username }, a.token);
+  assert.equal(toBlocked.status, 202);
+  assert.equal(toBlocked.status, toNormal.status);
+  assert.deepEqual(Object.keys(toBlocked.json).sort(), Object.keys(toNormal.json).sort(), 'a block is not revealed');
+  assert.deepEqual(Object.keys(toBlocked.json.request).sort(), Object.keys(toNormal.json.request).sort());
+  // An unknown username or code says so (a typo is never reported as sent).
   const toUnknown = await t.api('POST', '/friends/requests', { username: 'NoSuchRider_42' }, a.token);
-  assert.deepEqual([toBlocked.status, toBlocked.json], [toUnknown.status, toUnknown.json], 'no enumeration');
+  assert.deepEqual([toUnknown.status, toUnknown.json.code], [404, 'NOT_FOUND']);
   const badCode = await t.api('POST', '/friends/requests', { inviteCode: 'ZZZZZZZZ' }, a.token);
-  assert.deepEqual([badCode.status, badCode.json], [toUnknown.status, toUnknown.json]);
+  assert.deepEqual([badCode.status, badCode.json.code], [404, 'NOT_FOUND']);
 
   const pBlocked = await t.api('GET', `/users/${b.user.username}/profile`, null, a.token);
   const pUnknown = await t.api('GET', '/users/NoSuchRider_42/profile', null, a.token);
@@ -322,7 +333,7 @@ test('blocking: no requests, no profile, no picture; unknown and blocked answer 
   assert.equal((await t.api('POST', '/friends/requests', { username: a.user.username }, b.token)).json.code, 'YOU_BLOCKED');
   // Unblock: the shadow request is dropped, things work again.
   assert.equal((await t.api('DELETE', `/blocks/${a.user.username}`, null, b.token)).json.unblocked, true);
-  assert.equal((await t.api('GET', '/friends', null, a.token)).json.outgoing.length, 0);
+  assert.deepEqual((await t.api('GET', '/friends', null, a.token)).json.outgoing.map((x) => x.username), [c.user.username]);
   assert.equal((await t.api('GET', `/users/${b.user.username}/profile`, null, a.token)).status, 200);
   // Blocking an unknown username answers like a real one.
   assert.deepEqual((await t.api('POST', '/blocks', { username: 'NoSuchRider_42' }, a.token)).json, { ok: true, blocked: true });

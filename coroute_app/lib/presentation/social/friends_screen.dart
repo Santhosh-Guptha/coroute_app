@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/friends_service.dart';
 import '../widgets/feature_switch.dart';
+import 'friend_requests_card.dart';
 import 'rider_profile_screen.dart';
 import 'user_avatar.dart';
 
@@ -58,6 +59,16 @@ class _FriendsScreenState extends State<FriendsScreen> {
       subject: 'Ride with me on CoRoute',
       sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
     ));
+  }
+
+  Future<void> _blockRequester(FriendsService svc, FriendRequestEntry r) async {
+    if (await confirmAction(context,
+        title: 'Block ${r.username}?',
+        message: 'The request disappears and they cannot send another. They are not told.',
+        confirmLabel: 'Block',
+        destructive: true)) {
+      _say(await svc.block(r.username) ?? 'Blocked');
+    }
   }
 
   Future<void> _friendActions(FriendsService svc, FriendEntry f) async {
@@ -116,28 +127,21 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   if (!on)
                     DsCard(child: Text('Friends are turned off for now.', style: AppText.body))
                   else ...[
-                    DsButton(label: 'Invite friends to CoRoute', icon: Icons.share_rounded, tone: DsButtonTone.outline, onPressed: () => _invite(svc)),
+                    // Requests waiting for me come first, so they are never missed.
                     if (svc.incoming.isNotEmpty) ...[
+                      FriendRequestsCard(onBlock: (r) => _blockRequester(svc, r)),
+                      const SizedBox(height: Space.s16),
+                    ],
+                    DsButton(label: 'Invite friends to CoRoute', icon: Icons.share_rounded, tone: DsButtonTone.outline, onPressed: () => _invite(svc)),
+                    if (svc.outgoing.isNotEmpty) ...[
                       const SizedBox(height: Space.s24),
-                      DsSectionHeader('Requests (${svc.incoming.length})'),
+                      DsSectionHeader('Sent (${svc.outgoing.length})'),
                       const SizedBox(height: Space.s12),
-                      for (final r in svc.incoming)
+                      for (final r in svc.outgoing)
                         _RequestCard(
                           entry: r,
-                          subtitle: 'Wants to be friends',
-                          actions: [
-                            TextButton(onPressed: () async => _say(await svc.respond(r.requestId, false)), child: const Text('Decline')),
-                            FilledButton(onPressed: () async => _say(await svc.respond(r.requestId, true) ?? 'You are now friends'), child: const Text('Accept')),
-                          ],
-                          onMore: () async {
-                            if (await confirmAction(context,
-                                title: 'Block ${r.username}?',
-                                message: 'The request disappears and they cannot send another. They are not told.',
-                                confirmLabel: 'Block',
-                                destructive: true)) {
-                              _say(await svc.block(r.username) ?? 'Blocked');
-                            }
-                          },
+                          subtitle: 'Waiting for an answer',
+                          actions: [TextButton(onPressed: () async => _say(await svc.cancelRequest(r.requestId) ?? 'Request cancelled'), child: const Text('Cancel'))],
                         ),
                     ],
                     const SizedBox(height: Space.s24),
@@ -163,17 +167,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
                           ],
                         ),
                       ),
-                    if (svc.outgoing.isNotEmpty) ...[
-                      const SizedBox(height: Space.s24),
-                      DsSectionHeader('Sent (${svc.outgoing.length})'),
-                      const SizedBox(height: Space.s12),
-                      for (final r in svc.outgoing)
-                        _RequestCard(
-                          entry: r,
-                          subtitle: 'Waiting for an answer',
-                          actions: [TextButton(onPressed: () async => _say(await svc.cancelRequest(r.requestId) ?? 'Request cancelled'), child: const Text('Cancel'))],
-                        ),
-                    ],
                     if (svc.blocked.isNotEmpty) ...[
                       const SizedBox(height: Space.s24),
                       const DsSectionHeader('Blocked'),
@@ -248,8 +241,7 @@ class _RequestCard extends StatelessWidget {
   final FriendRequestEntry entry;
   final String subtitle;
   final List<Widget> actions;
-  final VoidCallback? onMore;
-  const _RequestCard({required this.entry, required this.subtitle, required this.actions, this.onMore});
+  const _RequestCard({required this.entry, required this.subtitle, required this.actions});
 
   @override
   Widget build(BuildContext context) {
@@ -271,7 +263,6 @@ class _RequestCard extends StatelessWidget {
               ),
             ),
             ...actions,
-            if (onMore != null) IconButton(tooltip: 'Block ${entry.username}', icon: const Icon(Icons.block_rounded), onPressed: onMore),
           ],
         ),
       ),
@@ -311,14 +302,7 @@ class _AddFriendFormState extends State<_AddFriendForm> {
       setState(() => _error = r.error);
       return;
     }
-    Navigator.pop(
-      context,
-      switch (r.status) {
-        'FRIENDS' => 'You are now friends',
-        'ALREADY_FRIENDS' => 'You are already friends',
-        _ => 'Request sent. You will be friends once they accept.',
-      },
-    );
+    Navigator.pop(context, r.confirmation);
   }
 
   @override
