@@ -278,7 +278,7 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.safety,
     icon: Icons.car_crash_rounded,
     name: 'Crash detection',
-    what: 'If the phone senses a crash, it rings for 15 s, then sends SOS.',
+    what: 'If the phone senses a crash, it rings for 30 s, then sends SOS.',
     when: 'During a ride (also a solo ride without internet), from about 12 km/h.',
     battery: Impact.medium,
     data: Impact.none,

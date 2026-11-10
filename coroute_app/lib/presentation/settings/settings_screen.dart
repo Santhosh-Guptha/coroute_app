@@ -20,6 +20,7 @@ import '../ride/fuel_sheet.dart';
 import '../safety/safety_settings_sheet.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
 import '../widgets/feature_switch.dart';
+import 'diagnostics_screen.dart';
 import 'features_guide_screen.dart';
 import 'push_notifications_tile.dart';
 
@@ -31,7 +32,7 @@ import 'push_notifications_tile.dart';
 ///  * Ride: voice alerts, siren alerts (on by default), language, battery saver, data saver.
 ///  * App & privacy: appearance, push notifications, my username on leaderboards.
 ///  * More (collapsed): audio fine-tuning, nearby riders help, score report, fuel, offline maps,
-///    permissions, phone check and the features guide.
+///    permissions, phone check, the features guide and Diagnostics (app log).
 /// Rows tied to an admin switch hide when it is off.
 class SettingsScreen extends StatefulWidget {
   /// Kept for callers and tests; emergency texts no longer have a switch that asks for SMS.
@@ -64,7 +65,6 @@ class SettingsScreen extends StatefulWidget {
   static const String moreTitle = 'More settings';
   static const String pauseMusicTitle = 'Pause music for alerts';
   static const String lowerMusicTitle = 'Lower music when speeding';
-  static const String hornTitle = 'Horn alerts';
   static const String giveWayTitle = 'Give way to the';
   static const String scoreReportTitle = 'Safety report in my score';
 
@@ -274,17 +274,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: s.lowerMusicWhenSpeeding,
                 onChanged: s.setLowerMusicWhenSpeeding,
               ),
-            // Admin switch 'hornAlert'.
-            if (context.featureOn('hornAlert'))
-              _ChoiceRow<bool?>(
-                key: const ValueKey('settings_horn_alerts'),
-                icon: Icons.campaign_rounded,
-                title: SettingsScreen.hornTitle,
-                subtitle: micPrivacy,
-                value: s.hornAlerts,
-                choices: const {null: 'Auto', true: 'On', false: 'Off'},
-                onChanged: s.setHornAlerts,
-              ),
             // Admin switch 'sirenDetector'.
             if (context.featureOn('sirenDetector'))
               _ChoiceRow<String>(
@@ -334,13 +323,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Features guide',
             onTap: () => _push(const FeaturesGuideScreen()),
           ),
+          // 3.55 diagnostics log: send / share / view the app log (docs/features_355/diagnostics_logs.md).
+          _Row(
+            key: const ValueKey('settings_diagnostics'),
+            icon: Icons.bug_report_outlined,
+            title: DiagnosticsScreen.title,
+            subtitle: 'App log for fixing problems',
+            onTap: () => _push(const DiagnosticsScreen()),
+          ),
         ]),
       ],
     );
   }
-
-  /// 3.55: added to the horn row (detection runs on the phone only).
-  static const String micPrivacy = 'Listens on your phone only. Nothing is recorded.';
 }
 
 /// "More settings": one tap opens or closes the less-used rows.
@@ -477,7 +471,7 @@ class _Row extends StatelessWidget {
   }
 }
 
-/// A setting with a few named choices (speed warning, horn alerts, give-way side).
+/// A setting with a few named choices (speed warning, give-way side).
 class _ChoiceRow<T> extends StatelessWidget {
   final IconData icon;
   final String title;

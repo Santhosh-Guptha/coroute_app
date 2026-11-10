@@ -44,8 +44,8 @@ const CATALOG = Object.freeze([
   f('noSignalAhead', 'Safety', 'No-signal ahead', 'Tells the group and guardians before a stretch that had no signal on the rider\'s earlier rides.'),
   f('arrivalMessage', 'Safety', 'Arrival message', 'Guardians get "Arrived safely" once at the end of the ride, then the link stops tracking.'),
   f('publicRiderHelp', 'Safety', 'Help from public riders', 'An SOS also asks riders of nearby public rides who agreed to help.'),
+  // ('hornAlert' was removed in 3.55: horn alerts are gone; a stored value is dropped by cleanStored.)
   f('sirenDetector', 'Safety', 'Siren detector', 'Listens for ambulance, police and fire engine sirens, lowers the audio and tells the rider.'),
-  f('hornAlert', 'Safety', 'Horn close by alert', 'Tells the rider when a vehicle honks close by (on the phone, nothing is recorded).'),
   // 3.55 phone-only sensor safety (free on every plan, no signal needed; logic on the phone).
   f('fatigueScore', 'Safety', 'Fatigue score', 'Break reminders that adapt to ride time, time of day, short stops and steering wobble.'),
   f('riderDown', 'Safety', 'Rider-down check', '"Bike down?" alarm when the bike falls at a stop and nothing moves for a minute.'),
@@ -113,6 +113,9 @@ const CATALOG = Object.freeze([
   f('marketingStudio', 'Platform', 'Marketing studio', 'Admin image creator for coupon and special-offer posts (admin console only).'),
   // 3.55 push notifications (docs/features_355/push_notifications.md): off = the gateway sends no FCM pushes.
   f('pushNotifications', 'Platform', 'Push notifications', 'Friend requests, crew invites, polls and ride invites reach the phone when the app is closed.'),
+  // 3.55 diagnostics logs (docs/features_355/diagnostics_logs.md): off = POST /me/diagnostics answers 403 FEATURE_OFF
+  // (logs stay on the phones; admin reads of logs already sent stay available).
+  f('diagnosticsUpload', 'Platform', 'App log upload', 'Riders can send their app log (no personal data) to CoRoute to help fix problems.'),
 ]);
 const BY_ID = new Map(CATALOG.map((e) => [e.id, e]));
 const ID_RE = /^[A-Za-z][A-Za-z0-9]{1,39}$/;
