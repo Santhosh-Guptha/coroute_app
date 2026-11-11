@@ -28,6 +28,7 @@ tmp/
 *.xml
 qa_screenshots/
 *.png
+!coroute_app/gateway/public/**/*.png
 *.tar.gz
 *.tgz
 *.apk
