@@ -3,6 +3,7 @@ process.env.NODE_ENV = 'test';
 process.env.GEO_SEARCH_URL = 'http://geo.test';
 process.env.GEO_ROUTE_URL = 'http://route.test';
 process.env.GEO_MIN_INTERVAL_MS = '150';
+process.env.SUPPORT_EMAIL = 'help@coroute.example'; // the contact in the providers' User-Agent (no built-in address)
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

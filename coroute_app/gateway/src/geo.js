@@ -54,9 +54,12 @@ class GeoProxy {
     return own + this.queued * Math.max(spacing, 250);
   }
 
-  async _cached(k, ttlDays, producer) {
+  async _cached(k, ttlDays, producer, { emptyTtlMs = null } = {}) {
     const hit = await this.repo.geoCacheGet(k).catch(() => null);
-    if (hit && Date.now() - (hit.createdAt || 0) < ttlDays * 86400000) return hit.value;
+    const age = hit ? Date.now() - (hit.createdAt || 0) : Infinity;
+    // 3.56: "nothing found" is kept briefly only (a provider hiccup must not hide a place for a month).
+    const empty = hit && emptyTtlMs !== null && Array.isArray(hit.value) && hit.value.length === 0;
+    if (hit && (empty ? age < emptyTtlMs : age < ttlDays * 86400000)) return hit.value;
     if (this.inflight.has(k)) return this.inflight.get(k);
     const p = (async () => {
       const value = await producer();
@@ -91,19 +94,39 @@ class GeoProxy {
    * Home country first: places near the rider inside the country, then the
    * rest of the country, and only when the country has nothing, the world
    * (marked outside: true). Uses Photon, which is built for search as you
-   * type; falls back to Nominatim if Photon is unavailable.
+   * type; falls back to Nominatim when Photon fails or finds nothing.
+   * `everywhere: true` skips the home-country pass.
    */
-  async search(q, { lat, lng } = {}) {
-    const query = String(q || '').trim().slice(0, 120);
-    if (query.length < 3) return [];
-    const near = Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0) ? { lat: round(lat, 2), lng: round(lng, 2) } : null;
-    const k = `q2:${hash(`${query.toLowerCase()}|${near ? `${near.lat},${near.lng}` : ''}|${config.geoCountry}`)}`;
-    return (await this._cached(k, config.geoCacheDays, async () => {
-      let results = null;
-      if (config.geoPhotonUrl) results = await this._photonSearch(query, near).catch((e) => { this.log.warn('[geo] photon failed', e.message); return null; });
-      if (results === null && this.searchEnabled) results = await this._nominatimSearch(query, near).catch((e) => { this.log.warn('[geo] search failed', e.message); return null; });
-      return results;
-    })) || [];
+  async search(q, opts = {}) {
+    return (await this.searchResult(q, opts)).results;
+  }
+
+  /**
+   * Same as search(), with the reason when there is no answer:
+   * { results } or { results: [], error: 'SEARCH_UNAVAILABLE' } (every provider failed; not cached).
+   */
+  async searchResult(q, { lat, lng, everywhere = false } = {}) {
+    const query = String(q || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    if (query.length < 3) return { results: [] };
+    if (!config.geoPhotonUrl && !this.searchEnabled) return { results: [], error: 'SEARCH_UNAVAILABLE' };
+    const near = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0) ? { lat: round(lat, 2), lng: round(lng, 2) } : null;
+    const scope = everywhere ? 'world' : config.geoCountry;
+    const k = `q3:${hash(`${query.toLowerCase()}|${near ? `${near.lat},${near.lng}` : ''}|${scope}`)}`;
+    let failed = false;
+    const results = await this._cached(k, config.geoCacheDays, async () => {
+      let photon = null;
+      let nominatim = null;
+      if (config.geoPhotonUrl) photon = await this._photonSearch(query, near, everywhere).catch((e) => { this.log.warn('[geo] photon failed', e.message); return null; });
+      if ((photon === null || photon.length === 0) && this.searchEnabled) {
+        nominatim = await this._nominatimSearch(query, near, everywhere).catch((e) => { this.log.warn('[geo] search failed', e.message); return null; });
+      }
+      if (photon === null && nominatim === null) { failed = true; return null; } // not cached
+      // Photon's world fallback ("outside") loses to a home-country answer from Nominatim.
+      if (photon && photon.length && !(nominatim && nominatim.length && photon.every((r) => r.outside) && nominatim.some((r) => !r.outside))) return photon;
+      return nominatim && nominatim.length ? nominatim : (photon || nominatim || []);
+    }, { emptyTtlMs: 3600000 });
+    if (results === null || results === undefined) return { results: [], ...(failed ? { error: 'SEARCH_UNAVAILABLE' } : {}) };
+    return { results };
   }
 
   async _photonGet(params) {
@@ -118,28 +141,28 @@ class GeoProxy {
     return p;
   }
 
-  async _photonSearch(query, near) {
+  async _photonSearch(query, near, everywhere = false) {
     const base = `q=${encodeURIComponent(query)}&limit=10&lang=en`;
     const bias = near ? `&lat=${near.lat}&lon=${near.lng}&zoom=10&location_bias_scale=0.4` : '';
     const bbox = config.geoCountryBbox.length === 4 && config.geoCountryBbox.every(Number.isFinite) ? `&bbox=${config.geoCountryBbox.join(',')}` : '';
     const home = config.geoCountry.toUpperCase();
     // 1. Inside the home country, nearest first.
-    let feats = ((await this._photonGet(base + bias + bbox))?.features || []).filter((f) => !home || f.properties?.countrycode === home);
+    let feats = everywhere ? [] : ((await this._photonGet(base + bias + bbox))?.features || []).filter((f) => !home || f.properties?.countrycode === home);
     let outside = false;
     // 2. Nothing at home: the world.
     if (feats.length === 0) {
       feats = (await this._photonGet(base + bias))?.features || [];
-      outside = true;
+      outside = !everywhere;
     }
     return dedupe(feats.map((f) => photonResult(f, near, home)).filter(Boolean).map((r) => ({ ...r, outside: outside || r.outside })));
   }
 
-  async _nominatimSearch(query, near) {
+  async _nominatimSearch(query, near, everywhere = false) {
     const bias = near ? `&viewbox=${round(near.lng - 1, 2)},${round(near.lat + 1, 2)},${round(near.lng + 1, 2)},${round(near.lat - 1, 2)}` : '';
     const get = (extra) => this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&addressdetails=1&limit=8&q=${encodeURIComponent(query)}${bias}${extra}`));
-    let rows = config.geoCountry ? await get(`&countrycodes=${config.geoCountry}`) : [];
+    let rows = config.geoCountry && !everywhere ? await get(`&countrycodes=${config.geoCountry}`) : [];
     let outside = false;
-    if (!Array.isArray(rows) || rows.length === 0) { rows = await get(''); outside = true; }
+    if (!Array.isArray(rows) || rows.length === 0) { rows = await get(''); outside = !everywhere && !!config.geoCountry; }
     return dedupe((Array.isArray(rows) ? rows : []).map((r) => {
       const la = Number(r.lat), ln = Number(r.lon);
       if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
@@ -149,7 +172,7 @@ class GeoProxy {
         displayName: indianLine(r.name, a.suburb || a.village || a.town || a.city, a.state_district || a.county, a.state, a.country_code !== config.geoCountry ? a.country : ''),
         lat: la, lng: ln, type: r.type || '',
         distanceM: near ? Math.round(haversine(near.lat, near.lng, la, ln)) : null,
-        outside: outside || (a.country_code && a.country_code !== config.geoCountry),
+        outside: !!(outside || (a.country_code && a.country_code !== config.geoCountry)),
       };
     }).filter(Boolean));
   }
