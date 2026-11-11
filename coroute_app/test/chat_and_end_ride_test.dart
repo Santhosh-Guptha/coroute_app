@@ -136,8 +136,9 @@ void main() {
 
       await tester.pump();
 
-      expect(find.text('Messages'), findsNothing); // Sheet header is outside MessagesView
-      expect(find.text('Quick replies'), findsOneWidget);
+      expect(find.text('Chat'), findsNothing); // Sheet header is outside MessagesView
+      expect(find.text('Fuel'), findsOneWidget); // one-tap quick actions
+      expect(find.text('Regroup here'), findsOneWidget);
       expect(find.text('No messages yet.'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
 
@@ -155,6 +156,104 @@ void main() {
 
       // Realtime service should have received the CHAT packet
       expect(rt.sent.any((m) => m['type'] == 'CHAT' && m['text'] == 'Stopping for fuel ahead'), isTrue);
+    });
+  });
+
+  group('3.55 ride chat', () {
+    Map<String, dynamic> msg(String id, String from, String name, String text, {bool quick = false, String card = 'CUSTOM'}) => {
+          'type': 'MESSAGE',
+          'message': {'messageId': id, 'senderId': from, 'senderName': name, 'text': text, 'timestamp': 1000000, 'isQuickCard': quick, 'cardType': card},
+        };
+
+    Future<void> pumpView(WidgetTester tester, {bool? canType}) async {
+      AppTheme.use(AppPalette.dark);
+      await tester.pumpWidget(
+        ChangeNotifierProvider<ConvoyService>.value(
+          value: service,
+          child: MaterialApp(
+            theme: AppTheme.themeFor(AppPalette.dark),
+            home: Scaffold(body: MessagesView(convoyId: 'GRP-TEST', me: me, canTypeOverride: canType)),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('while moving: no text field, a short hint, quick actions send a quick card', (tester) async {
+      await pumpView(tester, canType: false);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text(RideChatTexts.movingHint), findsOneWidget);
+      await tester.tap(find.text('Fuel'));
+      await tester.pump();
+      final sent = rt.sent.where((m) => m['type'] == 'CHAT').toList();
+      expect(sent, hasLength(1));
+      expect(sent.single['text'], 'Fuel stop');
+      expect(sent.single['isQuickCard'], isTrue);
+      expect(sent.single['cardType'], 'FUEL');
+      expect(find.text('Sent: Fuel'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('"Wait for me" is a wait request, not a chat line', (tester) async {
+      await pumpView(tester, canType: false);
+      await tester.tap(find.text('Wait for me'));
+      await tester.pump();
+      expect(rt.sent.any((m) => m['type'] == 'WAIT'), isTrue);
+      expect(rt.sent.any((m) => m['type'] == 'CHAT'), isFalse);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    test('incoming quick card is spoken once ("Rohan: fuel stop"); unread counts until the chat is open', () async {
+      final spoken = <String>[];
+      service.speaker = (line, key) => spoken.add(line);
+      rt.emit(msg('MSG-q1a', 'u2', 'Rohan', 'Fuel stop', quick: true, card: 'FUEL'));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(spoken, ['Rohan: fuel stop']);
+      expect(service.chatBanner, isNull, reason: 'quick cards are spoken, no banner');
+      expect(service.unreadChat('GRP-TEST'), 1);
+      service.setChatOpen('GRP-TEST');
+      expect(service.unreadChat('GRP-TEST'), 0);
+      service.setChatOpen(null);
+      expect(service.unreadChat('GRP-TEST'), 0, reason: 'seen');
+    });
+
+    test('incoming text: banner and a short spoken line; my own lines are silent', () async {
+      final spoken = <String>[];
+      service.speaker = (line, key) => spoken.add(line);
+      rt.emit(msg('MSG-t1b', 'u2', 'Rohan', 'Tea at the dhaba?'));
+      rt.emit(msg('MSG-t1c', 'u1', 'Arjun', 'my own words'));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(spoken, ['Rohan says: Tea at the dhaba?']);
+      expect(service.chatBanner?.text, 'Tea at the dhaba?');
+      service.dismissChatBanner();
+      expect(service.chatBanner, isNull);
+    });
+
+    test('hidden rider: messages not shown, counted or spoken', () async {
+      final spoken = <String>[];
+      service.speaker = (line, key) => spoken.add(line);
+      service.setChatHidden('u2', true);
+      rt.emit(msg('MSG-h1d', 'u2', 'Rohan', 'spam spam'));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(spoken, isEmpty);
+      expect(service.visibleMessages('GRP-TEST'), isEmpty);
+      expect(service.unreadChat('GRP-TEST'), 0);
+      expect(service.allConvoys['GRP-TEST']!.messages, hasLength(1), reason: 'kept, only hidden here');
+    });
+
+    test('report sends CHAT_REPORT and hides the sender', () async {
+      rt.emit(msg('MSG-r1e', 'u2', 'Rohan', 'bad words'));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      final m = service.allConvoys['GRP-TEST']!.messages.single;
+      expect(service.reportChatMessage(m, hide: true), isTrue);
+      expect(rt.sent.any((x) => x['type'] == 'CHAT_REPORT' && x['messageId'] == 'MSG-r1e'), isTrue);
+      expect(service.chatHidden, contains('u2'));
+    });
+
+    test('quick action order is saved and applied', () {
+      service.setQuickActionOrder(['arrived', 'fuel']);
+      expect(service.quickActions.take(2).map((a) => a.id), ['arrived', 'fuel']);
+      expect(service.quickActions, hasLength(8));
     });
   });
 

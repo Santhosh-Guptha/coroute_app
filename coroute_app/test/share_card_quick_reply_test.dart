@@ -37,17 +37,18 @@ void main() {
   }
 
   group('Quick replies', () {
-    test('one constant list with the quick replies', () {
-      expect(quickMessages.map((q) => q.text).toList(),
-          ['Fuel stop', 'Wait for me', 'All good', 'Slow down', 'Taking a break', 'Bike problem', 'Road hazard ahead']);
-      expect(quickMessages.where((q) => q.isWait).map((q) => q.text), ['Wait for me']);
+    test('one list of quick actions (labels on the tiles, text sent to the group)', () {
+      expect(quickMessages.map((q) => q.label).toList(),
+          ['Fuel', 'Break', 'Wait for me', "I'm OK", 'Slow down', 'Regroup here', 'On my way', 'Arrived']);
+      expect(quickMessages.map((q) => q.text).first, 'Fuel stop');
+      expect(quickMessages.where((q) => q.isWait).map((q) => q.label), ['Wait for me']);
       for (final q in quickMessages) {
         expect(q.cardType.length, lessThanOrEqualTo(24), reason: 'gateway keeps 24 characters');
         expect(q.text.length, lessThanOrEqualTo(300));
       }
     });
 
-    testWidgets('a double tap sends once, shows "Sent", chips are glove sized (320 dp, x1.3)', (tester) async {
+    testWidgets('a double tap sends once, shows "Sent", tiles are glove sized (320 dp, x1.3)', (tester) async {
       final sent = <String>[];
       await render(
         tester,
@@ -63,30 +64,31 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       for (final q in quickMessages) {
-        final chip = find.ancestor(of: find.text(q.text), matching: find.byType(InkWell));
+        final chip = find.ancestor(of: find.text(q.label), matching: find.byType(InkWell));
         expect(chip, findsOneWidget);
-        expect(tester.getSize(chip).height, greaterThanOrEqualTo(48));
+        expect(tester.getSize(chip).height, greaterThanOrEqualTo(QuickReplyBar.chipHeight));
+        expect(tester.getSize(chip).width, greaterThanOrEqualTo(48));
       }
 
-      await tester.tap(find.text('Fuel stop'));
+      await tester.tap(find.text('Fuel'));
       await tester.pump(const Duration(milliseconds: 150));
-      await tester.tap(find.text('Fuel stop'));
+      await tester.tap(find.text('Fuel'));
       await tester.pump(const Duration(milliseconds: 150));
       expect(sent, ['Fuel stop']);
-      expect(find.text('Sent: Fuel stop'), findsOneWidget);
+      expect(find.text('Sent: Fuel'), findsOneWidget);
 
       // Another reply is not blocked.
-      await tester.tap(find.text('All good'));
+      await tester.tap(find.text("I'm OK"));
       await tester.pump();
-      expect(sent, ['Fuel stop', 'All good']);
-      expect(find.text('Sent: All good'), findsOneWidget);
+      expect(sent, ['Fuel stop', "I'm OK"]);
+      expect(find.text("Sent: I'm OK"), findsOneWidget);
 
       // After the cooldown the same reply can be sent again; the line has cleared.
       await tester.pump(const Duration(seconds: 3));
       expect(find.textContaining('Sent:'), findsNothing);
-      await tester.tap(find.text('Fuel stop'));
+      await tester.tap(find.text('Fuel'));
       await tester.pump();
-      expect(sent, ['Fuel stop', 'All good', 'Fuel stop']);
+      expect(sent, ['Fuel stop', "I'm OK", 'Fuel stop']);
       await tester.pump(const Duration(seconds: 3));
     });
 
