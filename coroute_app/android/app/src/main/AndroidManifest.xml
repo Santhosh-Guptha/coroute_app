@@ -101,6 +101,23 @@
                 <data android:scheme="https" android:host="coroute.devmonks.space" android:pathPrefix="/join/"/>
             </intent-filter>
         </activity>
+        <!-- 3.56 "Share to CoRoute": text shared from a maps app (a place, a maps link, coordinates)
+             opens the trip planner with it in the destination search. Invisible trampoline: it
+             passes the text to the app's own task and finishes at once (ShareInActivity.kt). -->
+        <activity
+            android:name=".ShareInActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="@string/share_in_label"
+            android:taskAffinity="space.devmonks.coroute_app.share"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
         <!-- 3.15: invisible trampoline for the SOS button of the ride notification. showWhenLocked lets
              the system start it over the lock screen without the PIN; it opens the app's
              hold-to-send SOS screen (never sends by itself) and finishes at once. Not exported. -->
@@ -225,6 +242,14 @@
             <data android:scheme="om"/>
         </intent>
         <package android:name="app.organicmaps"/>
+        <!-- 3.55 "Navigate in Google Maps / Mappls" (NavHandoffChannel.kt): Android 11+ package
+             visibility for the installed check and package-targeted turn-by-turn links. -->
+        <package android:name="com.google.android.apps.maps"/>
+        <package android:name="com.mmi.maps"/>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https" android:host="www.mappls.com"/>
+        </intent>
         <!-- Spoken ride alerts (3.15): Android 11+ hides text-to-speech engines without this. -->
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>

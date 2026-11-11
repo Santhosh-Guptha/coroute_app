@@ -66,6 +66,12 @@ class MainActivity : FlutterActivity() {
 
         // 3.55 "Rate CoRoute": Google Play in-app review card (InAppReviewChannel.kt).
         MethodChannel(messenger, "coroute/in_app_review").setMethodCallHandler(InAppReviewChannel(this))
+
+        // 3.56 "Share to CoRoute": text shared from a maps app (ShareInActivity.kt).
+        ShareIn.register(MethodChannel(messenger, "coroute/share_in"))
+
+        // 3.55 "Navigate in Google Maps / Mappls": installed check and package-targeted links.
+        MethodChannel(messenger, "coroute/nav_handoff").setMethodCallHandler(NavHandoffChannel(this))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,6 +82,8 @@ class MainActivity : FlutterActivity() {
         if (savedInstanceState == null) rideNotification?.handleActivityIntent(intent, coldStart = true)
         // A tapped push notification started the app: kept until Dart asks (takeLaunchMessage).
         if (savedInstanceState == null) pushChannel?.handleActivityIntent(intent, coldStart = true)
+        // Text shared to CoRoute started the app: kept until Dart asks (takeSharedText).
+        if (savedInstanceState == null) ShareIn.handleActivityIntent(intent, coldStart = true)
     }
 
     override fun onResume() {
@@ -95,6 +103,7 @@ class MainActivity : FlutterActivity() {
         setIntent(intent)
         rideNotification?.handleActivityIntent(intent, coldStart = false)
         pushChannel?.handleActivityIntent(intent, coldStart = false)
+        ShareIn.handleActivityIntent(intent, coldStart = false)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -121,8 +130,10 @@ class MainActivity : FlutterActivity() {
         pushChannel?.dispose()
         pushChannel = null
         MethodChannel(messenger, "coroute/push").setMethodCallHandler(null)
+        MethodChannel(messenger, "coroute/nav_handoff").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/install_referrer").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/in_app_review").setMethodCallHandler(null)
+        ShareIn.channel?.let { ShareIn.dispose(it) }
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }
