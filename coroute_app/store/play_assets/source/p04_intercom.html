@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.body{position:absolute;left:0;right:0;top:86px;bottom:0;padding:0 18px}
+.seg{display:flex;padding:4px;border-radius:12px;background:var(--surfaceAlt)}
+.seg div{flex:1;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:var(--muted)}
+.seg .on{background:var(--surface);color:var(--text);box-shadow:0 1px 4px var(--shadow)}
+.to{display:flex;gap:8px;margin:16px 0 6px;align-items:center}
+.list{margin-top:10px;padding:0 14px}
+.list .row{padding:11px 0}
+.st{font-size:12px;color:var(--muted)}
+.wave{display:flex;align-items:center;gap:3px;height:26px}
+.wave i{display:block;width:4px;border-radius:2px;background:var(--primary)}
+.talkbox{position:absolute;left:0;right:0;bottom:30px;display:flex;flex-direction:column;align-items:center}
+.ptt{width:128px;height:128px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 12px var(--primarySoft),0 10px 24px rgba(31,95,110,.25)}
+.popv{display:flex;align-items:center;gap:14px;background:#fff;border-radius:999px;padding:12px 26px 12px 12px}
+.popv .wave i{width:5px}
+</style></head><body>
+<div class="panel warm" id="panel">
+  <div class="head"><h1>Talk hands-free</h1><div class="sub">Clean voice, no wind noise</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div class="appbar"><div class="back" id="bk"></div><span style="flex:1">Intercom</span><span class="chip tint" id="live"></span></div>
+    <div class="body">
+      <div class="seg"><div>Hold to talk</div><div class="on">Hands-free</div></div>
+      <div class="to"><span class="label">Talk to</span><span class="chip tint" style="font-weight:600">Everyone</span><span class="chip">Asha</span><span class="chip">Ravi</span><span class="chip">Meera</span></div>
+      <div class="card list" id="list"></div>
+      <div class="caption" style="text-align:center;margin-top:12px">Voice goes live to your group. Nothing is recorded.</div>
+    </div>
+    <div class="talkbox"><div class="ptt" id="mic"></div><div style="margin-top:22px;font-size:16px;font-weight:600">Hands-free is on</div><div class="caption" style="margin-top:2px">Just speak. Tap to mute.</div></div>
+  </div></div></div>
+  <div class="pop" style="left:40px;top:1372px"><div style="zoom:1.6"><div class="popv">
+    <div class="av" style="background:#2B7A8C;width:46px;height:46px;font-size:17px">A</div>
+    <div><div style="font-size:15px;font-weight:600;color:#1F2328">Asha</div><div class="caption">Talking to everyone</div></div>
+    <div class="wave" id="pw" style="margin-left:6px"></div>
+  </div></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'warm'); CR.chrome(document.getElementById('scr'));
+  const I = CR.icon; bk.innerHTML = I('back', 24); live.innerHTML = I('mic', 15) + 'Live'; mic.innerHTML = I('mic', 52, '#fff');
+  const wave = (n, seed, h) => { const r = CR.rng(seed); let s = ''; for (let i = 0; i < n; i++) s += `<i style="height:${(0.25 + r() * 0.75) * h}px"></i>`; return s; };
+  pw.innerHTML = wave(12, 3, 30);
+  const C = CR.MEMBERS.light;
+  const ppl = [
+    ['Asha', 'Lead · talking', C[0], 'talk'], ['Kiran', 'Listening', C[4], 'vol'], ['Arjun', 'Listening', C[3], 'vol'],
+    ['Meera', 'Listening', C[7], 'vol'], ['Ravi', 'Sweeper · mic off', C[1], 'off'],
+  ];
+  list.innerHTML = ppl.map(([n, s, c, k], i) => `${i ? '<div class="hair"></div>' : ''}<div class="row"><div class="av" style="background:${c}">${n[0]}</div><div style="flex:1"><div style="font-size:15px;font-weight:600">${n}</div><div class="st" style="${k === 'talk' ? 'color:var(--primary);font-weight:600' : ''}">${s}</div></div>${k === 'talk' ? `<div class="wave">${wave(7, 9, 24)}</div>` : k === 'off' ? I('mic-off', 20, 'var(--faint)') : I('volume', 20, 'var(--faint)')}</div>`).join('');
+});
+</script></body></html>

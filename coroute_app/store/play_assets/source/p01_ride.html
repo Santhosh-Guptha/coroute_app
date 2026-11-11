@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script><script src="cockpit.js"></script></head><body>
+<div class="panel teal" id="panel">
+  <div class="head"><h1>Ride together.<br>Stay safe.</h1><div class="sub">Your whole group on one live map</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr"></div></div></div>
+</div>
+<script>
+CR.ready(async () => { CR.deco(document.getElementById('panel'), 'teal'); buildCockpit(document.getElementById('scr')); });
+</script></body></html>

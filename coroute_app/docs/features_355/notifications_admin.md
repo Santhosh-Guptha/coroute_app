@@ -11,6 +11,108 @@ Related: [push_notifications.md](push_notifications.md) (the FCM pipeline),
 [purchase_email.md](purchase_email.md), [sos_sms.md](sos_sms.md),
 [play_payments_policy.md](play_payments_policy.md).
 
+## 3.56 push kinds, and Offers e-mail for prices and coupons
+
+The composer first asks for a **Channel**:
+
+* **Push notification**: one of the kinds below. The Play policy guard applies.
+* **E-mail (Offers)**: plan offers, prices and coupon codes. These are never allowed in a push. The
+  composer's banner explains why: the Google Play payments policy forbids prices, coupons and offers
+  in the app and its notifications, and the ads policy forbids third-party ads in notifications.
+
+### Push kinds
+
+Each kind has its own Android channel and its own switch in the app (**Settings > App & privacy**).
+The FCM type stays `NEWS`, and the data carries `kind` and `channel`. An older app shows every kind as
+"News and updates".
+
+| Kind | Android channel | App switch (`/api/me/push-prefs` field) | Default | Guard |
+| --- | --- | --- | --- | --- |
+| Update | `coroute_news` "News and updates" | News and updates (`news`) | on | strict (below) |
+| Event | `coroute_events` "Events" | Events (`events`) | on | strict |
+| Safety tip | `coroute_safety_tips` "Safety tips" | Safety tips (`safetyTips`) | on | strict |
+| Community | `coroute_community` "Community" (low importance) | Community (`community`) | on | strict |
+| Partner perk | `coroute_partner_perks` "Partner perks" (low importance) | Partner perks (`partnerPerks`) | **off** | partner perk guard |
+
+* Every kind can have a big picture.
+* Safety alerts, ride, social and plan pushes are not campaign kinds and can never be turned off
+  (`PUT /api/me/push-prefs {safety:false}` returns `400 SAFETY_ALWAYS_ON`).
+* The server skips a rider whose switch is off. Android also drops such a push, in the foreground too
+  (`PushConfig.isKindEnabled`).
+* `GET /api/me/push-prefs` returns `{news, events, safetyTips, community, partnerPerks, safety: true}`.
+  `PUT` takes any subset of these booleans; any other key is `400 BAD_PREF`.
+
+**Partner perk** is a real-world perk at a partner business that CoRoute curated for riders, for
+example "10% off a chain service at Speed Garage for CoRoute riders".
+
+* The admin must name the partner (2 to 60 characters) and tick "CoRoute curated this perk"
+  (`curated: true`, else `PERK_NOT_CONFIRMED`).
+* The phone labels it **"Partner perk · <partner>"** (notification sub-text, foreground snackbar).
+* It goes only to riders who turned Partner perks on, at most **one per rider per 7 days** (on top of
+  the daily cap).
+* Guard (`policy_terms.js` `partnerPerkTermIn`):
+  * allowed here only: "% off", "offer", "deal", "discount", "sale";
+  * still refused: every money or buying word (₹ / Rs amounts, price, buy, pay, checkout,
+    subscription, ...), coupon, promo code, voucher, "code", any mention of CoRoute plans or
+    membership, and any link or domain.
+  * Refused with `422 PLAY_POLICY` and a message that points to the Offers e-mail.
+
+### Offers e-mail (Channel "E-mail (Offers)")
+
+Prices, coupons and offers for CoRoute plans go here, **only to riders who opted in**.
+
+* **Consent** (India DPDP Act friendly): **off by default**.
+  * The rider turns "Send me offer e-mails" on or off on the website account page (`/account`,
+    `GET/PUT /api/web/marketing-consent {offersEmail}`).
+  * Every change is kept with its time and source (collection `marketing_consent`, last 20 changes).
+  * The consent row is erased with the account.
+* **Unsubscribe**:
+  * Every e-mail carries a link `/email/unsubscribe?u=<userId>&t=<HMAC>` (no expiry), plus the
+    `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers (RFC 8058).
+  * The link's GET shows one "Unsubscribe" button, so link scanners never unsubscribe anyone. The POST
+    (the button, or a mail client's one-click) turns consent off and adds the address to the
+    suppression list.
+* **Suppression list** (collection `email_suppression`):
+  * Stored as the SHA-256 of the lower-cased address; the admin sees it masked.
+  * Reasons: `unsubscribe`, `bounce`, `complaint`, `admin`.
+  * A suppressed address is never mailed, and it is checked again at send time.
+  * Turning consent on again lifts only the rider's own `unsubscribe` entry.
+  * The admin can add or remove entries. An erased account's entry stays, so the address is not
+    mailed again.
+* **Composer** (Notifications > Offers e-mail):
+  * Subject (at most 120), heading (at most 120), content (at most 5000).
+  * The content is plain text with a small markup: blank line = paragraph, `- ` = bullet, `**bold**`,
+    `[label](/path)`. Links may only point to this site; everything else is escaped.
+  * Optional image (the push image store) and an optional **coupon block**: code (must exist in
+    Coupons and still be usable), headline and note. Its button opens **`/plans?coupon=CODE`**.
+    Without a coupon the button opens `/plans`.
+  * Audience: every opted-in rider, opted-in and active in the last N days, or opted-in by plan type.
+  * Now, or scheduled in India time (at most 60 days ahead).
+  * The server renders the preview: the text version on screen, the exact HTML as a download. The
+    admin console's CSP allows no frames.
+  * **Send test to me** goes to the admin's account e-mail; consent and suppression do not apply to it.
+* **Sending**:
+  * The leased job `offer-emails` runs every 60 s on one node, with a compare-and-replace lease.
+  * It sends at `OFFER_EMAIL_RATE` e-mails per second (default 5) through the receipt mailer
+    (`mailer.js`, `SMTP_*` / `MAIL_FROM`).
+  * Consent and suppression are re-checked for every rider at send time.
+  * Stats per campaign: targeted, sent, skipped, failed.
+  * Without SMTP the campaign fails with a clear reason.
+
+| Method and path | What |
+| --- | --- |
+| `GET /api/admin/email/config` | mail ready, origin, rate, limits |
+| `POST /api/admin/email/offers/check` / `preview` | validate / `{subject, html, text, ctaUrl}` |
+| `POST /api/admin/email/offers/audience-count` | `{audience}` -> `{riders}` (opted in, valid, not suppressed) |
+| `POST /api/admin/email/offers/test` | to the admin's own e-mail |
+| `POST /api/admin/email/offers/campaigns` | create (now or `sendAt`) |
+| `GET /api/admin/email/offers/campaigns[/:id]`, `POST .../:id/cancel` | history; cancel a scheduled one |
+| `GET/POST /api/admin/email/suppression`, `DELETE /api/admin/email/suppression/:hash` | the suppression list |
+| `GET/PUT /api/web/marketing-consent` | rider (website), `{offersEmail}` |
+| `GET/POST /email/unsubscribe?u=&t=` | public, HMAC token |
+
+Tests: `gateway/test/push_kinds_offers_email_356.test.js`.
+
 ## Notifications > Compose push
 
 | Field | Rule |
@@ -49,7 +151,7 @@ or in an e-mail instead."*
   list), `campaignId` and `eventId`. The collapse key is one per campaign.
 - Riders can turn off **Settings > App & privacy > News and updates** in the app
   (`PUT /api/me/push-prefs {news:false}`). The server skips them, and Android drops a NEWS push
-  while the switch is off. Safety, ride, social and plan pushes are not in this category and
+  while the switch is off. 3.56: each push kind has its own switch (see Push kinds above). Safety, ride, social and plan pushes are not in this category and
   cannot be turned off there.
 - Frequency cap: at most **2** campaign pushes per rider per India day
   (`PUSH_NEWS_DAILY_CAP`; collection `push_news_caps`). A test send ignores the cap and the

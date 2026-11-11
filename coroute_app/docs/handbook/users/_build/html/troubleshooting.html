@@ -1,0 +1,253 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>CoRoute troubleshooting</title>
+<style>
+@font-face { font-family: Manrope; font-weight: 400; src: url('../fonts/manrope-latin-400-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 500; src: url('../fonts/manrope-latin-500-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 600; src: url('../fonts/manrope-latin-600-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 700; src: url('../fonts/manrope-latin-700-normal.woff2'); }
+@page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+@page :first { margin-top: 12mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; font-family: Manrope, 'Noto Sans', system-ui, sans-serif; color: #1C2B33; font-size: 10pt; line-height: 1.55; }
+a { color: #1E5A68; text-decoration: none; }
+h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 3mm; font-weight: 700; letter-spacing: -.01em; color: #1C2B33; }
+h2 { font-size: 14.5pt; margin: 8mm 0 2.5mm; font-weight: 700; color: #1E5A68; padding-bottom: 1.5mm; border-bottom: 1.5px solid #DCE6EA; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 5mm 0 1.5mm; font-weight: 700; color: #1C2B33; break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1mm; font-weight: 700; break-after: avoid; }
+p { margin: 0 0 2.6mm; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin: 0 0 1.1mm; }
+li > p { margin: 0 0 1mm; }
+strong { font-weight: 700; }
+code { font-family: 'DejaVu Sans Mono', monospace; font-size: 8.6pt; background: #F1F5F7; padding: .2mm 1.2mm; border-radius: 1mm; }
+pre { background: #F1F5F7; padding: 3mm; border-radius: 2mm; font-size: 8.5pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { background: none; padding: 0; }
+hr { border: 0; border-top: 1px solid #DCE6EA; margin: 5mm 0; }
+table { width: 100%; border-collapse: collapse; font-size: 8.9pt; margin: 2mm 0 4mm; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { text-align: left; font-size: 7.6pt; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: #2B7A8C; padding: 1.8mm 2.2mm; font-weight: 700; }
+th:first-child { border-top-left-radius: 1.5mm; } th:last-child { border-top-right-radius: 1.5mm; }
+td { border-bottom: 1px solid #DCE6EA; padding: 1.8mm 2.2mm; vertical-align: top; }
+tbody tr:nth-child(even) td { background: #F7FAFB; }
+blockquote { margin: 3mm 0 4mm; padding: 3mm 4.5mm; background: #E6F2F4; border-left: 1.6mm solid #2B7A8C; border-radius: 0 2mm 2mm 0; break-inside: avoid; }
+blockquote p:last-child { margin-bottom: 0; }
+blockquote.important, blockquote.warning { background: #FBF0E4; border-left-color: #D9822B; }
+blockquote .alert-label { display: block; font-size: 7.6pt; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: #1E5A68; margin-bottom: 1mm; }
+blockquote.important .alert-label, blockquote.warning .alert-label { color: #9A5513; }
+p.shots { display: flex; gap: 8mm; justify-content: center; margin: 4mm 0 1mm; break-inside: avoid; break-after: avoid; }
+p.shots img { height: 66mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 1.5mm 4mm rgba(28,43,51,.14); }
+p.caption { text-align: center; font-size: 8.2pt; color: #5A6B75; margin: 1mm 0 4mm; break-before: avoid; }
+.box-check { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #2B7A8C; border-radius: .8mm; margin-right: 1.8mm; vertical-align: -0.4mm; }
+li.task { list-style: none; margin-left: -5mm; }
+.doc-head { display: flex; align-items: center; gap: 4mm; background: #2B7A8C; color: #fff; border-radius: 3mm; padding: 4.5mm 6mm; margin: 0 0 6mm; }
+.doc-head img { width: 13mm; height: 13mm; border-radius: 3mm; background: #fff; }
+.doc-head .t { font-size: 18pt; font-weight: 700; line-height: 1.15; }
+.doc-head .s { font-size: 9.5pt; opacity: .92; }
+.doc-head .v { margin-left: auto; font-size: 8pt; font-weight: 600; background: rgba(255,255,255,.16); padding: 1mm 3mm; border-radius: 10mm; white-space: nowrap; }
+.has-head h1:first-of-type { display: none; }
+.cover { height: 258mm; display: flex; flex-direction: column; break-after: page; }
+.cover .band { background: #2B7A8C; color: #fff; border-radius: 4mm; padding: 16mm 14mm 12mm; position: relative; overflow: hidden; }
+.cover .band:after { content: ''; position: absolute; right: -30mm; top: -30mm; width: 110mm; height: 110mm; border-radius: 50%; background: rgba(255,255,255,.07); }
+.cover .band img.icon { width: 20mm; height: 20mm; border-radius: 5mm; background: #fff; margin-bottom: 8mm; }
+.cover .band .t { font-size: 32pt; font-weight: 700; line-height: 1.1; margin-bottom: 4mm; }
+.cover .band .s { font-size: 13pt; font-weight: 500; opacity: .95; max-width: 140mm; }
+.cover .band .v { display: inline-block; margin-top: 8mm; font-size: 9pt; font-weight: 700; border: 1px solid rgba(255,255,255,.5); border-radius: 10mm; padding: 1.2mm 4mm; }
+.cover .shots { display: flex; gap: 7mm; justify-content: center; margin: 12mm 0 8mm; }
+.cover .shots img { height: 92mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 2mm 5mm rgba(28,43,51,.16); }
+.cover .sos { margin-top: auto; background: #FBF0E4; border-left: 1.6mm solid #D9822B; border-radius: 0 3mm 3mm 0; padding: 4mm 6mm; font-size: 10.5pt; }
+.cover .sos b { color: #9A5513; }
+.breaks h2 { break-before: page; margin-top: 0; }
+.breaks h2#1-getting-around-the-app { break-before: avoid; }
+.compact { font-size: 9.1pt; line-height: 1.45; }
+.compact h2 { font-size: 12pt; margin: 4.5mm 0 1.8mm; padding-bottom: 1mm; }
+.compact h3 { margin: 2.5mm 0 1mm; font-size: 10pt; }
+.compact p { margin: 0 0 1.8mm; }
+.compact li { margin: 0 0 .6mm; }
+.compact table { font-size: 8.2pt; margin: 1.5mm 0 2.5mm; }
+.compact td, .compact th { padding: 1.2mm 2mm; }
+.compact blockquote { padding: 2.2mm 4mm; margin: 2mm 0 3mm; }
+.compact .doc-head { margin-bottom: 4mm; padding: 3.5mm 5mm; }
+</style></head><body class="has-head"><div class="doc-head"><img src="../../assets/icon.png"><div><div class="t">CoRoute troubleshooting</div><div class="s">Common problems, step-by-step fixes, and when to send diagnostics.</div></div><div class="v">App 3.55 · November 2026</div></div><main><h1 id="coroute-troubleshooting">CoRoute troubleshooting</h1>
+<blockquote class="tip">
+<p><span class="alert-label">Tip</span>Start with <strong>Profile ›</strong> gear <strong>› Safety health</strong>. It checks location, notifications, microphone, Bluetooth, battery limits, full-screen alerts and sound, and each problem has a button that opens the right page.</p>
+</blockquote>
+<p><strong>When to send diagnostics.</strong> If a fix below does not help, go to <strong>Profile › Help › Send feedback</strong>, choose <strong>Report a problem</strong>, describe what happened (date, time, what you saw), turn on <strong>Attach diagnostics log</strong> and <strong>You may reply by e-mail</strong>, and send. The log has no messages, names, phone numbers or exact places. Send it as soon as you can: the phone keeps it for 7 days at most.</p>
+<p>Menu names differ between Android versions and brands. If you cannot find a menu, search for it in your phone's Settings.</p>
+<hr />
+<h2 id="1-location-allow-all-the-time">1. Location: "Allow all the time"</h2>
+<p><strong>Signs:</strong> your group loses you when your screen is off; Safety health shows location as limited.</p>
+<ol>
+<li>Open <strong>Settings › Apps › CoRoute › Permissions › Location</strong>.</li>
+<li>Choose <strong>Allow all the time</strong>.</li>
+<li>Turn on <strong>Use precise location</strong>.</li>
+<li>Make sure the phone's location (GPS) is on.</li>
+</ol>
+<p><strong>Send diagnostics if</strong> the group still loses you with the screen off after this and section 2.</p>
+<h2 id="2-battery-optimisation-your-phone-closes-coroute">2. Battery optimisation (your phone closes CoRoute)</h2>
+<p><strong>Signs:</strong> the ride stops after some minutes with the screen off; alerts arrive late or only when you open the app; the ride notification disappears.</p>
+<p>On every phone: <strong>Settings › Apps › CoRoute › Battery › Unrestricted</strong> (or "Don't optimise"). In Safety health, tap <strong>Battery settings</strong> or <strong>Allow</strong>. Then follow the steps for your brand:</p>
+<table>
+<thead>
+<tr>
+<th>Brand</th>
+<th>Steps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Xiaomi / Redmi / POCO</strong> (MIUI, HyperOS)</td>
+<td>Settings › Apps › Manage apps › CoRoute: <strong>Autostart</strong> on; <strong>Battery saver › No restrictions</strong>. In Recent apps, pull CoRoute down or long-press and tap the <strong>lock</strong> icon.</td>
+</tr>
+<tr>
+<td><strong>Samsung</strong> (One UI)</td>
+<td>Settings › Apps › CoRoute › Battery › <strong>Unrestricted</strong>. Settings › Battery › Background usage limits: make sure CoRoute is <strong>not</strong> in "Sleeping apps" or "Deep sleeping apps"; add it to <strong>Never sleeping apps</strong>.</td>
+</tr>
+<tr>
+<td><strong>OnePlus</strong> (OxygenOS)</td>
+<td>Settings › Apps › CoRoute › Battery usage: <strong>Allow background activity</strong> on, optimisation <strong>Don't optimise</strong>. Lock CoRoute in Recent apps.</td>
+</tr>
+<tr>
+<td><strong>Vivo / iQOO</strong> (Funtouch, OriginOS)</td>
+<td>Settings › Battery › Background power consumption management › CoRoute: <strong>Allow high background power consumption</strong> (or "Don't restrict"). Settings › Apps › Autostart: CoRoute on. Lock it in Recent apps.</td>
+</tr>
+<tr>
+<td><strong>Oppo</strong> (ColorOS)</td>
+<td>Settings › Apps › CoRoute › Battery usage: <strong>Allow background activity</strong>, <strong>Allow auto launch</strong>. Lock CoRoute in Recent apps.</td>
+</tr>
+<tr>
+<td><strong>Realme</strong> (Realme UI)</td>
+<td>Settings › Apps › CoRoute › Battery usage: <strong>Allow background activity</strong> and <strong>Allow auto launch</strong> on. Turn off any "optimise" option for CoRoute. Lock it in Recent apps.</td>
+</tr>
+<tr>
+<td><strong>Google Pixel / Motorola / Nokia</strong></td>
+<td>Settings › Apps › CoRoute › App battery usage › <strong>Unrestricted</strong>.</td>
+</tr>
+</tbody>
+</table>
+<p>Also: do not swipe CoRoute away during a ride, and avoid "ultra" or "extreme" power saving modes while riding.</p>
+<p><strong>Send diagnostics if</strong> CoRoute still stops during rides.</p>
+<h2 id="3-notifications-blocked">3. Notifications blocked</h2>
+<p><strong>Signs:</strong> no ride notification, no crash countdown sound, friend requests or ride invitations do not arrive.</p>
+<ol>
+<li>In <strong>Safety health</strong>, tap <strong>Allow</strong> next to notifications. If you blocked them before, it opens CoRoute's notification page.</li>
+<li>Or open <strong>Settings › Apps › CoRoute › Notifications</strong> and turn them on, including the channels <strong>SOS</strong>, <strong>Critical ride alerts</strong>, <strong>Friends</strong> and <strong>Ride invites</strong>.</li>
+<li>For friend and crew messages when CoRoute is closed, check <strong>Settings › Push notifications</strong> in CoRoute is on.</li>
+<li>To hear critical alerts in Do Not Disturb: phone <strong>Settings › Notifications › Do Not Disturb › Apps</strong>, add CoRoute.</li>
+<li>Android 14+: allow <strong>full-screen alerts</strong> for CoRoute (Safety health › <strong>Open settings</strong>) so the crash countdown shows over the lock screen.</li>
+</ol>
+<h2 id="4-bluetooth-headset-audio">4. Bluetooth headset audio</h2>
+<p><strong>Signs:</strong> voice alerts or the group play on the phone speaker instead of the helmet.</p>
+<ol>
+<li>Connect the headset <strong>before</strong> starting the ride and check it plays media (music) from the phone.</li>
+<li>Allow <strong>Nearby devices</strong> for CoRoute: <strong>Settings › Apps › CoRoute › Permissions</strong>.</li>
+<li>Raise the media volume on the phone and on the headset.</li>
+<li>Some helmet sets connect for calls only. Turn on <strong>Media audio</strong> for the headset in the phone's Bluetooth settings (tap the gear next to it). With a calls-only connection, emergency lines play on the phone speaker.</li>
+<li>Disconnect other Bluetooth audio devices (car, speaker, smartwatch audio).</li>
+</ol>
+<p><strong>Send diagnostics if</strong> alerts still play on the wrong device.</p>
+<h2 id="5-intercom-the-group-cannot-hear-me-or-i-cannot-hear-them">5. Intercom: the group cannot hear me, or I cannot hear them</h2>
+<ol>
+<li>Check the microphone permission: <strong>Settings › Apps › CoRoute › Permissions › Microphone › Allow</strong>.</li>
+<li>Check you are not muted: the ride notification shows <strong>Group voice muted</strong> when you are. Tap <strong>Unmute</strong>.</li>
+<li><strong>Hold to talk:</strong> hold the button for the whole sentence. <strong>Hands-free:</strong> speak clearly; very quiet speech may not open the mic.</li>
+<li>During a phone call, group talk pauses ("Voice paused (call)") and comes back after.</li>
+<li>Check mobile data. Talk needs a connection; in poor signal voice can break up.</li>
+<li>If only one rider is not heard, ask them to check these steps.</li>
+<li>If talk is missing entirely in this ride, the ride may not include group talk: the app says "This isn't included in this ride."</li>
+</ol>
+<p><strong>Send diagnostics if</strong> talk keeps dropping with good signal (send from both phones if possible).</p>
+<h2 id="6-alerts-are-late-or-missing">6. Alerts are late or missing</h2>
+<ol>
+<li>Run <strong>Safety health</strong> and fix anything it shows, especially battery (section 2).</li>
+<li>Check <strong>Settings › Voice alerts</strong> is on. Emergencies are always spoken.</li>
+<li>Check the phone's media volume. Critical alerts sound anyway; ordinary ones follow your volume.</li>
+<li>Install or update your phone's text-to-speech engine (Google Speech Services) and the voice for your chosen language.</li>
+<li>Keep the phone in a mount, with GPS working (alerts depend on fresh GPS).</li>
+<li>Speed warnings use the true GPS speed. Bike speedometers read a few km/h high by law, so the app showing a little less than your speedometer is normal.</li>
+</ol>
+<p><strong>Send diagnostics if</strong> an alert came clearly late: say which alert, roughly when, and where you were.</p>
+<h2 id="7-siren-alerts-do-not-work">7. Siren alerts do not work</h2>
+<ol>
+<li>Check <strong>Settings › Siren alerts</strong> is on.</li>
+<li>Allow the microphone. If it is missing, CoRoute says: "Siren alerts need the microphone. Allow it for CoRoute in phone settings to use them."</li>
+<li>Siren alerts work only during a ride.</li>
+<li>Put the phone in a mount or tank bag. In a pocket at speed, wind and clothing can hide the siren.</li>
+<li>Music on the phone's own speaker pauses detection. Use earbuds or a headset.</li>
+<li>Below 15 % battery, detection pauses to save power.</li>
+<li>The alert comes about 3 seconds after the siren starts. Short chirps do not alert.</li>
+</ol>
+<h2 id="8-too-many-crash-alarms-false-alarms">8. Too many crash alarms (false alarms)</h2>
+<ol>
+<li>Use a firm <strong>handlebar mount</strong>. A loose phone in a bag or pocket is the most common cause.</li>
+<li>Always tap <strong>I'm OK</strong> when you are fine: CoRoute learns from it for your bike.</li>
+<li>If you simply ride on, the alarm cancels itself.</li>
+<li>Do not hold the phone loosely while riding.</li>
+</ol>
+<p><strong>Send diagnostics after any false alarm.</strong> CoRoute may ask "send the log of this ride?" after the ride: tap to send.</p>
+<h2 id="9-sos-text-sms-not-sent">9. SOS text (SMS) not sent</h2>
+<ol>
+<li>On Google Play phones, CoRoute does not send texts by itself: it opens your messages app with the text ready. Tap <strong>Send</strong>, or tap <strong>Text the group now</strong> on the SOS screen.</li>
+<li>If the phone is locked, tapping <strong>Text the group now</strong> asks you to unlock first.</li>
+<li>Check you have a default messages app and SIM credit, and that your emergency contact's number is correct (<strong>Profile › Emergency contact &amp; Medical ID</strong>).</li>
+<li>With no signal, the messages app queues the text and sends it when signal returns.</li>
+<li>Once your SOS reaches CoRoute's server, the server can text your contact, where text alerts are available.</li>
+</ol>
+<p><strong>Send diagnostics</strong> after any real or test SOS where texts did not go out.</p>
+<h2 id="10-map-search-finds-nothing">10. Map search finds nothing</h2>
+<ol>
+<li>Check your internet connection. CoRoute shows the reason and a <strong>Retry</strong> button.</li>
+<li>"Too many searches": wait a minute and try again.</li>
+<li>"No matching places found in India": tap <strong>Search everywhere</strong>, or try a shorter name or a nearby town.</li>
+<li>Paste a Google Maps link instead, or share the place from Google Maps to CoRoute (<strong>Plan a ride in CoRoute</strong>).</li>
+<li>"Signed out": sign in again.</li>
+</ol>
+<h2 id="11-friend-requests-do-not-arrive">11. Friend requests do not arrive</h2>
+<ol>
+<li>Check the username is exact. A request to a name that does not exist is refused, so ask your friend to read theirs from <strong>My profile</strong>.</li>
+<li>Look under <strong>People › Requests</strong> (and pull to refresh).</li>
+<li>If someone blocked you, or you blocked them, requests do not get through. Check your blocked list.</li>
+<li>There is a daily limit of 20 requests and 50 waiting.</li>
+<li>For notices when CoRoute is closed, check <strong>Settings › Push notifications</strong> and the phone's notification settings (section 3).</li>
+<li>Invite links: tap the link on the phone that has CoRoute installed. If it opens the website instead, install or update CoRoute, then tap the link again.</li>
+</ol>
+<p><strong>Send diagnostics if</strong> a request was sent but never appears.</p>
+<h2 id="12-other-common-issues">12. Other common issues</h2>
+<table>
+<thead>
+<tr>
+<th>Problem</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Add your safety details" when joining</td>
+<td>Add your phone number and an emergency contact in <strong>Profile › Emergency contact &amp; Medical ID</strong>.</td>
+</tr>
+<tr>
+<td>"Complete your bike" keeps showing</td>
+<td>Fill in make and model, bike type and colour, plus engine, tank and mileage for a fuel bike. Riding on someone else's bike? Choose <strong>I'm riding pillion (no bike)</strong>.</td>
+</tr>
+<tr>
+<td>"No active ride found for this code."</td>
+<td>Check the code with the trip owner. The ride may have ended.</td>
+</tr>
+<tr>
+<td>"This ride is full."</td>
+<td>The ride has reached its rider limit. Ask the trip owner.</td>
+</tr>
+<tr>
+<td>"Reconnecting to your ride…"</td>
+<td>No signal yet. Your group sees you again as soon as the phone reconnects.</td>
+</tr>
+<tr>
+<td>Wrong language</td>
+<td><strong>Settings › Language</strong>. Safety screens and spoken alerts are in English, Hindi or Telugu; other screens are in English.</td>
+</tr>
+<tr>
+<td>Screen dims while riding</td>
+<td>Battery saver may dim the screen. Charge the phone or turn <strong>Battery saver</strong> off.</td>
+</tr>
+</tbody>
+</table></main></body></html>

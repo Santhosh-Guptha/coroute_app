@@ -1,0 +1,133 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>What&#x27;s new in CoRoute 3.55</title>
+<style>
+@font-face { font-family: Manrope; font-weight: 400; src: url('../fonts/manrope-latin-400-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 500; src: url('../fonts/manrope-latin-500-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 600; src: url('../fonts/manrope-latin-600-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 700; src: url('../fonts/manrope-latin-700-normal.woff2'); }
+@page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+@page :first { margin-top: 12mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; font-family: Manrope, 'Noto Sans', system-ui, sans-serif; color: #1C2B33; font-size: 10pt; line-height: 1.55; }
+a { color: #1E5A68; text-decoration: none; }
+h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 3mm; font-weight: 700; letter-spacing: -.01em; color: #1C2B33; }
+h2 { font-size: 14.5pt; margin: 8mm 0 2.5mm; font-weight: 700; color: #1E5A68; padding-bottom: 1.5mm; border-bottom: 1.5px solid #DCE6EA; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 5mm 0 1.5mm; font-weight: 700; color: #1C2B33; break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1mm; font-weight: 700; break-after: avoid; }
+p { margin: 0 0 2.6mm; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin: 0 0 1.1mm; }
+li > p { margin: 0 0 1mm; }
+strong { font-weight: 700; }
+code { font-family: 'DejaVu Sans Mono', monospace; font-size: 8.6pt; background: #F1F5F7; padding: .2mm 1.2mm; border-radius: 1mm; }
+pre { background: #F1F5F7; padding: 3mm; border-radius: 2mm; font-size: 8.5pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { background: none; padding: 0; }
+hr { border: 0; border-top: 1px solid #DCE6EA; margin: 5mm 0; }
+table { width: 100%; border-collapse: collapse; font-size: 8.9pt; margin: 2mm 0 4mm; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { text-align: left; font-size: 7.6pt; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: #2B7A8C; padding: 1.8mm 2.2mm; font-weight: 700; }
+th:first-child { border-top-left-radius: 1.5mm; } th:last-child { border-top-right-radius: 1.5mm; }
+td { border-bottom: 1px solid #DCE6EA; padding: 1.8mm 2.2mm; vertical-align: top; }
+tbody tr:nth-child(even) td { background: #F7FAFB; }
+blockquote { margin: 3mm 0 4mm; padding: 3mm 4.5mm; background: #E6F2F4; border-left: 1.6mm solid #2B7A8C; border-radius: 0 2mm 2mm 0; break-inside: avoid; }
+blockquote p:last-child { margin-bottom: 0; }
+blockquote.important, blockquote.warning { background: #FBF0E4; border-left-color: #D9822B; }
+blockquote .alert-label { display: block; font-size: 7.6pt; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: #1E5A68; margin-bottom: 1mm; }
+blockquote.important .alert-label, blockquote.warning .alert-label { color: #9A5513; }
+p.shots { display: flex; gap: 8mm; justify-content: center; margin: 4mm 0 1mm; break-inside: avoid; break-after: avoid; }
+p.shots img { height: 66mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 1.5mm 4mm rgba(28,43,51,.14); }
+p.caption { text-align: center; font-size: 8.2pt; color: #5A6B75; margin: 1mm 0 4mm; break-before: avoid; }
+.box-check { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #2B7A8C; border-radius: .8mm; margin-right: 1.8mm; vertical-align: -0.4mm; }
+li.task { list-style: none; margin-left: -5mm; }
+.doc-head { display: flex; align-items: center; gap: 4mm; background: #2B7A8C; color: #fff; border-radius: 3mm; padding: 4.5mm 6mm; margin: 0 0 6mm; }
+.doc-head img { width: 13mm; height: 13mm; border-radius: 3mm; background: #fff; }
+.doc-head .t { font-size: 18pt; font-weight: 700; line-height: 1.15; }
+.doc-head .s { font-size: 9.5pt; opacity: .92; }
+.doc-head .v { margin-left: auto; font-size: 8pt; font-weight: 600; background: rgba(255,255,255,.16); padding: 1mm 3mm; border-radius: 10mm; white-space: nowrap; }
+.has-head h1:first-of-type { display: none; }
+.cover { height: 258mm; display: flex; flex-direction: column; break-after: page; }
+.cover .band { background: #2B7A8C; color: #fff; border-radius: 4mm; padding: 16mm 14mm 12mm; position: relative; overflow: hidden; }
+.cover .band:after { content: ''; position: absolute; right: -30mm; top: -30mm; width: 110mm; height: 110mm; border-radius: 50%; background: rgba(255,255,255,.07); }
+.cover .band img.icon { width: 20mm; height: 20mm; border-radius: 5mm; background: #fff; margin-bottom: 8mm; }
+.cover .band .t { font-size: 32pt; font-weight: 700; line-height: 1.1; margin-bottom: 4mm; }
+.cover .band .s { font-size: 13pt; font-weight: 500; opacity: .95; max-width: 140mm; }
+.cover .band .v { display: inline-block; margin-top: 8mm; font-size: 9pt; font-weight: 700; border: 1px solid rgba(255,255,255,.5); border-radius: 10mm; padding: 1.2mm 4mm; }
+.cover .shots { display: flex; gap: 7mm; justify-content: center; margin: 12mm 0 8mm; }
+.cover .shots img { height: 92mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 2mm 5mm rgba(28,43,51,.16); }
+.cover .sos { margin-top: auto; background: #FBF0E4; border-left: 1.6mm solid #D9822B; border-radius: 0 3mm 3mm 0; padding: 4mm 6mm; font-size: 10.5pt; }
+.cover .sos b { color: #9A5513; }
+.breaks h2 { break-before: page; margin-top: 0; }
+.breaks h2#1-getting-around-the-app { break-before: avoid; }
+.compact { font-size: 9.1pt; line-height: 1.45; }
+.compact h2 { font-size: 12pt; margin: 4.5mm 0 1.8mm; padding-bottom: 1mm; }
+.compact h3 { margin: 2.5mm 0 1mm; font-size: 10pt; }
+.compact p { margin: 0 0 1.8mm; }
+.compact li { margin: 0 0 .6mm; }
+.compact table { font-size: 8.2pt; margin: 1.5mm 0 2.5mm; }
+.compact td, .compact th { padding: 1.2mm 2mm; }
+.compact blockquote { padding: 2.2mm 4mm; margin: 2mm 0 3mm; }
+.compact .doc-head { margin-bottom: 4mm; padding: 3.5mm 5mm; }
+</style></head><body class="has-head"><div class="doc-head"><img src="../../assets/icon.png"><div><div class="t">What&#x27;s new in CoRoute 3.55</div><div class="s">Release notes for riders.</div></div><div class="v">App 3.55 · November 2026</div></div><main><h1 id="whats-new-in-coroute-355">What's new in CoRoute 3.55</h1>
+<h2 id="google-play-whats-new-under-500-characters">Google Play "What's new" (under 500 characters)</h2>
+<pre><code>New in 3.55:
+- Siren alerts: hear ambulances and police through your earbuds
+- SOS now needs a 3 s hold; the crash countdown gives you 30 s
+- People tab: friends, crews and ride polls
+- Ride chat with one-tap replies
+- Navigate in Google Maps or Mappls
+- Offline maps saved automatically
+- Pillion seat and bike markers in your bike's colour
+- Private rider score and leaderboards
+- Simpler Profile and Settings: safety is always on
+</code></pre>
+<p><em>(432 characters including line breaks. Check the count again in Play Console after any edit.)</em></p>
+<hr />
+<h2 id="the-longer-story-blog-website-updates-page">The longer story (blog / website "Updates" page)</h2>
+<p>CoRoute 3.55 is our biggest update yet. It makes riding safer when you cannot hear the road, brings your riding friends into the app, and makes the app simpler to use. Here is what changed.</p>
+<h3 id="hear-what-you-would-otherwise-miss">Hear what you would otherwise miss</h3>
+<p><strong>Siren alerts.</strong> With noise-cancelling earbuds, a helmet headset or music, an ambulance can be right next to you before you notice. CoRoute now listens for ambulance, police and fire engine sirens during rides, through your phone's own microphone. When one is close, your music pauses and you hear "Ambulance siren close by. Keep left and give way." in your ears, with a vibration and a card on the screen. Listening happens on your phone; nothing is recorded or sent. Siren alerts are on by default, with a switch in Settings.</p>
+<p><strong>Music, alerts and calls work together.</strong> Ordinary alerts make your music quieter for a moment; emergencies pause it and play loud enough to hear in your helmet. Well over the speed limit, music gets quieter and then pauses until you slow down. During a phone call, ordinary lines wait and you get a short summary afterwards; critical alerts still reach you.</p>
+<p><strong>Clearer group talk.</strong> CoRoute cleans breathing, wind and engine noise out of your voice before your group hears it. The lock-screen notification now has <strong>Talk</strong> and <strong>Mute</strong> buttons.</p>
+<h3 id="fewer-false-alarms-more-time-to-answer">Fewer false alarms, more time to answer</h3>
+<ul>
+<li><strong>SOS now needs a 3-second hold</strong>, so rain, a glove or a tank-bag window cannot send it by accident.</li>
+<li><strong>The crash countdown is 30 seconds</strong> again, so you can hear and answer it with the phone in a pocket. If you simply ride on, the alarm cancels itself.</li>
+<li>Crash detection now looks for real signs of a fall after an impact, so potholes, speed breakers and a loose phone followed by a red light no longer look like a crash. Each "I'm OK" teaches it about your bike.</li>
+<li><strong>"Bike down?"</strong> checks on you if the bike falls over while you are stopped and nothing moves.</li>
+<li><strong>"Are you OK? The group is moving on"</strong> checks on a rider left behind at a stop, with a red <strong>Send SOS</strong> button for emergencies.</li>
+</ul>
+<h3 id="ride-together">Ride together</h3>
+<ul>
+<li><strong>Riding roles:</strong> Lead, Middle and Sweeper, with voice prompts telling each rider where to ride, and automatic roles.</li>
+<li><strong>Pillion seat:</strong> join as a pillion and pick the bike you sit on. Your group sees one bike with two people, and your phone keeps its own crash detection.</li>
+<li><strong>Bike markers:</strong> every bike is drawn in its type and colour on the map.</li>
+<li><strong>Ride chat:</strong> a Chat button on the map with one-tap replies (Fuel, Break, Wait for me, I'm OK and more). Typing only when stopped.</li>
+<li><strong>Off the group's route?</strong> Choose Route to group, Ask group to wait or Keep my own route, once you have stopped.</li>
+<li><strong>Speak while moving, act when stopped:</strong> cards that need a choice wait until you stop. Safety alerts never wait.</li>
+</ul>
+<h3 id="your-riding-friends">Your riding friends</h3>
+<ul>
+<li><strong>Usernames</strong> for every rider. Your real name is never used for it.</li>
+<li><strong>People tab:</strong> add friends by username or invite link, accept requests, block anyone who bothers you.</li>
+<li><strong>Crews:</strong> a standing circle of riding friends, with polls to pick the date and place, and <strong>Start a ride</strong> to invite them in one tap.</li>
+<li><strong>Notifications</strong> for friend requests, crew invites, polls and ride invitations, even when CoRoute is closed.</li>
+</ul>
+<h3 id="maps-and-navigation">Maps and navigation</h3>
+<ul>
+<li><strong>Navigate in Google Maps or Mappls:</strong> turn-by-turn in your favourite app while CoRoute keeps your group and safety running.</li>
+<li><strong>Better search:</strong> paste a Google Maps link (short links too), Apple Maps, OpenStreetMap or Waze link, or coordinates. Or share a place from Google Maps to CoRoute.</li>
+<li><strong>Offline maps, automatically:</strong> the map along your route is saved when the ride starts and kept 7 days after the trip.</li>
+<li><strong>Road hazards</strong> (pothole, speed breaker, rough road), <strong>historic places</strong> on your way, and <strong>reviews</strong> of places from CoRoute riders.</li>
+</ul>
+<h3 id="your-score">Your score</h3>
+<p>A private <strong>rider score</strong> from 0 to 100 shows how safely you ride, with levels from Learner to <strong>Ace Rider</strong>. It never rewards speed, and SOS or crash alarms never lower it. Optional <strong>leaderboards</strong> show the top riders by username.</p>
+<h3 id="simpler-app">Simpler app</h3>
+<ul>
+<li><strong>Profile</strong> is short: tap the top box for your profile, the gear for Settings. Then My bikes, Emergency contact &amp; Medical ID, your score, Help and Account.</li>
+<li><strong>Settings</strong> fit on one screen. Safety features are always on and have no switch; the list is under <strong>Safety is always on</strong>.</li>
+<li><strong>Safety health</strong> checks your phone before you ride and takes you straight to the right page to fix anything.</li>
+<li><strong>Send feedback</strong> is one screen, with an option to attach a diagnostics log that contains no messages, names, phone numbers or exact places.</li>
+</ul>
+<p>As always: solo riding, joining a group ride and every safety feature are free.</p>
+<p>Ride safe.</p></main></body></html>

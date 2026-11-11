@@ -191,6 +191,22 @@ Note for a later gateway pass (not changed here, `gateway/src` was out of scope)
 
 Manual / help wording: "If you or your pillion answers “Are you OK?”, it counts for both of you." No new app string.
 
+### Profile tab and Help (Nov 11, owner: "make it minimal")
+
+| Place | Name in the UI | Notes / don't use |
+|---|---|---|
+| Profile top box | Picture, full name, **@username**; tap = **My profile** (details: picture, name, username, stats); gear icon = **Settings** | Don't add a "Profile & settings" row: the gear is the one entry |
+| Profile rows | **My bikes** (garage), **Emergency contact & Medical ID**, rider score card, **Leaderboard** | Not "My bike & Garage", not "Emergency contact" alone |
+| Profile › Help (three rows, one place in the app) | **Send feedback**, **Rate CoRoute**, **Privacy & terms** | Retired as rows: "Report a problem", "Suggest a safety feature" (now categories inside Send feedback), "Privacy policy" and "Terms of use" (now in the Privacy & terms sheet) |
+| Send feedback categories | **Report a problem** · **Suggest a safety feature** · **Other**; switch **Attach diagnostics log** ("No messages, names or exact places"); link **View diagnostics** | Diagnostics has no other entry (gone from Settings) |
+| Privacy & terms sheet | **Privacy policy**, **Terms of use**, **Your data** (website page /privacy-and-security) | |
+| Profile › Account | **Sign out**, **Delete account** | Not "Delete my account". "Change password" and "Edit details" moved to My profile. No "Ride history" button (Trips tab) and no "Your plan" (removed from the app for riders) |
+| Settings › Safety | **Safety health** ("Check your phone is ready") opens the phone check; the cockpit tile is also **Safety health** (sentence case) and opens the same screen; the screen title is **Safety health** | Not "Phone check" as a row or title; never open Settings from "Safety health" |
+| Phone check fix buttons | **Allow** (permission prompt; notifications blocked for good open CoRoute's own notification page), **Battery settings** (background use: the app's battery page), **Sound settings**, **Show steps** (brand battery guide), **Open settings** (full-screen alarm page) | Avoid "Open settings" when a specific page exists |
+| "Safety is always on" list | adds **Help nearby riders** and **Ask nearby riders to help me** | No switch for either any more |
+| Rider score screen | Line **Your score uses your ride safety report** (no switch) | Not "Use my ride safety report for my rider score" (that was the switch) |
+| Offline maps | No row. Features guide: "The map along your route is saved when the ride starts. Kept 7 days after the trip, then deleted." | Not "Offline map packs", "Save route map" as a button, "Check offline" |
+
 ## 3. Changes made (file → before → after)
 
 ### Ride / cockpit

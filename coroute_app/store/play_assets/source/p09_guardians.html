@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.urlbar{position:absolute;left:0;right:0;top:30px;height:56px;padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--border);z-index:8;display:flex;align-items:center;gap:10px}
+.urlbar .u{flex:1;height:40px;border-radius:20px;background:var(--surfaceAlt);display:flex;align-items:center;gap:8px;padding:0 14px;font-size:14px;color:var(--text)}
+.site{position:absolute;left:0;right:0;top:86px;height:56px;padding:0 16px;display:flex;align-items:center;gap:10px;background:var(--surface);z-index:7;border-bottom:1px solid var(--border)}
+.site img{width:30px;height:30px;border-radius:8px}
+.watch{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -4px 16px var(--shadow);padding:18px 18px 30px;z-index:7}
+.live{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:#EAF4ED;color:#2A6E45;font-size:12px;font-weight:600}
+.live i{width:8px;height:8px;border-radius:4px;background:#3E8E5E;display:block}
+.home{width:340px;background:#fff;border-radius:18px;padding:16px;border:1px solid #E3DED6}
+</style></head><body>
+<div class="panel teal" id="panel">
+  <div class="head"><h1>Guardians<br>at home</h1><div class="sub">Family can follow a live link</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div class="urlbar"><div class="u" id="u"></div><span id="mo" style="color:var(--muted)"></span></div>
+    <div class="site"><img src="assets/coroute_icon.png"><span style="font-size:16px;font-weight:600">CoRoute</span><span class="sp"></span><span class="live"><i></i>Live</span></div>
+    <div id="map" style="position:absolute;left:0;right:0;top:142px;bottom:0"></div>
+    <div class="watch">
+      <div class="row"><div class="av" style="background:#2B7A8C;width:48px;height:48px;font-size:18px">A</div><div style="flex:1"><div style="font-size:19px;font-weight:600">Asha is riding</div><div class="label">Updated a few seconds ago</div></div></div>
+      <div class="row" style="margin-top:14px;gap:10px">
+        <div class="card" style="flex:1;padding:12px"><div class="caption">Near</div><div style="font-size:15px;font-weight:600">Devanahalli</div></div>
+        <div class="card" style="flex:1;padding:12px"><div class="caption">Link ends</div><div style="font-size:15px;font-weight:600">in 28 min</div></div>
+      </div>
+      <div class="row" style="margin-top:14px;gap:8px;color:var(--muted);font-size:13px" id="pv"></div>
+    </div>
+  </div></div></div>
+  <div class="pop" style="left:34px;top:1370px"><div style="zoom:1.5"><div class="home">
+    <div class="row"><div style="width:44px;height:44px;border-radius:12px;background:#D7ECEF;color:#2B7A8C;display:flex;align-items:center;justify-content:center" id="hl"></div><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#1F2328">Live link shared</div><div class="caption">Amma can see where you are</div></div></div>
+  </div></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'teal'); CR.chrome(document.getElementById('scr'));
+  const I = CR.icon; u.innerHTML = I('lock', 16, 'var(--muted)') + 'coroute.devmonks.space'; mo.innerHTML = I('more', 22);
+  pv.innerHTML = I('eye-off', 18) + 'Only first name and position are shared'; hl.innerHTML = I('link', 24);
+  const m = CR.makeMap(document.getElementById('map'), {
+    w: 412, h: 756, seed: 61, gridAngle: -10, gridStep: 44,
+    route: [[90, 800], [120, 640], [210, 520], [220, 400], [180, 300], [240, 180], [330, 80], [380, -20]], showRoute: false,
+    major: [[[-20, 420], [200, 400], [430, 330]]], towns: [[300, 470, 100], [80, 200, 70]], parks: [[70, 380, 46]], lake: [350, 220, 40], country: 6,
+    labels: [[300, 400, 'Devanahalli', 13, 600]],
+  });
+  // travelled trail (teal) up to the rider
+  const L = m.path.getTotalLength(); const f = CR.atY(m.path, 340);
+  const ns = 'http://www.w3.org/2000/svg';
+  for (const [col, w] of [['#FFFFFF', 9], ['#2B7A8C', 5.5]]) { const p = document.createElementNS(ns, 'path'); p.setAttribute('d', m.path.getAttribute('d')); p.setAttribute('fill', 'none'); p.setAttribute('stroke', col); p.setAttribute('stroke-width', w); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-dasharray', `${L * f} ${L}`); m.svg.appendChild(p); }
+  const pos = CR.onPath(m.path, f); CR.rider(m.layer, { ...pos, type: 'adventure', color: '#2B7A8C', name: 'Asha', size: 92, tag: 'right' });
+});
+</script></body></html>

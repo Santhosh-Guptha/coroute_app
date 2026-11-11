@@ -1,0 +1,44 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+body{width:1024px;height:500px}
+.fg{position:relative;width:1024px;height:500px;overflow:hidden;background:radial-gradient(120% 140% at 85% 20%,#2F889B 0%,#2B7A8C 38%,#1F5F6E 100%)}
+.brand{position:absolute;left:64px;top:70px;display:flex;align-items:center;gap:16px}
+.brand img{width:68px;height:68px;border-radius:16px;box-shadow:0 6px 16px rgba(10,30,36,.25)}
+.brand span{font-size:38px;font-weight:600;color:#fff;letter-spacing:-.3px}
+h1{position:absolute;left:64px;top:174px;font-size:58px;line-height:1.08;font-weight:600;color:#fff;letter-spacing:-1px}
+.sub{position:absolute;left:64px;top:336px;font-size:22px;font-weight:500;color:#D7ECEF}
+#road{position:absolute;inset:0}
+#lay{position:absolute;inset:0}
+</style></head><body>
+<div class="fg" id="fg">
+  <svg id="road" width="1024" height="500" viewBox="0 0 1024 500"></svg>
+  <div id="lay"></div>
+  <div class="brand"><img src="assets/coroute_icon.png"><span>CoRoute</span></div>
+  <h1>Ride together.<br>Stay safe.</h1>
+  <div class="sub">Group and solo riding safety</div>
+</div>
+<script>
+CR.ready(async () => {
+  const fg = document.getElementById('fg');
+  const r = CR.rng(4); let s = '';
+  // soft contour texture
+  for (let i = 1; i < 16; i++) { const pts = []; const R = i * 46; for (let j = 0; j < 12; j++) { const a = j / 12 * Math.PI * 2; const rr = R * (0.88 + 0.2 * Math.sin(a * 3 + i * .4)); pts.push([860 + Math.cos(a) * rr, 260 + Math.sin(a) * rr * .7]); } s += `<path d="${CR.smooth(pts, true)}" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="1.5"/>`; }
+  // faint side roads
+  [[[560, 520], [640, 380], [760, 330], [1040, 300]], [[700, -20], [720, 140], [690, 300], [720, 520]], [[1040, 120], [900, 160], [820, 90], [760, -20]]].forEach(p => {
+    s += `<path d="${CR.smooth(p)}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="14" stroke-linecap="round"/>`; });
+  const route = [[560, 560], [620, 440], [720, 370], [800, 300], [850, 210], [900, 120], [990, -10]];
+  const d = CR.smooth(route);
+  s += `<path d="${d}" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="64" stroke-linecap="round"/>`;
+  s += `<path d="${d}" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="12" stroke-linecap="round"/>`;
+  s += `<path id="rl" d="${d}" fill="none" stroke="#5FB3C4" stroke-width="7" stroke-linecap="round"/>`;
+  road.innerHTML = s;
+  const path = document.getElementById('rl'); const C = CR.MEMBERS.light;
+  const bikes = [
+    { y: 118, type: 'adventure', color: '#D9822B', n: 1 },
+    { y: 214, type: 'cruiser', color: '#B5546E', n: 2 },
+    { y: 311, type: 'sport', color: '#3D7BC8', n: 1 },
+    { y: 408, type: 'retro', color: '#3E8E5E', n: 1 },
+  ];
+  bikes.forEach(b => { const p = CR.onPath(path, CR.atY(path, b.y)); CR.rider(document.getElementById('lay'), { ...p, ...b, size: 112, tag: 'none', haloScale: .85 }); });
+});
+</script></body></html>

@@ -37,6 +37,26 @@ The app may show neutral account status only: the plan name, what it includes, i
    Its allowlist is for non-UI identifiers only (API field names, storage keys, the policy regex itself,
    the fuel price lines and the staff note), each with a reason. Never allowlist rider-facing text.
 
+## 3.56 additions: access modes, push kinds, offer e-mails
+
+10. **Access modes** ([access_modes.md](access_modes.md)): the admin can make CoRoute paid, free for
+    everyone, or free up to limits. The app never learns the mode or a price.
+    * It reads only capabilities: `canHostGroup`, `maxRiders`, `groupFeatures`, `reason`.
+    * In free mode the app shows **no plan status at all**.
+    * The only gate words are "Hosting a group ride needs a group plan.", "Hosting more group rides needs
+      a group plan.", "This ride is full." and "This isn't included in this ride.", with no link and no
+      button.
+11. **Push kinds** ([notifications_admin.md](notifications_admin.md)): Update, Event, Safety tip,
+    Community and Partner perk. Each has its own channel and opt-out.
+    * A **Partner perk** is a real-world perk at a partner CoRoute curated: not a digital good, never a
+      CoRoute plan, price, coupon, code or link.
+    * It is off until the rider turns it on (Google Play ads policy: no third-party ads in
+      notifications the rider did not ask for) and is always labelled "Partner perk".
+12. **Offers, coupons and prices for CoRoute plans go only by e-mail** (the Offers e-mail campaign).
+    * Only to riders who opted in on the website account page (off by default).
+    * Every e-mail has an unsubscribe link and one-click headers, and a suppression list applies.
+    * Never in a push, never in the app.
+
 ## What the app shows now
 
 * **"Your plan"** screen (`lib/presentation/subscription/membership_dashboard_screen.dart`, title "Your plan"):

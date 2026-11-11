@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.wrap{position:absolute;left:0;right:0;top:86px;bottom:0;display:flex;flex-direction:column;align-items:center;padding:0 20px}
+.ringbox{position:relative;width:290px;height:290px;margin-top:8px}
+.ringbox svg{position:absolute;inset:0}
+.sosbtn{position:absolute;left:50%;top:50%;width:196px;height:196px;margin:-98px 0 0 -98px;border-radius:50%;background:#D93A2F;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  box-shadow:0 10px 24px rgba(217,58,47,.28)}
+.sosbtn b{font-size:52px;font-weight:700;letter-spacing:1px;line-height:1}
+.sosbtn span{font-size:14px;font-weight:600;margin-top:6px;opacity:.95}
+.hold{margin-top:12px;font-size:22px;font-weight:600}
+.who{width:100%;margin-top:16px;padding:2px 16px}
+.who .row{padding:12px 0}
+.who .ic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surfaceAlt);color:var(--text)}
+.cancel{position:absolute;left:20px;right:20px;bottom:30px}
+.popcard{width:290px;background:var(--surface);border-radius:16px;padding:14px;border:1px solid var(--border)}
+.popcard .top{display:flex;gap:12px;align-items:center}
+.popcard .badge{width:42px;height:42px;border-radius:12px;background:#D93A2F;color:#fff;display:flex;align-items:center;justify-content:center}
+</style></head><body>
+<div class="panel warm" id="panel">
+  <div class="head"><h1>SOS in one hold</h1><div class="sub">Your group and contacts are alerted</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div class="appbar"><div class="back" id="x"></div><span>Send SOS</span></div>
+    <div class="wrap">
+      <div class="ringbox">
+        <svg viewBox="0 0 290 290"><circle cx="145" cy="145" r="132" fill="none" stroke="#FBEBE8" stroke-width="14"/>
+          <circle cx="145" cy="145" r="132" fill="none" stroke="#D93A2F" stroke-width="14" stroke-linecap="round" stroke-dasharray="829.4" stroke-dashoffset="315" transform="rotate(-90 145 145)"/></svg>
+        <div class="sosbtn"><b>SOS</b><span>Keep holding</span></div>
+      </div>
+      <div class="hold">Hold 3 s to send</div>
+      <div class="label" style="margin-top:6px;text-align:center;font-size:14px">Lift your finger to cancel</div>
+      <div class="card who">
+        <div class="row"><div class="ic" id="i1"></div><div style="flex:1"><div style="font-size:15px;font-weight:600">Your group</div><div class="caption">Nandi Hills sunrise ride · 5 riders</div></div></div>
+        <div class="hair"></div>
+        <div class="row"><div class="ic" id="i2"></div><div style="flex:1"><div style="font-size:15px;font-weight:600">Emergency contacts</div><div class="caption">2 contacts, with a map link</div></div></div>
+        <div class="hair"></div>
+        <div class="row"><div class="ic" id="i3"></div><div style="flex:1"><div style="font-size:15px;font-weight:600">Safety card</div><div class="caption">Shown to your group while SOS is open</div></div></div>
+      </div>
+    </div>
+    <div class="btn outline cancel">Cancel</div>
+  </div></div></div>
+  <div class="pop" style="left:40px;top:1534px"><div style="zoom:1.62">
+    <div class="popcard">
+      <div class="top"><div class="badge" id="pb"></div><div style="flex:1"><div style="font-size:16px;font-weight:700;color:#D93A2F">SOS from Meera</div><div class="caption">800 m behind you · on NH 44</div></div></div>
+      <div style="display:flex;gap:8px;margin-top:12px"><div class="btn primary" style="flex:1;height:42px;font-size:14px" id="nav"></div><div class="btn outline" style="flex:1;height:42px;font-size:14px">I'm going</div></div>
+    </div>
+  </div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'warm'); CR.chrome(document.getElementById('scr'));
+  const I = CR.icon;
+  x.innerHTML = I('close', 24); i1.innerHTML = I('users', 22); i2.innerHTML = I('phone', 22); i3.innerHTML = I('shield', 22);
+  pb.innerHTML = I('sos', 24, '#fff'); nav.innerHTML = I('nav', 18) + 'Navigate';
+});
+</script></body></html>

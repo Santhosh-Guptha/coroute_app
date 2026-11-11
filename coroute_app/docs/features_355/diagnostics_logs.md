@@ -42,7 +42,7 @@ social ride battery permissions lifecycle errors diag`.
 | Diagnostics itself | `diag.upload_start/ok/failed`, `share`, `cleared`, `detailed_on/off`, `auto_send_safety`, `admin_request`, `safety_prompt_dismissed`, `queue_dropped` | `DiagLogService` |
 
 Levels: info, warn and error are always written. Debug only while **Detailed logs** is on
-(Settings › More › Diagnostics; shown to admins, or after seven taps on the screen subtitle). It
+(Profile › Help › Send feedback › View diagnostics; shown to admins, or after seven taps on the screen subtitle). It
 switches itself off 24 h after it was turned on.
 
 ## Privacy
@@ -99,7 +99,7 @@ base64 chunks). Requests: `diag_log_requests`.
 
 ## How testers and the owner send logs
 
-1. Settings › More settings › **Diagnostics** shows log size, days kept, last error and last send.
+1. Profile › Help › Send feedback › **View diagnostics** (its only entry since Nov 11; Send feedback also has an "Attach diagnostics log" switch that runs the same upload) shows log size, days kept, last error and last send.
 2. **Send logs to CoRoute**: uploads the last days (newest first, 5 MB gzip at most). Reason `manual`.
 3. **Share log file**: the same bundle as `coroute-logs-YYYYMMDD-HHMM.jsonl.gz` through the share
    sheet (WhatsApp, Drive, e-mail...).
@@ -200,7 +200,7 @@ Typical questions:
 
 ## Device checks (cannot be done here)
 
-1. Fresh install: Settings › More › Diagnostics shows a small size, "Today", Last error "None".
+1. Fresh install: Profile › Help › Send feedback › View diagnostics shows a small size, "Today", Last error "None".
    View log shows `lifecycle.app_start` and `resumed`.
 2. Ride 10 minutes: `ride_start`, `battery`, `permissions`, `gps_summary` every 30 s, `ride_end`.
 3. Overspeed in a test zone: `overspeed_warn` followed by `audio` `decision->audio` lines.

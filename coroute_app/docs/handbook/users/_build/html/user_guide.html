@@ -1,0 +1,706 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>CoRoute user guide</title>
+<style>
+@font-face { font-family: Manrope; font-weight: 400; src: url('../fonts/manrope-latin-400-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 500; src: url('../fonts/manrope-latin-500-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 600; src: url('../fonts/manrope-latin-600-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 700; src: url('../fonts/manrope-latin-700-normal.woff2'); }
+@page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+@page :first { margin-top: 12mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; font-family: Manrope, 'Noto Sans', system-ui, sans-serif; color: #1C2B33; font-size: 10pt; line-height: 1.55; }
+a { color: #1E5A68; text-decoration: none; }
+h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 3mm; font-weight: 700; letter-spacing: -.01em; color: #1C2B33; }
+h2 { font-size: 14.5pt; margin: 8mm 0 2.5mm; font-weight: 700; color: #1E5A68; padding-bottom: 1.5mm; border-bottom: 1.5px solid #DCE6EA; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 5mm 0 1.5mm; font-weight: 700; color: #1C2B33; break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1mm; font-weight: 700; break-after: avoid; }
+p { margin: 0 0 2.6mm; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin: 0 0 1.1mm; }
+li > p { margin: 0 0 1mm; }
+strong { font-weight: 700; }
+code { font-family: 'DejaVu Sans Mono', monospace; font-size: 8.6pt; background: #F1F5F7; padding: .2mm 1.2mm; border-radius: 1mm; }
+pre { background: #F1F5F7; padding: 3mm; border-radius: 2mm; font-size: 8.5pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { background: none; padding: 0; }
+hr { border: 0; border-top: 1px solid #DCE6EA; margin: 5mm 0; }
+table { width: 100%; border-collapse: collapse; font-size: 8.9pt; margin: 2mm 0 4mm; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { text-align: left; font-size: 7.6pt; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: #2B7A8C; padding: 1.8mm 2.2mm; font-weight: 700; }
+th:first-child { border-top-left-radius: 1.5mm; } th:last-child { border-top-right-radius: 1.5mm; }
+td { border-bottom: 1px solid #DCE6EA; padding: 1.8mm 2.2mm; vertical-align: top; }
+tbody tr:nth-child(even) td { background: #F7FAFB; }
+blockquote { margin: 3mm 0 4mm; padding: 3mm 4.5mm; background: #E6F2F4; border-left: 1.6mm solid #2B7A8C; border-radius: 0 2mm 2mm 0; break-inside: avoid; }
+blockquote p:last-child { margin-bottom: 0; }
+blockquote.important, blockquote.warning { background: #FBF0E4; border-left-color: #D9822B; }
+blockquote .alert-label { display: block; font-size: 7.6pt; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: #1E5A68; margin-bottom: 1mm; }
+blockquote.important .alert-label, blockquote.warning .alert-label { color: #9A5513; }
+p.shots { display: flex; gap: 8mm; justify-content: center; margin: 4mm 0 1mm; break-inside: avoid; break-after: avoid; }
+p.shots img { height: 66mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 1.5mm 4mm rgba(28,43,51,.14); }
+p.caption { text-align: center; font-size: 8.2pt; color: #5A6B75; margin: 1mm 0 4mm; break-before: avoid; }
+.box-check { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #2B7A8C; border-radius: .8mm; margin-right: 1.8mm; vertical-align: -0.4mm; }
+li.task { list-style: none; margin-left: -5mm; }
+.doc-head { display: flex; align-items: center; gap: 4mm; background: #2B7A8C; color: #fff; border-radius: 3mm; padding: 4.5mm 6mm; margin: 0 0 6mm; }
+.doc-head img { width: 13mm; height: 13mm; border-radius: 3mm; background: #fff; }
+.doc-head .t { font-size: 18pt; font-weight: 700; line-height: 1.15; }
+.doc-head .s { font-size: 9.5pt; opacity: .92; }
+.doc-head .v { margin-left: auto; font-size: 8pt; font-weight: 600; background: rgba(255,255,255,.16); padding: 1mm 3mm; border-radius: 10mm; white-space: nowrap; }
+.has-head h1:first-of-type { display: none; }
+.cover { height: 258mm; display: flex; flex-direction: column; break-after: page; }
+.cover .band { background: #2B7A8C; color: #fff; border-radius: 4mm; padding: 16mm 14mm 12mm; position: relative; overflow: hidden; }
+.cover .band:after { content: ''; position: absolute; right: -30mm; top: -30mm; width: 110mm; height: 110mm; border-radius: 50%; background: rgba(255,255,255,.07); }
+.cover .band img.icon { width: 20mm; height: 20mm; border-radius: 5mm; background: #fff; margin-bottom: 8mm; }
+.cover .band .t { font-size: 32pt; font-weight: 700; line-height: 1.1; margin-bottom: 4mm; }
+.cover .band .s { font-size: 13pt; font-weight: 500; opacity: .95; max-width: 140mm; }
+.cover .band .v { display: inline-block; margin-top: 8mm; font-size: 9pt; font-weight: 700; border: 1px solid rgba(255,255,255,.5); border-radius: 10mm; padding: 1.2mm 4mm; }
+.cover .shots { display: flex; gap: 7mm; justify-content: center; margin: 12mm 0 8mm; }
+.cover .shots img { height: 92mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 2mm 5mm rgba(28,43,51,.16); }
+.cover .sos { margin-top: auto; background: #FBF0E4; border-left: 1.6mm solid #D9822B; border-radius: 0 3mm 3mm 0; padding: 4mm 6mm; font-size: 10.5pt; }
+.cover .sos b { color: #9A5513; }
+.breaks h2 { break-before: page; margin-top: 0; }
+.breaks h2#1-getting-around-the-app { break-before: avoid; }
+.compact { font-size: 9.1pt; line-height: 1.45; }
+.compact h2 { font-size: 12pt; margin: 4.5mm 0 1.8mm; padding-bottom: 1mm; }
+.compact h3 { margin: 2.5mm 0 1mm; font-size: 10pt; }
+.compact p { margin: 0 0 1.8mm; }
+.compact li { margin: 0 0 .6mm; }
+.compact table { font-size: 8.2pt; margin: 1.5mm 0 2.5mm; }
+.compact td, .compact th { padding: 1.2mm 2mm; }
+.compact blockquote { padding: 2.2mm 4mm; margin: 2mm 0 3mm; }
+.compact .doc-head { margin-bottom: 4mm; padding: 3.5mm 5mm; }
+</style></head><body class="has-head breaks"><section class="cover"><div class="band"><img class="icon" src="../../assets/icon.png">
+<div class="t">CoRoute user guide</div><div class="s">Everything a rider needs: ride safely alone or in a group, and come home.</div><div class="v">App 3.55 · November 2026</div></div>
+<div class="shots"><img src="../../assets/ride_map.jpg"><img src="../../assets/sos_hold.jpg"><img src="../../assets/people_crews.jpg"></div>
+<div class="sos"><b>In an emergency, call 112 first.</b> Then hold SOS for 3 seconds so your group and emergency contact know where you are.</div></section><main><h1 id="coroute-user-guide">CoRoute user guide</h1>
+<p>This guide covers the CoRoute app for Android, version 3.55. It replaces the earlier rider manual. Screens in this guide are illustrations: your phone may show slightly different wording or layout.</p>
+<blockquote class="important">
+<p><span class="alert-label">Important</span>CoRoute is a riding aid, not a certified safety device. Your phone, GPS or network can fail. In an emergency, call <strong>112</strong> first.</p>
+</blockquote>
+<p><strong>Contents</strong></p>
+<ol>
+<li><a href="#1-getting-around-the-app">Getting around the app</a></li>
+<li><a href="#2-safety">Safety</a></li>
+<li><a href="#3-group-riding">Group riding</a></li>
+<li><a href="#4-talk-intercom-chat-music-and-calls">Talk: intercom, chat, music and calls</a></li>
+<li><a href="#5-navigation-and-maps">Navigation and maps</a></li>
+<li><a href="#6-community-friends-crews-reviews">Community: friends, crews, reviews</a></li>
+<li><a href="#7-trips-and-rider-score">Trips and rider score</a></li>
+<li><a href="#8-notifications">Notifications</a></li>
+<li><a href="#9-settings">Settings</a></li>
+<li><a href="#10-your-data-and-your-account">Your data and your account</a></li>
+<li><a href="#11-getting-help">Getting help</a></li>
+</ol>
+<hr />
+<h2 id="1-getting-around-the-app">1. Getting around the app</h2>
+<p>The bar at the bottom has five tabs:</p>
+<table>
+<thead>
+<tr>
+<th>Tab</th>
+<th>What it is for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Home</strong></td>
+<td>Start a ride (<strong>Start Ride</strong>, <strong>Plan a route</strong>), join one (<strong>Join Ride</strong>), ride solo without internet, and see your bike status. During a ride, Home becomes the ride map (the cockpit).</td>
+</tr>
+<tr>
+<td><strong>Trips</strong></td>
+<td>Your past rides: trip reports, maps, timelines, replays and the leaderboards.</td>
+</tr>
+<tr>
+<td><strong>People</strong></td>
+<td>Friends, crews, requests and invitations. Search riders by username.</td>
+</tr>
+<tr>
+<td><strong>Alerts</strong></td>
+<td>Recent ride and safety notices.</td>
+</tr>
+<tr>
+<td><strong>Profile</strong></td>
+<td>You, your bikes, your safety details, your score, help and your account.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="profile">Profile</h3>
+<p>The Profile tab is kept short on purpose:</p>
+<ul>
+<li><strong>Top box:</strong> your picture, name and <strong>@username</strong>. Tap it to open <strong>My profile</strong> (details, stats, <strong>Edit details</strong>, <strong>Change password</strong>). The <strong>gear</strong> icon in the box opens <strong>Settings</strong>.</li>
+<li><strong>My bikes:</strong> your garage.</li>
+<li><strong>Emergency contact &amp; Medical ID:</strong> amber until you add a contact.</li>
+<li><strong>Rider score</strong> card and <strong>Leaderboard</strong>.</li>
+<li><strong>Help:</strong> <strong>Send feedback</strong>, <strong>Rate CoRoute</strong>, <strong>Privacy &amp; terms</strong>.</li>
+<li><strong>Account:</strong> <strong>Sign out</strong>, <strong>Delete account</strong>.</li>
+</ul>
+<h3 id="the-ride-map-cockpit">The ride map (cockpit)</h3>
+<p>While you ride, the map shows your group, the route, your speed and the speed limit. Big buttons sit at the bottom: <strong>Hold to talk</strong>, <strong>SOS</strong> and the riders list. Cards appear at the top for things that need your attention, ranked so that safety always comes first.</p>
+<p class="shots"><img alt="Group ride map" src="../../assets/ride_map.jpg" /> <img alt="Light and dark map" src="../../assets/light_dark.jpg" /></p>
+<p class="caption">Ride map (illustration) and the night map.</p>
+<p><strong>Speak while moving, act when stopped.</strong> Cards that need a choice (off the route, a bike swap request, a historic place, a place review) only show their buttons once you have stopped for a few seconds. While you move, CoRoute says one short line and shows a small chip. Safety cards (SOS, crash countdown, "Bike down?", sirens, "Are you OK?") are never held back. A pillion can always tap.</p>
+<hr />
+<h2 id="2-safety">2. Safety</h2>
+<p>Every safety feature is free and on for every rider. In <strong>Settings › Safety is always on</strong> you can see the full list: crash detection; SOS, also on the lock screen; emergency texts; Medical ID for responders; "Are you OK?" check-in; solo ride ETA check-in; no-signal ahead; break reminder; road warnings; auto re-route; help nearby riders; ask nearby riders to help me; clear voice in group talk; screen stays on while riding.</p>
+<p>The <em>CoRoute safety guide</em> explains each one in depth, with limits and what to do in an emergency. Here is the short version.</p>
+<h3 id="sos">SOS</h3>
+<ol>
+<li>Press and hold the red <strong>SOS</strong> button. A ring fills for <strong>3 seconds</strong>. Let go early and nothing is sent.</li>
+<li>When the ring is full, your SOS goes to <strong>your group</strong> (voice and location) and your <strong>emergency contact</strong> (text, and you can call). Your location updates every 10 seconds.</li>
+<li>The SOS stays on every screen of your group until it is closed. Riders answer with <strong>I'm going</strong> or <strong>I'm with them</strong>.</li>
+<li>From the SOS screen you can <strong>Share live link</strong> (your first name and position for 30 minutes) and see the nearest hospital.</li>
+<li>When you are safe, close it with <strong>Help reached me</strong> or <strong>False alarm</strong>.</li>
+</ol>
+<p>The SOS button is also on the ride notification on your lock screen, so you can reach it without unlocking.</p>
+<p class="shots"><img alt="SOS hold" src="../../assets/sos_hold.jpg" /> <img alt="Crash countdown" src="../../assets/crash_countdown.jpg" /></p>
+<p class="caption">Hold SOS for 3 seconds (left). The crash countdown gives you 30 seconds (right). Illustrations.</p>
+<h3 id="crash-detection">Crash detection</h3>
+<p>During a ride (from about 12 km/h) the phone's motion sensor watches for a crash. Everything is worked out on your phone.</p>
+<table>
+<thead>
+<tr>
+<th>What happens</th>
+<th>What you see</th>
+<th>What you hear</th>
+<th>What you do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A possible crash</td>
+<td>Full screen: "Possible accident detected. Are you okay?" with a <strong>30-second</strong> countdown, also over the lock screen</td>
+<td>Alarm sound; music pauses</td>
+<td>Tap <strong>I'm OK</strong> if you are fine. Nothing is sent. Tap <strong>Need Help</strong> to send at once.</td>
+</tr>
+<tr>
+<td>No answer after 30 s</td>
+<td>"Crash SOS sent"</td>
+<td></td>
+<td>Your group and emergency contact are alerted, marked as automatic.</td>
+</tr>
+<tr>
+<td>You ride on</td>
+<td>"Crash alarm cancelled. You are riding."</td>
+<td>The same line, spoken</td>
+<td>Nothing. It counts as I'm OK.</td>
+</tr>
+<tr>
+<td>Next stop after an "I'm OK"</td>
+<td>"Still okay? Anything hurt?"</td>
+<td></td>
+<td><strong>Yes, fine</strong> or <strong>Need help</strong>.</td>
+</tr>
+</tbody>
+</table>
+<p>Each <strong>I'm OK</strong> teaches CoRoute a little about your bike, so bumps that fooled it once are less likely to fool it again. A severe impact always raises the alarm.</p>
+<h3 id="bike-down">"Bike down?"</h3>
+<p>If the bike falls over while you are stopped or walking and nothing moves for about a minute, CoRoute opens the same 30-second countdown titled <strong>Bike down?</strong>.</p>
+<h3 id="are-you-ok-checks">"Are you OK?" checks</h3>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>When</th>
+<th>Your choices</th>
+<th>If you do not answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>The group is moving on</strong></td>
+<td>You have been stopped for 3 min and the group has ridden more than 1 km away</td>
+<td><strong>I'm OK</strong>, <strong>Need help</strong> (asks the group to wait), <strong>Waiting for fuel</strong>, <strong>Photo stop</strong>, <strong>Taking a break</strong>, or hold the red <strong>Send SOS</strong> for 1.5 s</td>
+<td>After 90 s your lead and sweeper are told</td>
+</tr>
+<tr>
+<td><strong>Far from your group</strong></td>
+<td>You have been far from the group for a while</td>
+<td><strong>I'm OK</strong></td>
+<td>After 2 min your lead is told</td>
+</tr>
+<tr>
+<td><strong>Solo ride ETA</strong></td>
+<td>A solo ride with a destination and an emergency contact: you have not arrived well after your expected time and you are stopped</td>
+<td><strong>I'm fine</strong>, <strong>Add 30 min</strong></td>
+<td>After 3 min your emergency contact gets a text</td>
+</tr>
+<tr>
+<td><strong>Break reminder</strong></td>
+<td>After about 2 hours of riding (earlier if you seem tired)</td>
+<td><strong>I'm alert</strong>, <strong>Taking a break</strong></td>
+<td>Nothing is sent</td>
+</tr>
+</tbody>
+</table>
+<p>A rider who is riding normally is never reported as "no reply". If you or your pillion answers "Are you OK?", it counts for both of you.</p>
+<p class="shots"><img alt="Missing-rider check" src="../../assets/missing_rider_check.jpg" /></p>
+<p class="caption">"Are you OK? The group is moving on" (mock-up).</p>
+<h3 id="emergency-contact-and-medical-id">Emergency contact and Medical ID</h3>
+<p>Add them in <strong>Profile › Emergency contact &amp; Medical ID</strong>. Medical info (blood group, allergies, notes for a doctor) is optional. When you add it, it shows on your lock screen during an emergency and goes to the people helping you only while your SOS or crash alert is open. CoRoute staff never see it.</p>
+<h3 id="ride-guardian-live-link-for-family">Ride Guardian (live link for family)</h3>
+<p>Open the ride's settings card on the map and choose <strong>Ride Guardian</strong> to create a <strong>Guardian link</strong>. Pick what they see:</p>
+<ul>
+<li><strong>Basic:</strong> status without exact location;</li>
+<li><strong>Live:</strong> your last reported location;</li>
+<li><strong>Emergency only:</strong> your location only when help is requested.</li>
+</ul>
+<p>You can add an optional PIN (4 to 8 digits) and a maximum time. Share the link at once: it cannot be shown again. Links end at the time you pick, or 6 hours after the ride. When you arrive, the guardian page says "Arrived safely" and location sharing stops. You can stop a link at any time from <strong>Your links</strong>.</p>
+<h3 id="help-from-nearby-riders">Help from nearby riders</h3>
+<p>If you send an SOS or crash, your own group is always alerted first. CoRoute may also ask up to 3 riders of other groups who are riding toward you on the same road. Before one accepts they see only the emergency point and the distance. After one taps <strong>I Can Help</strong>, they see your first name, your bike type and colour and, while your alert is open, your medical info and emergency contact. They never get your phone number. In the same way, you may be asked to help others: tap <strong>I Can Help</strong> or <strong>Can't Assist</strong>.</p>
+<h3 id="sirens">Sirens</h3>
+<p>With <strong>Siren alerts</strong> on (Settings, on by default), the phone listens during rides for ambulance, police and fire engine sirens. It is meant for riders who cannot hear outside: earbuds, a helmet headset or music. Nothing is recorded or sent.</p>
+<table>
+<thead>
+<tr>
+<th>Your situation</th>
+<th>What you hear</th>
+<th>What you see and feel</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Earbuds, helmet set or music, siren close</td>
+<td>Music pauses. In your ears: "Ambulance siren close by. Keep left and give way." (or Police / Fire engine, or "Emergency vehicle" when the kind is not clear)</td>
+<td>Strong vibration, a card such as "AMBULANCE SIREN · GIVE WAY", a heads-up on the lock screen</td>
+</tr>
+<tr>
+<td>Siren getting louder</td>
+<td>"Ambulance approaching. Keep left and give way."</td>
+<td>Card updates to Approaching</td>
+</tr>
+<tr>
+<td>Siren far away</td>
+<td>"Emergency vehicle siren in the distance."</td>
+<td>Card, medium vibration</td>
+</tr>
+<tr>
+<td>Phone speaker, no music (you can hear outside)</td>
+<td>One short tone, no speech</td>
+<td>Card and strong vibration</td>
+</tr>
+</tbody>
+</table>
+<p>The alert comes about 3 seconds after the siren starts, so short chirps, horns and reversing beepers do not set it off. CoRoute says "close by" or "approaching", never "behind": one phone microphone cannot tell direction. Which side to keep to follows your phone's country (left in India).</p>
+<p class="shots"><img alt="Siren alert" src="../../assets/siren_alert.jpg" /></p>
+<p class="caption">Siren alert through earbuds (illustration).</p>
+<h3 id="other-ride-warnings">Other ride warnings</h3>
+<table>
+<thead>
+<tr>
+<th>Warning</th>
+<th>What you hear or see</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Over the speed limit</td>
+<td>A warning line. Far over: "Slow down. 95 km/h, limit 65." Music gets quieter, then pauses (see section 4).</td>
+</tr>
+<tr>
+<td>Road hazard ahead (pothole, speed breaker, rough road)</td>
+<td>"ROAD HAZARD AHEAD" card, "300 m ahead", and a spoken line</td>
+</tr>
+<tr>
+<td>Rider accident ahead on your road</td>
+<td>A short caution with the distance</td>
+</tr>
+<tr>
+<td>Sharp bend, school or hospital zone, high altitude, night riding</td>
+<td>Short spoken tips and cards</td>
+</tr>
+<tr>
+<td>No signal ahead</td>
+<td>A card saying your phone had no signal there on earlier rides; your group and guardians are told when you expect to be back online</td>
+</tr>
+<tr>
+<td>Low battery (under 10 %)</td>
+<td>"Battery saver for SOS is on": CoRoute stops extras to keep SOS and crash detection running, and sends your last location to your group once</td>
+</tr>
+<tr>
+<td>Phone not in a mount</td>
+<td>"Phone not in a mount? Crash detection works best with the phone in a handlebar mount."</td>
+</tr>
+</tbody>
+</table>
+<h3 id="safety-health">Safety health</h3>
+<p><strong>Settings › Safety health</strong> (also a tile on the ride map) checks your phone: location, notifications, microphone, Bluetooth, battery limits, full-screen alerts and sound. Each problem has a button that opens the right system page: <strong>Allow</strong>, <strong>Battery settings</strong>, <strong>Sound settings</strong>, <strong>Show steps</strong> or <strong>Open settings</strong>.</p>
+<hr />
+<h2 id="3-group-riding">3. Group riding</h2>
+<h3 id="before-the-ride">Before the ride</h3>
+<ul>
+<li><strong>Create:</strong> <strong>Home › Plan a route</strong> (or <strong>Start Ride</strong>). Set the start (your location by default), the <strong>Destination</strong> and up to the allowed number of stops (long-press the map to add one). Name the trip, then <strong>Confirm and Create Trip</strong>. You become the <strong>Trip owner</strong>.</li>
+<li><strong>Share:</strong> tap <strong>Share code</strong> and send it to your riders. Or invite a crew from <strong>People</strong> (see section 6).</li>
+<li><strong>Join:</strong> <strong>Home › Join Ride</strong> and enter the code, or accept a <strong>Ride invitation</strong>.</li>
+<li><strong>Your safety details:</strong> you need your phone number and an emergency contact before you ride with a group ("Add your safety details").</li>
+<li><strong>Complete your bike:</strong> make and model, type and colour are needed (engine, tank and mileage for fuel bikes). This is asked once, never in the middle of a ride and never for SOS.</li>
+<li><strong>Start:</strong> the trip owner taps <strong>Start the ride</strong>.</li>
+</ul>
+<p>If your account cannot host a group ride, CoRoute says so plainly ("Hosting a group ride needs a group plan." or "This ride is full."). There is nothing to buy in the app. Group hosting is managed in your CoRoute account on the website, and at times CoRoute may make group hosting free for everyone. Joining a ride is always free.</p>
+<h3 id="who-does-what">Who does what</h3>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Who</th>
+<th>What they can do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Trip owner</strong></td>
+<td>Created the trip</td>
+<td>Everything, including removing riders and ending the trip</td>
+</tr>
+<tr>
+<td><strong>Trip head</strong></td>
+<td>Picked by the trip owner</td>
+<td>Changes the trip's settings only</td>
+</tr>
+<tr>
+<td><strong>Lead</strong></td>
+<td>Riding role: rides first and guides the group</td>
+<td>Runs the ride on the road: stops, route, pause, regroup, roles</td>
+</tr>
+<tr>
+<td><strong>Middle</strong></td>
+<td>Riding role: rides between</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Sweeper</strong></td>
+<td>Riding role: rides last</td>
+<td>Told when someone falls behind</td>
+</tr>
+</tbody>
+</table>
+<p>The trip owner (or the Lead) sets riding roles from a rider's card, or turns on <strong>Automatic roles</strong> (the rider in front leads, the last one sweeps). CoRoute tells each rider by voice where to ride.</p>
+<h3 id="on-the-road">On the road</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What you see or hear</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A rider falls behind</td>
+<td>"Kiran fell behind · 1.2 km", and the sweeper is told</td>
+</tr>
+<tr>
+<td>The group is stretched out</td>
+<td>A spread alert to the lead</td>
+</tr>
+<tr>
+<td>Regroup</td>
+<td>A regroup point everyone can navigate to</td>
+</tr>
+<tr>
+<td>You leave the group's route</td>
+<td>"You left the group's route": <strong>Route to group</strong>, <strong>Ask group to wait</strong> or <strong>Keep my own route</strong> (buttons when stopped)</td>
+</tr>
+<tr>
+<td>Start and arrival</td>
+<td>A roll call: "Joined" / "Not yet", then "Arrived" / "On the way" and "Everyone has arrived"</td>
+</tr>
+<tr>
+<td>7 or more riders</td>
+<td>Buddy pairs: each rider looks out for one other</td>
+</tr>
+<tr>
+<td>Low fuel</td>
+<td>Fuel range warnings; a rider low on fuel can be routed to a fuel station</td>
+</tr>
+</tbody>
+</table>
+<p class="shots"><img alt="Fell behind" src="../../assets/fell_behind.jpg" /></p>
+<p class="caption">The sweeper is told when a rider falls behind (illustration).</p>
+<p><strong>Riding pillion.</strong> Join with <strong>I'm riding pillion (no bike)</strong> and pick the bike you sit on. The rider of that bike sees "Kiran is riding pillion with you" and can <strong>Decline</strong> within a minute or <strong>Remove pillion</strong> later. The group sees one bike with two people ("Asha + Kiran"). Your phone keeps its own crash detection and SOS.</p>
+<p><strong>Swaps.</strong> From a rider's card: <strong>Swap bikes</strong>, or <strong>Change places (rider and pillion)</strong>. The other rider accepts when stopped.</p>
+<p><strong>Bike markers.</strong> Each bike is drawn in its type and colour. A ring shows the state: amber when stopped or with a warning, pulsing red during an SOS.</p>
+<h3 id="ending-the-ride">Ending the ride</h3>
+<p>Only the trip owner can end the trip for everyone (<strong>End Ride</strong>). Any rider can leave. After the ride CoRoute may ask "How was the ride?" and offer to rate places you stopped at. Both are optional.</p>
+<hr />
+<h2 id="4-talk-intercom-chat-music-and-calls">4. Talk: intercom, chat, music and calls</h2>
+<h3 id="group-talk-intercom">Group talk (intercom)</h3>
+<ul>
+<li><strong>Hold to talk:</strong> hold the button and speak. Or switch to <strong>Hands-free</strong> and just speak.</li>
+<li><strong>Talk to:</strong> everyone, or one rider.</li>
+<li><strong>Mute</strong> stops you hearing the group. On the lock screen the ride notification has <strong>Talk</strong> / <strong>Talk off</strong> and <strong>Mute</strong> / <strong>Unmute</strong>, usable without unlocking.</li>
+<li>CoRoute cleans up your voice (breathing, wind and engine noise) before the group hears it. A rider who talks very loudly is levelled so they do not blast your ears.</li>
+<li>Voice is relayed live and never stored.</li>
+</ul>
+<p class="shots"><img alt="Intercom" src="../../assets/intercom.jpg" /> <img alt="Lock screen" src="../../assets/lock_screen.jpg" /></p>
+<p class="caption">Intercom (illustration) and the ride notification on the lock screen (mock-up).</p>
+<p>With a helmet headset or earbuds: push-to-talk uses the headset microphone while you hold it. Hands-free talk uses the phone's microphone, cleaned in software, so siren detection keeps working.</p>
+<p>The ride notification shows one line such as "55 km/h · limit 60 · Warning in 1.2 km · Receiving Asha". Intercom states: <strong>Talking</strong>, <strong>Receiving</strong> (name), <strong>Group voice muted</strong>, <strong>Hands-free on</strong>, <strong>Voice paused (call)</strong>.</p>
+<h3 id="ride-chat">Ride chat</h3>
+<p>Tap the <strong>Chat</strong> button on the map (group rides). A red badge shows unread messages.</p>
+<ul>
+<li><strong>Quick replies</strong>, one tap each: <strong>Fuel</strong>, <strong>Break</strong>, <strong>Wait for me</strong>, <strong>I'm OK</strong>, <strong>Slow down</strong>, <strong>Regroup here</strong>, <strong>On my way</strong>, <strong>Arrived</strong>. Change the order in <strong>Settings › More settings › Chat quick replies</strong>.</li>
+<li><strong>Typing</strong> is possible only when you are stopped (or riding pillion). While moving: "Riding: one-tap replies only. Stop to type."</li>
+<li>Incoming quick replies are spoken in one short line ("Kiran: fuel stop"). Short texts are read out; long ones show as a banner.</li>
+<li>During an SOS, chat is never spoken.</li>
+<li>Long-press a message to <strong>Hide messages from</strong> that rider (this phone only) or <strong>Report message</strong>.</li>
+<li>After the ride the chat is kept on your phone and shown in the trip report.</li>
+</ul>
+<h3 id="music-alerts-and-calls">Music, alerts and calls</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Music playing, ordinary alert (hazard, directions, group)</td>
+<td>Music gets quieter for the line, then comes back. With <strong>Pause music for alerts</strong> on, it pauses instead.</td>
+</tr>
+<tr>
+<td>Emergency or critical alert (SOS, crash countdown, "Bike down?", siren close, "Are you OK?", far over the limit)</td>
+<td>Music pauses. With a headset the line plays in your helmet or earbuds, loud enough to hear. On the speaker it plays as an alarm, heard even at media volume 0.</td>
+</tr>
+<tr>
+<td>Over the limit (<strong>Lower music when speeding</strong>, on by default)</td>
+<td>About 10 % over: music to 60 %. 25 % over: 30 %. 40 % over: music paused. It comes back when you are back under the limit. If you change the volume yourself, CoRoute stops touching it.</td>
+</tr>
+<tr>
+<td>Phone rings</td>
+<td>Ordinary lines wait. Critical lines still play.</td>
+</tr>
+<tr>
+<td>On a call</td>
+<td>Ordinary lines are held. A critical alert plays a short tone and phrase in your call audio (the caller does not hear it). After the call: "Safety alert during your call: …" then "While you were on the call: 2 road warnings, Asha fell behind."</td>
+</tr>
+<tr>
+<td>Voice alerts off</td>
+<td>Ordinary lines are silent. <strong>Emergencies are always spoken.</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-navigation-and-maps">5. Navigation and maps</h2>
+<h3 id="planning-and-search">Planning and search</h3>
+<ul>
+<li>The trip planner opens a map search for the start, destination and each stop. Results show the name, a short address and the distance. If India has nothing, tap <strong>Search everywhere</strong>.</li>
+<li><strong>Paste a map link</strong> or coordinates into the search box: Google Maps (including <code>maps.app.goo.gl</code> short links), Apple Maps, OpenStreetMap, Waze, plus codes and plain coordinates. A <strong>Pasted location</strong> row appears at the top.</li>
+<li><strong>Share to CoRoute:</strong> in Google Maps, share a place and pick <strong>Plan a ride in CoRoute</strong>.</li>
+<li>If search fails, CoRoute tells you why (offline, too many searches, search busy, signed out) and offers <strong>Retry</strong>.</li>
+</ul>
+<h3 id="navigate-in-google-maps-or-mappls">Navigate in Google Maps or Mappls</h3>
+<p>Tap <strong>Navigate</strong> on a stop, the destination or a place. CoRoute opens turn-by-turn directions in your navigation app and keeps running in the background: your group, crash detection, alerts and talk all continue. Choose the app in <strong>Settings › More settings › Navigation app</strong>: Automatic (Google Maps, else Mappls, else any map app), Google Maps, Mappls, or any map app.</p>
+<p>CoRoute also re-routes you automatically if you leave the route.</p>
+<h3 id="offline-maps-automatic">Offline maps (automatic)</h3>
+<p>There is nothing to download by hand. When a ride starts (on Wi-Fi, unless data saver is on) and while you ride, CoRoute saves the map along your route. The saved map is kept <strong>7 days after the trip</strong>, then deleted. All saved maps stay under 300 MB; the oldest go first. The ride in progress is never deleted. Past trips are shown from the internet.</p>
+<h3 id="places-on-the-map">Places on the map</h3>
+<p>Fuel stations (by fuel type), hospitals (always shown), mechanics, food, stays and <strong>Historic places</strong>. Tap a place for details, <strong>CoRoute rider reviews</strong> and <strong>Navigate</strong>. On a ride you can find <strong>Fuel stations near you</strong> and route to one.</p>
+<hr />
+<h2 id="6-community-friends-crews-reviews">6. Community: friends, crews, reviews</h2>
+<h3 id="username-and-profile">Username and profile</h3>
+<p>Your <strong>username</strong> is how other riders see you. Change it in <strong>My profile</strong> once every 30 days. You can add a profile picture. Non-friends see only your username and picture; friends also see your first name and ride totals. Your phone number, e-mail, location and medical info are never shown on your profile.</p>
+<h3 id="people-tab">People tab</h3>
+<p class="shots"><img alt="People and crews" src="../../assets/people_crews.jpg" /></p>
+<p class="caption">People: friends, crews, polls and requests (illustration).</p>
+<ul>
+<li><strong>Friends:</strong> search by username (or <strong>Enter an invite code</strong>) and <strong>Send request</strong>. Friendship needs both sides to accept. <strong>Share my invite link</strong> sends "Ride with me on CoRoute".</li>
+<li><strong>Requests:</strong> <strong>Accept</strong> or <strong>Decline</strong>.</li>
+<li>From a friend's card: <strong>View profile</strong>, <strong>Remove friend</strong> or <strong>Block</strong>. A blocked rider cannot send you requests or see your profile, and is not told.</li>
+<li><strong>People you rode with</strong> suggests riders from your recent group rides.</li>
+</ul>
+<h3 id="crews">Crews</h3>
+<p>A <strong>crew</strong> is a standing circle of riding friends. <strong>Create a crew</strong>, invite friends, and plan rides with <strong>polls</strong>. Roles: <strong>Crew admin</strong>, up to 3 <strong>Co-admins</strong>, and <strong>Members</strong>. A crew has no chat: members vote.</p>
+<ul>
+<li><strong>Polls:</strong> single or multiple choice, named or anonymous, with a closing time (there is a "Ride date" template). <strong>Save my vote</strong>, change it or <strong>Remove my vote</strong> until the poll closes.</li>
+<li><strong>Start a ride</strong> (or <strong>Invite crew to my ride</strong> while you run a live ride): pick members, they get a <strong>Ride invitation</strong> and tap <strong>Accept</strong> or <strong>Decline</strong>. No code is shared. Only the trip owner can invite.</li>
+</ul>
+<h3 id="reviews-and-ratings">Reviews and ratings</h3>
+<ul>
+<li><strong>How was the ride?</strong> After a ride: stars, quick chips and an optional note.</li>
+<li><strong>Rate places from your ride:</strong> at most 2 places where you stopped. Photos appear only after the CoRoute team approves them.</li>
+<li><strong>Rate CoRoute:</strong> in <strong>Profile › Help</strong>. CoRoute may also ask now and then, never during a ride and never after an SOS.</li>
+</ul>
+<p>See the <em>Community guidelines</em> for the rules.</p>
+<hr />
+<h2 id="7-trips-and-rider-score">7. Trips and rider score</h2>
+<h3 id="trip-reports">Trip reports</h3>
+<p>Every ride is in the <strong>Trips</strong> tab. A trip report has:</p>
+<ul>
+<li><strong>Summary:</strong> distance, riding time, stops, top speed, ride chat;</li>
+<li><strong>Map:</strong> each rider's route in their own colour;</li>
+<li><strong>Timeline:</strong> who stopped, fell behind, lost signal or arrived;</li>
+<li><strong>Replay</strong> of the ride, and a GPX file of your route;</li>
+<li>a private <strong>Safety summary</strong> (hard brakes, minutes over the limit, breaks, alerts). "From your phone only. Only you can see this."</li>
+</ul>
+<p class="shots"><img alt="Trip report" src="../../assets/trip_report.jpg" /></p>
+<p class="caption">Trip report (illustration).</p>
+<h3 id="rider-score">Rider score</h3>
+<p>Your <strong>rider score</strong> (0 to 100) shows how safely you ride. It appears after 3 rides of 10 km or more. Parts: <strong>Speed discipline</strong>, <strong>Smoothness</strong>, <strong>Safety habits</strong> and <strong>Regular riding</strong>. Levels: <strong>Learner</strong> (under 50), <strong>Steady</strong> (50 to 69), <strong>Skilled</strong> (70 to 84), <strong>Ace Rider</strong> (85 and up).</p>
+<ul>
+<li>It never rewards speed. Riding faster under the limit never adds points.</li>
+<li>SOS, crash alarms and "Bike down?" checks never lower it.</li>
+<li>Your score uses your ride safety report: five counts per ride (hard brakes, breaks, highest tiredness, break reminders, minutes over the limit). Never your route or position.</li>
+<li>Only you see your score.</li>
+</ul>
+<h3 id="leaderboards">Leaderboards</h3>
+<p><strong>Profile › Leaderboard</strong> (and the website) list top riders by <strong>Top score</strong>, <strong>Longest ride</strong>, <strong>Most km</strong>, <strong>Most hours</strong> and <strong>Most rides</strong>. Riders appear by username only, after 3 rides of 10 km or more. To leave the boards, turn off <strong>Settings › Show me on leaderboards</strong>.</p>
+<hr />
+<h2 id="8-notifications">8. Notifications</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Ride notification</strong></td>
+<td>During every ride: speed, limit, next warning, intercom state; buttons <strong>SOS</strong>, <strong>Talk</strong>, <strong>Mute</strong>, <strong>Leave</strong></td>
+</tr>
+<tr>
+<td><strong>SOS</strong> and <strong>Critical ride alerts</strong></td>
+<td>Another rider's SOS (full screen over the lock screen, or a heads-up), critical lines during calls</td>
+</tr>
+<tr>
+<td><strong>Crash countdown</strong></td>
+<td>Your own crash or "Bike down?" alarm</td>
+</tr>
+<tr>
+<td><strong>Friends</strong> and <strong>Ride invites</strong></td>
+<td>Friend requests, accepted requests, crew invites, new polls and ride invitations, when CoRoute is closed (usernames only, never your location)</td>
+</tr>
+<tr>
+<td><strong>News and updates</strong>, <strong>Events</strong>, <strong>Safety tips</strong>, <strong>Community</strong></td>
+<td>Optional messages from CoRoute. Each has its own switch.</td>
+</tr>
+<tr>
+<td><strong>Partner perks</strong></td>
+<td>Off unless you turn it on</td>
+</tr>
+</tbody>
+</table>
+<p>Turn push messages on or off in <strong>Settings › Push notifications</strong>. Safety and ride alerts always arrive. To let critical alerts sound through Do Not Disturb, allow CoRoute in your phone's Do Not Disturb settings.</p>
+<hr />
+<h2 id="9-settings">9. Settings</h2>
+<p>Open <strong>Profile ›</strong> gear. Settings are short on purpose: safety features have no switch.</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Row</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Safety</td>
+<td><strong>Safety is always on</strong></td>
+<td>The list of features that are always on</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Safety health</strong></td>
+<td>"Check your phone is ready"</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Emergency contact &amp; Medical ID</strong></td>
+<td>Your contact and medical info</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Speed warning</strong></td>
+<td>Your own limit (the group's limit, or 50 to 120 km/h). The stricter limit always applies.</td>
+</tr>
+<tr>
+<td>Ride</td>
+<td><strong>Voice alerts</strong></td>
+<td>"Emergencies are always spoken"</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Siren alerts</strong></td>
+<td>"Listens on your phone during rides. Nothing is recorded." On by default. Off releases the microphone at once.</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Language</strong></td>
+<td>System, English, Hindi or Telugu (safety screens and spoken alerts)</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Battery saver</strong></td>
+<td>"Turns on by itself when low" (at 20 %). Never reduces SOS or crash detection.</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Data saver</strong></td>
+<td>Uses less mobile data</td>
+</tr>
+<tr>
+<td>App &amp; privacy</td>
+<td><strong>Appearance</strong></td>
+<td>Light, dark or automatic</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Push notifications</strong></td>
+<td>Plus a switch for each kind of message</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Show me on leaderboards</strong></td>
+<td>Your username on public boards</td>
+</tr>
+<tr>
+<td><strong>More settings</strong></td>
+<td><strong>Pause music for alerts</strong></td>
+<td>Off: music only gets quieter</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Lower music when speeding</strong></td>
+<td>On by default</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Fuel</strong></td>
+<td>Tank range</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Navigation app</strong></td>
+<td>Which app <strong>Navigate</strong> opens</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Chat quick replies</strong></td>
+<td>The order of the quick replies</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Permissions</strong>, <strong>Features guide</strong></td>
+<td>Tools and help</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Quick settings</strong> on the ride map: three big tiles, <strong>Voice</strong>, <strong>Night map</strong> and <strong>Battery saver</strong>. "Emergencies are always spoken."</p>
+<hr />
+<h2 id="10-your-data-and-your-account">10. Your data and your account</h2>
+<ul>
+<li><strong>Location</strong> is shared only with the group you are riding with, and only during the ride. Recorded routes are deleted after 90 days.</li>
+<li><strong>Voice</strong> is never stored. <strong>Siren listening</strong> stays on your phone.</li>
+<li><strong>Crash detection</strong> runs on your phone. Motion data is not sent.</li>
+<li><strong>Medical info</strong> goes to responders only while your alert is open. Staff never see it.</li>
+<li><strong>Diagnostics:</strong> the app keeps a technical log on your phone (7 days at most) with no messages, names, phone numbers or exact places. It is sent only when you choose.</li>
+<li><strong>Privacy &amp; terms</strong> (Profile › Help) opens the privacy policy, the terms of use and <strong>Your data</strong>.</li>
+<li><strong>Delete account:</strong> Profile › Account › <strong>Delete account</strong>. "Your account, profile and ride history will be deleted. This cannot be undone." If you can no longer sign in, use the account deletion page on the CoRoute website.</li>
+</ul>
+<p>The <em>Privacy summary for riders</em> explains this in more detail.</p>
+<hr />
+<h2 id="11-getting-help">11. Getting help</h2>
+<ul>
+<li><strong>Profile › Help › Send feedback:</strong> pick <strong>Report a problem</strong>, <strong>Suggest a safety feature</strong> or <strong>Other</strong>, write your message, and turn on <strong>Attach diagnostics log</strong> if the support team should see what happened. Turn on <strong>You may reply by e-mail</strong> if you want an answer.</li>
+<li><strong>View diagnostics</strong> (inside Send feedback) shows the log on your phone, and lets you send it or share the file.</li>
+<li>See the <em>FAQ</em> and <em>Troubleshooting</em> guides for common questions and fixes.</li>
+</ul></main></body></html>

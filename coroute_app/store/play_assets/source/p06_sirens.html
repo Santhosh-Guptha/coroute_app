@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.siren{position:absolute;left:14px;right:14px;top:40px;z-index:6;background:var(--surface);border:1px solid var(--accentBorder);border-radius:16px;padding:16px;box-shadow:0 6px 20px var(--shadow)}
+.siren .ic{width:52px;height:52px;border-radius:14px;background:var(--accentSoft);color:var(--accent);display:flex;align-items:center;justify-content:center}
+.giveway{margin-top:14px;height:56px;border-radius:14px;background:var(--accentSoft);border:1px solid var(--accentBorder);display:flex;align-items:center;justify-content:center;gap:10px;font-size:22px;font-weight:700;color:var(--accentStrong)}
+.ear{margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);font-weight:500}
+.mini{position:absolute;left:0;right:0;bottom:0;height:120px;background:var(--surface);border-radius:20px 20px 0 0;box-shadow:0 -4px 16px var(--shadow);padding:10px 18px 26px;z-index:7}
+.handle{width:36px;height:4px;border-radius:2px;background:var(--borderStrong);margin:0 auto 12px}
+.amb{position:absolute;z-index:5;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);color:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px var(--shadow)}
+.pulse{position:absolute;z-index:4;transform:translate(-50%,-50%);border-radius:50%;border:2px solid rgba(217,130,43,.35)}
+.bud{width:330px;height:330px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px}
+</style></head><body>
+<div class="panel warm" id="panel">
+  <div class="head"><h1>Hear sirens<br>through earbuds</h1><div class="sub">Warns you even with noise cancelling</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div id="map" style="position:absolute;inset:0"></div>
+    <div class="siren">
+      <div class="row"><div class="ic" id="si"></div><div style="flex:1"><div style="font-size:18px;font-weight:600">Ambulance siren close by</div><div class="label">Slow down and keep left</div></div></div>
+      <div class="giveway" id="gw"></div>
+      <div class="ear" id="ear"></div>
+    </div>
+    <div class="mini"><div class="handle"></div>
+      <div class="row" style="gap:10px"><div class="btn primary" style="flex:1.25;height:56px;border-radius:14px" id="talk"></div><div class="btn sos" style="flex:.75;height:56px;border-radius:14px;font-size:18px">SOS</div></div>
+    </div>
+  </div></div></div>
+  <div class="pop" style="right:26px;top:1330px"><div style="zoom:1"><div class="bud" id="bud"></div></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'warm'); CR.chrome(document.getElementById('scr'));
+  const I = CR.icon; si.innerHTML = I('siren', 30); gw.innerHTML = 'Give way';
+  ear.innerHTML = I('earbuds', 18, 'var(--primary)') + 'Playing in your earbuds'; talk.innerHTML = I('mic', 22) + 'Hold to talk';
+  bud.innerHTML = `<svg width="190" height="120" viewBox="0 0 190 120"><g fill="none" stroke="#D9822B" stroke-width="5" stroke-linecap="round" opacity=".8"><path d="M22 34a40 40 0 0 0 0 52"/><path d="M8 22a60 60 0 0 0 0 76"/><path d="M168 34a40 40 0 0 1 0 52"/><path d="M182 22a60 60 0 0 1 0 76"/></g><g transform="translate(35 0) scale(5)" style="color:#2B7A8C">${CR.ICONS.earbuds}</g></svg>` + '<div style="font-size:22px;font-weight:500;color:#5B616B;margin-top:-4px">Spoken alert</div><div style="font-size:32px;font-weight:600;color:#1F2328;margin-top:-6px">“Give way”</div>';
+  const m = CR.makeMap(document.getElementById('map'), {
+    w: 412, h: 898, seed: 33, gridAngle: 8, gridStep: 44,
+    route: [[230, 960], [214, 800], [200, 640], [230, 500], [214, 360], [240, 220], [228, 60], [240, -40]],
+    major: [[[-20, 520], [200, 560], [430, 600]]],
+    towns: [[90, 420, 100], [340, 700, 90]], parks: [[340, 380, 50]], lake: [70, 760, 44], country: 6,
+    labels: [[90, 330, 'Yelahanka', 13, 600]],
+  });
+  const C = CR.MEMBERS.light;
+  const me = CR.onPath(m.path, CR.atY(m.path, 520)); CR.rider(m.layer, { ...me, type: 'retro', color: C[7], name: 'You', size: 84, tag: 'left' });
+  m.layer.insertAdjacentHTML('afterbegin', [150, 210, 270].map((d, i) => `<div class="pulse" style="left:${me.x}px;top:${me.y}px;width:${d}px;height:${d}px;border-color:rgba(217,130,43,${0.5 - i * 0.14})"></div>`).join(''));
+});
+</script></body></html>

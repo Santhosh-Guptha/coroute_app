@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script><script src="cockpit.js"></script>
+<style>
+#lt{z-index:1}
+#dk{z-index:2;clip-path:polygon(62% 0,100% 0,100% 100%,38% 100%)}
+.split{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:30}
+.tg{position:relative;display:flex;align-items:center;gap:12px;height:76px;padding:0 28px 0 22px;border-radius:38px;font-size:32px;font-weight:600}
+</style></head><body>
+<div class="panel warm" id="panel">
+  <div class="head"><h1>Light and dark</h1><div class="sub">Calm colours, easy on the eyes</div></div>
+  <div class="phone"><div class="glass">
+    <div class="screen" id="lt"></div>
+    <div class="screen" id="dk"></div>
+    <svg class="split" viewBox="0 0 636 1386" preserveAspectRatio="none"><line x1="394" y1="0" x2="242" y2="1386" stroke="#fff" stroke-width="3" opacity=".9"/></svg>
+  </div></div>
+  <div class="pop" style="left:40px;top:1250px"><div class="tg" style="background:#fff;color:#1F2328" id="t1"></div></div>
+  <div class="pop" style="right:40px;top:1225px"><div class="tg" style="background:#1C2026;color:#E7E3DC" id="t2"></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'warm');
+  buildCockpit(document.getElementById('lt')); buildCockpit(document.getElementById('dk'), { dark: true });
+  t1.innerHTML = CR.icon('sun', 36, '#D9822B') + 'Day'; t2.innerHTML = CR.icon('moon', 34, '#5FB3C4') + 'Night riding';
+});
+</script></body></html>

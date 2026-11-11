@@ -1,0 +1,66 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.body{position:absolute;left:0;right:0;top:86px;bottom:0;padding:0 18px}
+.tabs{display:flex;gap:22px;border-bottom:1px solid var(--border);padding:0 4px}
+.tabs div{padding:10px 0 12px;font-size:14px;font-weight:600;color:var(--muted)}
+.tabs .on{color:var(--primary);box-shadow:inset 0 -3px 0 var(--primary)}
+.mapcard{position:relative;margin-top:14px;height:300px;border-radius:14px;overflow:hidden;border:1px solid var(--border)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.grid .card{padding:12px 14px}
+.grid .metric{font-size:26px}
+.grid .metric small{font-size:15px;font-weight:600;color:var(--muted);margin-left:3px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px}
+.legend span{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500}
+.legend i{width:16px;height:4px;border-radius:2px;display:block}
+.score{width:330px;background:#fff;border-radius:18px;padding:18px;display:flex;gap:16px;align-items:center;border:1px solid #E3DED6}
+.flag{position:absolute;transform:translate(-50%,-100%)}
+.dotS{position:absolute;width:12px;height:12px;border-radius:50%;border:2.5px solid #fff;transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+</style></head><body>
+<div class="panel warm" id="panel">
+  <div class="head"><h1>Every ride,<br>remembered</h1><div class="sub">Trip reports with every rider's route</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div class="appbar"><div class="back" id="bk"></div><div style="flex:1"><div style="font-size:18px;font-weight:600;line-height:1.2">Trip report</div><div class="caption">Nandi Hills sunrise ride · Sun 12 Oct</div></div><div class="back" id="sh"></div></div>
+    <div class="body">
+      <div class="tabs"><div class="on">Summary</div><div>Map</div><div>Timeline</div><div>Replay</div></div>
+      <div class="mapcard" id="map"></div>
+      <div class="legend" id="lg"></div>
+      <div class="grid">
+        <div class="card"><div class="label">Distance</div><div class="metric">128<small>km</small></div></div>
+        <div class="card"><div class="label">Riding time</div><div class="metric">3 h 42<small>m</small></div></div>
+        <div class="card"><div class="label">Stops</div><div class="metric">3</div></div>
+        <div class="card"><div class="label">Top speed</div><div class="metric">78<small>km/h</small></div></div>
+      </div>
+    </div>
+  </div></div></div>
+  <div class="pop" style="right:30px;top:1610px"><div style="zoom:1.55"><div class="score">
+    <svg width="96" height="96" viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="none" stroke="#EFECE6" stroke-width="9"/><circle cx="48" cy="48" r="40" fill="none" stroke="#2B7A8C" stroke-width="9" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="30" transform="rotate(-90 48 48)"/>
+      <text x="48" y="56" text-anchor="middle" font-family="Manrope" font-size="26" font-weight="700" fill="#1F2328">88</text></svg>
+    <div><div class="caption">Rider score</div><div style="font-size:22px;font-weight:600;color:#1F2328;display:flex;align-items:center;gap:6px" id="ace"></div><div class="caption">Smooth braking, steady speed</div></div>
+  </div></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'warm'); CR.chrome(document.getElementById('scr'));
+  const I = CR.icon, C = CR.MEMBERS.light; bk.innerHTML = I('back', 24); sh.innerHTML = I('share', 22);
+  ace.innerHTML = I('trophy', 22, '#D9822B') + 'Ace Rider';
+  const W = 374, H = 300;
+  const trunk = [[60, 250], [110, 205], [170, 190], [230, 150], [270, 100], [320, 60]];
+  const off = (pts, dx, dy) => pts.map(([x, y]) => [x + dx, y + dy]);
+  const routes = [
+    { pts: [[20, 290], [40, 268], ...off(trunk, 0, 0)], color: C[0] },
+    { pts: [[150, 296], [120, 262], [88, 236], ...off(trunk.slice(1), 2.5, 2.5)], color: C[4] },
+    { pts: [[-10, 200], [30, 222], ...off(trunk, -2.5, 4)], color: C[3] },
+    { pts: [[220, 300], [200, 250], [176, 196], ...off(trunk.slice(3), -3, -3)], color: C[7] },
+    { pts: [[60, 300], [64, 270], ...off(trunk, 4, -2)], color: C[1] },
+  ];
+  const m = CR.makeMap(document.getElementById('map'), {
+    w: W, h: H, seed: 44, gridAngle: 20, gridStep: 40, routes,
+    major: [[[-20, 120], [180, 140], [400, 200]]], towns: [[90, 120, 70]], parks: [[320, 220, 46], [300, 40, 36]], country: 5,
+    labels: [[300, 278, 'Nandi Hills', 12, 600]],
+  });
+  const ends = routes.map(r => r.pts[0]);
+  m.layer.insertAdjacentHTML('beforeend', ends.map(([x, y], i) => `<div class="dotS" style="left:${Math.max(8, x)}px;top:${Math.min(H - 8, y)}px;background:${routes[i].color}"></div>`).join('') +
+    `<div class="flag" style="left:320px;top:62px"><svg width="34" height="40" viewBox="0 0 40 48"><path d="M20 47C20 47 4 30 4 18a16 16 0 0 1 32 0c0 12-16 29-16 29z" fill="#2B7A8C" stroke="#fff" stroke-width="2.5"/><path transform="translate(9 7) scale(.92)" d="M5 21V4M5 4h12l-2.5 4L17 12H5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`);
+  lg.innerHTML = [['Asha', 0], ['Kiran', 4], ['Arjun', 3], ['Meera', 7], ['Ravi', 1]].map(([n, i]) => `<span><i style="background:${C[i]}"></i>${n}</span>`).join('');
+});
+</script></body></html>

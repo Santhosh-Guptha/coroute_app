@@ -6,7 +6,7 @@ stayed, with configurable templates."
 Four parts, one set of admin templates:
 
 1. **Rate CoRoute**: Google Play's own in-app review card (Play In-App Review API), asked rarely and
-   at calm moments, plus a permanent "Rate CoRoute" row in Settings and Profile.
+   at calm moments, plus a permanent "Rate CoRoute" row in Profile › Help (only there since Nov 11).
 2. **Trip review**: after the ride, a calm card "How was the ride?" with 1-5 stars, quick chips and
    an optional short note (280).
 3. **Places he went and stayed**: the places the rider stopped at long enough (the existing dwell
@@ -43,8 +43,8 @@ Four parts, one set of admin templates:
 | Never after a problem: a ride with SOS / crash alarm, any SOS or crash error in the session log, a problem in the last 7 days, or an error-heavy session (5+ error log entries) | app |
 | Never in the first 2 days after install; "Don't ask again" from 3.54 still respected | app |
 
-The ask is counted before the card opens. The rows in Settings ("Rate CoRoute", "Send feedback")
-and Profile > Help are always there and do not count: they open Google's card and fall back to the
+The ask is counted before the card opens. The rows in Profile › Help ("Rate CoRoute", "Send feedback"; removed from Settings on Nov 11)
+are always there and do not count: they open Google's card and fall back to the
 Play listing (`market://details?id=...`, then `https://play.google.com/...`) when the card could not
 run or closed within 0.7 s (quota: Google showed nothing).
 
@@ -127,7 +127,7 @@ charts, place table). One Save bar with the live version; Versions table with Re
 ## Device checks
 
 1. Install from an internal-testing track (the Play card only shows for Play-installed builds; use
-   internal app sharing / FakeReviewManager for repeat tests). Settings > Rate CoRoute: Google's card
+   internal app sharing / FakeReviewManager for repeat tests). Profile › Help › Rate CoRoute: Google's card
    (or the Play listing when the quota hides it).
 2. Finish 3 clean rides: after the third ride's wrap-up is closed (or at the next app open) Google's
    card may show; a 4th ride within 30 days shows nothing.
@@ -137,5 +137,5 @@ charts, place table). One Save bar with the live version; Versions table with Re
    is set.
 5. Skip the wrap-up, open the trip report: "How was the ride?" card with Rate / Not now; gone after
    7 days or "Not now".
-6. Profile > Help > Send feedback: message appears in web admin Engagement > Feedback inbox.
+6. Profile › Help › Send feedback (pick Report a problem / Suggest a safety feature / Other; optionally attach the diagnostics log): message appears in web admin Engagement > Feedback inbox with topic bug / idea / other; an attached log appears under Diagnostics.
 7. Web admin: save a text with "Rate us to get a free month": refused with the field highlighted.

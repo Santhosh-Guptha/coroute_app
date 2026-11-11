@@ -62,6 +62,14 @@ list price struck through, the offer price, the label and "until <date>"; the or
 `offerPriceInr`, `offerLabel`; the receipt shows the offer line and label, the account list "₹49 (Launch offer)".
 Without a catalog the pages show no prices (only "Plans could not load…" / a pointer to the plans page).
 
+## Access mode (3.56)
+
+* In "free for everyone" mode ([access_modes.md](access_modes.md)), `/plans` shows "CoRoute is free
+  right now" and hides the checkout, and `POST /api/membership/order` answers `409 FREE_MODE`.
+* `/account` is unchanged. It also has the "Send me offer e-mails" consent switch (off by default; see
+  [notifications_admin.md](notifications_admin.md)).
+* In "free up to limits" mode, `/plans` shows the free limits above the plans.
+
 ## Endpoints
 
 | Endpoint | Auth | Notes |

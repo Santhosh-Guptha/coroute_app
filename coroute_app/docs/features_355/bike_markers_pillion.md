@@ -93,6 +93,44 @@ optional heading bucket (`headingBucket`, 10°) for platforms that bake bitmaps 
 Never enforced for SOS, never mid-ride, never locks the app: closing the sheet only cancels that
 create / join. The gateway never refuses an older app: the rider record gets `bikeComplete: false`.
 
+### Asked once, kept in the garage (3.56, owner bug Nov 11)
+
+Owner: "When creating a ride it asks for the bike details every time. Make it one time and sync it
+with the garage."
+
+Root causes:
+1. **Start-up sync wiped the server copy.** `GarageBinding` sent the bike summary whenever the
+   profile arrived (`/me`), also before the garage had loaded, and for an empty garage (a new
+   install). That summary was all empty, so `PATCH /me` cleared the rider's bike on the server.
+2. **The server copy was incomplete and never read back.** The profile kept model, cc, colour, tank,
+   mileage and cooling, but not the confirmed bike type or the fuel type, and refused electric
+   mileage below 5 km/kWh. Nothing restored the garage from it, so every new install, reinstall,
+   cleared app data or second phone started with an empty garage and the sheet came back.
+3. **A complete bike added in the garage did not become the ride bike** while the active one was
+   incomplete, so create / join kept asking about the old bike.
+4. The one-time home prompt also ran for pillion accounts.
+
+Now (`lib/domain/garage/bike_sync.dart`, pure, `test/bike_details_once_356_test.dart`):
+- One source of truth: the garage's active bike. `BikeGate.ensureReady` awaits the garage load,
+  lets the profile fill what this phone is missing (`GarageBinding.restoreFromServer`), then decides
+  (`BikeGatePlan.decide`). The sheet saves into the garage (edits the active bike, or creates it and
+  makes it active), and the create / join goes on at once. Once complete it never asks again unless
+  the rider changes the bike to an incomplete one.
+- Home prompt (`BikeGatePlan.shouldPromptOnce`): once (shown or dismissed), never for a pillion
+  account, a complete bike or an empty garage.
+- `GarageService.isLoaded`; nothing syncs before the load. `BikeSync.mayShare`: no summary for an
+  empty garage. `BikeSync.changes`: only changed keys, and only keys the gateway returned (an older
+  gateway never sees the new ones).
+- Profile round-trip: `bikeType` ('' = not confirmed; one of the type ids) and `bikeFuel`
+  (`petrol | diesel | cng | ev`) added to the bike summary (`/me`, `PATCH /me`); mileage accepted
+  from 2 (electric km/kWh). `BikeSync.merge` restores: an empty garage gets the server bike (details
+  the server lacks stay missing, never made up); a local bike of the same model only gets the
+  details it is missing; a value the rider gave on the phone is never replaced; a different bike on
+  the phone is left alone (it is sent up instead). Gateway test: `bike_details_once_356.test.js`.
+- `GarageService.saveBike`: a complete bike becomes active when the active one is incomplete.
+- Garage edits still reach the ride live (`GarageBinding` → `ConvoyService.setActiveBikeDetails` /
+  `RIDER_VEHICLE`). Pillion path unchanged.
+
 ## Protocol (gateway)
 
 Rider record (`publicRider`, room snapshot, replicated like the rest):

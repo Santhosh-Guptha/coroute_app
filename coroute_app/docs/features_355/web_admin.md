@@ -78,6 +78,21 @@ either console render the same (same JSON schema v1, relative geometry, units at
    admin console; `BOOTSTRAP_ADMIN_EMAILS` accounts become master admins on login).
 3. Theme: Auto / Light / Dark at the bottom of the sidebar (remembered on that browser).
 
+## 3.56 additions
+
+* **Plans & pricing > Access mode** (`public/admin/access.js`):
+  * Paid, Free for everyone (riders per ride), or Free up to limits (riders per free group ride, free
+    group rides per month, the group features included for free).
+  * An optional scheduled change in India time, a reason, and the version history.
+  * Saved with `PUT /api/admin/access-mode`, audited as `access_mode.update`. See
+    [access_modes.md](access_modes.md).
+* **Notifications**:
+  * the composer has a **Channel** (Push / E-mail (Offers)) and a push **Kind** (Update, Event, Safety
+    tip, Community, Partner perk, with partner name and the "curated" confirmation);
+  * new tab **Offers e-mail** (`public/admin/offers.js`) with the composer, campaigns and the
+    suppression list.
+  * See [notifications_admin.md](notifications_admin.md).
+
 ## New endpoints
 
 - 3.56: `GET/PUT /api/admin/pricing-rules` (minimum price), `GET /api/admin/membership/catalog` now also returns `effective` (price now per plan) and `rules`; `PUT /api/admin/membership/catalog` accepts `listPriceInr` and `offer` (audited as `pricing.plan_price`). Board endpoints: see [marketing_board.md](marketing_board.md).

@@ -1,0 +1,183 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>CoRoute FAQ</title>
+<style>
+@font-face { font-family: Manrope; font-weight: 400; src: url('../fonts/manrope-latin-400-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 500; src: url('../fonts/manrope-latin-500-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 600; src: url('../fonts/manrope-latin-600-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 700; src: url('../fonts/manrope-latin-700-normal.woff2'); }
+@page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+@page :first { margin-top: 12mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; font-family: Manrope, 'Noto Sans', system-ui, sans-serif; color: #1C2B33; font-size: 10pt; line-height: 1.55; }
+a { color: #1E5A68; text-decoration: none; }
+h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 3mm; font-weight: 700; letter-spacing: -.01em; color: #1C2B33; }
+h2 { font-size: 14.5pt; margin: 8mm 0 2.5mm; font-weight: 700; color: #1E5A68; padding-bottom: 1.5mm; border-bottom: 1.5px solid #DCE6EA; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 5mm 0 1.5mm; font-weight: 700; color: #1C2B33; break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1mm; font-weight: 700; break-after: avoid; }
+p { margin: 0 0 2.6mm; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin: 0 0 1.1mm; }
+li > p { margin: 0 0 1mm; }
+strong { font-weight: 700; }
+code { font-family: 'DejaVu Sans Mono', monospace; font-size: 8.6pt; background: #F1F5F7; padding: .2mm 1.2mm; border-radius: 1mm; }
+pre { background: #F1F5F7; padding: 3mm; border-radius: 2mm; font-size: 8.5pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { background: none; padding: 0; }
+hr { border: 0; border-top: 1px solid #DCE6EA; margin: 5mm 0; }
+table { width: 100%; border-collapse: collapse; font-size: 8.9pt; margin: 2mm 0 4mm; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { text-align: left; font-size: 7.6pt; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: #2B7A8C; padding: 1.8mm 2.2mm; font-weight: 700; }
+th:first-child { border-top-left-radius: 1.5mm; } th:last-child { border-top-right-radius: 1.5mm; }
+td { border-bottom: 1px solid #DCE6EA; padding: 1.8mm 2.2mm; vertical-align: top; }
+tbody tr:nth-child(even) td { background: #F7FAFB; }
+blockquote { margin: 3mm 0 4mm; padding: 3mm 4.5mm; background: #E6F2F4; border-left: 1.6mm solid #2B7A8C; border-radius: 0 2mm 2mm 0; break-inside: avoid; }
+blockquote p:last-child { margin-bottom: 0; }
+blockquote.important, blockquote.warning { background: #FBF0E4; border-left-color: #D9822B; }
+blockquote .alert-label { display: block; font-size: 7.6pt; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: #1E5A68; margin-bottom: 1mm; }
+blockquote.important .alert-label, blockquote.warning .alert-label { color: #9A5513; }
+p.shots { display: flex; gap: 8mm; justify-content: center; margin: 4mm 0 1mm; break-inside: avoid; break-after: avoid; }
+p.shots img { height: 66mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 1.5mm 4mm rgba(28,43,51,.14); }
+p.caption { text-align: center; font-size: 8.2pt; color: #5A6B75; margin: 1mm 0 4mm; break-before: avoid; }
+.box-check { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #2B7A8C; border-radius: .8mm; margin-right: 1.8mm; vertical-align: -0.4mm; }
+li.task { list-style: none; margin-left: -5mm; }
+.doc-head { display: flex; align-items: center; gap: 4mm; background: #2B7A8C; color: #fff; border-radius: 3mm; padding: 4.5mm 6mm; margin: 0 0 6mm; }
+.doc-head img { width: 13mm; height: 13mm; border-radius: 3mm; background: #fff; }
+.doc-head .t { font-size: 18pt; font-weight: 700; line-height: 1.15; }
+.doc-head .s { font-size: 9.5pt; opacity: .92; }
+.doc-head .v { margin-left: auto; font-size: 8pt; font-weight: 600; background: rgba(255,255,255,.16); padding: 1mm 3mm; border-radius: 10mm; white-space: nowrap; }
+.has-head h1:first-of-type { display: none; }
+.cover { height: 258mm; display: flex; flex-direction: column; break-after: page; }
+.cover .band { background: #2B7A8C; color: #fff; border-radius: 4mm; padding: 16mm 14mm 12mm; position: relative; overflow: hidden; }
+.cover .band:after { content: ''; position: absolute; right: -30mm; top: -30mm; width: 110mm; height: 110mm; border-radius: 50%; background: rgba(255,255,255,.07); }
+.cover .band img.icon { width: 20mm; height: 20mm; border-radius: 5mm; background: #fff; margin-bottom: 8mm; }
+.cover .band .t { font-size: 32pt; font-weight: 700; line-height: 1.1; margin-bottom: 4mm; }
+.cover .band .s { font-size: 13pt; font-weight: 500; opacity: .95; max-width: 140mm; }
+.cover .band .v { display: inline-block; margin-top: 8mm; font-size: 9pt; font-weight: 700; border: 1px solid rgba(255,255,255,.5); border-radius: 10mm; padding: 1.2mm 4mm; }
+.cover .shots { display: flex; gap: 7mm; justify-content: center; margin: 12mm 0 8mm; }
+.cover .shots img { height: 92mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 2mm 5mm rgba(28,43,51,.16); }
+.cover .sos { margin-top: auto; background: #FBF0E4; border-left: 1.6mm solid #D9822B; border-radius: 0 3mm 3mm 0; padding: 4mm 6mm; font-size: 10.5pt; }
+.cover .sos b { color: #9A5513; }
+.breaks h2 { break-before: page; margin-top: 0; }
+.breaks h2#1-getting-around-the-app { break-before: avoid; }
+.compact { font-size: 9.1pt; line-height: 1.45; }
+.compact h2 { font-size: 12pt; margin: 4.5mm 0 1.8mm; padding-bottom: 1mm; }
+.compact h3 { margin: 2.5mm 0 1mm; font-size: 10pt; }
+.compact p { margin: 0 0 1.8mm; }
+.compact li { margin: 0 0 .6mm; }
+.compact table { font-size: 8.2pt; margin: 1.5mm 0 2.5mm; }
+.compact td, .compact th { padding: 1.2mm 2mm; }
+.compact blockquote { padding: 2.2mm 4mm; margin: 2mm 0 3mm; }
+.compact .doc-head { margin-bottom: 4mm; padding: 3.5mm 5mm; }
+</style></head><body class="has-head"><div class="doc-head"><img src="../../assets/icon.png"><div><div class="t">CoRoute FAQ</div><div class="s">Answers to the questions riders ask most.</div></div><div class="v">App 3.55 · November 2026</div></div><main><h1 id="coroute-faq">CoRoute FAQ</h1>
+<h2 id="account">Account</h2>
+<p><strong>1. How do I sign in?</strong>
+With your Google account, or with an e-mail and password. You must be 18 or older.</p>
+<p><strong>2. What is my username and can I change it?</strong>
+CoRoute gives every rider a unique username, for example <code>SwiftFalcon482</code>. It never uses your real name. You can pick your own in <strong>Profile › My profile</strong> once every 30 days. Changing only capital letters is always allowed. Names that look like a phone number or e-mail, offensive words and words like "admin" or "coroute" are not allowed.</p>
+<p><strong>3. Who can see my name, phone number and e-mail?</strong>
+Riders in your current group ride see your name and phone number during the ride, so they can reach you. Friends see your first name and ride totals. Everyone else sees only your username and picture. Your e-mail is never shown to other riders.</p>
+<p><strong>4. How do I change my password or details?</strong>
+<strong>Profile ›</strong> tap the top box (<strong>My profile</strong>) › <strong>Edit details</strong> or <strong>Change password</strong>.</p>
+<p><strong>5. Where is Settings?</strong>
+Tap the <strong>gear</strong> icon in the top box of the <strong>Profile</strong> tab.</p>
+<p><strong>6. Why does the app need my phone number and an emergency contact?</strong>
+So your group can call you and CoRoute knows who to alert if you crash. They are needed before you ride with a group.</p>
+<h2 id="permissions-and-battery">Permissions and battery</h2>
+<p><strong>7. Why does CoRoute need location "Allow all the time"?</strong>
+So your group still sees you, and crash detection and SOS still work, when the screen is off or the phone is in your pocket. Location is used only during a ride.</p>
+<p><strong>8. Why does it need the microphone?</strong>
+For group talk and <strong>Siren alerts</strong>. The microphone is used only during a ride. Voice is relayed live and never stored. Siren listening happens on your phone and nothing is recorded.</p>
+<p><strong>9. Why does it ask to ignore battery optimisation?</strong>
+Many phones close apps in the background to save battery. On a long ride that would stop crash detection and your group would lose you. See <em>Troubleshooting</em> for your phone brand.</p>
+<p><strong>10. How much battery does a ride use?</strong>
+It depends on your phone, the screen and how much you talk. The screen stays on while riding, so a bike charger helps on long rides. GPS slows down when you stop, and <strong>Battery saver</strong> turns on by itself at 20 %. Below 10 %, CoRoute keeps only what SOS and crash detection need.</p>
+<p><strong>11. Does Battery saver turn off safety features?</strong>
+No. SOS and crash detection are never reduced.</p>
+<h2 id="data-use">Data use</h2>
+<p><strong>12. How much mobile data does CoRoute use?</strong>
+Live positions are small. Group talk and map downloads use the most. Turn on <strong>Settings › Data saver</strong> to use less: map saving and weather are skipped and talk uses less data.</p>
+<p><strong>13. Does it work without internet?</strong>
+Partly. Crash detection and SOS by text work on your phone without data (<strong>Ride solo without internet</strong> on Home). The map along your route is saved when the ride starts. An SOS sent without signal is kept and sent as soon as the phone reconnects.</p>
+<h2 id="offline-maps">Offline maps</h2>
+<p><strong>14. How do I download offline maps?</strong>
+You do not need to. When a ride starts (on Wi-Fi, unless data saver is on) CoRoute saves the map along your route automatically.</p>
+<p><strong>15. How long are saved maps kept?</strong>
+7 days after the trip, then they are deleted. All saved maps stay under 300 MB; the oldest go first. A map of a trip that never ended is kept 30 days. The ride in progress is never deleted.</p>
+<p><strong>16. Why does a past trip's map need internet?</strong>
+Past trips are shown from the internet so your phone does not fill up. Saved tiles are used only when you are offline.</p>
+<h2 id="safety">Safety</h2>
+<p><strong>17. How do I send an SOS?</strong>
+Press and hold the red <strong>SOS</strong> button for <strong>3 seconds</strong> until the ring is full. It is on the ride map and on the ride notification on your lock screen.</p>
+<p><strong>18. I pressed SOS by mistake. What now?</strong>
+If you let go before the ring was full, nothing was sent. If it was sent, close it with <strong>False alarm</strong> on the SOS screen, and tell your group if you can.</p>
+<p><strong>19. What happens when CoRoute thinks I crashed?</strong>
+You get "Possible accident detected. Are you okay?" with a 30-second countdown. Tap <strong>I'm OK</strong> and nothing is sent. If you do not answer, your group and emergency contact are alerted. If you simply ride on, the alarm cancels itself.</p>
+<p><strong>20. Can I turn crash detection off?</strong>
+No. Safety features are always on for every rider. If you get false alarms, see <em>Troubleshooting</em>: phone placement makes the biggest difference, and each "I'm OK" teaches CoRoute about your bike.</p>
+<p><strong>21. Does CoRoute call 112 for me?</strong>
+No. Call 112 yourself if you can. CoRoute alerts your group, your emergency contact and nearby riders, who can call for you. The SOS screen has quick dialling for emergency numbers.</p>
+<p><strong>22. Who sees my medical info?</strong>
+Only while your SOS or crash alert is open: your ride group, your guardians and a rider who accepted to help. It is also on your lock screen during the emergency. CoRoute staff never see it.</p>
+<p><strong>23. Why are "Help nearby riders" and "Ask nearby riders to help me" always on?</strong>
+They can bring help sooner. Before anyone accepts, riders of other groups see only the emergency point and distance. After one accepts, they see your first name, bike and, while the alert is open, your medical info and emergency contact. Never your phone number.</p>
+<p><strong>24. Will my emergency contact get a text?</strong>
+Yes. When there is no internet, your phone prepares the text in your messages app (tap <strong>Send</strong>). CoRoute's server can also text your contact once your SOS reaches it, where text alerts are available. Your carrier may charge for texts you send.</p>
+<h2 id="group-rides">Group rides</h2>
+<p><strong>25. How do I start a group ride?</strong>
+<strong>Home › Plan a route</strong>, set the destination, <strong>Confirm and Create Trip</strong>, share the code, then <strong>Start the ride</strong>.</p>
+<p><strong>26. How do I join a ride?</strong>
+<strong>Home › Join Ride</strong> and enter the code, or accept a <strong>Ride invitation</strong>. Joining is always free.</p>
+<p><strong>27. It says "Hosting a group ride needs a group plan." What does that mean?</strong>
+Your account cannot host a group ride right now. You can still join any group ride and ride solo, with every safety feature. Group hosting is managed in your CoRoute account on the website. At times CoRoute makes group hosting free for everyone; the app then shows no such message.</p>
+<p><strong>28. What is the difference between Trip owner, Trip head and Lead?</strong>
+The <strong>Trip owner</strong> created the trip and can end it or remove riders. The <strong>Trip head</strong> can change the trip's settings only. The <strong>Lead</strong> is a riding position: the rider at the front who guides the group, with <strong>Middle</strong> and <strong>Sweeper</strong> behind.</p>
+<p><strong>29. Why can't I end the ride?</strong>
+Only the trip owner can end the trip for everyone. Any rider can leave.</p>
+<p><strong>30. Why can't I type in the ride chat?</strong>
+Typing works only when you are stopped (or riding pillion). While moving, use the one-tap quick replies.</p>
+<h2 id="pillion">Pillion</h2>
+<p><strong>31. I ride on someone else's bike. What do I do?</strong>
+When you join, choose <strong>I'm riding pillion (no bike)</strong> and pick the bike. The rider confirms. Your group sees one bike with two people.</p>
+<p><strong>32. Does a pillion still get crash detection?</strong>
+Yes. Your phone keeps crash detection and SOS. If either of you answers "Are you OK?", it counts for both.</p>
+<h2 id="intercom-and-sirens">Intercom and sirens</h2>
+<p><strong>33. How do I talk to my group?</strong>
+Hold <strong>Hold to talk</strong> and speak, or switch to <strong>Hands-free</strong>. You can talk to everyone or to one rider. The lock-screen notification has <strong>Talk</strong> and <strong>Mute</strong> buttons.</p>
+<p><strong>34. Does it work with my helmet headset?</strong>
+Yes, with Bluetooth helmet sets and earbuds. Voice alerts and the group play in your headset. Allow <strong>Nearby devices / Bluetooth</strong> for CoRoute.</p>
+<p><strong>35. Can I listen to music while riding?</strong>
+Yes. Ordinary alerts make the music quieter for a moment. Emergencies pause it. Over the speed limit, music gets quieter, then pauses (you can turn this off in <strong>More settings › Lower music when speeding</strong>).</p>
+<p><strong>36. How do Siren alerts work, and do they record me?</strong>
+The phone's microphone listens for siren patterns during rides only. The sound is analysed on the phone in short pieces and thrown away. Nothing is recorded or sent. Turn it off in <strong>Settings › Siren alerts</strong>.</p>
+<p><strong>37. Why did it say "close by" and not "behind"?</strong>
+One phone microphone cannot tell direction. "Approaching" means getting louder.</p>
+<h2 id="notifications">Notifications</h2>
+<p><strong>38. Which notifications can I turn off?</strong>
+In <strong>Settings › Push notifications</strong>: friend and crew messages, news and updates, events, safety tips, community and partner perks (off by default). Ride and safety alerts always arrive.</p>
+<p><strong>39. Will notifications show my location?</strong>
+No. Push messages name other riders by username only, never your location.</p>
+<h2 id="community">Community</h2>
+<p><strong>40. How do I add a friend?</strong>
+<strong>People</strong> tab: search the username and tap <strong>Send request</strong>, or <strong>Share my invite link</strong>. Both of you must accept.</p>
+<p><strong>41. What is a crew?</strong>
+A standing circle of riding friends, with polls to plan rides. A crew has no chat. The crew admin can invite members to a ride with <strong>Start a ride</strong>.</p>
+<p><strong>42. How do I hide from the leaderboards?</strong>
+Turn off <strong>Settings › Show me on leaderboards</strong>. Your username leaves the boards within a few minutes.</p>
+<p><strong>43. Who sees my rider score?</strong>
+Only you. It never rewards speed, and SOS or crash alarms never lower it.</p>
+<h2 id="privacy-and-deleting-data">Privacy and deleting data</h2>
+<p><strong>44. Do you sell my data or show ads?</strong>
+No. No ads, no third-party trackers, no sale of data.</p>
+<p><strong>45. How long do you keep my routes?</strong>
+Recorded routes and exact positions are deleted after 90 days. Trip summaries stay until you delete them or your account.</p>
+<p><strong>46. How do I delete my account?</strong>
+<strong>Profile › Account › Delete account</strong>. Your account, profile and ride history are deleted. This cannot be undone. If you cannot sign in, use the account deletion page on the CoRoute website.</p>
+<p><strong>47. What is the diagnostics log? Is it sent automatically?</strong>
+A technical log kept on your phone for up to 7 days, with no messages, names, phone numbers or exact places. It is sent only when you choose: <strong>Profile › Help › Send feedback › Attach diagnostics log</strong>, or after a safety event when the app asks you.</p>
+<h2 id="website-account-and-plans">Website account and plans</h2>
+<p><strong>48. Why don't I see plans or prices in the app?</strong>
+The app has no plans or payments screens. Group hosting is managed in your CoRoute account on the website. Solo riding, joining group rides and every safety feature are free.</p>
+<p><strong>49. I set up group hosting on the website. When does the app update?</strong>
+Straight away while the app is open, or the next time you open it.</p>
+<p><strong>50. How do I ask about something I did on the website?</strong>
+Use <strong>Profile › Help › Send feedback</strong> and choose <strong>Other</strong>, or the contact address on the website.</p></main></body></html>

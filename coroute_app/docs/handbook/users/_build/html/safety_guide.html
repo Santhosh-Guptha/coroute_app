@@ -1,0 +1,381 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>CoRoute safety guide</title>
+<style>
+@font-face { font-family: Manrope; font-weight: 400; src: url('../fonts/manrope-latin-400-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 500; src: url('../fonts/manrope-latin-500-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 600; src: url('../fonts/manrope-latin-600-normal.woff2'); }
+@font-face { font-family: Manrope; font-weight: 700; src: url('../fonts/manrope-latin-700-normal.woff2'); }
+@page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+@page :first { margin-top: 12mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; font-family: Manrope, 'Noto Sans', system-ui, sans-serif; color: #1C2B33; font-size: 10pt; line-height: 1.55; }
+a { color: #1E5A68; text-decoration: none; }
+h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 3mm; font-weight: 700; letter-spacing: -.01em; color: #1C2B33; }
+h2 { font-size: 14.5pt; margin: 8mm 0 2.5mm; font-weight: 700; color: #1E5A68; padding-bottom: 1.5mm; border-bottom: 1.5px solid #DCE6EA; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 5mm 0 1.5mm; font-weight: 700; color: #1C2B33; break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1mm; font-weight: 700; break-after: avoid; }
+p { margin: 0 0 2.6mm; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin: 0 0 1.1mm; }
+li > p { margin: 0 0 1mm; }
+strong { font-weight: 700; }
+code { font-family: 'DejaVu Sans Mono', monospace; font-size: 8.6pt; background: #F1F5F7; padding: .2mm 1.2mm; border-radius: 1mm; }
+pre { background: #F1F5F7; padding: 3mm; border-radius: 2mm; font-size: 8.5pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { background: none; padding: 0; }
+hr { border: 0; border-top: 1px solid #DCE6EA; margin: 5mm 0; }
+table { width: 100%; border-collapse: collapse; font-size: 8.9pt; margin: 2mm 0 4mm; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { text-align: left; font-size: 7.6pt; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: #2B7A8C; padding: 1.8mm 2.2mm; font-weight: 700; }
+th:first-child { border-top-left-radius: 1.5mm; } th:last-child { border-top-right-radius: 1.5mm; }
+td { border-bottom: 1px solid #DCE6EA; padding: 1.8mm 2.2mm; vertical-align: top; }
+tbody tr:nth-child(even) td { background: #F7FAFB; }
+blockquote { margin: 3mm 0 4mm; padding: 3mm 4.5mm; background: #E6F2F4; border-left: 1.6mm solid #2B7A8C; border-radius: 0 2mm 2mm 0; break-inside: avoid; }
+blockquote p:last-child { margin-bottom: 0; }
+blockquote.important, blockquote.warning { background: #FBF0E4; border-left-color: #D9822B; }
+blockquote .alert-label { display: block; font-size: 7.6pt; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: #1E5A68; margin-bottom: 1mm; }
+blockquote.important .alert-label, blockquote.warning .alert-label { color: #9A5513; }
+p.shots { display: flex; gap: 8mm; justify-content: center; margin: 4mm 0 1mm; break-inside: avoid; break-after: avoid; }
+p.shots img { height: 66mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 1.5mm 4mm rgba(28,43,51,.14); }
+p.caption { text-align: center; font-size: 8.2pt; color: #5A6B75; margin: 1mm 0 4mm; break-before: avoid; }
+.box-check { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.3px solid #2B7A8C; border-radius: .8mm; margin-right: 1.8mm; vertical-align: -0.4mm; }
+li.task { list-style: none; margin-left: -5mm; }
+.doc-head { display: flex; align-items: center; gap: 4mm; background: #2B7A8C; color: #fff; border-radius: 3mm; padding: 4.5mm 6mm; margin: 0 0 6mm; }
+.doc-head img { width: 13mm; height: 13mm; border-radius: 3mm; background: #fff; }
+.doc-head .t { font-size: 18pt; font-weight: 700; line-height: 1.15; }
+.doc-head .s { font-size: 9.5pt; opacity: .92; }
+.doc-head .v { margin-left: auto; font-size: 8pt; font-weight: 600; background: rgba(255,255,255,.16); padding: 1mm 3mm; border-radius: 10mm; white-space: nowrap; }
+.has-head h1:first-of-type { display: none; }
+.cover { height: 258mm; display: flex; flex-direction: column; break-after: page; }
+.cover .band { background: #2B7A8C; color: #fff; border-radius: 4mm; padding: 16mm 14mm 12mm; position: relative; overflow: hidden; }
+.cover .band:after { content: ''; position: absolute; right: -30mm; top: -30mm; width: 110mm; height: 110mm; border-radius: 50%; background: rgba(255,255,255,.07); }
+.cover .band img.icon { width: 20mm; height: 20mm; border-radius: 5mm; background: #fff; margin-bottom: 8mm; }
+.cover .band .t { font-size: 32pt; font-weight: 700; line-height: 1.1; margin-bottom: 4mm; }
+.cover .band .s { font-size: 13pt; font-weight: 500; opacity: .95; max-width: 140mm; }
+.cover .band .v { display: inline-block; margin-top: 8mm; font-size: 9pt; font-weight: 700; border: 1px solid rgba(255,255,255,.5); border-radius: 10mm; padding: 1.2mm 4mm; }
+.cover .shots { display: flex; gap: 7mm; justify-content: center; margin: 12mm 0 8mm; }
+.cover .shots img { height: 92mm; border-radius: 4mm; border: 1px solid #DCE6EA; box-shadow: 0 2mm 5mm rgba(28,43,51,.16); }
+.cover .sos { margin-top: auto; background: #FBF0E4; border-left: 1.6mm solid #D9822B; border-radius: 0 3mm 3mm 0; padding: 4mm 6mm; font-size: 10.5pt; }
+.cover .sos b { color: #9A5513; }
+.breaks h2 { break-before: page; margin-top: 0; }
+.breaks h2#1-getting-around-the-app { break-before: avoid; }
+.compact { font-size: 9.1pt; line-height: 1.45; }
+.compact h2 { font-size: 12pt; margin: 4.5mm 0 1.8mm; padding-bottom: 1mm; }
+.compact h3 { margin: 2.5mm 0 1mm; font-size: 10pt; }
+.compact p { margin: 0 0 1.8mm; }
+.compact li { margin: 0 0 .6mm; }
+.compact table { font-size: 8.2pt; margin: 1.5mm 0 2.5mm; }
+.compact td, .compact th { padding: 1.2mm 2mm; }
+.compact blockquote { padding: 2.2mm 4mm; margin: 2mm 0 3mm; }
+.compact .doc-head { margin-bottom: 4mm; padding: 3.5mm 5mm; }
+</style></head><body class="has-head"><section class="cover"><div class="band"><img class="icon" src="../../assets/icon.png">
+<div class="t">CoRoute safety guide</div><div class="s">How CoRoute looks after you, what to do in an emergency, and what it cannot do.</div><div class="v">App 3.55 · November 2026</div></div>
+<div class="shots"><img src="../../assets/sos_hold.jpg"><img src="../../assets/crash_countdown.jpg"><img src="../../assets/siren_alert.jpg"></div>
+<div class="sos"><b>In an emergency, call 112 first.</b> Then hold SOS for 3 seconds so your group and emergency contact know where you are.</div></section><main><h1 id="coroute-safety-guide">CoRoute safety guide</h1>
+<p>Every feature in this guide is free and on for every rider. None of them has an off switch, except <strong>Siren alerts</strong>, which you can turn off in Settings.</p>
+<blockquote class="important">
+<p><span class="alert-label">Important</span><strong>In an emergency, call 112 first.</strong> CoRoute alerts your group, your emergency contact and nearby riders, but it does not call emergency services for you. If you cannot call, send an SOS: the people it alerts can call for you.</p>
+</blockquote>
+<h2 id="1-in-an-emergency-what-to-do">1. In an emergency: what to do</h2>
+<p><strong>If you are hurt or in danger</strong></p>
+<ol>
+<li><strong>Call 112</strong> (national emergency). 108 is the ambulance and 100 the police. The SOS screen also offers the highway helpline <strong>1073</strong>.</li>
+<li><strong>Hold SOS for 3 seconds</strong> so your group and emergency contact know where you are.</li>
+<li>If you can, <strong>Share live link</strong> from the SOS screen with family: it shows your first name and position for 30 minutes.</li>
+<li>Stay where you are if it is safe. Keep the phone on you: your location updates every 10 seconds.</li>
+<li>When help has reached you, tap <strong>Help reached me</strong>. Your emergency contact gets a "safe now" text where text alerts are available.</li>
+</ol>
+<p><strong>If another rider is down</strong></p>
+<ol>
+<li>Make the scene safe: warn traffic, switch on hazard lights, do not move the rider unless there is danger.</li>
+<li><strong>Call 112.</strong> Read out the place shown on the SOS card.</li>
+<li>In CoRoute, tap <strong>I'm going</strong> or <strong>I'm with them</strong> so your group knows who is helping.</li>
+<li>Open the rider's alert to see their <strong>medical info</strong> (blood group, allergies, notes) and their <strong>emergency contact</strong>. They are shown to responders only while the alert is open.</li>
+<li>The rider's lock screen also shows their <strong>Medical ID</strong>, so anyone can read it without unlocking the phone.</li>
+</ol>
+<p><strong>If you are asked to help a rider of another group</strong></p>
+<p>You may see a request with the emergency point and the distance. Tap <strong>I Can Help</strong> only if you can get there safely, or <strong>Can't Assist</strong>. After you accept you see the rider's first name, bike type and colour, and their medical info and emergency contact while the alert is open.</p>
+<h2 id="2-sos">2. SOS</h2>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>You press and hold <strong>SOS</strong></td>
+<td>A ring fills for <strong>3 seconds</strong>. Let go early and nothing is sent. This stops rain, gloves or a tank bag from sending an SOS by mistake.</td>
+</tr>
+<tr>
+<td>The ring is full</td>
+<td>Your group gets your SOS with your location, by voice and on screen. Your emergency contact gets a text with a live link and your coordinates, and you can call them in one tap.</td>
+</tr>
+<tr>
+<td>Your group</td>
+<td>The SOS stays on every screen until it is closed, with distance, direction and <strong>Navigate</strong>. Riders answer <strong>I'm going</strong> or <strong>I'm with them</strong>. The nearest hospital is shown.</td>
+</tr>
+<tr>
+<td>Nearby riders</td>
+<td>Up to 3 riders of other groups riding toward you on the same road may be asked to help (see section 8).</td>
+</tr>
+<tr>
+<td>You are safe</td>
+<td>Tap <strong>Help reached me</strong>, or <strong>False alarm</strong> if it was a mistake.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Where to find SOS:</strong> the red button on the ride map, the ride notification on your lock screen, and the <strong>Send SOS</strong> button on an "Are you OK?" card (held for 1.5 seconds there).</p>
+<h3 id="when-there-is-no-internet">When there is no internet</h3>
+<ul>
+<li>Your SOS is saved on the phone and sent the moment the phone reconnects. It is never sent twice. The app says: "SOS queued. It goes out the moment the phone reconnects. Call 112 if you can."</li>
+<li><strong>Emergency texts (SMS fallback):</strong> CoRoute prepares a text to your emergency contact, your lead and sweeper, and the nearest riders, with your name, the time, a live link and your coordinates. On phones from Google Play, the text opens in your messages app with everything filled in: tap <strong>Send</strong> (or tap <strong>Text the group now</strong> on the SOS screen). The status shows, for example, "Texted 2 of 3". Your carrier may charge for these texts.</li>
+<li>If your phone could not text your emergency contact, CoRoute's server can text them once your SOS reaches it, where text alerts are available. When the SOS is closed, they get a "safe now" text.</li>
+<li><strong>Ride solo without internet</strong> (Home): crash detection and SOS by text work on your phone alone, with no group and no data.</li>
+</ul>
+<h2 id="3-crash-detection">3. Crash detection</h2>
+<p>During a ride (from about 12 km/h) your phone's motion sensor watches for a crash: a hard impact followed by signs that the bike or rider went down, or an abrupt stop. Everything is worked out on your phone. Motion data is never sent.</p>
+<table>
+<thead>
+<tr>
+<th>Moment</th>
+<th>What you see</th>
+<th>What you hear</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Possible crash</td>
+<td>Full screen, also over the lock screen: "Possible accident detected. Are you okay?" with a <strong>30-second</strong> countdown: "Sending SOS to your group in 30 seconds."</td>
+<td>Alarm sound; music pauses</td>
+<td>Fine? Tap <strong>I'm OK</strong>. Nothing is sent. Need help? Tap <strong>Need Help</strong> to send at once.</td>
+</tr>
+<tr>
+<td>No answer</td>
+<td>"Crash SOS sent"</td>
+<td></td>
+<td>Your group and emergency contact are alerted, marked "Automatic alert".</td>
+</tr>
+<tr>
+<td>You ride on</td>
+<td>"Crash alarm cancelled. You are riding."</td>
+<td>Spoken</td>
+<td>Nothing to do.</td>
+</tr>
+<tr>
+<td>Your next stop</td>
+<td>"Still okay? Anything hurt?"</td>
+<td></td>
+<td><strong>Yes, fine</strong> or <strong>Need help</strong>.</td>
+</tr>
+</tbody>
+</table>
+<p>Why 30 seconds: it gives a rider with the phone in a pocket or tank bag time to hear and answer.</p>
+<p><strong>It learns.</strong> Each <strong>I'm OK</strong> makes the matching kind of alarm a little less sensitive for that bike, so a bump that fooled it once is less likely to fool it again. A severe impact or a tumble always raises the alarm, however much it has learned.</p>
+<p class="shots"><img alt="Crash countdown" src="../../assets/crash_countdown.jpg" /></p>
+<p class="caption">The crash countdown (illustration).</p>
+<h2 id="4-bike-down">4. "Bike down?"</h2>
+<p>If the bike falls over while you are stopped or walking (for example on a slope or soft ground) and nothing moves for about a minute, CoRoute opens the same 30-second countdown, titled <strong>Bike down?</strong>. Picking up the phone, walking away or lifting the bike cancels it.</p>
+<h2 id="5-are-you-ok-checks">5. "Are you OK?" checks</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>When it asks</th>
+<th>Your answers</th>
+<th>If you do not answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>The group is moving on</strong> (missing-rider check)</td>
+<td>You have been stopped for 3 minutes, most of the group is moving, and the nearest moving rider is more than 1 km away and getting further</td>
+<td><strong>I'm OK</strong> · <strong>Need help</strong> (asks the group to wait) · <strong>Waiting for fuel</strong> · <strong>Photo stop</strong> · <strong>Taking a break</strong> · red <strong>Send SOS · hold to send</strong> (1.5 s)</td>
+<td>After 90 seconds your lead and sweeper are told: "Stopped while the group moved on and did not answer Are you OK"</td>
+</tr>
+<tr>
+<td><strong>Far from your group</strong></td>
+<td>You have been far from the group for some minutes</td>
+<td><strong>I'm OK</strong></td>
+<td>After 2 minutes your lead is told</td>
+</tr>
+<tr>
+<td><strong>Solo ride ETA check-in</strong></td>
+<td>A solo ride with a destination and an emergency contact: you have not arrived well after your expected time, and you are stopped</td>
+<td><strong>I'm fine</strong> · <strong>Add 30 min</strong></td>
+<td>After 3 minutes your emergency contact gets a text with your last known position. If you then tap I'm fine, they get a follow-up.</td>
+</tr>
+<tr>
+<td><strong>Break reminder</strong></td>
+<td>About 2 hours of riding without a break, then hourly; earlier when you seem tired (long stretch, night, many short stops, wobbly steering)</td>
+<td><strong>I'm alert</strong> · <strong>Taking a break</strong></td>
+<td>Nothing is sent</td>
+</tr>
+</tbody>
+</table>
+<p>"Need help asks the group to wait. For an emergency, hold Send SOS."</p>
+<p>A rider who is riding normally is never reported as "no reply". If you or your pillion answers, it counts for both of you.</p>
+<p class="shots"><img alt="Missing-rider check" src="../../assets/missing_rider_check.jpg" /></p>
+<p class="caption">The missing-rider check (mock-up).</p>
+<h2 id="6-siren-alerts">6. Siren alerts</h2>
+<p>With earbuds, a helmet headset or music, you may not hear an ambulance behind you. <strong>Siren alerts</strong> listen through the phone's own microphone during rides and warn you. Nothing is recorded or sent. The switch is in <strong>Settings › Siren alerts</strong> (on by default).</p>
+<table>
+<thead>
+<tr>
+<th>You</th>
+<th>What you hear</th>
+<th>What you see and feel</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Earbuds, helmet set or music; siren close</td>
+<td>Music pauses. In your ears: "Ambulance siren close by. Keep left and give way." (Police, Fire engine, or "Emergency vehicle" when the kind is not clear)</td>
+<td>Strong vibration; card "AMBULANCE SIREN · GIVE WAY"; heads-up on the lock screen</td>
+</tr>
+<tr>
+<td>Siren getting louder</td>
+<td>"Ambulance approaching. Keep left and give way."</td>
+<td>Card shows Approaching</td>
+</tr>
+<tr>
+<td>Siren far away</td>
+<td>"Emergency vehicle siren in the distance."</td>
+<td>Card, medium vibration</td>
+</tr>
+<tr>
+<td>Phone speaker, no music</td>
+<td>One short tone (you can hear the siren yourself)</td>
+<td>Card and strong vibration</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The alert comes about <strong>3 seconds</strong> after a siren starts. Short chirps, horns, musical truck horns, reversing beepers, ringtones and temple music do not set it off.</li>
+<li>One microphone cannot tell direction, so CoRoute says "close by" or "approaching", never "behind". A siren coming toward you also counts as approaching.</li>
+<li>The side to keep to follows your phone's country (left in India).</li>
+<li>The kind (ambulance, police, fire engine) is a best guess and is said only when the sound pattern makes it likely.</li>
+</ul>
+<h2 id="7-ride-guardian-family-can-follow-your-ride">7. Ride Guardian: family can follow your ride</h2>
+<p>Create a <strong>Guardian link</strong> from the ride's settings card (<strong>Ride Guardian</strong>). Family open it in a browser; they do not need an account.</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>What they see</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Basic</strong></td>
+<td>Status without exact location</td>
+</tr>
+<tr>
+<td><strong>Live</strong></td>
+<td>Your last reported location during the ride</td>
+</tr>
+<tr>
+<td><strong>Emergency only</strong></td>
+<td>Your location only when help is requested</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Optional PIN (4 to 8 digits) and a maximum time. Share the link at once; it cannot be shown again.</li>
+<li>While your SOS or crash alert is open, guardians also see your medical info.</li>
+<li>They are told when you enter a stretch where your phone had no signal before, and when you expect to be back online.</li>
+<li>When you arrive, the page says "Arrived safely. Location sharing has stopped." and the link ends 2 hours later. Links also end at the time you picked, or 6 hours after the ride.</li>
+<li>Stop a link at any time from <strong>Your links</strong>.</li>
+</ul>
+<h2 id="8-help-from-nearby-riders">8. Help from nearby riders</h2>
+<p>When you send an SOS or crash alert, <strong>your own group is always alerted first</strong>. CoRoute may also ask a few riders of other groups who are already riding toward you on the same road and may reach you sooner: at most 3 at a time, never everyone nearby.</p>
+<table>
+<thead>
+<tr>
+<th>Before a rider accepts</th>
+<th>After a rider taps <strong>I Can Help</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Only the emergency point, the distance and roughly how long it takes</td>
+<td>Also your first name and your bike type and colour, so they can find you; while your alert is open, your medical info and emergency contact</td>
+</tr>
+</tbody>
+</table>
+<p>They never get your phone number or your ride mates' numbers. When the alert closes they lose access at once. Riders heading toward an accident on the same road get a short caution with the place only, no names. Help nearby riders and Ask nearby riders to help me are always on; CoRoute can pause them for everyone, for example during maintenance, and your own group is still told.</p>
+<h2 id="9-your-medical-id-and-emergency-contact">9. Your Medical ID and emergency contact</h2>
+<p>Set them in <strong>Profile › Emergency contact &amp; Medical ID</strong>.</p>
+<ul>
+<li><strong>Emergency contact:</strong> a name and phone number. SOS lets you call or text this person in one tap.</li>
+<li><strong>Medical info (optional):</strong> blood group, allergies, notes for a doctor. "Shown to responders in an emergency and on your lock screen."</li>
+<li>Who sees medical info: your ride group, your guardians, and a rider who accepted to help, only while your SOS or crash alert is open. CoRoute staff never see it.</li>
+</ul>
+<h2 id="10-battery-and-phone-placement">10. Battery and phone placement</h2>
+<p><strong>Battery</strong></p>
+<ul>
+<li>Start the ride charged. A USB charger on the bike is best for long rides.</li>
+<li><strong>Battery saver</strong> turns on by itself at 20 %. It never reduces SOS or crash detection.</li>
+<li>Below 10 % (and not charging), <strong>Battery saver for SOS</strong> takes over: map downloads, hands-free talk and other extras stop, and your last location is sent to your group once, so they know where you were if the phone dies.</li>
+<li>Allow CoRoute to run in the background (no battery restriction). See <em>Troubleshooting</em> for your phone brand.</li>
+</ul>
+<p><strong>Where to put the phone</strong></p>
+<table>
+<thead>
+<tr>
+<th>Place</th>
+<th>Crash detection</th>
+<th>Siren alerts</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Handlebar mount</strong></td>
+<td>Best</td>
+<td>Best</td>
+<td>Recommended. Use a firm, vibration-damped mount.</td>
+</tr>
+<tr>
+<td><strong>Tank bag</strong></td>
+<td>Good</td>
+<td>Good</td>
+<td>Keep the phone held firmly, not loose.</td>
+</tr>
+<tr>
+<td><strong>Jacket pocket</strong></td>
+<td>Works, less precise</td>
+<td>May miss sirens at speed</td>
+<td>Wind and clothing muffle the sound.</td>
+</tr>
+<tr>
+<td><strong>Backpack / loose in a bag</strong></td>
+<td>Less reliable</td>
+<td>Often misses</td>
+<td>A loose phone can look like a bump; CoRoute guards against this.</td>
+</tr>
+</tbody>
+</table>
+<p>CoRoute checks this during the first minutes of the ride and may show "Phone not in a mount? Crash detection works best with the phone in a handlebar mount."</p>
+<h2 id="11-what-coroute-cannot-do-honest-limits">11. What CoRoute cannot do (honest limits)</h2>
+<ul>
+<li><strong>It is not a certified safety device.</strong> It depends on your phone, its sensors, GPS and network, any of which can fail or be late.</li>
+<li><strong>Crash detection cannot catch every crash.</strong> A slow fall onto soft ground, a fall before you have started riding (detection starts from about 12 km/h), a bike that falls long after you parked it, or a phone that flies off the bike may not be recognised. It can also, rarely, alarm when nothing happened: that is why you have 30 seconds to answer.</li>
+<li><strong>A phone in a pocket at speed may miss sirens.</strong> Wind and clothing can bury the sound. Very fast "phaser" sirens and two sirens at once are harder to recognise. Music playing on the phone's own speaker pauses detection.</li>
+<li><strong>It needs battery and permissions.</strong> If the phone is off, the app was closed by the phone's battery manager, or location, notifications or the microphone are blocked, safety features cannot work. Run <strong>Safety health</strong> before long rides.</li>
+<li><strong>Texts need you or a bystander to press Send</strong> on phones from Google Play when the internet is down. If the phone is locked and you cannot reach it, the text may wait until someone does.</li>
+<li><strong>Help from other riders depends on who is nearby</strong> and riding the same road.</li>
+<li><strong>The full-screen alarm</strong> may show only as a notification on some Android 14+ phones until you allow full-screen alerts.</li>
+</ul>
+<h2 id="12-before-every-ride-checklist">12. Before every ride: checklist</h2>
+<ul>
+<li class="task"><span class="box-check"></span>Phone charged (or charging on the bike)</li>
+<li class="task"><span class="box-check"></span><strong>Safety health</strong> shows no problems</li>
+<li class="task"><span class="box-check"></span>Emergency contact saved (Profile row is not amber)</li>
+<li class="task"><span class="box-check"></span>Phone in a mount or held firmly in a tank bag</li>
+<li class="task"><span class="box-check"></span>Headset connected, if you use one</li>
+<li class="task"><span class="box-check"></span>For long solo rides: a destination set, so the ETA check-in can look out for you</li>
+<li class="task"><span class="box-check"></span>Family has a <strong>Guardian link</strong>, if they want to follow</li>
+</ul></main></body></html>

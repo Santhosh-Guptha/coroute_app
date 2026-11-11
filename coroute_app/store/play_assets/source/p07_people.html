@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.body{position:absolute;left:0;right:0;top:86px;bottom:0;padding:0 18px}
+.tabs{display:flex;padding:4px;border-radius:12px;background:var(--surfaceAlt)}
+.tabs div{flex:1;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:600;color:var(--muted)}
+.tabs .on{background:var(--surface);color:var(--text);box-shadow:0 1px 4px var(--shadow)}
+.badge{min-width:20px;height:20px;border-radius:10px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px}
+.crew{margin-top:16px;padding:0;overflow:hidden}
+.crew .hero{background:linear-gradient(135deg,#2B7A8C,#1F5F6E);color:#fff;padding:16px;display:flex;gap:12px;align-items:center}
+.crew .logo{width:48px;height:48px;border-radius:14px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center}
+.stack{display:flex}
+.stack .av{width:30px;height:30px;font-size:12px;border:2px solid var(--surface);margin-left:-8px}
+.stack .av:first-child{margin-left:0}
+.opt{position:relative;height:42px;border-radius:10px;background:var(--surfaceAlt);overflow:hidden;display:flex;align-items:center;padding:0 12px;margin-top:8px;font-size:14px;font-weight:500}
+.opt .bar{position:absolute;left:0;top:0;bottom:0;background:var(--primarySoft)}
+.opt span{position:relative}
+.opt .n{margin-left:auto;font-weight:600;color:var(--muted)}
+.req{width:300px;background:#fff;border-radius:16px;padding:14px;border:1px solid #E3DED6}
+</style></head><body>
+<div class="panel teal" id="panel">
+  <div class="head"><h1>Your crew,<br>your rides</h1><div class="sub">Friends, crews and ride polls</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div class="appbar"><span style="flex:1;padding-left:4px">People</span><div class="back" id="add"></div></div>
+    <div class="body">
+      <div class="tabs"><div>Friends</div><div class="on">Crews</div><div>Requests <span class="badge">2</span></div></div>
+      <div class="card crew">
+        <div class="hero"><div class="logo" id="cl"></div><div style="flex:1"><div style="font-size:18px;font-weight:600">Weekend Wanderers</div><div style="font-size:13px;opacity:.85">8 members · Bengaluru</div></div></div>
+        <div style="padding:14px 16px">
+          <div class="row"><div class="stack" id="stk"></div><div class="caption">Asha, Kiran and 6 more</div></div>
+          <div class="hair" style="margin:14px 0"></div>
+          <div class="row"><span id="ci" style="color:var(--primary)"></span><div style="flex:1"><div style="font-size:15px;font-weight:600">Next ride · Sun 5:30 am</div><div class="caption">Nandi Hills sunrise ride</div></div><span class="chip tint">Going</span></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <div class="row" style="gap:8px"><span id="pi" style="color:var(--accent)"></span><span class="label">Poll by SwiftFalcon482</span></div>
+        <div style="font-size:16px;font-weight:600;margin-top:6px">Where to this Sunday?</div>
+        <div class="opt"><div class="bar" style="width:62%"></div><span id="tick"></span><span style="margin-left:6px">Nandi Hills</span><span class="n">5</span></div>
+        <div class="opt"><div class="bar" style="width:25%"></div><span>Skandagiri</span><span class="n">2</span></div>
+        <div class="opt"><div class="bar" style="width:13%"></div><span>Avalabetta</span><span class="n">1</span></div>
+        <div class="caption" style="margin-top:10px">8 votes · closes Saturday 9 pm</div>
+      </div>
+      <div class="card" style="margin-top:12px;padding:12px 16px" id="fr"></div>
+    </div>
+  </div></div></div>
+  <div class="pop" style="left:34px;top:1690px"><div style="zoom:1.6"><div class="req">
+    <div class="row"><div class="av" style="background:#7A62B0">M</div><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#1F2328">MistyTrail915</div><div class="caption">wants to be friends</div></div></div>
+    <div class="row" style="gap:8px;margin-top:12px"><div class="btn primary" style="flex:1;height:40px;font-size:14px">Accept</div><div class="btn outline" style="flex:1;height:40px;font-size:14px">Not now</div></div>
+  </div></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'teal'); CR.chrome(document.getElementById('scr'));
+  const I = CR.icon, C = CR.MEMBERS.light;
+  add.innerHTML = I('plus', 24); cl.innerHTML = I('route', 26, '#fff'); ci.innerHTML = I('clock', 22); pi.innerHTML = I('poll', 18); tick.innerHTML = I('check', 18, 'var(--primary)');
+  stk.innerHTML = ['A', 'K', 'M', 'R', 'A'].map((l, i) => `<div class="av" style="background:${C[[0, 4, 7, 1, 3][i]]}">${l}</div>`).join('') + '<div class="av" style="background:var(--surfaceAlt);color:var(--muted)">+3</div>';
+  fr.innerHTML = [['SwiftFalcon482', 'Asha', C[0], 'Riding now'], ['CalmRider207', 'Meera', C[7], 'Last ride Sunday']].map(([u, n, c, s], i) => `${i ? '<div class="hair" style="margin:10px 0"></div>' : ''}<div class="row"><div class="av" style="background:${c}">${n[0]}</div><div style="flex:1"><div style="font-size:15px;font-weight:600">${u}</div><div class="caption">${n} · ${s}</div></div><span style="color:var(--muted)">${I('chev', 20)}</span></div>`).join('');
+});
+</script></body></html>

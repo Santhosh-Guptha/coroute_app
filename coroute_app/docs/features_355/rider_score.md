@@ -42,8 +42,10 @@ doubles it):
 - timeline `OVERSPEED` episodes of this rider: limit (group or town limit), top speed, duration;
 - timeline `SEPARATED` episodes: count and total time; group size.
 
-From the phone, only while the rider's setting **"Use my ride safety report for my rider score"**
-(score screen, default ON) is on: per ride `hardBrakes`, `breaks`, `fatiguePeak` (0–100),
+From the phone (always on since Nov 11, owner decision: the switch **"Use my ride safety report for
+my rider score"** was removed; the score screen shows the line "Your score uses your ride safety
+report"; for a rider who had it off, settings migration v2 stores `coroute_rider_score_send_from_v1`
+and rides that ended before it are never sent): per ride `hardBrakes`, `breaks`, `fatiguePeak` (0–100),
 `fatiguePrompts`, `overLimitMin`. The app sends them once per finished ride (RideStatsStore entries
 with an end time, last 30 days), at ride end (`SafetyService.onRideStatsEnded` → `RiderScoreService.syncAfterRide`, fire-and-forget) and when the score card or screen opens. Counts that arrive before the
 report is built wait up to 14 days.
@@ -95,8 +97,9 @@ the account (`Repo.deleteUserCascade`).
 
 ## Privacy
 
-- The ride safety report stays private: the phone sends only five counts per ride, only with the
-  setting on (default on, explained on the score screen); switching it off deletes the counts sent.
+- The ride safety report stays private: the phone sends only five counts per ride (always on since
+  Nov 11, explained on the score screen; never rides from before the change for a rider who had it
+  off). `DELETE /api/me/score/phone` stays on the gateway (no app caller now).
 - The score is visible only to the rider (and the master admin in user detail).
 - The leaderboard shows usernames and rounded totals only; opting out (`publicLeaderboard: false`,
   profile setting owned by the profile screen) hides the rider at the next cache refresh (≤ 5 min).

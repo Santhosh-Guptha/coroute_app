@@ -176,7 +176,7 @@ Navigation (3.55 People hub, owner feedback "too complex to search and open"):
   - Empty parts show one line and one button ("No friends yet" + "Share your invite link").
 - `PeopleScreen.open(context, segment:)` switches to the People tab when the home shell is up (else
   pushes the hub); old `FriendsScreen.open` / `CrewsScreen.open` (pushes, notices) go through it.
-- My profile no longer lists requests; the "My profile" row on the Profile tab opens it.
+- My profile no longer lists requests; the Profile tab's top box (picture, full name, @username) opens it (Nov 11; the gear in that box opens Settings). Edit details and Change password moved into My profile.
 - QR: no QR scanner or encoder package is in `pubspec.yaml`, so "Scan QR" / "My QR" are not offered;
   the invite link and code cover the same need.
 - Live: the hub watches `FriendsService`, `CrewsService` and `RideInvitesService`, which refresh on the

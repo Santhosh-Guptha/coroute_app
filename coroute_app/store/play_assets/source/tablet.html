@@ -1,0 +1,133 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+/* Tablet panels: 1920 x 1080 CSS px (rendered at 1x for 7-inch and 4/3x = 2560 x 1440 for 10-inch) */
+body{width:1920px;height:1080px}
+.tp{position:relative;width:1920px;height:1080px;overflow:hidden}
+.tp.teal{background:linear-gradient(160deg,#2E8296 0%,#2B7A8C 40%,#1F5F6E 100%)}
+.tp.warm{background:linear-gradient(180deg,#F8F6F2 0%,#F3EFE8 100%)}
+.tp .head{position:absolute;left:80px;width:600px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:28px}
+.tp h1{font-size:84px;line-height:1.06;font-weight:600;letter-spacing:-1.4px}
+.tp .sub{font-size:38px;line-height:1.3;font-weight:500}
+.tp.teal h1{color:#fff}.tp.teal .sub{color:#D7ECEF}
+.tp.warm h1{color:#1F2328}.tp.warm .sub{color:#5B616B}
+.tab{position:absolute;z-index:1;left:712px;top:166px;width:1148px;height:748px;border-radius:48px;background:#1A1D21;padding:24px;
+  box-shadow:0 2px 0 1px rgba(255,255,255,.06) inset,0 40px 80px rgba(16,40,48,.28),0 12px 24px rgba(16,40,48,.16)}
+.tp.warm .tab{box-shadow:0 2px 0 1px rgba(255,255,255,.06) inset,0 40px 80px rgba(60,48,30,.2),0 12px 24px rgba(60,48,30,.12)}
+.tab .glass{position:relative;width:1100px;height:700px;border-radius:26px;overflow:hidden;background:var(--bg)}
+.tab .cam{position:absolute;left:50%;top:9px;margin-left:-4px;width:8px;height:8px;border-radius:50%;background:#0d0f12}
+.ts{position:absolute;left:0;top:0;width:1257px;height:800px;zoom:.875;overflow:hidden;background:var(--bg);color:var(--text)}
+.ts .status{padding:6px 24px 0 24px}
+.ts .gesture{width:160px;margin-left:-80px}
+.col{position:absolute;top:30px;bottom:0;overflow:hidden}
+.side{background:var(--surface);border-right:1px solid var(--border)}
+.tabs{display:flex;padding:4px;border-radius:12px;background:var(--surfaceAlt)}
+.tabs div{flex:1;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:600;color:var(--muted)}
+.tabs .on{background:var(--surface);color:var(--text);box-shadow:0 1px 4px var(--shadow)}
+.badge{min-width:20px;height:20px;border-radius:10px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px}
+.opt{position:relative;height:44px;border-radius:10px;background:var(--surfaceAlt);overflow:hidden;display:flex;align-items:center;padding:0 12px;margin-top:8px;font-size:14px;font-weight:500}
+.opt .bar{position:absolute;left:0;top:0;bottom:0;background:var(--primarySoft)}
+.opt span{position:relative}.opt .n{margin-left:auto;font-weight:600;color:var(--muted)}
+.metric small{font-size:16px;font-weight:600;color:var(--muted);margin-left:3px}
+.dotS{position:absolute;width:14px;height:14px;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+</style></head><body>
+<div class="tp" id="tp"><div class="head"><h1 id="h"></h1><div class="sub" id="sb"></div></div>
+  <div class="tab"><div class="glass"><div class="ts" id="scr"></div></div></div>
+</div>
+<script>
+const S = new URLSearchParams(location.search).get('s') || 'map';
+const I = CR.icon, C = CR.MEMBERS.light;
+const flagPin = (x, y, sz = 40) => `<div style="position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-100%)"><svg width="${sz}" height="${sz * 1.2}" viewBox="0 0 40 48"><path d="M20 47C20 47 4 30 4 18a16 16 0 0 1 32 0c0 12-16 29-16 29z" fill="#2B7A8C" stroke="#fff" stroke-width="2.5"/><path transform="translate(9 7) scale(.92)" d="M5 21V4M5 4h12l-2.5 4L17 12H5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+const V = {
+  map: { tone: 'teal', h: 'Ride together.<br>Stay safe.', sb: 'Your whole group<br>on one live map', build(scr) {
+    const riders = [['Asha', 'Lead · 0 m', C[0], 'L'], ['Kiran', '120 m behind', C[4]], ['Arjun', '+ pillion · 260 m', C[3]], ['Meera', '380 m behind', C[7]], ['Ravi', 'Sweeper · 520 m', C[1], 'S']];
+    scr.innerHTML = `<div id="mp" style="position:absolute;left:380px;right:0;top:0;bottom:0"></div>
+    <div class="col side" style="left:0;width:380px;top:0;padding:46px 20px 20px">
+      <div class="row"><div style="width:44px;height:44px;border-radius:12px;background:var(--primarySoft);color:var(--primary);display:flex;align-items:center;justify-content:center">${I('route', 24)}</div><div><div class="title" style="font-size:18px">Nandi Hills sunrise ride</div><div class="label">5 riders · group together</div></div></div>
+      <div class="row" style="margin-top:18px;gap:10px"><div class="card" style="flex:1;padding:12px 14px"><div class="label">Speed</div><div class="metric">42<small>km/h</small></div></div><div class="card" style="flex:1;padding:12px 14px"><div class="label">Group limit</div><div class="metric">60<small>km/h</small></div></div></div>
+      <div class="card" style="margin-top:14px;padding:4px 14px">${riders.map(([n, s, c, r], i) => `${i ? '<div class="hair"></div>' : ''}<div class="row" style="padding:10px 0"><div class="av" style="background:${c}">${n[0]}</div><div style="flex:1"><div style="font-size:15px;font-weight:600">${n}${r ? ` <span style="font-size:11px;font-weight:700;color:#fff;background:${c};border-radius:9px;padding:1px 6px;margin-left:4px">${r}</span>` : ''}</div><div class="caption">${s}</div></div>${I('battery', 20, 'var(--faint)')}</div>`).join('')}</div>
+      <div class="row" style="position:absolute;left:20px;right:20px;bottom:30px;gap:10px"><div class="btn primary" style="flex:1.3;height:56px;border-radius:14px">${I('mic', 22)}Hold to talk</div><div class="btn sos" style="flex:.7;height:56px;border-radius:14px;font-size:18px">SOS</div></div>
+    </div>
+    <div class="float" style="position:absolute;right:20px;top:46px;padding:12px 16px;display:flex;gap:12px;align-items:center;z-index:5">${I('fuel', 22, 'var(--accent)')}<div><div style="font-size:15px;font-weight:600">Next stop · Fuel, Devanahalli</div><div class="caption">12 km · about 18 min</div></div></div>`;
+    CR.chrome(scr);
+    const m = CR.makeMap(scr.querySelector('#mp'), { w: 877, h: 800, seed: 8, gridAngle: 14, gridStep: 46,
+      route: [[-40, 640], [120, 600], [250, 520], [380, 520], [500, 430], [600, 330], [720, 290], [930, 200]],
+      major: [[[300, -20], [360, 300], [380, 520], [420, 820]]], towns: [[620, 600, 140], [180, 220, 120]], parks: [[760, 520, 60], [420, 150, 50]], lake: [90, 420, 50],
+      river: [[-20, 760], [300, 700], [600, 760], [900, 720]], riverW: 16, country: 8,
+      labels: [[180, 120, 'Devanahalli', 14, 600], [640, 700, 'Vijayapura', 13, 600]] });
+    [[0.82, 'adventure', 1, C[0], 'Asha', 'L', 'above'], [0.715, 'sport', 1, C[4], 'Kiran', '', 'below'], [0.585, 'cruiser', 2, C[3], 'Arjun', '', 'above'], [0.47, 'retro', 1, C[7], 'Meera', '', 'below'], [0.355, 'offroad', 1, C[1], 'Ravi', 'S', 'above']]
+      .forEach(([f, type, n, color, name, role, tag]) => CR.rider(m.layer, { ...CR.onPath(m.path, f), type, n, color, name, role, tag, size: 92 }));
+  } },
+  trip: { tone: 'warm', h: 'Every ride,<br>remembered', sb: "Trip reports with<br>every rider's route", build(scr) {
+    scr.innerHTML = `<div class="appbar" style="padding:0 24px"><div class="back">${I('back', 24)}</div><div style="flex:1"><div style="font-size:20px;font-weight:600;line-height:1.2">Trip report</div><div class="caption">Nandi Hills sunrise ride · Sun 12 Oct</div></div>${I('share', 22)}</div>
+    <div style="position:absolute;left:24px;top:96px;width:740px;bottom:28px;border-radius:14px;overflow:hidden;border:1px solid var(--border)" id="mp"></div>
+    <div style="position:absolute;left:788px;right:24px;top:96px;bottom:28px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="card"><div class="label">Distance</div><div class="metric">128<small>km</small></div></div>
+        <div class="card"><div class="label">Riding time</div><div class="metric">3 h 42<small>m</small></div></div>
+        <div class="card"><div class="label">Stops</div><div class="metric">3</div></div>
+        <div class="card"><div class="label">Top speed</div><div class="metric">78<small>km/h</small></div></div></div>
+      <div class="card" style="margin-top:12px;display:flex;gap:16px;align-items:center">
+        <svg width="92" height="92" viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="none" stroke="var(--surfaceAlt)" stroke-width="9"/><circle cx="48" cy="48" r="40" fill="none" stroke="#2B7A8C" stroke-width="9" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="30" transform="rotate(-90 48 48)"/><text x="48" y="56" text-anchor="middle" font-family="Manrope" font-size="26" font-weight="700" fill="#1F2328">88</text></svg>
+        <div><div class="caption">Rider score</div><div style="font-size:22px;font-weight:600;display:flex;gap:6px;align-items:center">${I('trophy', 22, '#D9822B')}Ace Rider</div><div class="caption">Smooth braking, steady speed</div></div></div>
+      <div class="card" style="margin-top:12px;padding:6px 16px">${[['Asha', 0, '128 km'], ['Kiran', 4, '131 km'], ['Arjun', 3, '124 km'], ['Meera', 7, '119 km'], ['Ravi', 1, '127 km']].map(([n, i, d], k) => `${k ? '<div class="hair"></div>' : ''}<div class="row" style="padding:9px 0"><i style="width:18px;height:5px;border-radius:3px;background:${C[i]};display:block"></i><span style="flex:1;font-size:15px;font-weight:500">${n}</span><span class="label">${d}</span></div>`).join('')}</div>
+    </div>`;
+    CR.chrome(scr);
+    const trunk = [[120, 560], [230, 470], [340, 440], [450, 360], [540, 250], [650, 150]];
+    const off = (p, dx, dy) => p.map(([x, y]) => [x + dx, y + dy]);
+    const routes = [
+      { pts: [[40, 660], [80, 610], ...trunk], color: C[0], width: 6 },
+      { pts: [[320, 690], [250, 600], [180, 520], ...off(trunk.slice(1), 3, 3)], color: C[4], width: 6 },
+      { pts: [[-10, 450], [60, 500], ...off(trunk, -3, 5)], color: C[3], width: 6 },
+      { pts: [[480, 700], [430, 560], [370, 450], ...off(trunk.slice(3), -4, -4)], color: C[7], width: 6 },
+      { pts: [[130, 700], [130, 620], ...off(trunk, 5, -3)], color: C[1], width: 6 },
+    ];
+    const m = CR.makeMap(scr.querySelector('#mp'), { w: 740, h: 676, seed: 47, gridAngle: 20, gridStep: 44, routes,
+      major: [[[-20, 260], [360, 300], [760, 420]]], towns: [[200, 250, 120], [560, 560, 90]], parks: [[640, 440, 60], [600, 80, 50]], lake: [80, 120, 46], country: 7,
+      labels: [[620, 210, 'Nandi Hills', 14, 600], [200, 140, 'Devanahalli', 13, 600]] });
+    m.layer.insertAdjacentHTML('beforeend', routes.map(r => `<div class="dotS" style="left:${Math.max(10, r.pts[0][0])}px;top:${Math.min(666, r.pts[0][1])}px;background:${r.color}"></div>`).join('') + flagPin(650, 152));
+  } },
+  sos: { tone: 'teal', h: 'SOS in<br>one hold', sb: 'Your group and<br>contacts are alerted', build(scr) {
+    scr.innerHTML = `<div class="appbar" style="padding:0 24px"><div class="back">${I('close', 24)}</div><span>Send SOS</span></div>
+    <div style="position:absolute;left:0;width:640px;top:90px;bottom:0;display:flex;flex-direction:column;align-items:center">
+      <div style="position:relative;width:340px;height:340px;margin-top:40px">
+        <svg viewBox="0 0 290 290" style="position:absolute;inset:0"><circle cx="145" cy="145" r="132" fill="none" stroke="#FBEBE8" stroke-width="13"/><circle cx="145" cy="145" r="132" fill="none" stroke="#D93A2F" stroke-width="13" stroke-linecap="round" stroke-dasharray="829.4" stroke-dashoffset="315" transform="rotate(-90 145 145)"/></svg>
+        <div style="position:absolute;left:50%;top:50%;width:232px;height:232px;margin:-116px 0 0 -116px;border-radius:50%;background:#D93A2F;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(217,58,47,.28)"><b style="font-size:60px;font-weight:700;line-height:1">SOS</b><span style="font-size:15px;font-weight:600;margin-top:6px">Keep holding</span></div></div>
+      <div style="margin-top:26px;font-size:24px;font-weight:600">Hold 3 s to send</div><div class="label" style="margin-top:6px;font-size:15px">Lift your finger to cancel</div></div>
+    <div style="position:absolute;left:640px;right:40px;top:120px;bottom:40px;display:flex;flex-direction:column">
+      <div class="label" style="font-size:15px;margin-bottom:10px">Who is alerted</div>
+      <div class="card" style="padding:4px 18px">${[['users', 'Your group', 'Nandi Hills sunrise ride · 5 riders'], ['phone', 'Emergency contacts', '2 contacts, with a map link'], ['shield', 'Safety card', 'Shown to your group while SOS is open'], ['link', 'Live link', 'Share your position for 30 minutes']].map(([ic, t, s], i) => `${i ? '<div class="hair"></div>' : ''}<div class="row" style="padding:14px 0"><div style="width:44px;height:44px;border-radius:12px;background:var(--surfaceAlt);display:flex;align-items:center;justify-content:center">${I(ic, 22)}</div><div><div style="font-size:16px;font-weight:600">${t}</div><div class="caption" style="font-size:13px">${s}</div></div></div>`).join('')}</div>
+      <div class="sp"></div><div class="btn outline">Cancel</div></div>`;
+    CR.chrome(scr);
+  } },
+  people: { tone: 'warm', h: 'Your crew,<br>your rides', sb: 'Friends, crews and ride polls', build(scr) {
+    const stack = ['A', 'K', 'M', 'R', 'A'].map((l, i) => `<div class="av" style="width:32px;height:32px;font-size:12px;border:2px solid var(--surface);margin-left:${i ? -8 : 0}px;background:${C[[0, 4, 7, 1, 3][i]]}">${l}</div>`).join('');
+    const friends = [['SwiftFalcon482', 'Asha · Riding now', C[0]], ['CalmRider207', 'Meera · Last ride Sunday', C[7]], ['BoldComet118', 'Kiran · Last ride Sunday', C[4]], ['QuietRidge364', 'Ravi · Last ride last week', C[1]]];
+    scr.innerHTML = `<div class="appbar" style="padding:0 24px"><span style="flex:1">People</span>${I('plus', 24)}</div>
+    <div style="position:absolute;left:24px;width:560px;top:90px;bottom:24px">
+      <div class="tabs"><div>Friends</div><div class="on">Crews</div><div>Requests <span class="badge">2</span></div></div>
+      <div class="card" style="margin-top:16px;padding:0;overflow:hidden">
+        <div style="background:linear-gradient(135deg,#2B7A8C,#1F5F6E);color:#fff;padding:18px;display:flex;gap:14px;align-items:center"><div style="width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center">${I('route', 28, '#fff')}</div><div><div style="font-size:19px;font-weight:600">Weekend Wanderers</div><div style="font-size:13px;opacity:.85">8 members · Bengaluru</div></div></div>
+        <div style="padding:14px 18px"><div class="row"><div style="display:flex">${stack}</div><div class="caption">Asha, Kiran and 6 more</div></div><div class="hair" style="margin:14px 0"></div>
+        <div class="row">${I('clock', 22, 'var(--primary)')}<div style="flex:1"><div style="font-size:15px;font-weight:600">Next ride · Sun 5:30 am</div><div class="caption">Nandi Hills sunrise ride</div></div><span class="chip tint">Going</span></div></div></div>
+      <div class="card" style="margin-top:14px;padding:6px 18px">${friends.map(([u, s, c], i) => `${i ? '<div class="hair"></div>' : ''}<div class="row" style="padding:10px 0"><div class="av" style="background:${c}">${s[0]}</div><div style="flex:1"><div style="font-size:15px;font-weight:600">${u}</div><div class="caption">${s}</div></div>${I('chev', 20, 'var(--muted)')}</div>`).join('')}</div>
+    </div>
+    <div style="position:absolute;left:608px;right:24px;top:90px;bottom:24px">
+      <div class="card"><div class="row" style="gap:8px">${I('poll', 18, 'var(--accent)')}<span class="label">Poll by SwiftFalcon482</span></div>
+        <div style="font-size:18px;font-weight:600;margin-top:6px">Where to this Sunday?</div>
+        <div class="opt"><div class="bar" style="width:62%"></div>${'<span>' + I('check', 18, 'var(--primary)') + '</span>'}<span style="margin-left:6px">Nandi Hills</span><span class="n">5</span></div>
+        <div class="opt"><div class="bar" style="width:25%"></div><span>Skandagiri</span><span class="n">2</span></div>
+        <div class="opt"><div class="bar" style="width:13%"></div><span>Avalabetta</span><span class="n">1</span></div>
+        <div class="caption" style="margin-top:10px">8 votes · closes Saturday 9 pm</div></div>
+      <div class="label" style="margin:18px 0 8px;font-size:14px">Requests</div>
+      <div class="card"><div class="row"><div class="av" style="background:#7A62B0">M</div><div style="flex:1"><div style="font-size:15px;font-weight:600">MistyTrail915</div><div class="caption">wants to be friends</div></div><div class="btn primary" style="height:40px;padding:0 18px;font-size:14px">Accept</div><div class="btn outline" style="height:40px;padding:0 16px;font-size:14px">Not now</div></div></div>
+      <div class="card" style="margin-top:10px"><div class="row"><div style="width:40px;height:40px;border-radius:20px;background:var(--primarySoft);color:var(--primary);display:flex;align-items:center;justify-content:center">${I('users', 20)}</div><div style="flex:1"><div style="font-size:15px;font-weight:600">Hill Hoppers</div><div class="caption">Crew invite from CalmRider207</div></div><div class="btn primary" style="height:40px;padding:0 18px;font-size:14px">Join</div></div></div>
+    </div>`;
+    CR.chrome(scr);
+  } },
+};
+CR.ready(async () => {
+  const v = V[S]; const tp = document.getElementById('tp'); tp.classList.add(v.tone);
+  h.innerHTML = v.h; sb.innerHTML = v.sb; CR.deco(tp, v.tone);
+  v.build(document.getElementById('scr'));
+});
+</script></body></html>

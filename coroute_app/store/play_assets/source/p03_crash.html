@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="common.css"><script src="common.js"></script>
+<style>
+.wrap{position:absolute;left:0;right:0;top:30px;bottom:0;display:flex;flex-direction:column;align-items:center;padding:0 22px}
+.badge{margin-top:34px;width:64px;height:64px;border-radius:20px;background:#FBEBE8;color:#D93A2F;display:flex;align-items:center;justify-content:center}
+.ttl{margin-top:18px;font-size:26px;font-weight:600;line-height:1.25;text-align:center}
+.body{margin-top:10px;font-size:15px;color:var(--muted);text-align:center;line-height:1.45;max-width:320px}
+.ring{position:relative;width:236px;height:236px;margin-top:28px}
+.ring svg{position:absolute;inset:0}
+.ring .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .num b{font-size:72px;font-weight:700;line-height:1;color:var(--text)}
+.ring .num span{font-size:14px;color:var(--muted);margin-top:4px}
+.btns{position:absolute;left:22px;right:22px;bottom:34px;display:flex;flex-direction:column;gap:12px}
+.btns .btn{height:64px;border-radius:16px;font-size:19px}
+</style></head><body>
+<div class="panel teal" id="panel">
+  <div class="head"><h1>Crash detection</h1><div class="sub">A 30 s check, then your group is alerted</div></div>
+  <div class="phone"><div class="glass"><div class="screen" id="scr">
+    <div class="wrap">
+      <div class="badge" id="b"></div>
+      <div class="ttl">Possible crash.<br>Are you OK?</div>
+      <div class="body">We noticed a hard stop. If you don't answer, your group and emergency contacts are alerted.</div>
+      <div class="ring">
+        <svg viewBox="0 0 236 236"><circle cx="118" cy="118" r="106" fill="none" stroke="var(--surfaceAlt)" stroke-width="12"/>
+          <circle cx="118" cy="118" r="106" fill="none" stroke="#D93A2F" stroke-width="12" stroke-linecap="round" stroke-dasharray="666" stroke-dashoffset="133" transform="rotate(-90 118 118)"/></svg>
+        <div class="num"><b>24</b><span>seconds left</span></div>
+      </div>
+      <div class="label" style="margin-top:14px;font-size:14px">SOS is sent when the timer ends</div>
+      <div class="card" style="width:100%;margin-top:22px;display:flex;gap:12px;align-items:center;padding:12px 14px"><div style="width:40px;height:40px;border-radius:12px;background:var(--surfaceAlt);display:flex;align-items:center;justify-content:center" id="li"></div><div><div style="font-size:15px;font-weight:600">NH 44, near Devanahalli</div><div class="caption">Your location is sent with the alert</div></div></div>
+    </div>
+    <div class="btns">
+      <div class="btn primary" id="ok"></div>
+      <div class="btn sos">Need help</div>
+    </div>
+  </div></div></div>
+</div>
+<script>
+CR.ready(async () => {
+  CR.deco(document.getElementById('panel'), 'teal'); CR.chrome(document.getElementById('scr'));
+  b.innerHTML = CR.icon('crash', 34); li.innerHTML = CR.icon('stop', 22); ok.innerHTML = CR.icon('check', 24) + "I'm OK";
+});
+</script></body></html>
