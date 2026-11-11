@@ -39,6 +39,25 @@ class ConvoyModel {
 
   /// No seat is left for a new rider.
   bool get isFull => capacity > 0 && riders.length >= capacity;
+
+  /// 3.56 access mode ("free up to limits"): the group features this ride includes, as feature
+  /// switch ids (`intercom`, `rideRoles`, `crewRides`, ...); null = every group feature (also from
+  /// an older gateway). Set by the gateway when the ride starts, cleared when the limits lift.
+  final List<String>? groupFeatures;
+
+  /// A group feature [id] is part of this ride (the gateway refuses it otherwise: GROUP_FEATURE_LOCKED).
+  bool allowsGroupFeature(String id) => groupFeatures == null || !gatableGroupFeatures.contains(id) || groupFeatures!.contains(id);
+
+  /// The only features a ride can leave out (gateway access_mode.js GATABLE_GROUP_FEATURES). Safety
+  /// features are never in it and are never limited.
+  static const Set<String> gatableGroupFeatures = {
+    'intercom', 'rideRoles', 'autoRoles', 'crewRides', 'groupFuel', 'regroupSuggest', 'publicRide', 'discovery', 'vehicleSwap',
+  };
+
+  /// `groupFeatures` from the gateway: a list of ids, or 'all' / missing (= null, every feature).
+  static List<String>? groupFeaturesFromWire(Object? v) => v is List ? v.map((e) => e.toString()).toList(growable: false) : null;
+
+  static const Object _keep = Object();
   final String startLocationName;
   final String destinationName;
   final double destinationLat;
@@ -146,6 +165,7 @@ class ConvoyModel {
     this.featurePolicy = const RideFeaturePolicy(),
     this.featureAnalytics = const {},
     this.capacity = 0,
+    this.groupFeatures,
     this.autoRoles = false,
   });
 
@@ -186,6 +206,7 @@ class ConvoyModel {
     RideFeaturePolicy? featurePolicy,
     Map<String, dynamic>? featureAnalytics,
     int? capacity,
+    Object? groupFeatures = _keep,
     bool? autoRoles,
   }) {
     return ConvoyModel(
@@ -224,6 +245,7 @@ class ConvoyModel {
       featurePolicy: featurePolicy ?? this.featurePolicy,
       featureAnalytics: featureAnalytics ?? this.featureAnalytics,
       capacity: capacity ?? this.capacity,
+      groupFeatures: identical(groupFeatures, _keep) ? this.groupFeatures : groupFeatures as List<String>?,
       autoRoles: autoRoles ?? this.autoRoles,
     );
   }
@@ -264,6 +286,7 @@ class ConvoyModel {
       'featurePolicy': featurePolicy.toJson(),
       'featureAnalytics': featureAnalytics,
       if (capacity > 0) 'capacity': capacity,
+      if (groupFeatures != null) 'groupFeatures': groupFeatures,
       if (autoRoles) 'autoRoles': true,
     };
   }
@@ -349,6 +372,7 @@ class ConvoyModel {
       featurePolicy: RideFeaturePolicy.fromJson(json['featurePolicy']),
       featureAnalytics: json['featureAnalytics'] is Map ? Map<String, dynamic>.from(json['featureAnalytics']) : const {},
       capacity: (json['capacity'] as num?)?.toInt() ?? 0,
+      groupFeatures: groupFeaturesFromWire(json['groupFeatures']),
     );
   }
 }

@@ -86,6 +86,9 @@ class PhoneCheckFix {
   static const String fullScreen = 'fullScreen';
   static const String sound = 'sound';
   static const String appSettings = 'appSettings';
+
+  /// Background use blocked for CoRoute: opens the app's battery page (not the app settings root).
+  static const String backgroundUse = 'backgroundUse';
   static const String crashDetection = 'crashDetection';
   static const String retry = 'retry';
 }

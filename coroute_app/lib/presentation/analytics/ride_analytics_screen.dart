@@ -10,7 +10,7 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../domain/analytics/ride_analytics.dart';
 import '../../domain/places/fuel_match.dart';
-import '../feedback/suggest_feature_screen.dart';
+import '../engagement/rate_and_feedback.dart';
 import '../widgets/feature_switch.dart';
 
 /// "Your ride analytics": totals, this month against last, km per week,
@@ -163,8 +163,8 @@ class _RideAnalyticsScreenState extends State<RideAnalyticsScreen> {
                   child: data == null
                       ? const Center(child: CircularProgressIndicator())
                       : data.isEmpty
-                          ? _EmptyAnalytics(onSuggest: () => SuggestFeatureScreen.open(context))
-                          : _AnalyticsBody(data: data, onEditPrice: _editPrice, onSuggest: () => SuggestFeatureScreen.open(context)),
+                          ? _EmptyAnalytics(onSuggest: () => RateAndFeedback.openFeedback(context, category: FeedbackCategory.safetyIdea))
+                          : _AnalyticsBody(data: data, onEditPrice: _editPrice, onSuggest: () => RateAndFeedback.openFeedback(context, category: FeedbackCategory.safetyIdea)),
                 ),
               ],
             ),

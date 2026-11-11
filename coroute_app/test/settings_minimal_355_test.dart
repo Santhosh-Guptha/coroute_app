@@ -1,5 +1,7 @@
 // 3.55 minimal settings (docs/SETTINGS_MINIMAL_v3.55.md): safety settings are always on, a stored
 // "off" from an older version is ignored and rewritten once, and the screen shows only a few rows.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -9,9 +11,24 @@ import 'package:coroute_app/core/constants/network_constants.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
+import 'package:coroute_app/data/models/device_diagnostic_report.dart';
+import 'package:coroute_app/data/services/device_diagnostic_service.dart';
+import 'package:coroute_app/data/services/rider_score_service.dart';
+import 'package:coroute_app/presentation/diagnostics/pre_ride_phone_check_screen.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
+import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
 import 'package:coroute_app/presentation/settings/settings_screen.dart';
+
+/// Never finishes a check: the phone check screen stays on its "checking" state.
+class _PendingDiag extends DeviceDiagnosticService {
+  @override
+  Future<DeviceDiagnosticReport?> loadCachedReport() async => null;
+
+  @override
+  Future<DeviceDiagnosticReport> runFullDiagnostic({String? riderId, String? riderEmail, bool micTest = true}) =>
+      Completer<DeviceDiagnosticReport>().future;
+}
 
 bool _allOn(SettingsService s) =>
     s.crashDetection &&
@@ -96,6 +113,46 @@ void main() {
     });
   });
 
+  group('fixed defaults (Nov 11): give-way side, safety report in my score', () {
+    test('migration v2 forces give-way to Automatic and the score report on, once, with the version key', () async {
+      SharedPreferences.setMockInitialValues({
+        SettingsService.keySafetyDefaultsVersion: 1,
+        SettingsService.keyGiveWaySide: 'right',
+        RiderScoreService.prefsUseReport: false,
+        // A choice the rider still has: never touched by v2.
+        SettingsService.keySirenAlerts: false,
+      });
+      final s = SettingsService();
+      await s.load();
+      await s.loadSoundSettings();
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt(SettingsService.keySafetyDefaultsVersion), 2);
+      expect(prefs.getString(SettingsService.keyGiveWaySide), 'auto');
+      expect(s.giveWaySide, 'auto');
+      expect(prefs.getBool(RiderScoreService.prefsUseReport), isTrue);
+      expect(prefs.getInt(RiderScoreService.prefsSendFrom), isNotNull, reason: 'rides from while it was off are never sent');
+      expect(s.sirenAlerts, isFalse, reason: 'v2 never re-runs the v1 siren step');
+    });
+
+    test('a rider who had the score report on gets no send-from cut-off', () async {
+      SharedPreferences.setMockInitialValues({SettingsService.keySafetyDefaultsVersion: 1});
+      final s = SettingsService();
+      await s.load();
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(RiderScoreService.prefsUseReport), isTrue);
+      expect(prefs.containsKey(RiderScoreService.prefsSendFrom), isFalse);
+    });
+
+    test('give-way side cannot be changed any more', () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsService();
+      await s.load();
+      await s.loadSoundSettings();
+      await s.setGiveWaySide('left');
+      expect(s.giveWaySide, 'auto');
+    });
+  });
+
   group('siren alerts switch (default on)', () {
     test('the rider can turn it off and on; the choice is kept', () async {
       SharedPreferences.setMockInitialValues({});
@@ -172,6 +229,56 @@ void main() {
       await tester.pump();
       expect(s.pauseOtherAudio, isTrue);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('none of the removed rows, even with More open; Safety health is on the main screen', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsService();
+      await s.load();
+      await pump(tester, s);
+      expect(find.byKey(const ValueKey('settings_safety_health')), findsOneWidget);
+      final list = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_more')), 120, scrollable: list);
+      await tester.tap(find.byKey(const ValueKey('settings_more')));
+      await tester.pump();
+      for (final k in SettingsScreen.removedRowKeys) {
+        expect(find.byKey(ValueKey(k)), findsNothing, reason: k);
+      }
+      for (final t in ['Give way to the', 'Safety report in my score', 'Offline maps', 'Rate CoRoute', 'Send feedback', 'Diagnostics', 'Phone check',
+        SafetyTexts.helpTitle, SafetyTexts.askTitle]) {
+        expect(find.text(t), findsNothing, reason: t);
+      }
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Safety health opens the phone check screen, not Settings', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsService();
+      await s.load();
+      AppTheme.use(AppPalette.light);
+      addTearDown(() => AppTheme.use(AppPalette.dark));
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<SettingsService>.value(value: s),
+          ChangeNotifierProvider<DeviceDiagnosticService>.value(value: _PendingDiag()),
+        ],
+        child: MaterialApp(theme: AppTheme.themeFor(AppPalette.light), home: const SettingsScreen()),
+      ));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('settings_safety_health')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PreRidePhoneCheckScreen), findsOneWidget);
+      expect(find.byType(SettingsScreen, skipOffstage: true), findsNothing, reason: 'covered by the phone check, not a second Settings');
+    });
+
+    test('the "Safety is always on" list names helping and asking nearby riders', () {
+      final labels = SettingsScreen.alwaysOn.map((e) => e.$2).toList();
+      expect(labels, contains(SafetyTexts.helpTitle));
+      expect(labels, contains(SafetyTexts.askTitle));
     });
 
     testWidgets('siren alerts switch turns off with one tap', (tester) async {

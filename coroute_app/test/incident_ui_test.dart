@@ -244,7 +244,7 @@ void main() {
     await tester.tap(find.text('Navigate to Kiran'));
     await tester.pump();
     expect(tried, hasLength(3));
-    expect(tried[0].toString(), 'google.navigation:q=12.983034,77.606333&mode=d');
+    expect(tried[0].toString(), 'google.navigation:q=12.983034,77.606333&mode=l'); // two-wheeler
     expect(tried[1].scheme, 'geo');
     expect(tried[2].host, 'www.google.com');
     expect(opened, 0, reason: 'Navigate does not open the sheet');

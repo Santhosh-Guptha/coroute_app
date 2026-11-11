@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
+import 'rider_score_service.dart';
 
 /// Rider settings kept on the phone: only the choices a rider really makes.
 /// Everything else is decided by the app (emergency voice, after-dark voice,
@@ -29,6 +30,10 @@ import '../../core/l10n/l10n.dart';
 /// [alwaysOnKeys] are always on and have no switch. Their getters return true, a stored
 /// "off" from an older version is ignored, [load] rewrites them to on once
 /// ([keySafetyDefaultsVersion]), and their setters refuse "off".
+///
+/// Nov 11 (owner decision, migration v2): the give-way side is fixed to Automatic and the rider
+/// score always uses the safety report; help / ask nearby riders are always on (server profile,
+/// kept on by AuthService). Offline maps are automatic (OfflineMapRetentionService).
 class SettingsService extends ChangeNotifier {
   SettingsService([this._prefs]);
 
@@ -300,16 +305,28 @@ class SettingsService extends ChangeNotifier {
   /// it off. Nothing is ever forced off.
   static const List<String> safetyDefaultsV1Keys = [...alwaysOnKeys, keySirenAlerts];
 
-  /// Version of the safety defaults written by [load]; bumped when a setting joins [alwaysOnKeys].
+  /// Version of the safety defaults written by [load]; bumped when a setting joins the fixed list.
+  ///  * 1: [safetyDefaultsV1Keys] written to true.
+  ///  * 2 (owner decision, Nov 11): give-way side fixed to Automatic ([keyGiveWaySide] = 'auto') and
+  ///    "Use my safety report in my score" fixed on ([RiderScoreService.prefsUseReport] = true). Help
+  ///    nearby riders / Ask nearby riders are always on too; they live on the server profile, so
+  ///    AuthService writes them (PATCH /me) when the gateway still reports them off.
   static const String keySafetyDefaultsVersion = 'settings_safety_defaults_version';
-  static const int safetyDefaultsVersion = 1;
+  static const int safetyDefaultsVersion = 2;
 
-  /// One time per [safetyDefaultsVersion]: rewrites every [alwaysOnKeys] value to true, so a
-  /// stored "off" from an older version cannot come back. Only ever turns settings on.
+  /// One time per step of [safetyDefaultsVersion]: only ever turns settings on (or back to their
+  /// fixed default). A rider who upgrades several versions at once runs every missing step once.
   Future<void> _migrateSafetyDefaults(SharedPreferences prefs) async {
-    if ((prefs.getInt(keySafetyDefaultsVersion) ?? 0) >= safetyDefaultsVersion) return;
-    for (final k in safetyDefaultsV1Keys) {
-      await prefs.setBool(k, true);
+    final from = prefs.getInt(keySafetyDefaultsVersion) ?? 0;
+    if (from >= safetyDefaultsVersion) return;
+    if (from < 1) {
+      for (final k in safetyDefaultsV1Keys) {
+        await prefs.setBool(k, true);
+      }
+    }
+    if (from < 2) {
+      await prefs.setString(keyGiveWaySide, 'auto');
+      await RiderScoreService.adoptAlwaysOn(prefs);
     }
     await prefs.setInt(keySafetyDefaultsVersion, safetyDefaultsVersion);
   }
@@ -518,10 +535,9 @@ class SettingsService extends ChangeNotifier {
   /// Removed in 3.55 (horn alerts are gone); the stored value is deleted by [loadSoundSettings].
   static const String legacyKeyHornAlerts = 'horn_alerts_mode_v1';
   static const String keyVoiceCleanup = 'voice_cleanup_v1';
-  static const String keyGiveWaySide = 'give_way_side_v1'; // 'auto', 'left', 'right'
+  static const String keyGiveWaySide = 'give_way_side_v1'; // fixed to 'auto' since migration v2
   bool _sirenAlerts = true;
   bool _voiceCleanup = true;
-  String _giveWaySide = 'auto';
 
   /// Emergency-vehicle siren alerts from the phone's own microphone during rides (switch in
   /// Settings > Ride, on by default; admin switch `sirenDetector`). Off releases the mic at once.
@@ -531,8 +547,9 @@ class SettingsService extends ChangeNotifier {
   /// "Clean up my voice" for the intercom (always on, 3.55).
   bool get voiceCleanup => _voiceCleanup;
 
-  /// Side to keep to when giving way: 'auto' (from the phone's country; India = left), 'left', 'right'.
-  String get giveWaySide => _giveWaySide;
+  /// Side to keep to when giving way: always 'auto' since Nov 11 (owner decision): from the
+  /// phone's country (India = left). No row in Settings any more; a stored left / right is ignored.
+  String get giveWaySide => 'auto';
 
   Future<void> loadSoundSettings() async {
     try {
@@ -540,8 +557,6 @@ class SettingsService extends ChangeNotifier {
       _sirenAlerts = prefs.getBool(keySirenAlerts) ?? true; // rider's choice, default on
       if (prefs.containsKey(legacyKeyHornAlerts)) await prefs.remove(legacyKeyHornAlerts); // horn alerts removed
       _voiceCleanup = true; // always on (3.55)
-      final side = prefs.getString(keyGiveWaySide) ?? 'auto';
-      _giveWaySide = const {'auto', 'left', 'right'}.contains(side) ? side : 'auto';
     } catch (e) {
       debugPrint('settings sound load note: $e');
     }
@@ -564,16 +579,6 @@ class SettingsService extends ChangeNotifier {
     await _save(keyVoiceCleanup, true);
   }
 
-  Future<void> setGiveWaySide(String value) async {
-    final v = const {'auto', 'left', 'right'}.contains(value) ? value : 'auto';
-    if (v == _giveWaySide) return;
-    _giveWaySide = v;
-    notifyListeners();
-    try {
-      final prefs = await _p();
-      await prefs.setString(keyGiveWaySide, v);
-    } catch (e) {
-      debugPrint('settings save note: $e');
-    }
-  }
+  /// Fixed to 'auto' (Nov 11): kept for callers; any side is ignored and nothing is stored.
+  Future<void> setGiveWaySide(String value) async {}
 }

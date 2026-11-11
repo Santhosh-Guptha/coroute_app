@@ -35,6 +35,11 @@ class PreRidePhoneCheckScreen extends StatefulWidget {
     this.beforeRide = false,
   });
 
+  /// "Safety health": the cockpit tile and the Settings row open this screen (never Settings).
+  /// Runs a fresh check at once (the microphone test is skipped during a ride).
+  static Future<void> open(BuildContext context) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const PreRidePhoneCheckScreen()));
+
   /// Precise-location purpose key in Info.plist (NSLocationTemporaryUsageDescriptionDictionary).
   static const String precisePurposeKey = 'PreciseRiding';
 
@@ -129,6 +134,9 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
       case PhoneCheckFix.oemBattery:
         return 'Show steps';
       case PhoneCheckFix.sound:
+        return 'Sound settings';
+      case PhoneCheckFix.backgroundUse:
+        return 'Battery settings';
       case PhoneCheckFix.appSettings:
       case PhoneCheckFix.fullScreen:
         return 'Open settings';
@@ -158,6 +166,11 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
           rerunNow = false;
           _rerunOnResume = true;
           await SafetyNative.openSoundSettings();
+        case PhoneCheckFix.backgroundUse:
+          // The app's battery page ("Allow background usage"), not the app settings root.
+          rerunNow = false;
+          _rerunOnResume = true;
+          if (!await SafetyNative.openAppBatterySettings()) await Geolocator.openAppSettings();
         case PhoneCheckFix.locationAlways:
           final go = await _backgroundLocationDisclosure();
           if (!mounted) return;
@@ -274,7 +287,7 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
       appBar: AppBar(
         backgroundColor: AppTheme.bg,
         elevation: 0,
-        title: const Text('Phone check', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: const Text('Safety health', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18)),
         actions: [
           IconButton(
             tooltip: 'Check again',

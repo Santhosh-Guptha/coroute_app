@@ -33,7 +33,11 @@ import '../garage/complete_bike_sheet.dart'; // 3.55 mandatory bike details
 /// After the ride is created the planner returns to the root route; the
 /// home shell sees the new active ride and switches to the Ride tab.
 class TripPlannerScreen extends StatefulWidget {
-  const TripPlannerScreen({super.key});
+  /// 3.56: text shared to CoRoute (a maps link, a place, coordinates): the destination
+  /// picker opens with it in the search box.
+  final String? sharedText;
+
+  const TripPlannerScreen({super.key, this.sharedText});
 
   @override
   State<TripPlannerScreen> createState() => _TripPlannerScreenState();
@@ -67,6 +71,12 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _useCurrentLocationAsStart());
+    final shared = widget.sharedText;
+    if (shared != null && shared.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pickDestination(initialQuery: shared);
+      });
+    }
     RecentPlaces.load().then((r) {
       if (mounted) setState(() => _recent = r);
     });
@@ -171,11 +181,11 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     }
   }
 
-  Future<void> _pickDestination() async {
+  Future<void> _pickDestination({String? initialQuery}) async {
     if (_isPicking || _launching) return;
     _isPicking = true;
     try {
-      final p = await MapPickerScreen.pick(context, title: 'Destination', initial: _destination);
+      final p = await MapPickerScreen.pick(context, title: 'Destination', initial: _destination, initialQuery: initialQuery);
       if (p == null || !mounted) return;
       _setDestination(p);
     } finally {
@@ -390,6 +400,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           riderLocation: _start != null ? (_start!.lat, _start!.lng) : null,
           destination: _destination != null ? (_destination!.lat, _destination!.lng) : null,
           stops: [for (final s in _stops) (s.lat, s.lng)],
+          tripId: convoy.groupId,
         ).ignore();
       }
     } catch (_) {}

@@ -6,34 +6,38 @@ import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/ui/ui.dart';
-import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/friends_service.dart';
+import '../../data/services/nav_handoff_service.dart';
+import '../../domain/navigation/nav_handoff.dart';
+import '../../domain/notify/push_kinds.dart';
 import '../../data/services/push_service.dart';
-import '../../data/services/rider_score_service.dart';
 import '../../data/services/settings_service.dart';
 import '../account/appearance_sheet.dart';
 import '../account/edit_profile_screen.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../ride/fuel_sheet.dart';
+import '../ride/messages_sheet.dart' show QuickActionOrderView, showQuickActionOrderSheet;
 import '../safety/safety_settings_sheet.dart';
-import '../trip_planner/offline_map_manager_screen.dart';
 import '../widgets/feature_switch.dart';
-import 'diagnostics_screen.dart';
 import 'features_guide_screen.dart';
 import 'push_notifications_tile.dart';
-import '../engagement/rate_and_feedback.dart';
 
 /// The one Settings screen, minimal by design (3.55, docs/SETTINGS_MINIMAL_v3.55.md).
 ///
 /// Safety features are always on and have no switch (crash detection, SOS, emergency texts,
-/// break reminder...): one row says so and lists them. What is left:
-///  * Safety: emergency contact & Medical ID (data, not a setting) and my speed warning.
+/// break reminder, helping and asking nearby riders...): one row says so and lists them.
+/// What is left:
+///  * Safety: safety health (the phone check), emergency contact & Medical ID (data, not a
+///    setting) and my speed warning.
 ///  * Ride: voice alerts, siren alerts (on by default), language, battery saver, data saver.
 ///  * App & privacy: appearance, push notifications, my username on leaderboards.
-///  * More (collapsed): audio fine-tuning, nearby riders help, score report, fuel, offline maps,
-///    permissions, phone check, the features guide and Diagnostics (app log).
+///  * More (collapsed): audio fine-tuning, fuel, navigation app, quick replies, permissions and
+///    the features guide.
+/// Fixed since Nov 11 (owner decision), no row: help / ask nearby riders (on), give-way side
+/// (Automatic), safety report in my score (on), offline maps (automatic, kept 7 days after a trip).
+/// Send feedback, Rate CoRoute and Diagnostics live once, in Profile › Help.
 /// Rows tied to an admin switch hide when it is off.
 class SettingsScreen extends StatefulWidget {
   /// Kept for callers and tests; emergency texts no longer have a switch that asks for SMS.
@@ -66,8 +70,20 @@ class SettingsScreen extends StatefulWidget {
   static const String moreTitle = 'More settings';
   static const String pauseMusicTitle = 'Pause music for alerts';
   static const String lowerMusicTitle = 'Lower music when speeding';
-  static const String giveWayTitle = 'Give way to the';
-  static const String scoreReportTitle = 'Safety report in my score';
+  static const String safetyHealthTitle = 'Safety health';
+  static const String safetyHealthSubtitle = 'Check your phone is ready';
+
+  /// Rows removed on Nov 11 (owner decision); tests check none of them is shown.
+  static const List<String> removedRowKeys = [
+    'settings_give_way_side',
+    'settings_score_report',
+    'settings_help_nearby',
+    'settings_ask_nearby',
+    'settings_offline_maps',
+    'settings_rate_coroute',
+    'settings_send_feedback',
+    'settings_diagnostics',
+  ];
 
   /// The always-on list shown by the "Safety is always on" row (icon, short label).
   static List<(IconData, String)> get alwaysOn => [
@@ -81,6 +97,8 @@ class SettingsScreen extends StatefulWidget {
     (Icons.free_breakfast_rounded, 'Break reminder'),
     (Icons.warning_amber_rounded, 'Road warnings'),
     (Icons.alt_route_rounded, 'Auto re-route'),
+    (Icons.volunteer_activism_rounded, SafetyTexts.helpTitle),
+    (Icons.emergency_share_rounded, SafetyTexts.askTitle),
     (Icons.graphic_eq_rounded, 'Clear voice in group talk'),
     (Icons.stay_current_portrait_rounded, 'Screen stays on while riding'),
   ];
@@ -97,11 +115,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(content: Text(text)));
-  }
-
-  Future<void> _saveNet(AuthService auth, {bool? help, bool? ask}) async {
-    final ok = await auth.updateNetworkPrefs(assistHelp: help, assistAsk: ask);
-    if (!ok) _say(SafetyTexts.saveFailed);
   }
 
   void _push(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
@@ -168,6 +181,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         title: SettingsScreen.alwaysOnTitle,
                         subtitle: SettingsScreen.alwaysOnSubtitle,
                         onTap: _showAlwaysOn,
+                      ),
+                      // The phone check (permissions, battery, notifications, sensors): the same
+                      // screen as the cockpit's "Safety health" tile.
+                      _Row(
+                        key: const ValueKey('settings_safety_health'),
+                        icon: Icons.health_and_safety_rounded,
+                        title: SettingsScreen.safetyHealthTitle,
+                        subtitle: SettingsScreen.safetyHealthSubtitle,
+                        onTap: () => PreRidePhoneCheckScreen.open(context),
                       ),
                       if (auth != null) _EmergencyRow(auth: auth, onTap: () => _push(const EditProfileScreen())),
                       _SpeedWarning(settings: s),
@@ -236,6 +258,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: push.newsEnabled,
                           onChanged: (on) => push.setNewsEnabled(on),
                         ),
+                      // 3.56 one switch per push kind (own Android channel each); partner perks start off.
+                      if (push != null && push.available && push.enabled)
+                        for (final kind in PushKinds.all.where((k) => k != PushKinds.update))
+                          _Row(
+                            key: ValueKey('settings_push_kind_${kind.id}'),
+                            icon: switch (kind.id) {
+                              'event' => Icons.event_rounded,
+                              'safety_tip' => Icons.health_and_safety_rounded,
+                              'community' => Icons.groups_rounded,
+                              _ => Icons.handshake_rounded,
+                            },
+                            title: kind.title,
+                            subtitle: kind.subtitle,
+                            value: push.kindEnabled(kind),
+                            onChanged: (on) => push.setKindEnabled(kind, on),
+                          ),
                       if (friends != null && profile != null)
                         _Row(
                           key: const ValueKey('settings_public_leaderboard'),
@@ -250,7 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ]),
                   ],
                   _MoreToggle(open: _more, onTap: () => setState(() => _more = !_more)),
-                  if (_more) _moreSection(context, s, auth),
+                  if (_more) _moreSection(context, s),
                   const SizedBox(height: Space.s32),
                 ],
               ),
@@ -261,13 +299,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Two cards: the less-used switches, then links to tools and help.
-  Widget _moreSection(BuildContext context, SettingsService? s, AuthService? auth) {
+  /// Two cards: the less-used switches, then links to tools.
+  Widget _moreSection(BuildContext context, SettingsService? s) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Section(null, [
-          if (s != null) ...[
+        if (s != null)
+          _Section(null, [
             _Row(
               key: const ValueKey('settings_pause_music'),
               icon: Icons.music_off_rounded,
@@ -285,34 +323,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: s.lowerMusicWhenSpeeding,
                 onChanged: s.setLowerMusicWhenSpeeding,
               ),
-            // Admin switch 'sirenDetector'.
-            if (context.featureOn('sirenDetector'))
-              _ChoiceRow<String>(
-                key: const ValueKey('settings_give_way_side'),
-                icon: Icons.swap_horiz_rounded,
-                title: SettingsScreen.giveWayTitle,
-                value: s.giveWaySide,
-                choices: const {'auto': 'Auto', 'left': 'Left', 'right': 'Right'},
-                onChanged: s.setGiveWaySide,
-              ),
-          ],
-          // Admin switch 'riderScore'.
-          if (context.featureOn('riderScore') && context.read<ApiClient?>() != null) const _ScoreReportRow(),
-          if (auth != null) ...[
-            _Row(
-              icon: Icons.volunteer_activism_rounded,
-              title: SafetyTexts.helpTitle,
-              value: auth.assistHelp,
-              onChanged: (v) => _saveNet(auth, help: v),
-            ),
-            _Row(
-              icon: Icons.emergency_share_rounded,
-              title: SafetyTexts.askTitle,
-              value: auth.assistAsk,
-              onChanged: (v) => _saveNet(auth, ask: v),
-            ),
-          ],
-        ]),
+          ]),
         _Section(null, [
           if (s != null)
             _Row(
@@ -321,43 +332,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: s.fuelProfile.valid ? '${s.fuelProfile.rangeKm.floor()} km on a full tank' : null,
               onTap: () => showFuelSheet(context, configure: true),
             ),
-          _Row(icon: Icons.download_for_offline_rounded, title: 'Offline maps', onTap: () => _push(const OfflineMapManagerScreen())),
-          _Row(icon: Icons.verified_user_outlined, title: 'Permissions', onTap: () => _push(const PermissionsScreen())),
+          // 3.55 "Navigate in Google Maps / Mappls": which app the Navigate buttons open.
+          const _NavAppRow(key: ValueKey('settings_nav_app')),
+          // 3.55 ride chat: the order of the one-tap quick replies.
           _Row(
-            icon: Icons.phonelink_setup_rounded,
-            title: 'Phone check',
-            onTap: () => _push(const PreRidePhoneCheckScreen(autoRun: false)),
+            key: const ValueKey('settings_chat_quick_replies'),
+            icon: Icons.forum_rounded,
+            title: QuickActionOrderView.title,
+            onTap: () => showQuickActionOrderSheet(context),
           ),
+          _Row(icon: Icons.verified_user_outlined, title: 'Permissions', onTap: () => _push(const PermissionsScreen())),
           _Row(
             key: const ValueKey('settings_features_guide'),
             icon: Icons.help_outline_rounded,
             title: 'Features guide',
             onTap: () => _push(const FeaturesGuideScreen()),
           ),
-          // 3.55 ratings & reviews: always available; straight to Google Play (no "do you like us?" first).
-          _Row(
-            key: const ValueKey('settings_rate_coroute'),
-            icon: Icons.star_outline_rounded,
-            title: RateAndFeedback.rateTitle,
-            subtitle: RateAndFeedback.rateSubtitle,
-            onTap: () => RateAndFeedback.rate(context),
-          ),
-          _Row(
-            key: const ValueKey('settings_send_feedback'),
-            icon: Icons.chat_bubble_outline_rounded,
-            title: RateAndFeedback.feedbackTitle,
-            onTap: () => RateAndFeedback.openFeedback(context),
-          ),
-          // 3.55 diagnostics log: send / share / view the app log (docs/features_355/diagnostics_logs.md).
-          _Row(
-            key: const ValueKey('settings_diagnostics'),
-            icon: Icons.bug_report_outlined,
-            title: DiagnosticsScreen.title,
-            subtitle: 'App log for fixing problems',
-            onTap: () => _push(const DiagnosticsScreen()),
-          ),
         ]),
       ],
+    );
+  }
+}
+
+/// "Navigation app": Automatic (Google Maps, else Mappls, else any map app), always Google Maps,
+/// always Mappls, or any map app. Kept on the phone (NavHandoffService).
+class _NavAppRow extends StatefulWidget {
+  const _NavAppRow({super.key});
+
+  static const String title = 'Navigation app';
+
+  @override
+  State<_NavAppRow> createState() => _NavAppRowState();
+}
+
+class _NavAppRowState extends State<_NavAppRow> {
+  NavApp _value = NavHandoffService.choice;
+
+  @override
+  void initState() {
+    super.initState();
+    NavHandoffService.load().then((v) {
+      if (mounted && v != _value) setState(() => _value = v);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _ChoiceRow<NavApp>(
+      icon: Icons.navigation_rounded,
+      title: _NavAppRow.title,
+      value: _value,
+      choices: {for (final a in NavApp.values) a: a.label},
+      onChanged: (v) {
+        setState(() => _value = v);
+        NavHandoffService.setChoice(v).ignore();
+      },
     );
   }
 }
@@ -653,47 +682,6 @@ class _LanguageRow extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// "Safety report in my score" (rider score, admin switch 'riderScore'): counts only, and
-/// turning it off deletes the counts already sent. Shown only when the API is provided.
-class _ScoreReportRow extends StatefulWidget {
-  const _ScoreReportRow();
-
-  @override
-  State<_ScoreReportRow> createState() => _ScoreReportRowState();
-}
-
-class _ScoreReportRowState extends State<_ScoreReportRow> {
-  late final RiderScoreService _svc;
-
-  @override
-  void initState() {
-    super.initState();
-    _svc = RiderScoreService(context.read<ApiClient>())..loadSetting();
-  }
-
-  @override
-  void dispose() {
-    _svc.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final svc = _svc;
-    return ListenableBuilder(
-      listenable: svc,
-      builder: (context, _) => _Row(
-        key: const ValueKey('settings_score_report'),
-        icon: Icons.insights_rounded,
-        title: SettingsScreen.scoreReportTitle,
-        subtitle: 'Counts only, never your route',
-        value: svc.useSafetyReport,
-        onChanged: svc.setUseSafetyReport,
       ),
     );
   }

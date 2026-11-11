@@ -17,9 +17,10 @@ class RiderScoreScreen extends StatefulWidget {
 
   static const String title = 'Your rider score';
   static const String privacyLine = 'Only you can see your score. The leaderboard shows usernames only.';
-  static const String useReportLabel = 'Use my ride safety report for my rider score';
+  /// Always on since Nov 11 (owner decision): a plain line, no switch.
+  static const String useReportLabel = 'Your score uses your ride safety report';
   static const String useReportSubtitle =
-      'Sends only counts per ride (hard brakes, breaks, tiredness, minutes over the limit). Never your route or position.';
+      'Only counts per ride (hard brakes, breaks, tiredness, minutes over the limit). Never your route or position.';
 
   static Future<void> open(BuildContext context) async {
     if (!context.featureOnNow('riderScore')) {
@@ -179,13 +180,25 @@ class _RiderScoreScreenState extends State<RiderScoreScreen> {
         const SizedBox(height: Space.s24),
         DsCard(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: DsSwitchRow(
+          child: Padding(
             key: const Key('score_use_safety_report'),
-            label: RiderScoreScreen.useReportLabel,
-            subtitle: RiderScoreScreen.useReportSubtitle,
-            value: _svc.useSafetyReport,
-            divider: false,
-            onChanged: (v) => _svc.setUseSafetyReport(v),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.insights_rounded, size: 22, color: AppTheme.accentText),
+                const SizedBox(width: Space.s12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(RiderScoreScreen.useReportLabel, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                      Text(RiderScoreScreen.useReportSubtitle, style: AppText.caption),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         if (leaderboardOn) ...[

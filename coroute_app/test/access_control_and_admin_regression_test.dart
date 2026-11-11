@@ -227,10 +227,11 @@ void main() {
       expect(find.text('Admin'), findsNothing);
       expect(find.text('Live rides, history and users'), findsNothing);
 
-      // 3. Verify legitimate rider settings are shown (Permissions now lives in the one
-      //    Settings screen, opened from this row).
-      expect(find.text('Change password'), findsOneWidget);
+      // 3. Verify the rider's entry points are shown: the gear in the top box opens the one
+      //    Settings screen (Change password moved to My profile on Nov 11).
       expect(find.byKey(const Key('profile_settings')), findsOneWidget);
+      expect(find.byKey(const Key('profile_top_box')), findsOneWidget);
+      expect(find.text('Change password'), findsNothing);
     });
 
     testWidgets('AccountScreen DOES show Admin tile only when signed in as Master Admin', (tester) async {
@@ -294,7 +295,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify Admin tile is present for Master Admin (badge + settings row)
+      // Verify Admin tile is present for Master Admin (badge in the top box + admin row)
       expect(find.text('Admin'), findsNWidgets(2));
       expect(find.text('Live rides, history and users'), findsOneWidget);
 

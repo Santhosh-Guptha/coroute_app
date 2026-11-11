@@ -80,7 +80,7 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('Settings (3.55 minimal): a few main switches; nearby riders under More write the profile', (tester) async {
+  testWidgets('Settings (Nov 11): no nearby riders switches anywhere; they are in the always-on list', (tester) async {
     final settings = SettingsService();
     await settings.load();
     final (auth, patches) = authWithPatches();
@@ -92,8 +92,6 @@ void main() {
     expect(find.text(SafetyTexts.hazardTitle), findsNothing);
     expect(find.text(SafetyTexts.lockTitle), findsNothing);
     expect(find.text(SafetyTexts.crashTitle), findsNothing);
-    // Nearby riders help is collapsed under More.
-    expect(find.text(SafetyTexts.helpTitle), findsNothing);
     final list = find.byType(Scrollable).first;
 
     await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_spoken_alerts')), 80, scrollable: list);
@@ -102,35 +100,58 @@ void main() {
     expect(settings.voiceWarnings, isFalse);
 
     await openMore(tester);
-    await tester.scrollUntilVisible(find.text(SafetyTexts.helpTitle), 80, scrollable: list);
-    expect(auth.assistHelp, isTrue, reason: 'default on');
-    await tester.tap(find.text(SafetyTexts.helpTitle));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(patches.last, {'assistHelp': false});
-    expect(auth.assistHelp, isFalse);
+    expect(find.text(SafetyTexts.helpTitle), findsNothing);
+    expect(find.text(SafetyTexts.askTitle), findsNothing);
+    expect(SettingsScreen.alwaysOn.map((e) => e.$2), containsAll([SafetyTexts.helpTitle, SafetyTexts.askTitle]));
+    expect(auth.assistHelp, isTrue);
+    expect(auth.assistAsk, isTrue);
 
     // Medical info has no sharing switch anywhere (always shared with responders in an emergency).
     expect(find.text(SafetyTexts.medicalTitle), findsNothing);
     expect(settings.hazardAlerts, isTrue);
     expect(settings.rideOnLockScreen, isTrue);
-    expect(patches, hasLength(1), reason: 'phone-only settings never call the server');
+    expect(patches, isEmpty, reason: 'phone-only settings never call the server');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a refused save puts the switch back and says so', (tester) async {
-    final settings = SettingsService();
-    await settings.load();
-    final (auth, _) = authWithPatches(fail: true);
-    await host(tester, const SettingsScreen(), settings: settings, auth: auth);
-    final list = find.byType(Scrollable).first;
-    await openMore(tester);
-    await tester.scrollUntilVisible(find.text(SafetyTexts.askTitle), 80, scrollable: list);
-    await tester.tap(find.text(SafetyTexts.askTitle));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+  test('always on: "off" is never sent to the server', () async {
+    final (auth, patches) = authWithPatches();
+    expect(await auth.updateNetworkPrefs(assistHelp: false, assistAsk: false), isTrue);
+    expect(patches, isEmpty);
+    expect(auth.assistHelp, isTrue);
     expect(auth.assistAsk, isTrue);
-    expect(find.text(SafetyTexts.saveFailed), findsOneWidget);
+  });
+
+  test('migration: a profile the gateway still has off is written back on once (PATCH /me)', () async {
+    SharedPreferences.setMockInitialValues({'coroute_user_id': 'u1'});
+    FlutterSecureStorage.setMockInitialValues({'coroute_jwt': 'jwt'});
+    final patches = <Map<String, dynamic>>[];
+    var server = <String, dynamic>{'userId': 'u1', 'email': 'a@example.com', 'name': 'Asha', 'assistHelp': false, 'assistAsk': true};
+    final api = ApiClient(
+      httpClient: MockClient((req) async {
+        if (req.url.path.endsWith('/me') && req.method == 'GET') return http.Response(jsonEncode(server), 200);
+        if (req.url.path.endsWith('/me') && req.method == 'PATCH') {
+          final body = jsonDecode(req.body) as Map<String, dynamic>;
+          patches.add(body);
+          server = {...server, ...body};
+          return http.Response(jsonEncode(server), 200);
+        }
+        return http.Response('{}', 200);
+      }),
+      storage: const FlutterSecureStorage(),
+    );
+    await api.init();
+    final auth = AuthService(api);
+    await auth.revalidate();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(patches, [
+      {'assistHelp': true, 'assistAsk': true},
+    ]);
+    expect(auth.serverAssistOn, isTrue);
+    // Already on: a later /me sends nothing more.
+    await auth.revalidate();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(patches, hasLength(1));
   });
 
   testWidgets('consent: shown before a ride until answered; Later at most 3 times; Continue saves with consent', (tester) async {
@@ -157,13 +178,15 @@ void main() {
     await tester.tap(find.text('ride'));
     await tester.pumpAndSettle();
     expect(find.text('Riders helping riders'), findsOneWidget);
+    expect(find.byType(Switch), findsNothing, reason: 'always on since Nov 11: an explanation, no switches');
+    expect(find.text(NetworkConsentSheet.alwaysOnNote), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('Later'));
     await tester.pumpAndSettle();
     expect(settings.netConsentPrompts, 1);
     expect(patches, isEmpty);
 
-    // Continue: the assistance switches and the consent are saved (medical info has no switch).
+    // Continue: both always-on values and the consent are saved (medical info has no switch).
     await tester.tap(find.text('ride'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));

@@ -1,6 +1,9 @@
+import '../../domain/geo/offline_map_retention.dart';
 import '../../domain/tracking/geo_math.dart';
 
-/// Metadata for a locally saved offline map pack corridor.
+/// Metadata for a locally saved offline map pack corridor. Since Nov 11 every pack is an automatic
+/// trip map: [tripId] ties it to the ride, [completedAt] is set when that ride ends, and
+/// [OfflineMapRetention] decides when it is deleted (7 days after the trip, 300 MB cap).
 class SavedMapPack {
   final String id;
   final String name;
@@ -11,6 +14,15 @@ class SavedMapPack {
   final int estimatedBytes;
   final List<(double, double)> polyline;
 
+  /// The ride (group id) the map was saved for; null for packs from before Nov 11.
+  final String? tripId;
+
+  /// When that ride ended; null while it has not.
+  final DateTime? completedAt;
+
+  /// Last time the map was saved again for a ride; [downloadedAt] when unknown.
+  final DateTime? lastUsedAt;
+
   const SavedMapPack({
     required this.id,
     required this.name,
@@ -20,7 +32,37 @@ class SavedMapPack {
     required this.tileCount,
     required this.estimatedBytes,
     required this.polyline,
+    this.tripId,
+    this.completedAt,
+    this.lastUsedAt,
   });
+
+  /// The id automatic trip maps use for [groupId].
+  static String idForTrip(String groupId) => 'trip_$groupId';
+
+  SavedMapPack copyWith({DateTime? completedAt, DateTime? lastUsedAt}) => SavedMapPack(
+        id: id,
+        name: name,
+        downloadedAt: downloadedAt,
+        highDetail: highDetail,
+        zooms: zooms,
+        tileCount: tileCount,
+        estimatedBytes: estimatedBytes,
+        polyline: polyline,
+        tripId: tripId,
+        completedAt: completedAt ?? this.completedAt,
+        lastUsedAt: lastUsedAt ?? this.lastUsedAt,
+      );
+
+  /// What the retention rules need. A pack from before Nov 11 (no trip id) counts as an ended
+  /// trip from the time it was saved, so it goes 7 days after it was downloaded.
+  RetainedMap get retained => RetainedMap(
+        id: id,
+        createdAtMs: downloadedAt.millisecondsSinceEpoch,
+        completedAtMs: completedAt?.millisecondsSinceEpoch ?? (tripId == null ? downloadedAt.millisecondsSinceEpoch : null),
+        lastUsedAtMs: (lastUsedAt ?? downloadedAt).millisecondsSinceEpoch,
+        bytes: estimatedBytes,
+      );
 
   /// Formatted size in MB.
   String get sizeMb => (estimatedBytes / (1024 * 1024)).toStringAsFixed(1);
@@ -34,6 +76,9 @@ class SavedMapPack {
         'tile_count': tileCount,
         'estimated_bytes': estimatedBytes,
         'polyline': GeoMath.encodePolyline(polyline),
+        if (tripId != null) 'trip_id': tripId,
+        if (completedAt != null) 'completed_at': completedAt!.toIso8601String(),
+        if (lastUsedAt != null) 'last_used_at': lastUsedAt!.toIso8601String(),
       };
   factory SavedMapPack.fromJson(Map<String, dynamic> map) {
     final polyStr = map['polyline'] as String? ?? '';
@@ -47,6 +92,9 @@ class SavedMapPack {
       tileCount: (map['tile_count'] as num?)?.toInt() ?? 0,
       estimatedBytes: (map['estimated_bytes'] as num?)?.toInt() ?? 0,
       polyline: poly,
+      tripId: map['trip_id'] as String?,
+      completedAt: DateTime.tryParse(map['completed_at'] as String? ?? ''),
+      lastUsedAt: DateTime.tryParse(map['last_used_at'] as String? ?? ''),
     );
   }
 }

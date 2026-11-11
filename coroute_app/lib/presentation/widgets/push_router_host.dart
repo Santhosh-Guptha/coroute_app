@@ -11,12 +11,12 @@ import '../../data/services/membership_service.dart';
 import '../../data/services/push_service.dart';
 import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/notify/push_routing.dart';
+import '../../domain/notify/push_kinds.dart';
 import '../social/crew_detail_screen.dart';
 import '../social/crews_screen.dart';
 import '../rider/trip_history_screen.dart';
 import '../settings/settings_screen.dart';
 import '../social/friends_screen.dart';
-import '../subscription/membership_dashboard_screen.dart';
 
 /// 3.55 push notifications: opens the right screen for a tapped push, and shows a push that
 /// arrives while the app is in front as a snackbar (with "View"). Placed once in
@@ -128,10 +128,9 @@ class _PushRouterHostState extends State<PushRouterHost> {
       case PushDestination.adminWarnings:
         context.read<AdminWarningsService?>()?.refresh().ignore();
       case PushDestination.membership:
-        // A plan change (for example a plan activated in the rider's CoRoute account): re-read it,
-        // then show the read-only "Your plan" screen.
+        // A plan change (for example a plan activated in the rider's CoRoute account): re-read it.
+        // No plan screen in the app any more (owner decision, Nov 11; Play payments policy).
         context.read<MembershipService?>()?.fetchMyMembership().ignore();
-        await Navigator.of(navContext).push(MaterialPageRoute<void>(builder: (_) => const MembershipDashboardScreen()));
       // 3.56 admin "News and updates" pushes: the target screen chosen in the web admin.
       case PushDestination.home:
         Navigator.of(navContext).popUntil((r) => r.isFirst);
@@ -166,7 +165,10 @@ class _PushRouterHostState extends State<PushRouterHost> {
       case PushDestination.none:
         break;
     }
-    final text = m.body.isNotEmpty ? m.body : m.title;
+    final raw = m.body.isNotEmpty ? m.body : m.title;
+    // 3.56: a partner perk is always labelled as one ("Partner perk · Speed Garage: ...").
+    final label = PushKinds.labelFor(m.payload['kind']?.toString(), m.payload['partner']?.toString());
+    final text = label == null || raw.isEmpty ? raw : '$label: $raw';
     if (text.isEmpty || route.destination == PushDestination.none) return;
     // 3.55: ride invites in the foreground get their own banner from the socket message
     // (RideInvitesService), so no second snackbar here.

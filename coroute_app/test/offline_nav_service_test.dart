@@ -61,7 +61,7 @@ void main() {
 
       // 1. Google Maps / Android Navigation Turn-by-Turn
       expect(uris[0].scheme, 'google.navigation');
-      expect(uris[0].toString(), contains('mode=d'));
+      expect(uris[0].toString(), contains('mode=l')); // two-wheeler turn-by-turn
       expect(uris[0].toString(), contains('17.500000,78.500000'));
 
       // 2. Any map app (geo:)

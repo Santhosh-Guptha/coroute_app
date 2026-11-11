@@ -4,7 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
+import '../../domain/garage/bike_sync.dart';
 import 'api_client.dart';
+import 'feature_flags_service.dart' show FeatureFlagsService;
 import 'friends_service.dart' show FriendsService;
 
 /// Account state. Registration (email + password, or Google) is mandatory;
@@ -89,9 +91,11 @@ class AuthService extends ChangeNotifier {
   bool _smsOptOut = false;
   bool _medicalLoaded = false;
 
-  // Rider Safety Network switches (3.15): memory only, from /me.
+  // Rider Safety Network switches (3.15): memory only, from /me. Always on since Nov 11 (owner
+  // decision): these keep what the server last said, only to write it back on (see [_keepAssistOn]).
   bool _assistHelp = true;
   bool _assistAsk = true;
+  String? _assistFixFor;
   int _netConsentAt = 0;
   bool _netLoaded = false;
 
@@ -118,11 +122,16 @@ class AuthService extends ChangeNotifier {
   /// True when I asked not to receive emergency texts from my ride group.
   bool get smsOptOut => _smsOptOut;
 
-  /// Get a request when a rider from another group may need help on my route (default on).
-  bool get assistHelp => _assistHelp;
+  /// Get a request when a rider from another group may need help on my route. Always on since
+  /// Nov 11 (owner decision, docs/SETTINGS_MINIMAL_v3.55.md): no switch in the app.
+  bool get assistHelp => true;
 
-  /// Let nearby riders of other groups be asked to help me (default on).
-  bool get assistAsk => _assistAsk;
+  /// Let nearby riders of other groups be asked to help me. Always on since Nov 11.
+  bool get assistAsk => true;
+
+  /// What the gateway last reported (false only until [_keepAssistOn] wrote it back on).
+  @visibleForTesting
+  bool get serverAssistOn => _assistHelp && _assistAsk;
 
   /// Medical info always goes to a responder during my emergency (no switch any more). A stored
   /// `false` from an older version is ignored, here and on the gateway.
@@ -258,8 +267,9 @@ class AuthService extends ChangeNotifier {
     // Plan state travels with the profile; an expired paid tier arrives as community.
     _noteSubscriptionStatus(u['subscriptionStatus']);
     // 3.55 bike summary: only a gateway that returns it accepts it (older ones never see it).
+    // 3.56: only the keys this gateway returned (a newer one also keeps the type and fuel).
     if (u.containsKey('bikeModel')) {
-      _bikeOnServer = {for (final k in bikeSummaryKeys) k: u[k]};
+      _bikeOnServer = {for (final k in bikeSummaryKeys) if (u.containsKey(k)) k: u[k]};
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -279,6 +289,19 @@ class AuthService extends ChangeNotifier {
       _emergencyContactName ?? '',
     );
     notifyListeners();
+    _keepAssistOn();
+  }
+
+  /// "Help nearby riders" and "Ask nearby riders to help me" are always on (Nov 11). When the
+  /// gateway still has one of them off (set by an older app), write both back on once per signed-in
+  /// rider and app run. Skipped while the admin switch `assistNetwork` is off (the feature is
+  /// paused for everyone; the rider's value is left as it is). Never blocks; failures retry next run.
+  void _keepAssistOn() {
+    final uid = _userId;
+    if (uid == null || !_netLoaded || (_assistHelp && _assistAsk)) return;
+    if (_assistFixFor == uid || !FeatureFlagsService.on('assistNetwork')) return;
+    _assistFixFor = uid;
+    updateNetworkPrefs(assistHelp: true, assistAsk: true).ignore();
   }
 
   bool get mustChangePassword => _mustChangePassword;
@@ -405,10 +428,14 @@ class AuthService extends ChangeNotifier {
   String? get lastProfileError => _lastProfileError;
 
   /// 3.55: the active bike's summary keys the gateway stores (engine care and fuel analysis).
-  static const List<String> bikeSummaryKeys = ['bikeModel', 'bikeCc', 'bikeColour', 'bikeTankL', 'bikeMileageKmL', 'bikeCooling'];
+  /// 3.56: also the confirmed bike type and the fuel type ([BikeSync.allKeys]).
+  static const List<String> bikeSummaryKeys = BikeSync.allKeys;
 
   /// The bike summary as the gateway last returned it (null: an older gateway, or not loaded yet).
   Map<String, dynamic>? _bikeOnServer;
+
+  /// 3.56: the gateway's copy of the rider's bike (restores the garage on a new install / phone).
+  Map<String, dynamic>? get bikeOnServer => _bikeOnServer == null ? null : Map.unmodifiable(_bikeOnServer!);
 
   /// Shares the active bike's summary, best effort: only with a gateway that returned the
   /// summary before (older ones are never sent unknown keys), only when it changed, and every
@@ -416,10 +443,7 @@ class AuthService extends ChangeNotifier {
   Future<bool> syncBikeSummary(Map<String, Object> summary) async {
     final known = _bikeOnServer;
     if (_userId == null || known == null) return false;
-    final changed = <String, Object>{
-      for (final e in summary.entries)
-        if (bikeSummaryKeys.contains(e.key) && !_sameBikeValue(known[e.key], e.value)) e.key: e.value,
-    };
+    final changed = BikeSync.changes(summary, known);
     if (changed.isEmpty) return true;
     // One request at a time; the newest summary goes next. A refused one is not sent again.
     if (_bikeSyncing) {
@@ -456,11 +480,6 @@ class AuthService extends ChangeNotifier {
   Map<String, Object>? _bikePending;
   String? _bikeRefused;
 
-  static bool _sameBikeValue(Object? a, Object b) {
-    if (a is num && b is num) return (a - b).abs() < 0.05;
-    return (a ?? '').toString() == b.toString();
-  }
-
   /// Update rider profile details (server is the source of truth). The
   /// medical fields and [smsOptOut] are sent only when given (older callers
   /// never clear them).
@@ -494,8 +513,9 @@ class AuthService extends ChangeNotifier {
       if (allergies != null) payload['allergies'] = allergies.trim();
       if (medicalNotes != null) payload['medicalNotes'] = medicalNotes.trim();
       if (smsOptOut != null) payload['smsOptOut'] = smsOptOut;
-      if (assistHelp != null) payload['assistHelp'] = assistHelp;
-      if (assistAsk != null) payload['assistAsk'] = assistAsk;
+      // Always on since Nov 11: only "on" is ever sent.
+      if (assistHelp == true) payload['assistHelp'] = true;
+      if (assistAsk == true) payload['assistAsk'] = true;
       // Medical info is always shared with responders in an emergency. Gateways before that rule
       // still read this switch, so it travels (as true) with the medical fields; newer ones ignore it.
       if (bloodGroup != null || allergies != null || medicalNotes != null) {
@@ -529,6 +549,9 @@ class AuthService extends ChangeNotifier {
     bool? assistAsk,
     bool netConsent = false,
   }) async {
+    // Always on since Nov 11: "off" is never sent.
+    if (assistHelp == false) assistHelp = null;
+    if (assistAsk == false) assistAsk = null;
     final helpBefore = _assistHelp, askBefore = _assistAsk;
     final payload = <String, dynamic>{
       'assistHelp': ?assistHelp,
@@ -622,6 +645,7 @@ class AuthService extends ChangeNotifier {
     _medicalLoaded = false;
     _assistHelp = true;
     _assistAsk = true;
+    _assistFixFor = null;
     _netConsentAt = 0;
     _netLoaded = false;
     _lastSubscriptionStatus = null;

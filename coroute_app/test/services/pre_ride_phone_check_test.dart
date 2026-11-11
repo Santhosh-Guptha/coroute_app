@@ -122,7 +122,7 @@ void main() {
     expect(r.overallResult, DiagnosticOverallResult.criticalIssueDetected);
     expect(item(r, 'accel_stream').verdict, CheckVerdict.fail);
     expect(item(r, 'crash_ready').verdict, CheckVerdict.fail);
-    expect(item(r, 'bg_restricted').fix, PhoneCheckFix.appSettings);
+    expect(item(r, 'bg_restricted').fix, PhoneCheckFix.backgroundUse, reason: 'opens the battery page, not the app settings root');
     expect(item(r, 'battery_level').verdict, CheckVerdict.fail);
     expect(item(r, 'do_not_disturb').fix, PhoneCheckFix.sound);
     expect(item(r, 'media_volume').fix, PhoneCheckFix.sound);

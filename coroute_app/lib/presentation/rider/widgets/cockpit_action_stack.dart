@@ -16,6 +16,7 @@ import '../../../domain/fuel/group_fuel_consensus.dart';
 import '../../../domain/ride/ride_facts.dart';
 import '../../../domain/route/route_plan.dart';
 import '../../../domain/tracking/geo_math.dart';
+import '../../ride/navigate_to.dart';
 
 /// Floating right-side action stack in the motorcycle cockpit.
 ///
@@ -311,6 +312,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
             accentColor: AppTheme.accentText,
             title: 'MEET HERE · ${meet.name}',
             subtitle: 'Group meeting point$distText · Tap to view',
+            onNavigate: (meet.lat != 0 || meet.lng != 0) ? () => navigateTo(meet.lat, meet.lng, label: meet.name) : null,
             onTap: () {
               HapticFeedback.lightImpact();
               if (widget.onFocusLocation != null && meet.lat != 0 && meet.lng != 0) {
@@ -341,6 +343,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
               accentColor: AppTheme.warnText,
               title: '$who stopped: $reason',
               subtitle: 'Rider stopped$distText · Tap to locate',
+              onNavigate: () => navigateTo(rider.lat, rider.lng, label: who),
               onTap: () {
                 HapticFeedback.lightImpact();
                 if (widget.onFocusLocation != null) {
@@ -689,6 +692,9 @@ class _ActionPill extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
 
+  /// 3.55 one-tap hand-off to Google Maps / Mappls turn-by-turn (meeting point, stopped rider).
+  final VoidCallback? onNavigate;
+
   const _ActionPill({
     required this.icon,
     required this.iconColor,
@@ -696,6 +702,7 @@ class _ActionPill extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.onNavigate,
   });
 
   @override
@@ -759,6 +766,18 @@ class _ActionPill extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onNavigate != null) ...[
+                const SizedBox(width: 6),
+                IconButton(
+                  tooltip: 'Navigate',
+                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                  icon: Icon(Icons.navigation_rounded, color: accentColor, size: 24),
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    onNavigate!();
+                  },
+                ),
+              ],
             ],
           ),
         ),

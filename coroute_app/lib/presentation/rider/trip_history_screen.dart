@@ -592,7 +592,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
             initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),
           ),
           children: [
-            appTileLayer(),
+            appTileLayer(pastTrip: true),
             if (points.length >= 2)
               PolylineLayer(polylines: [
                 for (final piece in pieces)

@@ -28,11 +28,47 @@ class SavedMapPackStore {
   static Future<void> save(SavedMapPack pack) async {
     try {
       final packs = (await loadAll()).toList();
-      packs.removeWhere((p) => p.id == pack.id || (p.name == pack.name && p.highDetail == pack.highDetail));
+      packs.removeWhere((p) =>
+          p.id == pack.id ||
+          (pack.tripId != null && p.tripId == pack.tripId) ||
+          (pack.tripId == null && p.tripId == null && p.name == pack.name && p.highDetail == pack.highDetail));
       packs.insert(0, pack);
       await _write(packs);
     } catch (e) {
       debugPrint('SavedMapPackStore save note: ${e.runtimeType}');
+    }
+  }
+
+  /// The ride [tripId] ended at [at]: its map starts its retention time (OfflineMapRetention).
+  /// True when a pack was marked.
+  static Future<bool> markCompleted(String tripId, DateTime at) async {
+    try {
+      final packs = (await loadAll()).toList();
+      var changed = false;
+      for (var i = 0; i < packs.length; i++) {
+        if (packs[i].tripId == tripId && packs[i].completedAt == null) {
+          packs[i] = packs[i].copyWith(completedAt: at);
+          changed = true;
+        }
+      }
+      if (changed) await _write(packs);
+      return changed;
+    } catch (e) {
+      debugPrint('SavedMapPackStore mark note: ${e.runtimeType}');
+      return false;
+    }
+  }
+
+  /// Deletes several packs in one write.
+  static Future<void> deleteAll(Iterable<String> ids) async {
+    final doomed = ids.toSet();
+    if (doomed.isEmpty) return;
+    try {
+      final packs = (await loadAll()).toList();
+      packs.removeWhere((p) => doomed.contains(p.id));
+      await _write(packs);
+    } catch (e) {
+      debugPrint('SavedMapPackStore delete note: ${e.runtimeType}');
     }
   }
 

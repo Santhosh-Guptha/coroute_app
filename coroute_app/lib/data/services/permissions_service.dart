@@ -70,7 +70,10 @@ class PermissionsService {
         return (await Permission.microphone.status).isGranted;
       case 'notification':
         final r = await Permission.notification.request();
-        if (r.isPermanentlyDenied) await openAppSettings();
+        // Blocked for good: CoRoute's own notification page (Android), not the app settings root.
+        if (r.isPermanentlyDenied && !(Platform.isAndroid && await SafetyNative.openNotificationSettings())) {
+          await openAppSettings();
+        }
         return (await Permission.notification.status).isGranted;
       case 'bluetooth':
         if (Platform.isAndroid) {

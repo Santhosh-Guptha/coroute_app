@@ -59,6 +59,9 @@ import 'trip_storage_service.dart';
 import '../../domain/ride/ride_roles.dart';
 import '../../domain/ride/vehicle_swap.dart';
 import '../../domain/ride/pillion_seat.dart'; // 3.55 pillion seat
+import '../../domain/ride/ride_chat.dart'; // 3.55 ride chat
+import '../../domain/notify/notice_dedupe.dart';
+import 'ride_chat_store.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'diag_log_service.dart';
 
@@ -184,7 +187,8 @@ class ConvoyService extends ChangeNotifier {
   /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = everything on,
   /// so tests and older wiring never lose a feature.
   bool Function(String id)? featureOn;
-  bool _featureOn(String id) => featureOn?.call(id) ?? true;
+  /// The admin switch of [id] AND (3.56) the active ride including it (hybrid free tier).
+  bool _featureOn(String id) => (featureOn?.call(id) ?? true) && (activeConvoy?.allowsGroupFeature(id) ?? true);
 
   RoleNotice? _roleNotice;
   Timer? _roleNoticeClear;
@@ -525,6 +529,7 @@ class ConvoyService extends ChangeNotifier {
   Future<void> startSession({required String token, required String userId, bool admin = false}) async {
     _myUserId = userId;
     _rt.connect(token, adminMode: admin);
+    _loadChatPrefs().ignore(); // 3.55 ride chat: quick action order, hidden riders, unread marks
     _adminWatching = admin;
     await _readPreviousExit();
     final cachedRoster = _smsFallbackOn ? await _rosterStore.load() : null;
@@ -1091,10 +1096,13 @@ class ConvoyService extends ChangeNotifier {
     }
 
     // Plan events concern the account, not a convoy: handled whether or not a ride is active.
+    // 3.56: CAPABILITIES_CHANGED (the admin changed the access mode, or its scheduled change came):
+    // the same re-read of /membership/my, which carries the new capabilities.
     if (type == 'SUBSCRIPTION_ACTIVATED' ||
         type == 'SUBSCRIPTION_EXPIRING' ||
         type == 'SUBSCRIPTION_EXPIRED' ||
-        type == 'SUBSCRIPTION_REVOKED') {
+        type == 'SUBSCRIPTION_REVOKED' ||
+        type == 'CAPABILITIES_CHANGED') {
       _onSubscriptionEvent(type!, e);
       return;
     }
@@ -1201,6 +1209,7 @@ class ConvoyService extends ChangeNotifier {
         final msgs = List<GroupMessageModel>.from(convoy.messages)..add(msg);
         if (msgs.length > 300) msgs.removeRange(0, msgs.length - 300);
         _allConvoys[gid] = convoy.copyWith(messages: msgs);
+        _onIncomingChat(gid, msg); // 3.55 ride chat: spoken quick cards, text banner, unread badge
         break;
       case 'ALERT':
         if (convoy == null || e['alert'] is! Map) return;
@@ -1348,6 +1357,8 @@ class ConvoyService extends ChangeNotifier {
           featurePolicy: e['featurePolicy'] is Map ? RideFeaturePolicy.fromJson(e['featurePolicy']) : null,
           // The host's seats: raised at once when the host upgrades during the ride.
           capacity: (e['capacity'] as num?)?.toInt(),
+          // 3.56 access mode: the group features of this ride ('all' clears a limit).
+          groupFeatures: e.containsKey('groupFeatures') ? ConvoyModel.groupFeaturesFromWire(e['groupFeatures']) : convoy.groupFeatures,
           // 3.55 fix: automatic roles ride in CONFIG too (a missed AUTO_ROLES is corrected by the
           // next CONFIG; it decides whether a front rider has lead rights, see canEditRoute).
           autoRoles: e['autoRoles'] is bool ? e['autoRoles'] as bool : null,
@@ -1494,6 +1505,8 @@ class ConvoyService extends ChangeNotifier {
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
       _saveEndedTrip(convoy, _myUserId).ignore();
     }
+    // 3.55 ride chat: the ride's messages stay on the phone for the trip summary.
+    RideChatStore.archive(convoy.groupId, convoy.messages).ignore();
     _stopStatus();
     recorder?.stop().ignore();
     _syncTripsLater();
@@ -2593,6 +2606,152 @@ class ConvoyService extends ChangeNotifier {
     // Messages are a group feature: a solo ride (Community host) has nobody to message.
     if (_allConvoys[gid]?.isSoloRide == true) return;
     _enqueue('CHAT', {'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType, 'sentAt': _clock()}, targetGroupId: gid);
+  }
+
+  // ------------------------------------------------------------ 3.55 ride chat
+  // docs/features_355/ride_chat.md. Rules in lib/domain/ride/ride_chat.dart (pure).
+
+  final ChatUnread _chatUnread = ChatUnread();
+  Set<String> _chatHidden = <String>{};
+  List<String> _quickOrder = const [];
+  GroupMessageModel? _chatBanner;
+  Timer? _chatBannerClear;
+  String? _chatOpenGid;
+
+  /// True while the rider is moving (the cockpit sets it to its RideTapGate). Null: my speed.
+  bool Function()? rideMoving;
+
+  /// How long a text message banner stays.
+  static const Duration chatBannerFor = Duration(seconds: 8);
+
+  bool get _chatMovingNow {
+    final hook = rideMoving;
+    if (hook != null) return hook();
+    final me = activeConvoy?.riders[_myUserId];
+    return me != null && !RideChat.canTypeAt(speedKmh: me.speedKmh);
+  }
+
+  /// Typing is shown in the chat: stopped, or riding pillion (someone else rides). While moving
+  /// only the one-tap quick actions.
+  bool get chatCanType {
+    final me = activeConvoy?.riders[_myUserId];
+    if (me?.isCoRiding == true) return true;
+    return !_chatMovingNow;
+  }
+
+  Future<void> _loadChatPrefs() async {
+    try {
+      _quickOrder = await RideChatStore.loadOrder();
+      _chatHidden = {..._chatHidden, ...await RideChatStore.loadHidden()};
+      _chatUnread.load(await RideChatStore.loadSeen());
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// The quick actions in the rider's order.
+  List<RideQuickAction> get quickActions => RideChat.ordered(_quickOrder);
+
+  /// Saves a new quick action order (ids of [RideChat.actions]).
+  void setQuickActionOrder(List<String> ids) {
+    _quickOrder = [for (final a in RideChat.ordered(ids)) a.id];
+    RideChatStore.saveOrder(_quickOrder).ignore();
+    notifyListeners();
+  }
+
+  /// Riders whose chat messages are hidden on this phone.
+  Set<String> get chatHidden => Set.unmodifiable(_chatHidden);
+
+  void setChatHidden(String userId, bool hidden) {
+    if (userId.isEmpty || userId == _myUserId) return;
+    final next = {..._chatHidden};
+    hidden ? next.add(userId) : next.remove(userId);
+    _chatHidden = next;
+    RideChatStore.saveHidden(next).ignore();
+    if (hidden && _chatBanner?.authorId == userId) _chatBanner = null;
+    notifyListeners();
+  }
+
+  /// The ride's messages to show (hidden riders removed), oldest first.
+  List<GroupMessageModel> visibleMessages(String gid) =>
+      ChatRules.visible(_allConvoys[gid]?.messages ?? const <GroupMessageModel>[], (m) => m.authorId, _chatHidden);
+
+  /// Unread messages from others in [gid] (badge on the Chat button).
+  int unreadChat(String gid) {
+    if (_chatOpenGid == gid) return 0;
+    final uid = _myUserId ?? '';
+    return _chatUnread.count(gid, [for (final m in _allConvoys[gid]?.messages ?? const <GroupMessageModel>[]) m.toLine()], myUserId: uid, hidden: _chatHidden);
+  }
+
+  /// The chat sheet of [gid] is open (null: closed): everything there counts as read.
+  void setChatOpen(String? gid) {
+    if (_disposed) return;
+    final was = _chatOpenGid;
+    _chatOpenGid = gid;
+    final g = gid ?? was;
+    if (g != null) markChatSeen(g);
+    if (gid != null) _chatBanner = null;
+    notifyListeners();
+  }
+
+  void markChatSeen(String gid) {
+    final msgs = _allConvoys[gid]?.messages ?? const <GroupMessageModel>[];
+    final last = msgs.isEmpty ? 0 : msgs.map((m) => m.timestamp).reduce((a, b) => a > b ? a : b);
+    final before = _chatUnread.seenAt(gid);
+    _chatUnread.markSeen(gid, last);
+    if (_chatUnread.seenAt(gid) != before) RideChatStore.saveSeen(_chatUnread.toJson()).ignore();
+  }
+
+  /// The newest text message from another rider, for a banner (8 s; null when none).
+  GroupMessageModel? get chatBanner => _chatBanner;
+
+  void dismissChatBanner() {
+    _chatBannerClear?.cancel();
+    _chatBanner = null;
+    notifyListeners();
+  }
+
+  void _onIncomingChat(String gid, GroupMessageModel msg) {
+    if (gid != _activeGroupId) return;
+    // One notice per message, whichever way it arrives (socket echo, peer gateway, restore).
+    if (!NoticeDedupe.shared.firstTime('CHAT:${msg.messageId}')) return;
+    // Old messages replayed after a reconnect are not announced.
+    if (_clock() - msg.timestamp > const Duration(minutes: 2).inMilliseconds) return;
+    final notice = ChatRules.decide(msg.toLine(), myUserId: _myUserId ?? '', moving: _chatMovingNow, hidden: _chatHidden, emergency: _emergencyOpen);
+    if (notice.isNone) return;
+    final line = notice.speech;
+    if (line != null) _say(line, 'CHAT:${msg.messageId}');
+    if (notice.banner && _chatOpenGid != gid) {
+      _chatBanner = msg;
+      _chatBannerClear?.cancel();
+      _chatBannerClear = Timer(chatBannerFor, () {
+        _chatBanner = null;
+        notifyListeners();
+      });
+    }
+  }
+
+  /// Sends a quick action to the ride: "Wait for me" is a wait request (the gateway posts the chat
+  /// card), the others a chat line marked as a quick card. Both wait in the outbox without signal.
+  bool sendQuickAction(RideQuickAction a, {String? groupId}) {
+    final gid = groupId ?? _activeGroupId;
+    final me = gid == null ? null : _allConvoys[gid]?.riders[_myUserId];
+    if (gid == null || _myUserId == null) return false;
+    if (_allConvoys[gid]?.isSoloRide == true) return false;
+    if (a.isWait) {
+      if (gid != _activeGroupId) return false;
+      requestWait(me?.name ?? 'Rider');
+    } else {
+      sendGroupMessage(groupId: gid, senderId: _myUserId!, senderName: me?.name ?? 'Rider', text: a.text, isQuickCard: true, cardType: a.cardType);
+    }
+    return true;
+  }
+
+  /// Reports a chat message to the CoRoute team (gateway CHAT_REPORT, reviewed with the public
+  /// ride reports). Optionally hides the sender's messages on this phone too. False when offline.
+  bool reportChatMessage(GroupMessageModel m, {String reason = 'ABUSE', bool hide = false}) {
+    if (hide) setChatHidden(m.authorId, true);
+    if (!_rt.isConnected || _activeGroupId == null) return false;
+    return _rt.send({'type': 'CHAT_REPORT', 'messageId': m.messageId, 'reason': reason});
   }
 
   void requestWait(String requesterName) {
@@ -4180,6 +4339,7 @@ class ConvoyService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _chatBannerClear?.cancel();
     _lifecycle?.dispose();
     _configPending?.cancel(); // 3.55 fix
     _eventSub?.cancel();

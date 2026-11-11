@@ -7,7 +7,6 @@ import 'package:coroute_app/presentation/alerts/alerts_screen.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_planner_screen.dart';
 import 'package:coroute_app/presentation/trip_planner/route_stops_panel.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_review_sheet.dart';
-import 'package:coroute_app/presentation/trip_planner/offline_tile_verification_screen.dart';
 import 'package:coroute_app/presentation/trip/trip_feedback_sheet.dart';
 import 'ui_audit_helper.dart';
 
@@ -82,17 +81,7 @@ void main() {
       outputPath: '../docs/ui-audit/screenshots/04_trip_management/SCR-019_trip_review_sheet.png',
     );
 
-    // SCR-020: Offline Tile Verification Screen
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const OfflineTileVerificationScreen(
-        packName: 'Bangalore to Goa Route Pack',
-        routePoints: [(12.9716, 77.5946), (15.2993, 74.1240)],
-        showTileLayer: false,
-      ),
-      outputPath: '../docs/ui-audit/screenshots/04_trip_management/SCR-020_offline_tile_verification.png',
-    );
+    // SCR-020 (offline tile verification) removed Nov 11: offline maps are automatic.
 
     // SCR-021: Trip Feedback Sheet
     await renderAndSaveScreen(

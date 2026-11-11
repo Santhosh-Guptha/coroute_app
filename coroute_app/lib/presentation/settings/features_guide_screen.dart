@@ -7,8 +7,6 @@ import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../garage/garage_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../ride/fuel_sheet.dart';
-import '../subscription/membership_dashboard_screen.dart';
-import '../trip_planner/offline_map_manager_screen.dart';
 import 'feature_catalog.dart';
 import 'settings_screen.dart';
 
@@ -148,14 +146,10 @@ Future<void> openFeatureSettings(BuildContext context, SettingsTarget target) as
       push(const PermissionsScreen());
     case SettingsTarget.fuel:
       await showFuelSheet(context, configure: true);
-    case SettingsTarget.offlineMaps:
-      push(const OfflineMapManagerScreen());
     case SettingsTarget.garage:
       push(const GarageScreen());
-    case SettingsTarget.membership:
-      push(const MembershipDashboardScreen());
     case SettingsTarget.phoneCheck:
-      push(const PreRidePhoneCheckScreen(autoRun: false));
+      await PreRidePhoneCheckScreen.open(context);
     case SettingsTarget.profile:
       push(const EditProfileScreen());
   }

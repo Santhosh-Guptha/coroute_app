@@ -1049,6 +1049,14 @@ class SafetyService extends ChangeNotifier {
       _endRideStats();
       // The ride ended or changed: a route map still being saved is for the old route (no data after the ride).
       if (_rideActive) _tiles?.cancel();
+      // Automatic offline maps (Nov 11): the ended ride's map is kept 7 days, then deleted.
+      final ended = _groupId;
+      final hook = onTripEnded;
+      if (_rideActive && ended != null && hook != null) {
+        try {
+          hook(ended);
+        } catch (_) {}
+      }
       _groupId = gid;
       _rideActive = active;
       _resetRide();
@@ -1950,6 +1958,10 @@ class SafetyService extends ChangeNotifier {
   /// counts can be sent while the rider's setting allows it (set in main.dart).
   void Function()? onRideStatsEnded;
 
+  /// Called once when a ride this phone was in ends (or the phone switches to another ride), with
+  /// that ride's group id. main.dart starts the offline map retention time there.
+  void Function(String groupId)? onTripEnded;
+
   void _endRideStats() {
     if (_groupId == null || !_rideActive) return;
     final saved = _saveRideStats(endedAt: _now());
@@ -2149,7 +2161,7 @@ class SafetyService extends ChangeNotifier {
         return;
       }
       await prefs.setString(SafetyConstants.keyTilesPrefetchedFor, gid);
-      await t.start(route.points, label: convoy.name);
+      await t.start(route.points, label: convoy.name, tripId: gid);
     } catch (_) {}
   }
 

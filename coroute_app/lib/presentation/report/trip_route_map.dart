@@ -246,7 +246,7 @@ class TripRouteMapState extends State<TripRouteMap> {
         initialCameraFit: (initial == null && _bounds != null) ? CameraFit.bounds(bounds: _bounds!, padding: const EdgeInsets.all(48)) : null,
       ),
       children: [
-        appTileLayer(),
+        appTileLayer(pastTrip: true),
         PolylineLayer(polylines: [
           // The plan: only a faint dashed neutral line under the ridden routes (no solid casing,
           // so it can never be mistaken for a route somebody rode).

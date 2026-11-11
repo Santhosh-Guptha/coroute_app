@@ -54,7 +54,7 @@ void main() {
   group('ISSUE-6A: Automatic Offline Map Preparation & TileCache Enhancements', () {
     test('TileCache budget is configurable within 300 MB - 500 MB, defaulting to 400 MB', () async {
       final cache = await openCache();
-      expect(cache.maxBytesBudget, equals(400 * 1024 * 1024)); // Default 400 MB
+      expect(cache.maxBytesBudget, equals(300 * 1024 * 1024)); // Default 300 MB (automatic offline maps, Nov 11)
 
       // Configure budget within range
       cache.configureBudgetMb(350);

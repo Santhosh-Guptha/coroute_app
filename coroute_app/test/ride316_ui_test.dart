@@ -146,7 +146,7 @@ class _Prefetcher extends TilePrefetcher {
   @override
   String? get error => err;
   @override
-  Future<void> start(List<(double, double)> line, {required String label, bool highDetail = false}) async {
+  Future<void> start(List<(double, double)> line, {required String label, bool highDetail = false, String? tripId}) async {
     starts++;
   }
 }

@@ -11,6 +11,8 @@ import '../../core/ui/ui.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/social/username_rules.dart';
+import '../account/change_password_screen.dart';
+import '../account/edit_profile_screen.dart';
 import '../score/leaderboard_screen.dart';
 import '../score/rider_score_card.dart';
 import '../widgets/feature_switch.dart';
@@ -260,6 +262,28 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                       ),
                     ],
                   ],
+                  // Moved here from the Profile tab (Nov 11): the details editor and the password.
+                  const SizedBox(height: Space.s24),
+                  DsCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Column(
+                      children: [
+                        DsListRow(
+                          key: const Key('profile_edit_details'),
+                          icon: Icons.edit_rounded,
+                          label: 'Edit details',
+                          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const EditProfileScreen())),
+                        ),
+                        DsListRow(
+                          key: const Key('profile_change_password'),
+                          icon: Icons.password_rounded,
+                          label: 'Change password',
+                          divider: false,
+                          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ChangePasswordScreen())),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),

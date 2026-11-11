@@ -95,7 +95,7 @@ void main() {
     expect(find.text('Stop Reason'), findsOneWidget);
     expect(find.text('320 km range'), findsOneWidget);
     expect(find.textContaining('Messages'), findsOneWidget);
-    expect(find.text('Safety Health'), findsOneWidget);
+    expect(find.text('Safety health'), findsOneWidget);
     expect(find.text('All systems active'), findsOneWidget);
 
     // Verify taps
@@ -114,7 +114,7 @@ void main() {
     await tester.tap(find.textContaining('Messages'));
     expect(messagesTapped, isTrue);
 
-    await tester.tap(find.text('Safety Health'));
+    await tester.tap(find.text('Safety health'));
     expect(safetyTapped, isTrue);
   });
 

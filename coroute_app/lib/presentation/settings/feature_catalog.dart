@@ -50,16 +50,10 @@ enum SettingsTarget {
   /// Settings > Fuel (tank size and fuel left).
   fuel,
 
-  /// Offline map packs.
-  offlineMaps,
-
   /// Profile > Garage.
   garage,
 
-  /// Profile > Membership & Plans.
-  membership,
-
-  /// Settings > Phone check.
+  /// Settings > Safety health (the phone check).
   phoneCheck,
 
   /// Profile > Edit profile (name, bike, emergency contact, medical info).
@@ -350,12 +344,11 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.safety,
     icon: Icons.volunteer_activism_rounded,
     name: 'Nearby rider help',
-    what: 'In an accident, riders from other groups close by can be asked to help.',
-    when: 'Needs internet.',
+    what: 'In an accident, riders from other groups close by can be asked to help. You can be asked too.',
+    when: 'Always on. Needs internet.',
     battery: Impact.none,
     data: Impact.low,
     privacy: 'Name and bike shared only after a rider accepts. Never your phone number.',
-    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'report_down',
@@ -566,19 +559,18 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.maps,
     icon: Icons.download_for_offline_rounded,
     name: 'Offline maps',
-    what: 'Download the map along your route to use without signal.',
-    when: 'Download with internet. Use offline.',
+    what: 'The map along your route is saved when the ride starts. Kept 7 days after the trip, then deleted.',
+    when: 'Automatic. Not in data saver. Past trips use the online map.',
     battery: Impact.none,
-    data: Impact.high,
+    data: Impact.medium,
     privacy: 'Maps are saved on your phone.',
-    settings: SettingsTarget.offlineMaps,
   ),
   FeatureInfo(
     id: 'save_maps_wifi',
     group: FeatureGroup.maps,
     icon: Icons.wifi_rounded,
     name: 'Save maps on Wi-Fi',
-    what: 'Saves the route map before the ride (about 12 MB, kept 30 days).',
+    what: 'Saves the route map before the ride (about 12 MB, kept 7 days after the trip).',
     when: 'Automatic on Wi-Fi, not in data saver.',
     battery: Impact.low,
     data: Impact.none,
@@ -693,7 +685,7 @@ const List<FeatureInfo> featureCatalog = [
     id: 'phone_check',
     group: FeatureGroup.account,
     icon: Icons.phonelink_setup_rounded,
-    name: 'Phone check',
+    name: 'Safety health',
     what: 'Tests GPS, sensors and battery settings before a ride.',
     when: 'Any time. Works offline.',
     battery: Impact.none,
@@ -704,13 +696,13 @@ const List<FeatureInfo> featureCatalog = [
   FeatureInfo(
     id: 'report_problem',
     group: FeatureGroup.account,
-    icon: Icons.bug_report_rounded,
-    name: 'Report a problem',
-    what: 'Tell us what went wrong. We reply by e-mail.',
+    icon: Icons.chat_bubble_outline_rounded,
+    name: 'Send feedback',
+    what: 'Report a problem, suggest a safety feature or tell us anything. Profile › Help.',
     when: 'Needs internet.',
     battery: Impact.none,
     data: Impact.low,
-    privacy: 'Sends your e-mail, app version and phone type.',
+    privacy: 'Your e-mail only if you allow a reply. A diagnostics log only if you attach it.',
   ),
   FeatureInfo(
     id: 'delete_account',
@@ -735,7 +727,6 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'The app only reads your plan name, riders and end date.',
-    settings: SettingsTarget.membership,
   ),
   FeatureInfo(
     id: 'group_seats',
@@ -747,7 +738,6 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Seat holders see the plan name and owner.',
-    settings: SettingsTarget.membership,
   ),
   FeatureInfo(
     id: 'ride_safe_on_expiry',

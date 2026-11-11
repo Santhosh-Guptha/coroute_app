@@ -9,10 +9,11 @@ import '../safety/safety_settings_sheet.dart';
 
 /// "Riders helping riders": shown once before a ride until the rider
 /// answers (Continue), or at most [NetworkConstants.netConsentMaxPrompts]
-/// times when they tap Later (the defaults stay on meanwhile). Plain
-/// explanation and the two assistance switches (on). Continue saves them
-/// with the consent. Medical info has no switch: a rider who accepts sees it
-/// while the alert is open (owner decision, see ProfileForm.medicalShareNote).
+/// times when they tap Later. A plain explanation only: helping and being
+/// helped by nearby riders are always on since Nov 11 (owner decision,
+/// docs/SETTINGS_MINIMAL_v3.55.md), so there are no switches. Continue saves
+/// both on with the consent. Medical info has no switch: a rider who accepts
+/// sees it while the alert is open (see ProfileForm.medicalShareNote).
 class NetworkConsentSheet extends StatefulWidget {
   const NetworkConsentSheet({super.key});
 
@@ -24,6 +25,9 @@ class NetworkConsentSheet extends StatefulWidget {
   }
 
   static bool _isShowing = false;
+
+  /// Shown under the two lines (both are part of "Safety is always on").
+  static const String alwaysOnNote = 'Both are always on, like crash detection and SOS.';
 
   /// Shows the sheet when [due]. Never blocks the ride: always completes.
   static Future<void> maybeShow(BuildContext context) async {
@@ -49,25 +53,13 @@ class NetworkConsentSheet extends StatefulWidget {
 }
 
 class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
-  bool _help = true;
-  bool _ask = true;
   bool _busy = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final auth = Provider.of<AuthService?>(context, listen: false);
-    if (auth != null && auth.netLoaded) {
-      _help = auth.assistHelp;
-      _ask = auth.assistAsk;
-    }
-  }
 
   Future<void> _continue() async {
     final auth = Provider.of<AuthService?>(context, listen: false);
     final settings = Provider.of<SettingsService?>(context, listen: false);
     setState(() => _busy = true);
-    final ok = await (auth?.updateNetworkPrefs(assistHelp: _help, assistAsk: _ask, netConsent: true) ?? Future.value(false));
+    final ok = await (auth?.updateNetworkPrefs(assistHelp: true, assistAsk: true, netConsent: true) ?? Future.value(false));
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok) {
@@ -117,34 +109,19 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
                     ],
                   ),
                 ),
-                const SizedBox(height: Space.s8),
-                Text(
-                  'You can change this any time in Profile > Settings.',
-                  style: AppText.caption,
-                ),
                 const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
                     children: [
-                      SafetySwitch(
-                        icon: Icons.emergency_share_rounded,
-                        title: SafetyTexts.askTitle,
-                        subtitle: SafetyTexts.askExplain,
-                        value: _ask,
-                        onChanged: (v) => setState(() => _ask = v),
-                      ),
+                      _AlwaysOnLine(icon: Icons.emergency_share_rounded, title: SafetyTexts.askTitle, subtitle: SafetyTexts.askExplain),
                       Divider(color: AppTheme.border),
-                      SafetySwitch(
-                        icon: Icons.volunteer_activism_rounded,
-                        title: SafetyTexts.helpTitle,
-                        subtitle: SafetyTexts.helpExplain,
-                        value: _help,
-                        onChanged: (v) => setState(() => _help = v),
-                      ),
+                      _AlwaysOnLine(icon: Icons.volunteer_activism_rounded, title: SafetyTexts.helpTitle, subtitle: SafetyTexts.helpExplain),
                     ],
                   ),
                 ),
+                const SizedBox(height: Space.s8),
+                Text(NetworkConsentSheet.alwaysOnNote, style: AppText.caption),
               ],
             ),
           ),
@@ -160,6 +137,39 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
             style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
             child: const Text('Later'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One always-on line: icon, title, one short explanation and a check (no switch).
+class _AlwaysOnLine extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  const _AlwaysOnLine({required this.icon, required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 22, color: AppTheme.accentText),
+          const SizedBox(width: Space.s12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                Text(subtitle, style: AppText.caption),
+              ],
+            ),
+          ),
+          const SizedBox(width: Space.s8),
+          Icon(Icons.check_rounded, size: 20, color: AppTheme.accentText),
         ],
       ),
     );

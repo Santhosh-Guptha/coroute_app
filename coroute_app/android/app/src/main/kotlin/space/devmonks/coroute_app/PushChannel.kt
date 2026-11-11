@@ -65,12 +65,29 @@ object PushConfig {
     fun setNewsEnabled(context: Context, on: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_NEWS, on).apply()
     }
+
+    /**
+     * 3.56 push kinds (Dart push_kinds.dart): "update" is the News switch above; the others have their
+     * own switch. Partner perks are off until the rider turns them on; the rest default to on.
+     */
+    private val KINDS = setOf("event", "safety_tip", "community", "partner_perk")
+
+    fun isKindEnabled(context: Context, kind: String): Boolean {
+        if (kind == "update" || kind !in KINDS) return isNewsEnabled(context)
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("kind_$kind", kind != "partner_perk")
+    }
+
+    fun setKindEnabled(context: Context, kind: String, on: Boolean) {
+        if (kind !in KINDS) return
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("kind_$kind", on).apply()
+    }
 }
 
 /**
  * MethodChannel "coroute/push".
  *
  * Dart -> Android: isAvailable, getToken, deleteToken, setEnabled {on}, setNewsEnabled {on} (3.56),
+ * setKindEnabled {kind, on} (3.56 push kinds),
  * takeLaunchMessage, notificationsEnabled.
  * Android -> Dart (invokeMethod): onToken {token}, onMessage {data map} (app in front: no system
  * notification is shown), onMessageOpened {type, payload} (a push notification was tapped while
@@ -125,6 +142,11 @@ class PushChannel(activity: Activity, private val channel: MethodChannel) : Meth
             }
             "setNewsEnabled" -> {
                 PushConfig.setNewsEnabled(app, call.argument<Boolean>("on") != false)
+                result.success(null)
+            }
+            "setKindEnabled" -> {
+                val kind = call.argument<String>("kind") ?: ""
+                PushConfig.setKindEnabled(app, kind, call.argument<Boolean>("on") == true)
                 result.success(null)
             }
             "takeLaunchMessage" -> {

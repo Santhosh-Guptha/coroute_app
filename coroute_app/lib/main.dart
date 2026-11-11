@@ -55,6 +55,7 @@ import 'data/services/safety_service.dart';
 import 'data/services/solo_guardian_service.dart';
 import 'data/services/sos_battery_reserve.dart';
 import 'data/services/settings_service.dart';
+import 'data/services/offline_map_retention_service.dart';
 import 'data/services/tile_cache_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/public_ride_service.dart';
@@ -78,6 +79,7 @@ import 'data/services/group_safety_service.dart';
 import 'data/services/map_places_service.dart';
 import 'domain/notify/notification_snapshot.dart';
 import 'presentation/auth/access_gate_screen.dart';
+import 'presentation/trip_planner/share_in_opener.dart'; // 3.56 Share to CoRoute
 import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
 import 'presentation/splash/splash_screen.dart';
@@ -153,6 +155,8 @@ Future<void> _main() async {
   } catch (_) {
     TileCache.instance = null;
   }
+  // Saved trip maps past their time (7 days after the trip) or over 300 MB go; the rest are kept.
+  OfflineMapRetentionService.sweep().ignore();
   // Rider-only ride numbers (hard stops) older than 90 days go; nothing else to maintain.
   RideStatsStore.prune().ignore();
   // Install time for the store-rating prompt (never in the first days after install).
@@ -329,6 +333,8 @@ class CoRouteApp extends StatelessWidget {
             // 3.55 rider score: at ride end send the ride's counts (only while the rider's setting is on).
             final scoreApi = ctx.read<ApiClient>();
             safety.onRideStatsEnded = () => RiderScoreService.syncAfterRide(scoreApi);
+            // Automatic offline maps (Nov 11): kept 7 days after the trip, then deleted (300 MB cap).
+            safety.onTripEnded = (gid) => OfflineMapRetentionService.tripEnded(gid).ignore();
             return safety;
           },
         ),
@@ -412,7 +418,8 @@ class CoRouteApp extends StatelessWidget {
                   ))
               ..tone = (() => NativeVoiceEngine.alertTone().ignore())
               ..sirenSettingOn = (() => settings.sirenAlerts)
-              ..giveWaySide = (() => settings.giveWaySide == 'auto' ? SirenAcousticDetector.keepSideForCountry(country) : settings.giveWaySide)
+              // Give-way side is fixed to Automatic (Nov 11): from the phone's country.
+              ..giveWaySide = (() => SirenAcousticDetector.keepSideForCountry(country))
               ..intercomPlaying = (() => intercom.isReceiving)
               ..ownSpeechActive = (() => voice.priorityManager.isSpeaking)
               // Can the rider hear outside? Headset / music / call from the phone's audio state, no mic.
@@ -778,10 +785,13 @@ class _DeepLinkListener extends StatefulWidget {
 class _DeepLinkListenerState extends State<_DeepLinkListener> {
   final AppLinks _appLinks = AppLinks();
   StreamSubscription<Uri>? _sub;
+  // 3.56 "Share to CoRoute": a maps place shared from another app opens the planner.
+  late final ShareInOpener _shareIn = ShareInOpener(navigatorKey: appNavigatorKey, readContext: () => mounted ? context : null);
 
   @override
   void initState() {
     super.initState();
+    _shareIn.start();
     _appLinks.getInitialLink().then((uri) {
       if (uri != null) _handle(uri);
     }).catchError((_) {});
@@ -816,6 +826,7 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
   @override
   void dispose() {
     _sub?.cancel();
+    _shareIn.stop();
     super.dispose();
   }
 

@@ -188,6 +188,13 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
     notifyListeners();
   }
 
+  // 3.55 ride chat: the cockpit's moving hook and the Chat button's unread badge.
+  @override
+  bool Function()? rideMoving;
+
+  @override
+  int unreadChat(String gid) => 0;
+
   @override
   dynamic noSuchMethod(Invocation invocation) {
     if (invocation.isGetter) {

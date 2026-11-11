@@ -72,7 +72,8 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
   Widget build(BuildContext context) {
     final ic = context.watch<IntercomService?>();
     // 3.55 admin feature switch: group talk turned off for every rider.
-    if (ic == null || !context.featureOn('intercom')) return const SizedBox.shrink();
+    // 3.56: or not included in this ride (access mode "free up to limits").
+    if (ic == null || !context.featureOn('intercom') || !widget.convoy.allowsGroupFeature('intercom')) return const SizedBox.shrink();
 
     final tx = ic.isTransmitting;
     final rx = ic.isReceiving;

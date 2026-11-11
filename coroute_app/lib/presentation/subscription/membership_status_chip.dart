@@ -4,11 +4,11 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/membership_service.dart';
-import 'membership_dashboard_screen.dart';
 
 /// The rider's plan on the home screen: the plan name only ("Community", "Small Group",
-/// "Large Group"). Tap opens the read-only "Your plan" screen. Hidden when the gateway runs
-/// without plans. Play payments policy: no price, no buying words (play_payments_policy.md).
+/// "Large Group"). Not tappable: the app has no plan screen for riders any more (owner decision,
+/// Nov 11). Hidden when the gateway runs without plans. Play payments policy: no price, no buying
+/// words, no link (play_payments_policy.md).
 class MembershipStatusChip extends StatelessWidget {
   const MembershipStatusChip({super.key});
 
@@ -24,13 +24,9 @@ class MembershipStatusChip extends StatelessWidget {
     // A paid plan in the accent colour; Community (free) in the quiet text colour.
     final color = access.isPaid ? AppTheme.accentText : AppTheme.text2;
     return Semantics(
-      button: true,
       label: 'Your plan: $text',
-      child: GestureDetector(
+      child: KeyedSubtree(
         key: const Key('home_membership_status'),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const MembershipDashboardScreen()),
-        ),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
@@ -51,8 +47,6 @@ class MembershipStatusChip extends StatelessWidget {
                   style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded, size: 14, color: color.withValues(alpha: 0.7)),
             ],
           ),
         ),

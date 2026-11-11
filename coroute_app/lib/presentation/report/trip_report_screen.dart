@@ -1,3 +1,4 @@
+import '../ride/messages_sheet.dart' show RideChatHistory;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -634,6 +635,8 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
               const SizedBox(height: 10),
               _RodeWithCard(members: others, colors: _colors, allArrived: r.arrived >= r.memberCount, arrived: r.arrived, total: r.memberCount),
             ],
+            // 3.55 ride chat: the ride's messages stay visible after the ride (kept on this phone).
+            if (!widget.adminView && t.groupId.isNotEmpty) RideChatHistory(groupId: t.groupId, myUserId: myId ?? ''),
             const SizedBox(height: 20),
             _moreDetails(r, me, myId),
             // 3.55 ride safety report: my own phone's summary, never uploaded.

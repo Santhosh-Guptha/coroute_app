@@ -242,10 +242,11 @@ class SafetyConstants {
   static const double wearableImpactG = 6.0;
 
   // ---------------------------------------------------------------- map tiles (3.16)
-  /// Configurable offline tile cache budget range (300 MB to 500 MB, default 400 MB).
+  /// Configurable offline tile cache budget range (300 MB to 500 MB, default 300 MB since Nov 11:
+  /// the same cap as automatic trip maps, OfflineMapRetention.maxBytes). LRU by last use.
   static const int tileCacheMinBudgetBytes = 300 * 1024 * 1024;
   static const int tileCacheMaxBudgetBytes = 500 * 1024 * 1024;
-  static const int tileCacheMaxBytes = 400 * 1024 * 1024;
+  static const int tileCacheMaxBytes = 300 * 1024 * 1024;
   static const int tileMaxAgeDays = 30;
   static const List<int> prefetchZooms = [11, 12, 13, 14, 15, 16];
   static const List<int> prefetchZoomsHighDetail = [11, 12, 13, 14, 15, 16, 17];

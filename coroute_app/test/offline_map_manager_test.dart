@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -6,8 +5,6 @@ import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/data/local/saved_map_pack_store.dart';
 import 'package:coroute_app/data/models/saved_map_pack.dart';
 import 'package:coroute_app/data/services/tile_cache_service.dart';
-import 'package:coroute_app/presentation/trip_planner/offline_map_manager_screen.dart';
-import 'package:coroute_app/presentation/trip_planner/offline_tile_verification_screen.dart';
 
 List<(double, double)> testCorridor(int km) => [
       for (var i = 0; i <= km; i++) (17.385 + i * 0.009, 78.4867),
@@ -119,102 +116,6 @@ void main() {
 
       expect(tiles.length, lessThanOrEqualTo(SafetyConstants.prefetchMaxTilesHighDetail));
       expect(tiles.length, greaterThan(600)); // More than standard 600
-    });
-  });
-
-  group('OfflineTileVerificationScreen Widget Tests', () {
-    testWidgets('renders verification HUD, offline indicator, and zoom snap chips', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: OfflineTileVerificationScreen(
-            packName: 'Bangalore to Mysore',
-            routePoints: testCorridor(4),
-            highDetail: true,
-            showTileLayer: false,
-          ),
-        ),
-      );
-      await tester.pump();
-
-      expect(find.text('Bangalore to Mysore'), findsOneWidget);
-      expect(find.text('OFFLINE TILE VERIFICATION'), findsOneWidget);
-      expect(find.text('Z12 Overview'), findsOneWidget);
-      expect(find.text('Z14 Highways'), findsOneWidget);
-      expect(find.text('Z16 Streets'), findsOneWidget);
-      expect(find.text('Z17 Junctions'), findsOneWidget);
-      expect(find.text('Offline Storage Ready'), findsOneWidget);
-      expect(find.text('HIGH DETAIL'), findsOneWidget);
-
-      // Tap Z12 Overview
-      await tester.tap(find.text('Z12 Overview'));
-      await tester.pump();
-
-      expect(find.textContaining('Z 12.0'), findsOneWidget);
-      expect(find.text('Route area'), findsOneWidget);
-
-      // Tap Z17 Junctions
-      await tester.tap(find.text('Z17 Junctions'));
-      await tester.pump();
-
-      expect(find.textContaining('Z 17.0'), findsOneWidget);
-      expect(find.text('Junction turns, landmark POIs & buildings'), findsOneWidget);
-    });
-  });
-
-  group('OfflineMapManagerScreen Widget Tests', () {
-    testWidgets('renders storage gauge, empty state when no packs', (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: OfflineMapManagerScreen(initialPacks: []),
-        ),
-      );
-      await tester.pump();
-
-      expect(find.text('Offline map packs'), findsOneWidget);
-      expect(find.text('Local Map Cache Storage'), findsOneWidget);
-      expect(find.textContaining('of 400 MB used'), findsOneWidget);
-      expect(find.text('No offline maps yet'), findsOneWidget);
-    });
-
-    testWidgets('renders downloaded map packs with Verify and Delete actions', (tester) async {
-      final pack = SavedMapPack(
-        id: 'pack_nandi',
-        name: 'Nandi Hills Sunrise Run',
-        downloadedAt: DateTime.now(),
-        highDetail: true,
-        zooms: const [12, 14, 16, 17],
-        tileCount: 480,
-        estimatedBytes: 12 * 1024 * 1024,
-        polyline: testCorridor(4),
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: OfflineMapManagerScreen(initialPacks: [pack]),
-        ),
-      );
-      await tester.pump();
-
-      expect(find.text('Nandi Hills Sunrise Run'), findsOneWidget);
-      expect(find.text('HIGH DETAIL'), findsOneWidget);
-      expect(find.textContaining('about 12.0 MB'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Check offline'), findsOneWidget);
-      expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
-
-      // Tap Verify Offline -> navigates to OfflineTileVerificationScreen
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Check offline'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-
-      expect(find.byType(OfflineTileVerificationScreen), findsOneWidget);
-      expect(find.text('Nandi Hills Sunrise Run'), findsWidgets);
-
-      // Return
-      await tester.tap(find.text('Return to Trip Planner'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-
-      expect(find.byType(OfflineMapManagerScreen), findsOneWidget);
     });
   });
 }

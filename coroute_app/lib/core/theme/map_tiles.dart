@@ -30,7 +30,10 @@ Widget softDarkTileBuilder(BuildContext context, Widget tileWidget, TileImage ti
 /// The tile source every map uses (3.16): tiles saved on the phone first, the
 /// network after, both with the app's User-Agent. Plain network when the cache
 /// could not be opened. Backed by shared HTTP client to prevent client disposal crashes.
-TileProvider appTileProvider() {
+///
+/// [pastTrip] (trip report, replay, trip history map; Nov 11): the online map first with nothing
+/// saved, and any saved tile only when offline. Past trips never download an offline map.
+TileProvider appTileProvider({bool pastTrip = false}) {
   final cache = TileCache.instance;
   if (cache == null) {
     return NetworkTileProvider(
@@ -38,17 +41,17 @@ TileProvider appTileProvider() {
       httpClient: TileCache.sharedHttpClient,
     );
   }
-  return CachedTileProvider(cache: cache, client: TileCache.sharedHttpClient);
+  return CachedTileProvider(cache: cache, client: TileCache.sharedHttpClient, pastTrip: pastTrip);
 }
 
 /// The OSM tile layer for every map: theme-aware tiles through [appTileProvider].
 /// [panBuffer] 0 under data saver (no extra ring of tiles around the screen).
 /// [keepBuffer] retains intermediate zoom levels in memory during zoom transitions.
-TileLayer appTileLayer({int panBuffer = 1, int keepBuffer = 3}) => TileLayer(
+TileLayer appTileLayer({int panBuffer = 1, int keepBuffer = 3, bool pastTrip = false}) => TileLayer(
       tileBuilder: mapTileBuilder,
       urlTemplate: AppConstants.osmTileUrl,
       userAgentPackageName: AppConstants.osmUserAgent,
-      tileProvider: appTileProvider(),
+      tileProvider: appTileProvider(pastTrip: pastTrip),
       panBuffer: panBuffer,
       keepBuffer: keepBuffer,
       minZoom: 2.0,

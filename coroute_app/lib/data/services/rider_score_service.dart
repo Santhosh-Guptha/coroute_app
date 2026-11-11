@@ -7,11 +7,14 @@ import 'api_client.dart';
 
 /// 3.55 rider score + leaderboard (docs/features_355/rider_score.md).
 ///
-/// Reads GET /me/score, GET /public/leaderboard and GET /me/leaderboard, and (only while the rider's
-/// setting "Use my ride safety report for my rider score" is on, default on) sends each finished
+/// Reads GET /me/score, GET /public/leaderboard and GET /me/leaderboard, and sends each finished
 /// ride's counts from the private ride safety report: hard brakes, breaks, highest tiredness, break
 /// reminders and minutes over the limit. Counts only, never a position, time, speed or track. The
-/// report itself stays on the phone. Switching the setting off also deletes the counts already sent.
+/// report itself stays on the phone.
+///
+/// "Use my safety report in my score" is always on since Nov 11 (owner decision, settings migration
+/// v2): it has no switch. A rider who had turned it off is moved on by [adoptAlwaysOn], and rides that
+/// ended before that moment are never sent ([prefsSendFrom]).
 ///
 /// Created where it is used (the score screen / card); no global provider is needed.
 class RiderScoreService extends ChangeNotifier {
@@ -21,6 +24,10 @@ class RiderScoreService extends ChangeNotifier {
 
   static const String prefsUseReport = 'coroute_rider_score_use_report_v1';
   static const String prefsSent = 'coroute_rider_score_sent_v1';
+
+  /// Rides that ended before this time (epoch ms) are never sent: set when a rider who had the
+  /// report switched off is moved to always on, so rides recorded while it was off stay private.
+  static const String prefsSendFrom = 'coroute_rider_score_send_from_v1';
   static const int _sentMax = 200;
   static const int _sendWithinDays = 30;
 
@@ -42,38 +49,32 @@ class RiderScoreService extends ChangeNotifier {
     super.dispose();
   }
 
+  /// Always on (Nov 11). Kept so callers keep working.
   Future<void> loadSetting() async {
-    try {
-      final p = await SharedPreferences.getInstance();
-      useSafetyReport = p.getBool(prefsUseReport) ?? true;
-    } catch (_) {
-      useSafetyReport = true;
-    }
+    useSafetyReport = true;
     _notify();
   }
 
-  /// Turns the setting on or off. Off: the counts already sent are deleted on the server.
+  /// Always on (Nov 11): "off" is ignored. "On" sends what is pending and reloads the score.
   Future<void> setUseSafetyReport(bool on) async {
-    useSafetyReport = on;
+    if (!on) return;
+    useSafetyReport = true;
     _notify();
-    try {
-      final p = await SharedPreferences.getInstance();
-      await p.setBool(prefsUseReport, on);
-      if (!on) await p.remove(prefsSent); // switched back on later: rides are sent again
-    } catch (_) {}
-    if (on) {
-      await syncPhoneCounts();
-    } else {
-      try {
-        await _api.delete('/me/score/phone');
-      } catch (e) {
-        debugPrint('rider score note: ${e.runtimeType}');
-      }
-    }
+    await syncPhoneCounts();
     await loadScore();
   }
 
-  /// Sends the counts of finished rides not sent yet (only while the setting is on). Safe to call often.
+  /// Settings migration v2 (SettingsService): fixes the report on. When the rider had switched it
+  /// off, rides that ended before now are marked as never to send ([prefsSendFrom]). Pure storage.
+  static Future<void> adoptAlwaysOn(SharedPreferences p, {int? nowMs}) async {
+    final wasOff = p.getBool(prefsUseReport) == false;
+    if (wasOff && !p.containsKey(prefsSendFrom)) {
+      await p.setInt(prefsSendFrom, nowMs ?? DateTime.now().millisecondsSinceEpoch);
+    }
+    await p.setBool(prefsUseReport, true);
+  }
+
+  /// Sends the counts of finished rides not sent yet. Safe to call often.
   Future<int> syncPhoneCounts({int? nowMs}) async {
     if (!_api.hasToken) return 0;
     SharedPreferences p;
@@ -82,12 +83,12 @@ class RiderScoreService extends ChangeNotifier {
     } catch (_) {
       return 0;
     }
-    if (!(p.getBool(prefsUseReport) ?? true)) return 0;
+    final sendFrom = p.getInt(prefsSendFrom) ?? 0;
     final sent = (p.getStringList(prefsSent) ?? const <String>[]).toList();
     final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
     var n = 0;
     for (final s in await RideStatsStore.loadAll()) {
-      if (s.endedAt <= 0 || !s.groupId.startsWith('GRP-') || sent.contains(s.groupId)) continue;
+      if (s.endedAt <= 0 || s.endedAt < sendFrom || !s.groupId.startsWith('GRP-') || sent.contains(s.groupId)) continue;
       if (now - s.endedAt > _sendWithinDays * 86400000) continue;
       final sf = s.safety;
       try {
@@ -121,7 +122,7 @@ class RiderScoreService extends ChangeNotifier {
   }
 
   /// 3.55: fire-and-forget at ride end (wired in main.dart via SafetyService.onRideStatsEnded).
-  /// Respects the setting (syncPhoneCounts returns early when it is off); never throws.
+  /// Never sends rides from before [prefsSendFrom]; never throws.
   static Future<void> syncAfterRide(ApiClient api) async {
     final svc = RiderScoreService(api);
     try {

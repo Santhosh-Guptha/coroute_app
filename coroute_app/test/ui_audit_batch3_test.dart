@@ -10,7 +10,6 @@ import 'package:coroute_app/presentation/ride/rider_card_sheet.dart';
 import 'package:coroute_app/presentation/ride/group_settings_sheet.dart';
 import 'package:coroute_app/presentation/timeline/live_timeline_screen.dart';
 import 'package:coroute_app/presentation/map_picker/map_picker_screen.dart';
-import 'package:coroute_app/presentation/trip_planner/offline_map_manager_screen.dart';
 import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
 import 'package:coroute_app/presentation/ride/messages_sheet.dart';
 import 'ui_audit_helper.dart';
@@ -328,13 +327,7 @@ void main() {
       outputPath: '../docs/ui-audit/screenshots/07_maps_navigation/SCR-035_map_picker_screen.png',
     );
 
-    // SCR-037: Offline Map Manager Screen
-    await renderAndSaveScreen(
-      tester: tester,
-      env: env,
-      widget: const OfflineMapManagerScreen(),
-      outputPath: '../docs/ui-audit/screenshots/07_maps_navigation/SCR-037_offline_map_manager.png',
-    );
+    // SCR-037 (offline map manager) removed Nov 11: offline maps are automatic.
 
     // SCR-041: Intercom Options Sheet
     await renderAndSaveScreen(

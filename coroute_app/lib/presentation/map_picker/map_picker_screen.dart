@@ -13,7 +13,7 @@ import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/geo_service.dart';
-import '../../domain/tracking/coordinate_parser.dart';
+import '../../domain/geo/map_link_parser.dart';
 
 /// The stop category code sent to the gateway for a [StopKind].
 ///
@@ -125,13 +125,16 @@ class MapPickerScreen extends StatefulWidget {
   final bool forStop;
   final String confirmLabel;
 
-  const MapPickerScreen({super.key, required this.title, this.initial, this.forStop = false, this.confirmLabel = 'Use this place'});
+  /// 3.56: text to put in the search box at once (a map link shared to CoRoute).
+  final String? initialQuery;
+
+  const MapPickerScreen({super.key, required this.title, this.initial, this.forStop = false, this.confirmLabel = 'Use this place', this.initialQuery});
 
   /// Opens the picker and returns the chosen place.
-  static Future<PickedPlace?> pick(BuildContext context, {required String title, PickedPlace? initial, bool forStop = false, String confirmLabel = 'Use this place'}) {
+  static Future<PickedPlace?> pick(BuildContext context, {required String title, PickedPlace? initial, bool forStop = false, String confirmLabel = 'Use this place', String? initialQuery}) {
     return Navigator.push<PickedPlace>(
       context,
-      MaterialPageRoute(builder: (_) => MapPickerScreen(title: title, initial: initial, forStop: forStop, confirmLabel: confirmLabel)),
+      MaterialPageRoute(builder: (_) => MapPickerScreen(title: title, initial: initial, forStop: forStop, confirmLabel: confirmLabel, initialQuery: initialQuery)),
     );
   }
 
@@ -148,9 +151,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   Timer? _searchDebounce;
   Timer? _reverseDebounce;
   List<PlaceResult> _results = [];
-  (double, double)? _parsedCoord;
   List<PickedPlace> _recent = const [];
   bool _searching = false;
+  // 3.56 search states: every new text bumps [_searchSeq], so an older, slower answer is dropped.
+  int _searchSeq = 0;
+  String? _searchError;
+  String _lastQuery = '';
+  bool _searchedEverywhere = false;
+  _PastedPlace? _pasted;
   bool _naming = false;
   bool _nameEdited = false;
   late LatLng _center;
@@ -176,6 +184,13 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     RecentPlaces.load().then((r) {
       if (mounted) setState(() => _recent = r);
     });
+    final shared = widget.initialQuery?.trim();
+    if (shared != null && shared.isNotEmpty) {
+      _search.text = shared.length > 2000 ? shared.substring(0, 2000) : shared;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onSearchChanged(_search.text);
+      });
+    }
   }
 
   @override
@@ -238,29 +253,105 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     });
   }
 
+  static const Duration _searchDelay = Duration(milliseconds: 350);
+
+  /// Every keystroke: a pasted map link or coordinates show a "Pasted location" row at
+  /// once; text is searched 350 ms after the last key, and only the newest answer counts.
   void _onSearchChanged(String q) {
     _searchDebounce?.cancel();
+    final seq = ++_searchSeq;
     final trimmed = q.trim();
-    final parsed = CoordinateParser.tryParse(trimmed);
+    final link = MapLinkParser.parse(trimmed);
     setState(() {
-      _parsedCoord = parsed;
+      _searchError = null;
+      _searchedEverywhere = false;
+      _searching = false;
+      _pasted = null;
     });
 
-    if (trimmed.length < 3) {
+    if (link != null && link.hasPoint) {
+      final p = _PastedPlace(lat: link.lat!, lng: link.lng!, name: link.name, precise: link.precise, naming: link.name == null);
+      setState(() {
+        _results = [];
+        _pasted = p;
+      });
+      if (link.name == null) {
+        _searchDebounce = Timer(_searchDelay, () async {
+          final n = await _geo.reverse(p.lat, p.lng);
+          if (!mounted || seq != _searchSeq) return;
+          setState(() => _pasted = p.named(n));
+        });
+      }
+      return;
+    }
+    if (link != null && link.needsExpansion) {
+      setState(() {
+        _results = [];
+        _pasted = const _PastedPlace.resolving();
+      });
+      _searchDebounce = Timer(_searchDelay, () => _resolveLink(trimmed, seq));
+      return;
+    }
+    // A link that only names a place (?q=Nandi+Hills): search for the name.
+    final text = (link != null && link.query != null) ? link.query! : trimmed;
+    if (text.length < 3) {
       setState(() => _results = []);
       return;
     }
+    _searchDebounce = Timer(_searchDelay, () => _runSearch(text, seq));
+  }
 
-    _searchDebounce = Timer(const Duration(milliseconds: 600), () async {
-      if (!mounted) return;
-      setState(() => _searching = true);
-      final r = await _geo.search(trimmed, nearLat: _center.latitude, nearLng: _center.longitude);
-      if (!mounted) return;
-      setState(() {
-        _searching = false;
-        _results = r;
-      });
+  Future<void> _runSearch(String text, int seq, {bool everywhere = false}) async {
+    if (!mounted) return;
+    setState(() {
+      _searching = true;
+      _searchError = null;
+      _lastQuery = text;
+      _searchedEverywhere = everywhere;
     });
+    final out = await _geo.searchPlaces(text, nearLat: _center.latitude, nearLng: _center.longitude, everywhere: everywhere);
+    if (!mounted || seq != _searchSeq) return; // the rider typed on: a newer search owns the list
+    setState(() {
+      _searching = false;
+      _results = out.results;
+      _searchError = out.error;
+    });
+  }
+
+  Future<void> _resolveLink(String text, int seq) async {
+    if (!mounted) return;
+    setState(() => _searching = true);
+    final r = await _geo.resolveLink(text, nearLat: _center.latitude, nearLng: _center.longitude);
+    if (!mounted || seq != _searchSeq) return;
+    setState(() {
+      _searching = false;
+      final place = r.place;
+      if (place != null) {
+        final hasName = place.name.isNotEmpty && !RegExp(r'^-?\d+\.\d+, -?\d+\.\d+$').hasMatch(place.name);
+        _pasted = _PastedPlace(lat: place.lat, lng: place.lng, name: hasName ? place.name : null, precise: r.precise, naming: false);
+        _results = [];
+      } else if (r.error != null) {
+        _pasted = null;
+        _searchError = r.error;
+        _lastQuery = '';
+      } else {
+        _pasted = null;
+        _lastQuery = r.query ?? '';
+        _results = r.results;
+      }
+    });
+  }
+
+  /// Retry after an error: the same text again (a link is resolved again).
+  void _retrySearch() {
+    final text = _search.text;
+    _onSearchChanged(text);
+  }
+
+  void _searchEverywhere() {
+    if (_lastQuery.length < 3) return;
+    _searchDebounce?.cancel();
+    _runSearch(_lastQuery, ++_searchSeq, everywhere: true);
   }
 
   Future<void> _pasteCoordinates() async {
@@ -275,22 +366,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         }
         return;
       }
-      final parsed = CoordinateParser.tryParse(text);
-      if (parsed != null) {
-        final lat = parsed.$1;
-        final lng = parsed.$2;
-        _search.text = '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';
-        _choose(LatLng(lat, lng), 'Location (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Pinned coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}')),
-          );
-        }
-      } else {
-        _search.text = text;
-        _onSearchChanged(text);
-        if (mounted) setState(() {});
-      }
+      final clipped = text.length > 2000 ? text.substring(0, 2000) : text;
+      _search.text = clipped;
+      _search.selection = TextSelection.collapsed(offset: clipped.length);
+      _onSearchChanged(clipped);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -302,9 +381,13 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
 
   void _choose(LatLng p, String name) {
     FocusScope.of(context).unfocus();
+    _searchDebounce?.cancel();
+    _searchSeq++;
     setState(() {
       _results = [];
-      _parsedCoord = null;
+      _pasted = null;
+      _searching = false;
+      _searchError = null;
     });
     _moveTo(p, zoom: 15, name: name);
   }
@@ -409,37 +492,35 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _searchField(),
-                  if (_parsedCoord != null || _results.isNotEmpty)
+                  if (_pasted != null || _results.isNotEmpty)
                     _resultList([
-                      if (_parsedCoord != null)
-                        _ResultRow(
-                          icon: Icons.my_location_rounded,
-                          title: 'Jump to coordinates',
-                          subtitle: '${_parsedCoord!.$1.toStringAsFixed(6)}, ${_parsedCoord!.$2.toStringAsFixed(6)}',
-                          onTap: () => _choose(
-                            LatLng(_parsedCoord!.$1, _parsedCoord!.$2),
-                            'Location (${_parsedCoord!.$1.toStringAsFixed(4)}, ${_parsedCoord!.$2.toStringAsFixed(4)})',
-                          ),
-                        ),
+                      if (_pasted != null) _pastedRow(_pasted!),
                       for (final r in _results)
                         _ResultRow(
                           icon: Icons.place_rounded,
                           title: r.name,
-                          subtitle: r.displayName,
+                          subtitle: _resultSubtitle(r),
                           onTap: () => _choose(LatLng(r.lat, r.lng), r.name),
                         ),
                     ])
-                  else if (_search.text.trim().length >= 3 && !_searching && _results.isEmpty && _parsedCoord == null)
+                  else if (_searchError != null && !_searching)
                     _resultList([
-                      Padding(
-                        padding: const EdgeInsets.all(Space.s16),
-                        child: Center(
-                          child: Text(
-                            'No matching places found. Try a town name.',
-                            style: AppText.caption,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
+                      _MessageRow(
+                        icon: Icons.cloud_off_rounded,
+                        text: _searchError!,
+                        actionLabel: 'Retry',
+                        onAction: _retrySearch,
+                      ),
+                    ])
+                  else if (_search.text.trim().length >= 3 && !_searching && _lastQuery.isNotEmpty && _searchDebounce?.isActive != true)
+                    _resultList([
+                      _MessageRow(
+                        icon: Icons.search_off_rounded,
+                        text: _searchedEverywhere
+                            ? 'No matching places found. Try a town or landmark name, or paste a map link.'
+                            : 'No matching places found in India. Try a town name, or search everywhere.',
+                        actionLabel: _searchedEverywhere ? null : 'Search everywhere',
+                        onAction: _searchedEverywhere ? null : _searchEverywhere,
                       ),
                     ])
                   else if (showRecent)
@@ -490,18 +571,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           style: AppText.body,
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
-            hintText: 'Search place, town or coordinates',
+            hintText: 'Search a place, or paste a map link',
             hintStyle: AppText.body.copyWith(color: AppTheme.muted),
             prefixIcon: Icon(Icons.search_rounded, color: AppTheme.accentText),
             suffixIcon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: 'Paste coordinates or text',
+                  tooltip: 'Paste a map link, coordinates or text',
                   icon: Icon(Icons.content_paste_rounded, color: AppTheme.accentText, size: 20),
                   onPressed: _pasteCoordinates,
                 ),
-                if (_searching)
+                if (_searching || _searchDebounce?.isActive == true && _search.text.trim().length >= 3)
                   Padding(
                     padding: const EdgeInsets.only(right: 12),
                     child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText)),
@@ -510,11 +591,17 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                   IconButton(
                     tooltip: 'Clear search',
                     icon: Icon(Icons.close_rounded, color: AppTheme.muted),
-                    onPressed: () => setState(() {
-                      _search.clear();
-                      _results = [];
-                      _parsedCoord = null;
-                    }),
+                    onPressed: () {
+                      _searchDebounce?.cancel();
+                      _searchSeq++;
+                      setState(() {
+                        _search.clear();
+                        _results = [];
+                        _pasted = null;
+                        _searchError = null;
+                        _lastQuery = '';
+                      });
+                    },
                   ),
               ],
             ),
@@ -528,6 +615,31 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       ),
     );
   }
+
+  String _resultSubtitle(PlaceResult r) {
+    final d = placeDistanceLabel(r.distanceM);
+    final parts = [if (r.displayName.isNotEmpty && r.displayName != r.name) r.displayName, if (d.isNotEmpty) '$d away'];
+    return parts.join(' · ');
+  }
+
+  Widget _pastedRow(_PastedPlace p) {
+    if (p.resolving) {
+      return const _ResultRow(icon: Icons.link_rounded, title: 'Pasted link', subtitle: 'Opening the map link...', onTap: _noop);
+    }
+    final coords = '${p.lat.toStringAsFixed(5)}, ${p.lng.toStringAsFixed(5)}';
+    final name = p.name;
+    final subtitle = p.naming
+        ? 'Finding the place name... · $coords'
+        : [if (name != null && name.isNotEmpty) name, coords, if (!p.precise) 'map view centre, check the pin'].join(' · ');
+    return _ResultRow(
+      icon: Icons.push_pin_rounded,
+      title: 'Pasted location',
+      subtitle: subtitle,
+      onTap: () => _choose(LatLng(p.lat, p.lng), (name != null && name.isNotEmpty) ? name : 'Location ($coords)'),
+    );
+  }
+
+  static void _noop() {}
 
   Widget _resultList(List<Widget> rows) {
     return Container(
@@ -664,6 +776,56 @@ class _ResultRow extends StatelessWidget {
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
       subtitle: sub == null || sub.isEmpty ? null : Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
       onTap: onTap,
+    );
+  }
+}
+
+/// The place read from a pasted map link or coordinates (shown above the results).
+class _PastedPlace {
+  final double lat;
+  final double lng;
+  final String? name;
+  final bool precise;
+
+  /// The name is being looked up (reverse geocoding).
+  final bool naming;
+
+  /// A short link is being opened by the gateway.
+  final bool resolving;
+
+  const _PastedPlace({required this.lat, required this.lng, this.name, this.precise = true, this.naming = false}) : resolving = false;
+  const _PastedPlace.resolving()
+      : lat = 0,
+        lng = 0,
+        name = null,
+        precise = true,
+        naming = false,
+        resolving = true;
+
+  _PastedPlace named(String? n) => _PastedPlace(lat: lat, lng: lng, name: n ?? name, precise: precise);
+}
+
+/// An empty or error state in the result list, with an optional action (Retry, Search everywhere).
+class _MessageRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _MessageRow({required this.icon, required this.text, this.actionLabel, this.onAction});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s8, Space.s12),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.muted, size: 20),
+          const SizedBox(width: Space.s12),
+          Expanded(child: Text(text, style: AppText.caption)),
+          if (actionLabel != null && onAction != null) TextButton(onPressed: onAction, child: Text(actionLabel!)),
+        ],
+      ),
     );
   }
 }

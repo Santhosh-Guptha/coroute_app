@@ -321,7 +321,7 @@ class GloveQuickActionGrid extends StatelessWidget {
               child: GloveActionTile(
                 icon: Icons.shield_rounded,
                 iconColor: isSafetyHealthy ? AppTheme.accentText : AppTheme.warnText,
-                title: 'Safety Health',
+                title: 'Safety health',
                 subtitle: isSafetyHealthy ? 'All systems active' : 'Check status',
                 onTap: onOpenSafetyStatus,
                 badgeText: isSafetyHealthy ? 'OK' : 'CHECK',
@@ -538,6 +538,9 @@ class SecondaryManagementGroup extends StatelessWidget {
   final VoidCallback onOpenGroupSettings;
   final VoidCallback onOpenGuardian;
   final VoidCallback onOpenSafetyStatus;
+
+  /// Opens Settings from the "Settings" row. Older callers pass only [onOpenSafetyStatus] (used then).
+  final VoidCallback? onOpenSettings;
   final VoidCallback? onShareEta;
   final String? etaSubtitle;
   final bool isSolo;
@@ -554,6 +557,7 @@ class SecondaryManagementGroup extends StatelessWidget {
     required this.onOpenGroupSettings,
     required this.onOpenGuardian,
     required this.onOpenSafetyStatus,
+    this.onOpenSettings,
     this.onShareEta,
     this.etaSubtitle,
     this.isSolo = false,
@@ -613,7 +617,7 @@ class SecondaryManagementGroup extends StatelessWidget {
             iconColor: AppTheme.brand,
             title: 'Settings',
             subtitle: 'Safety, voice, map and privacy',
-            onTap: onOpenSafetyStatus,
+            onTap: onOpenSettings ?? onOpenSafetyStatus,
           ),
           if (onShareEta != null) ...[
             const Divider(height: 1),

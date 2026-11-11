@@ -89,6 +89,7 @@ import '../../domain/places/place_dwell.dart';
 import '../map_places/place_chips.dart';
 import '../ride/meet_here_sheet.dart';
 import '../ride/messages_sheet.dart';
+import '../../domain/navigation/nav_handoff.dart';
 import '../ride/report_down_sheet.dart';
 import '../ride/ride_sheet.dart';
 import '../ride/rider_card_sheet.dart';
@@ -132,6 +133,7 @@ import 'widgets/cockpit_dual_state_banner.dart';
 import 'widgets/cockpit_permission_warning_banner.dart';
 import 'widgets/rider_management_sheet.dart';
 import '../widgets/sheet_coordinator.dart';
+import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../data/services/group_safety_service.dart';
 import '../ride/group_safety_cards.dart';
@@ -593,6 +595,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       final s = context.read<ConvoyService>();
       _convoys = s;
       s.addListener(_onConvoyUpdate);
+      // 3.55 ride chat: long texts are not spoken and typing is hidden while moving (same gate).
+      s.rideMoving = _chatMoving;
       _onConvoyUpdate();
       try {
         _theme = Provider.of<ThemeController?>(context, listen: false);
@@ -784,6 +788,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         destination: dest,
         groupMembers: members,
         label: convoy.name,
+        tripId: convoy.groupId,
       ).ignore();
     }
   }
@@ -857,6 +862,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     _subscribedRoute = null;
     WidgetsBinding.instance.removeObserver(this);
     _convoys?.removeListener(_onConvoyUpdate);
+    if (_convoys?.rideMoving == _chatMoving) _convoys?.rideMoving = null;
     widget.focus?.removeListener(_onFocusRequest);
     _rideEssentials?.removeListener(_essentialsChanged);
     if (_guide.onFuelStopDone == _onFuelStopDone) _guide.onFuelStopDone = null;
@@ -1986,6 +1992,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
   // ------------------------------------------------------------- alert slot
 
+  /// 3.55 ride chat: moving per the cockpit's tap gate (8 km/h, 5 s stop hold).
+  bool _chatMoving() => _advice.tapGate.moving;
+
+  void _openChat(ConvoyModel convoy, RiderModel me) =>
+      _popup<void>('messages', () => showMessagesSheet(context, convoyId: convoy.groupId, me: me));
+
   List<_Slot> _slots({
     required ConvoyModel convoy,
     required ConvoyService service,
@@ -2224,6 +2236,24 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         },
         onDismiss: second == null ? null : () => context.read<SafetyService>().answerPrompt(p.key, primary: false),
         dismissible: !isOverspeed,
+      ));
+    }
+    // 3.55 ride chat: a text from another rider (8 s). Reply opens the chat (typing only when stopped).
+    final chat = service.chatBanner;
+    if (chat != null) {
+      out.add(_Slot(
+        key: 'CHAT:${chat.messageId}',
+        tier: AlertTier.normal,
+        priority: AlertPriority.social,
+        title: chat.senderName.isEmpty ? 'Message' : chat.senderName,
+        message: chat.text,
+        actionLabel: 'Open chat',
+        onAction: () {
+          service.dismissChatBanner();
+          _openChat(convoy, me);
+        },
+        onDismiss: service.dismissChatBanner,
+        dismissible: true,
       ));
     }
     final broadcast = service.systemBroadcastMessage;
@@ -2797,7 +2827,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         final recenterH = Space.s16 + textScaler.scale(18).clamp(18.0, 40.0).toDouble();
         // Zoom pair plus the map orientation (compass) button above it: 3 x 44 dp + 2 x 8.
         // Places button, orientation, zoom in, zoom out: 4 x 44 dp + 3 x 8.
-        const zoomH = 44.0 + 8.0 + 44.0 + 8.0 + 44.0 + 8.0 + 44.0;
+        // 3.55 ride chat: the always-visible Chat button (56 dp + 8) on top in a group ride.
+        final showChat = !convoy.isSoloRide && convoy.hasGroupFeatures;
+        final zoomH = 44.0 + 8.0 + 44.0 + 8.0 + 44.0 + 8.0 + 44.0 + (showChat ? RideChatButton.size + 8.0 : 0.0);
         _navSide = side;
         _navPanelW = panelW;
         _navTopReserve = topInset + topBarReserve;
@@ -3124,6 +3156,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (showChat) ...[
+                    RideChatButton(unread: service.unreadChat(convoy.groupId), onTap: () => _openChat(convoy, me)),
+                    const SizedBox(height: 8),
+                  ],
                   if (_placesFor(lowData) case final places?) ...[
                     PlacesMapButton(
                       service: places,
@@ -3420,7 +3456,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   ? rawAheadM
                   : (me.lat != 0 && me.lng != 0 ? GeoMath.haversine(me.lat, me.lng, nearestFuel.lat, nearestFuel.lng) : null))
               : null;
-          // "CHECK" when the sensors are missing or the rider turned crash detection off (tap opens Settings).
+          // "CHECK" when the sensors are missing or crash detection is off (tap opens the phone check).
           final crashOn = ctx.select<SettingsService?, bool>((s) => s?.crashDetection ?? true);
           final isSafetyHealthy = crashOn && !(safety?.isSensorUnavailable ?? false);
           // Prefer the next station that sells this bike's fuel, from the map places on the phone.
@@ -3438,9 +3474,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
             estimatedUsableKm: estimate,
             nearestFuelName: matchedFuel?.poi.displayName ?? nearestFuel?.name,
             nearestFuelAheadM: matchedFuel != null ? matchedFuel.distanceKm * 1000 : fuelAheadM,
-            onOpenMessages: () => _popup<void>('messages', () => showMessagesSheet(context, convoyId: convoy.groupId, me: me)),
+            onOpenMessages: () => _openChat(convoy, me),
             chatQueued: chatQueued,
-            onOpenSafetyStatus: () => _popup<void>('safety', () => SettingsScreen.open(context)),
+            // "Safety health" opens the phone check (permissions, battery, alerts, sensors), not Settings.
+            onOpenSafetyStatus: () => _popup<void>('safety', () => PreRidePhoneCheckScreen.open(context)),
             isSafetyHealthy: isSafetyHealthy,
             isSolo: convoy.isSolo,
             groupFeatures: convoy.hasGroupFeatures,
@@ -3486,7 +3523,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         onOpenAudioSettings: () => _popup<void>('intercom', () => IntercomOptions.show(context)),
         onOpenGroupSettings: () => _popup<void>('group', () => showGroupSettings(context, convoyId: convoy.groupId)),
         onOpenGuardian: () => _popup<void>('guardian', () => showGuardianSheet(context, groupId: convoy.groupId)),
-        onOpenSafetyStatus: () => _popup<void>('safety', () => SettingsScreen.open(context)),
+        onOpenSafetyStatus: () => _popup<void>('safety', () => PreRidePhoneCheckScreen.open(context)),
+        onOpenSettings: () => _popup<void>('settings', () => SettingsScreen.open(context)),
         onShareEta: hasDest ? () => _shareEta(convoy, snap.remainingM, snap.eta) : null,
         etaSubtitle: _etaShareSubtitle(snap),
         isSolo: convoy.isSolo,
@@ -3550,13 +3588,18 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
 
     _showHudToast('Navigating to $label', Icons.navigation_rounded, AppTheme.accentText);
+    // 3.55 hand-off to Google Maps / Mappls (Settings > Navigation app). The ride, intercom and
+    // safety keep running in the background; the ride notification brings the rider back.
     navigateTo(
       destLat,
       destLng,
       label: label,
       startLat: RideFacts.hasPosition(me) ? me.lat : null,
       startLng: RideFacts.hasPosition(me) ? me.lng : null,
-    );
+      twoWheeler: NavHandoff.isTwoWheeler(me.vehicleKind),
+    ).then((ok) {
+      if (!ok && mounted) _showHudToast('No navigation app found', Icons.navigation_outlined, AppTheme.warnText);
+    });
   }
 
   Future<void> _showOfflineExplainer(BuildContext context, ConvoyModel convoy, ConvoyService service) {

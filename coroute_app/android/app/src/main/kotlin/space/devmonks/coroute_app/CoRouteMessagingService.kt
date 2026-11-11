@@ -33,6 +33,13 @@ import javax.net.ssl.HttpsURLConnection
  * switch is off (PushConfig.isNewsEnabled), and a big picture when the data carries `imageUrl`:
  * https only, no redirects, 5 s timeouts, at most 1 MB, decoded downscaled; any problem falls back
  * to the text notification. The tap opens the `target` screen (Dart push_routing.dart).
+ *
+ * 3.56 push kinds (data `kind`, gateway push_campaigns.js KINDS; Dart lib/domain/notify/push_kinds.dart):
+ * update -> "News and updates" (coroute_news), event -> "Events" (coroute_events), safety_tip ->
+ * "Safety tips" (coroute_safety_tips), community -> "Community" (coroute_community), partner_perk ->
+ * "Partner perks" (coroute_partner_perks, off until the rider turns it on; labelled "Partner perk").
+ * A kind switched off in the app (PushConfig.isKindEnabled) is dropped, also in the foreground.
+ * A NEWS push without `kind` (older gateway) is an update. Every kind may carry a big picture.
  */
 class CoRouteMessagingService : FirebaseMessagingService() {
 
@@ -41,6 +48,11 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         private const val CHANNEL_RIDE_INVITES = "coroute_ride_invites"
         private const val CHANNEL_PLAN = "coroute_plan_reminders"
         private const val CHANNEL_NEWS = "coroute_news"
+        private const val CHANNEL_EVENTS = "coroute_events"
+        private const val CHANNEL_SAFETY_TIPS = "coroute_safety_tips"
+        private const val CHANNEL_COMMUNITY = "coroute_community"
+        private const val CHANNEL_PARTNER_PERKS = "coroute_partner_perks"
+        private const val MAX_PARTNER = 60
         private const val MAX_IMAGE_BYTES = 1024 * 1024
         private const val IMAGE_TIMEOUT_MS = 5000
         private const val IMAGE_DEADLINE_MS = 8000L
@@ -63,6 +75,7 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         if (!TYPE_RE.matches(type)) return
         if (!PushConfig.isEnabled(applicationContext)) return
         if (type == "NEWS" && !PushConfig.isNewsEnabled(applicationContext)) return
+        if (type == "NEWS" && !PushConfig.isKindEnabled(applicationContext, newsKind(data))) return
         val live = PushChannel.active
         if (PushChannel.foreground && live != null) {
             live.deliverForeground(data)
@@ -80,9 +93,16 @@ class CoRouteMessagingService : FirebaseMessagingService() {
 
         val rideInvite = type == "RIDE_INVITE"
         val news = type == "NEWS"
+        val kind = if (news) newsKind(data) else ""
         val channelId = when {
             rideInvite -> CHANNEL_RIDE_INVITES
-            news -> CHANNEL_NEWS
+            news -> when (kind) {
+                "event" -> CHANNEL_EVENTS
+                "safety_tip" -> CHANNEL_SAFETY_TIPS
+                "community" -> CHANNEL_COMMUNITY
+                "partner_perk" -> CHANNEL_PARTNER_PERKS
+                else -> CHANNEL_NEWS
+            }
             type.startsWith("SUBSCRIPTION") -> CHANNEL_PLAN
             else -> CHANNEL_SOCIAL
         }
@@ -118,6 +138,11 @@ class CoRouteMessagingService : FirebaseMessagingService() {
             Notification.BigPictureStyle().bigPicture(picture).setSummaryText(body)
         } else {
             Notification.BigTextStyle().bigText(body)
+        }
+        // A partner perk is always labelled as one ("Partner perk · Speed Garage").
+        if (kind == "partner_perk") {
+            val partner = (data["partner"] ?: "").trim().take(MAX_PARTNER)
+            builder.setSubText(if (partner.isEmpty()) "Partner perk" else "Partner perk · $partner")
         }
         builder.setSmallIcon(applicationInfo.icon)
             .setContentTitle(title)
@@ -197,6 +222,12 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
     }
 
+    /** The kind of an admin NEWS push; missing or unknown (older gateway) is "update". */
+    private fun newsKind(data: Map<String, String>): String {
+        val k = data["kind"] ?: return "update"
+        return if (k == "event" || k == "safety_tip" || k == "community" || k == "partner_perk") k else "update"
+    }
+
     /** One notification per thing (a later push about the same request / crew / ride replaces it). */
     private fun notificationId(type: String, data: Map<String, String>): Int {
         val ref = data["requestId"] ?: data["inviteId"] ?: data["pollId"] ?: data["crewId"] ?: data["groupId"] ?: data["campaignId"] ?: ""
@@ -215,6 +246,18 @@ class CoRouteMessagingService : FirebaseMessagingService() {
             }
             CHANNEL_NEWS -> NotificationChannel(id, "News and updates", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "New features and tips from CoRoute. Safety and ride alerts use other channels."
+            }
+            CHANNEL_EVENTS -> NotificationChannel(id, "Events", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Group rides, meet-ups and community events."
+            }
+            CHANNEL_SAFETY_TIPS -> NotificationChannel(id, "Safety tips", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Riding tips from CoRoute. SOS and crash alerts use other channels."
+            }
+            CHANNEL_COMMUNITY -> NotificationChannel(id, "Community", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Rider stories and community milestones."
+            }
+            CHANNEL_PARTNER_PERKS -> NotificationChannel(id, "Partner perks", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Perks for riders at partners CoRoute picked. Off unless you turn it on in the app."
             }
             else -> NotificationChannel(id, "Friends", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "Friend requests, crew invites and crew polls."

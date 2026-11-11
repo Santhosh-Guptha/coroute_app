@@ -93,6 +93,12 @@ class SafetyNative {
   /// Opens the system page "Allow full-screen notifications" for CoRoute (Android 14+) or app settings.
   static Future<bool> openFullScreenIntentSettings() => _bool('openFullScreenIntentSettings');
 
+  /// Opens CoRoute's own notification settings (Android 8+), else its app info page.
+  static Future<bool> openNotificationSettings() => _bool('openNotificationSettings');
+
+  /// Opens CoRoute's battery page ("Allow background usage"), else the battery optimisation list.
+  static Future<bool> openAppBatterySettings() => _bool('openAppBatterySettings');
+
   /// Opens the brand's autostart / battery page, or the app's settings page.
   static Future<bool> openOemBatterySettings() => _bool('openOemBatterySettings');
 

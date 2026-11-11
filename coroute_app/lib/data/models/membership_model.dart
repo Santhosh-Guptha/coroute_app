@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import '../../domain/membership/ride_capabilities.dart';
 
 /// One plan of the server catalog as the app shows it: name, riders and what it includes.
 /// Play payments policy (docs/features_355/play_payments_policy.md): the app never reads, keeps or
@@ -291,6 +292,10 @@ class MyMembershipOverview {
   /// Null from an older gateway: [planAccess] then derives it from [ownedMembership].
   final PlanAccess? plan;
 
+  /// 3.56 what the rider may host as the gateway decided it from the admin access mode (no mode,
+  /// plan or price on the wire). Null from an older gateway: [planAccess] decides alone.
+  final RideCapabilities? capabilities;
+
   const MyMembershipOverview({
     this.ownedMembership,
     this.participating = const [],
@@ -298,6 +303,7 @@ class MyMembershipOverview {
     this.effectiveEntitlements = const {},
     this.plansEnforced = true,
     this.plan,
+    this.capabilities,
   });
 
   /// What the rider may host now: the single answer every screen uses (Community when nothing else).
@@ -314,6 +320,7 @@ class MyMembershipOverview {
     'effectiveEntitlements': effectiveEntitlements,
     'paymentsEnabled': plansEnforced,
     if (plan != null) 'plan': plan!.toJson(),
+    if (capabilities != null) 'capabilities': capabilities!.toJson(),
   };
 
   factory MyMembershipOverview.fromJson(Map<String, dynamic> json) {
@@ -333,8 +340,10 @@ class MyMembershipOverview {
       effectiveEntitlements: json['effectiveEntitlements'] is Map
           ? Map<String, dynamic>.from(json['effectiveEntitlements'] as Map)
           : const {},
-      plansEnforced: json['paymentsEnabled'] != false,
+      // 3.56: "free for everyone" (capabilities.gated false) shows no plan UI, like payments off.
+      plansEnforced: json['paymentsEnabled'] != false && !(json['capabilities'] is Map && (json['capabilities'] as Map)['gated'] == false),
       plan: json['plan'] is Map ? PlanAccess.fromJson(Map<String, dynamic>.from(json['plan'] as Map)) : null,
+      capabilities: json['capabilities'] is Map ? RideCapabilities.fromJson(Map<String, dynamic>.from(json['capabilities'] as Map)) : null,
     );
   }
 }

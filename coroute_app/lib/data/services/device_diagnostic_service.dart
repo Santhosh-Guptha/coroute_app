@@ -527,7 +527,7 @@ class DeviceDiagnosticService extends ChangeNotifier {
               ? 'Blocked for CoRoute. Tracking and crash detection stop when the screen is off.'
               : 'Allowed. The ride notification keeps CoRoute running with the screen off.',
           critical: true,
-          fix: restricted ? PhoneCheckFix.appSettings : null,
+          fix: restricted ? PhoneCheckFix.backgroundUse : null,
         ));
         bgChecks.add(_item(
           'bg_battery_optimization',

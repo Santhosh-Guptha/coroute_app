@@ -365,7 +365,8 @@ class _NoRideHero extends StatelessWidget {
   Widget build(BuildContext context) {
     // Community (free) starts solo rides; a group plan (or plans off on the server) hosts a group with a code.
     final ms = context.watch<MembershipService?>();
-    final hostsGroup = ms == null || !ms.plansEnforced || ms.planAccess.canHostGroup;
+    // 3.56: the gateway's capabilities (admin access mode) decide; the plan only on an older gateway.
+    final hostsGroup = ms == null || ms.canHostGroup;
     return DsHeroCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

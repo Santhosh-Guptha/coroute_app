@@ -59,6 +59,8 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
             "networkKind" -> result.success(networkKind())
             "phoneProbe" -> phoneProbe(result)
             "openSoundSettings" -> result.success(start(Intent(Settings.ACTION_SOUND_SETTINGS)))
+            "openNotificationSettings" -> result.success(openNotificationSettings())
+            "openAppBatterySettings" -> result.success(openAppBatterySettings())
             else -> result.notImplemented()
         }
     }
@@ -295,6 +297,29 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
             if (start(intent)) return true
         }
         return false
+    }
+
+    /** Safety health "Allow": CoRoute's own notification page (Android 8+), else its app info page. */
+    private fun openNotificationSettings(): Boolean {
+        val pkg = activity.packageName
+        if (Build.VERSION.SDK_INT >= 26 &&
+            start(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg))
+        ) return true
+        return start(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg")))
+    }
+
+    /**
+     * Safety health "Background use": the app's battery page where "Allow background usage" /
+     * "Unrestricted" lives (Android 12+ on most phones), else the battery optimisation list, else
+     * the app info page (Battery is one tap from there).
+     */
+    private fun openAppBatterySettings(): Boolean {
+        val pkg = activity.packageName
+        if (Build.VERSION.SDK_INT >= 31 &&
+            start(Intent("android.settings.VIEW_ADVANCED_POWER_USAGE_DETAIL", Uri.parse("package:$pkg")))
+        ) return true
+        if (start(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))) return true
+        return start(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg")))
     }
 
     private fun start(intent: Intent): Boolean {

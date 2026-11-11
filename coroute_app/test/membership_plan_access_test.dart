@@ -158,6 +158,14 @@ void main() {
       expect(find.textContaining('Host a group'), findsNothing);
     });
 
+    testWidgets('not tappable: the app has no plan screen for riders (Nov 11)', (tester) async {
+      await pump(tester, _FakeMembership(PlanAccess.none));
+      final chip = find.byKey(const Key('home_membership_status'));
+      expect(chip, findsOneWidget);
+      expect(find.descendant(of: chip, matching: find.byType(GestureDetector)), findsNothing);
+      expect(find.byIcon(Icons.chevron_right_rounded), findsNothing);
+    });
+
     testWidgets('hidden when the server runs without plans', (tester) async {
       await pump(tester, _FakeMembership(PlanAccess.none, payments: false));
       expect(find.byKey(const Key('home_membership_status')), findsNothing);

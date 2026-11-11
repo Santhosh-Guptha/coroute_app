@@ -27,6 +27,21 @@ class TileCache {
   int maxBytesBudget;
   final Set<String> _activeTripTiles = {};
 
+  /// Tiles of trip maps still within their retention time (OfflineMapRetentionService): never
+  /// pruned for age or by LRU and never treated as stale, until the retention sweep lets them go.
+  final Set<String> _retainedTiles = {};
+
+  /// Replaces the retained set (called by the retention sweep).
+  void setRetainedTiles(Iterable<(int, int, int)> tiles) {
+    _retainedTiles
+      ..clear()
+      ..addAll([for (final t in tiles) nameOf(t.$1, t.$2, t.$3)]);
+  }
+
+  int get retainedTileCount => _retainedTiles.length;
+
+  bool _kept(String name) => _activeTripTiles.contains(name) || _retainedTiles.contains(name);
+
   /// Sets the configurable cache budget in megabytes (clamped between 300 and 500 MB).
   void configureBudgetMb(int mb) {
     maxBytesBudget = (mb * 1024 * 1024).clamp(
@@ -142,7 +157,7 @@ class TileCache {
       return f.existsSync() ? f : null;
     }
     final now = _clock();
-    if (now - e.storedAt > maxAgeDays * 86400000) return null;
+    if (!_kept(name) && now - e.storedAt > maxAgeDays * 86400000) return null;
     e.usedAt = now;
     return File(_path(name));
   }
@@ -166,7 +181,8 @@ class TileCache {
   }
 
   /// Drops tiles older than [maxAgeDays], then the least recently used until under [maxBytes].
-  /// Active trip tiles pinned in [_activeTripTiles] are NEVER pruned.
+  /// Active trip tiles and retained trip-map tiles are NEVER pruned here (the retention sweep
+  /// deletes trip maps when their time is up).
   Future<void> prune({int? maxBytes, int maxAgeDays = SafetyConstants.tileMaxAgeDays}) async {
     if (_pruning) return;
     _pruning = true;
@@ -175,13 +191,13 @@ class TileCache {
       final now = _clock();
       final doomed = <String>[];
       _index.forEach((name, e) {
-        // Active trip tiles are never pruned regardless of age
-        if (_activeTripTiles.contains(name)) return;
+        // Active trip and retained trip-map tiles are never pruned regardless of age
+        if (_kept(name)) return;
         if (now - e.storedAt > maxAgeDays * 86400000) doomed.add(name);
       });
       if (_bytes - _sizeOf(doomed) > effectiveMaxBytes) {
         final rest = _index.keys
-            .where((n) => !_activeTripTiles.contains(n) && !doomed.contains(n))
+            .where((n) => !_kept(n) && !doomed.contains(n))
             .toList()
           ..sort((a, b) => _index[a]!.usedAt.compareTo(_index[b]!.usedAt));
         var bytes = _bytes - _sizeOf(doomed);
@@ -235,7 +251,7 @@ class _TileEntry {
 /// app's User-Agent, as the OSM tile policy asks), saved after the download.
 /// A failed download behaves like [NetworkTileProvider] (error tile path).
 class CachedTileProvider extends TileProvider {
-  CachedTileProvider({TileCache? cache, http.Client? client, this.offlineOnly = false})
+  CachedTileProvider({TileCache? cache, http.Client? client, this.offlineOnly = false, this.pastTrip = false})
       : _cache = cache ?? TileCache.instance,
         _client = client ?? TileCache.sharedHttpClient,
         _ownsClient = client != null && client != TileCache.sharedHttpClient,
@@ -245,6 +261,10 @@ class CachedTileProvider extends TileProvider {
   final http.Client _client;
   final bool _ownsClient;
   final bool offlineOnly;
+
+  /// Past trip report / replay (Nov 11): the online map first and nothing saved; any saved tile
+  /// (however old) only when the network fails. No offline download is made for past trips.
+  final bool pastTrip;
 
   @override
   ImageProvider getImage(TileCoordinates coordinates, TileLayer options) => CachedTileImage(
@@ -256,6 +276,7 @@ class CachedTileProvider extends TileProvider {
         client: _client,
         headers: headers,
         offlineOnly: offlineOnly,
+        pastTrip: pastTrip,
       );
 
   @override
@@ -277,6 +298,7 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
     required this.client,
     required this.headers,
     this.offlineOnly = false,
+    this.pastTrip = false,
   });
 
   final String url;
@@ -287,6 +309,10 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
   final http.Client client;
   final Map<String, String> headers;
   final bool offlineOnly;
+  final bool pastTrip;
+
+  /// Saved tiles of any age are acceptable as an offline fallback for a past trip.
+  static const int _anyAgeDays = 100000;
 
   static final Uint8List transparentPngBytes = base64Decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
@@ -300,6 +326,7 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
       MultiFrameImageStreamCompleter(codec: _load(decode), scale: 1, debugLabel: url);
 
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
+    if (pastTrip && !offlineOnly) return _loadPastTrip(decode);
     final saved = cache?.lookup(z, x, y);
     if (saved != null) {
       try {
@@ -334,6 +361,25 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
       }
     }
 
+    return decode(await ui.ImmutableBuffer.fromUint8List(transparentPngBytes));
+  }
+
+  /// Network first (not saved), then any saved tile, then the parent tile, then a blank tile.
+  Future<ui.Codec> _loadPastTrip(ImageDecoderCallback decode) async {
+    try {
+      final res = await client.get(Uri.parse(url), headers: headers).timeout(SafetyConstants.prefetchTimeout);
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        return await decode(await ui.ImmutableBuffer.fromUint8List(res.bodyBytes));
+      }
+    } catch (_) {}
+    for (final (tz, tx, ty) in [(z, x, y), if (z > 1) (z - 1, x >> 1, y >> 1)]) {
+      final f = cache?.lookup(tz, tx, ty, maxAgeDays: _anyAgeDays);
+      if (f == null) continue;
+      try {
+        final bytes = await f.readAsBytes();
+        if (bytes.isNotEmpty) return await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+      } catch (_) {}
+    }
     return decode(await ui.ImmutableBuffer.fromUint8List(transparentPngBytes));
   }
 
@@ -807,6 +853,7 @@ class TilePrefetcher extends ChangeNotifier {
     List<(double, double)> line, {
     required String label,
     bool highDetail = false,
+    String? tripId,
   }) async {
     if (_running) return;
     if (_paused || _lowBattery) {
@@ -880,7 +927,10 @@ class TilePrefetcher extends ChangeNotifier {
       }
       if (pending.isNotEmpty) await Future.wait(pending.toList());
       if (consecutive >= SafetyConstants.prefetchMaxFailures) _error = 'network';
-      if (_error == null && !_cancel && _done >= _total) {
+      if (tripId != null && _done > 0) {
+        // An automatic trip map (Nov 11): kept 7 days after the trip, then deleted.
+        _recordTripPack(tripId: tripId, label: label, line: line, highDetail: highDetail, tileCount: _total);
+      } else if (_error == null && !_cancel && _done >= _total) {
         try {
           final pack = SavedMapPack(
             id: 'pack_${DateTime.now().millisecondsSinceEpoch}',
@@ -916,6 +966,7 @@ class TilePrefetcher extends ChangeNotifier {
     required String label,
     bool highDetail = false,
     Duration spacing = const Duration(milliseconds: 150),
+    String? tripId,
   }) async {
     final cache = _cache;
     if (cache == null) return;
@@ -993,6 +1044,10 @@ class TilePrefetcher extends ChangeNotifier {
       if (consecutive >= SafetyConstants.prefetchMaxFailures) {
         _error = 'network';
       }
+      if (tripId != null && routeLine.length >= 2 && _saved > 0) {
+        // An automatic trip map (Nov 11): kept 7 days after the trip, then deleted.
+        _recordTripPack(tripId: tripId, label: label, line: routeLine, highDetail: highDetail, tileCount: allTiles.length);
+      }
     } catch (_) {
       // Quiet background failure
     } finally {
@@ -1014,6 +1069,7 @@ class TilePrefetcher extends ChangeNotifier {
     List<(double, double)> stops = const [],
     (double, double)? destination,
     bool highDetail = false,
+    String? tripId,
   }) async {
     // Check battery level (< 20%) before starting background prefetch
     try {
@@ -1032,7 +1088,33 @@ class TilePrefetcher extends ChangeNotifier {
       destination: destination,
       label: label,
       highDetail: highDetail,
+      tripId: tripId,
     );
+  }
+
+  /// Saves (or refreshes) the automatic trip map of [tripId] for the retention rules.
+  void _recordTripPack({
+    required String tripId,
+    required String label,
+    required List<(double, double)> line,
+    required bool highDetail,
+    required int tileCount,
+  }) {
+    try {
+      final now = DateTime.fromMillisecondsSinceEpoch(_clock());
+      SavedMapPackStore.save(SavedMapPack(
+        id: SavedMapPack.idForTrip(tripId),
+        name: label,
+        downloadedAt: now,
+        highDetail: highDetail,
+        zooms: highDetail ? SafetyConstants.prefetchZoomsHighDetail : SafetyConstants.prefetchZooms,
+        tileCount: tileCount,
+        estimatedBytes: tileCount * 25 * 1024,
+        polyline: line,
+        tripId: tripId,
+        lastUsedAt: now,
+      )).ignore();
+    } catch (_) {}
   }
 
   /// Checks whether all tiles for the active ride are already in the local cache.

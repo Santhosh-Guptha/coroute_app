@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/app_config.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import '../../domain/notify/push_routing.dart';
+import '../../domain/notify/push_kinds.dart';
 import 'api_client.dart';
 import 'meta_service.dart';
 import 'permissions_service.dart';
@@ -60,6 +61,9 @@ class PushService extends ChangeNotifier {
   bool _available = false;
   bool _enabled = true;
   bool _newsEnabled = true;
+
+  /// 3.56 the other push kinds' switches (events, safety tips, community, partner perks), by kind id.
+  final Map<String, bool> _kinds = {for (final k in PushKinds.all) if (k != PushKinds.update) k.id: k.defaultOn};
   bool _hadToken = false;
   String? _lastBearer;
   String? _registeredToken;
@@ -79,6 +83,9 @@ class PushService extends ChangeNotifier {
   /// the server never sends admin pushes to a rider who turned it off; also mirrored to Android,
   /// which drops a NEWS push while it is off.
   bool get newsEnabled => _newsEnabled;
+
+  /// 3.56: the switch of one push kind ([PushKinds]); "News and updates" is [newsEnabled].
+  bool kindEnabled(PushKind kind) => kind == PushKinds.update ? _newsEnabled : (_kinds[kind.id] ?? kind.defaultOn);
 
   /// The token the gateway has for this phone (null until registered).
   String? get registeredToken => _registeredToken;
@@ -117,11 +124,17 @@ class PushService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool(prefKey) ?? true;
       _newsEnabled = prefs.getBool(newsPrefKey) ?? true;
+      for (final k in PushKinds.all) {
+        if (k != PushKinds.update) _kinds[k.id] = prefs.getBool(k.localKey) ?? k.defaultOn;
+      }
     } catch (_) {}
     _channel.setMethodCallHandler(_onNative);
     _available = await _invoke<bool>('isAvailable') ?? false;
     await _invoke<void>('setEnabled', {'on': _enabled});
     await _invoke<void>('setNewsEnabled', {'on': _newsEnabled});
+    for (final e in _kinds.entries) {
+      await _invoke<void>('setKindEnabled', {'kind': e.key, 'on': e.value});
+    }
     final launch = await _invoke<Map<dynamic, dynamic>>('takeLaunchMessage');
     if (launch != null) _emitOpened(launch);
     _notify();
@@ -162,6 +175,8 @@ class PushService extends ChangeNotifier {
       DiagLog.info(DiagCat.push, 'token_registered');
       // "News and updates" turned off on this phone: make sure the gateway knows (new account / reinstall).
       if (!_newsEnabled) _syncNews().ignore();
+      // A kind switched away from its default on this phone: the gateway learns it too.
+      if (PushKinds.all.any((k) => k != PushKinds.update && kindEnabled(k) != k.defaultOn)) _syncKinds().ignore();
       _notify();
     } catch (e) {
       debugPrint('push: register note: $e');
@@ -236,6 +251,36 @@ class PushService extends ChangeNotifier {
     } catch (_) {}
     if (_android) await _invoke<void>('setNewsEnabled', {'on': on});
     return _syncNews();
+  }
+
+  /// 3.56: one push kind's switch (events, safety tips, community, partner perks); "News and
+  /// updates" goes through [setNewsEnabled]. Saved here, on Android and on the gateway.
+  Future<bool> setKindEnabled(PushKind kind, bool on) async {
+    if (kind == PushKinds.update) return setNewsEnabled(on);
+    _kinds[kind.id] = on;
+    _notify();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kind.localKey, on);
+    } catch (_) {}
+    if (_android) await _invoke<void>('setKindEnabled', {'kind': kind.id, 'on': on});
+    if (!_api.hasToken) return false;
+    try {
+      await _api.put('/me/push-prefs', {kind.serverKey: on});
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _syncKinds() async {
+    if (!_api.hasToken) return false;
+    try {
+      await _api.put('/me/push-prefs', {for (final k in PushKinds.all) if (k != PushKinds.update) k.serverKey: kindEnabled(k)});
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<bool> _syncNews() async {

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
+import '../../domain/membership/plan_gate_messages.dart';
+import '../../domain/membership/ride_capabilities.dart';
 import '../models/membership_model.dart';
 import 'api_client.dart';
 
@@ -40,6 +42,21 @@ class MembershipService extends ChangeNotifier {
   /// The rider's plan (the single source for hosting, seats and the home status line). Every rider
   /// has at least Community (free, solo rides), also before the server answered.
   PlanAccess get planAccess => _myOverview?.planAccess ?? PlanAccess.community;
+
+  /// 3.56 what the rider may host now (admin access mode, decided by the gateway). Null from an
+  /// older gateway. Never carries a plan, a mode or a price.
+  RideCapabilities? get capabilities => _myOverview?.capabilities;
+
+  /// The one answer for "may this rider start a group ride others join": the gateway's capabilities
+  /// when it sent them, else the plan (or plans off on the server).
+  bool get canHostGroup => !plansEnforced || (capabilities?.canHostGroup ?? planAccess.canHostGroup);
+
+  /// The neutral line for why hosting is limited now, or null (PlanGateMessages.forCapabilities).
+  String? get hostingLimitMessage {
+    final c = capabilities;
+    if (c == null) return plansEnforced && !planAccess.canHostGroup ? PlanGateMessages.hostingNeedsGroupPlan : null;
+    return PlanGateMessages.forCapabilities(c);
+  }
 
   MembershipService(this._api, [this._prefs]) {
     _initCache();

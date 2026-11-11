@@ -230,7 +230,7 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
               initialZoom: 15.0,
             ),
             children: [
-              appTileLayer(),
+              appTileLayer(pastTrip: true),
 
               // Full route (dimmed base)
               PolylineLayer(
