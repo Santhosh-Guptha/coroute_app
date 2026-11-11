@@ -29,7 +29,7 @@ const { PublicRides, publicRideAdminRouter } = require('./public_ride');
 const { AdminWarnings } = require('./admin_warnings');
 const { SafetyAudit } = require('./safety_audit');
 const { RouteIndexCache, gridSize } = require('./net_geo');
-const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
+const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP, MARKETING_CSP } = require('./pages');
 const rateLimit = require('express-rate-limit');
 const { liveTokenOf } = require('./validate');
 const { communityStories } = require('./trip_reviews');
@@ -88,6 +88,12 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   convoys.featureFlags = featureFlags;
   await featureFlags.refresh();
   featureFlags.start();
+  // 3.56 access mode (src/access_mode.js): paid / free for everyone / free up to limits, set in the web
+  // admin. One cached copy per node (re-read every 30 s, schedule boundary checked every 15 s).
+  const accessMode = new (require('./access_mode').AccessMode)({ repo, logger });
+  convoys.accessMode = accessMode;
+  await accessMode.refresh();
+  accessMode.start();
   // 3.55 buddy pairs in large groups (src/buddies.js): assigned, stored and relayed only.
   convoys.buddies = new (require('./buddies').BuddyService)(convoys, { logger });
   const emergencyGateway = new EmergencySmsGateway({
@@ -209,6 +215,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   mirror.register('ff', featureFlags);
   // Every connected app switches within seconds (each node tells its own sockets).
   featureFlags.on('change', (snap) => hub.broadcastAll({ type: 'FEATURE_FLAGS', ...snap }));
+  // 3.56 access mode: a change (admin save, the other node, or the schedule boundary) tells every app to
+  // re-read its capabilities (GET /api/me/capabilities) and gives live rides their new seats (never fewer).
+  mirror.register('am', accessMode);
+  accessMode.on('change', (ev) => {
+    hub.broadcastAll({ type: 'CAPABILITIES_CHANGED', version: ev.version });
+    convoys.refreshAllCapacities().catch((e) => logger.warn?.(`[access-mode] ride refresh failed: ${e.message}`));
+  });
   await mirror.start();
   let guardianPush = null;
   // Pilot is disabled by default; an explicit HTTPS origin prevents host-header links.
@@ -255,10 +268,23 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // 3.56 rider shop (src/web_shop.js): shop page headers (strict CSP), /get?coupon= -> /plans, /checkout
   // without an app order -> /plans, /api/web/config and /api/web/receipt/:orderId. Before the page routes.
   require('./web_shop').attachWebShop({ app, repo, gate, logger });
+  // Marketing and legal pages: a strict CSP of their own (no inline script; src/pages.js MARKETING_CSP). The shop
+  // pages and /checkout already carry theirs (web_shop.js).
+  const shopRoutes = new Set([...Object.keys(require('./web_shop').SHOP_PAGES), '/checkout']);
   for (const [route, file] of Object.entries(SITE_PAGES)) {
     const paths = route === '/' ? ['/', '/index.html'] : [route, `${route}.html`];
-    app.get(paths, (req, res) => sendPage(res, site.render(file, pageVars(req))));
+    const strict = !shopRoutes.has(route);
+    app.get(paths, (req, res) => {
+      if (strict) res.set('Content-Security-Policy', MARKETING_CSP);
+      sendPage(res, site.render(file, pageVars(req)));
+    });
   }
+  // RFC 9116 security.txt: Contact from SECURITY_CONTACT (else SUPPORT_EMAIL), Expires one year ahead, Policy /security.
+  app.get(['/.well-known/security.txt', '/security.txt'], (req, res) => {
+    res.type('text/plain; charset=utf-8').set('Cache-Control', 'public, max-age=86400').send(securityTxt({
+      origin: originOf(req), contact: config.securityContact, now: Date.now(),
+    }));
+  });
   // One download link that never breaks: Play Store when configured, otherwise the APK this server hosts
   // (public/coroute.apk, 64-bit ARM). Older 32-bit phones use /download/32bit.
   app.get('/download', (req, res) => {
@@ -345,12 +371,18 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   });
   // 3.55 web admin (src/web_admin.js): /admin page + assets with their own strict CSP and noindex.
   app.use(require('./web_admin').webAdminPages({ publicDir: pub('') }));
+  // 3.56 operator / club console (src/operator_routes.js): /operator console, /operators/apply, /clubs, /rides/<slug>
+  // and their /api routes. Before the static files (console assets carry their own CSP). The mailer is read lazily.
+  require('./operator_routes').attachOperators({ app, repo, gate, convoys, hub, tracks, featureFlags, site, pageVars, notFoundPage, logger,
+    mailerOf: () => { try { return notifications.mailer; } catch { return null; } } });
   // Partials, templates (_*.html) and raw page sources are never served directly: every page has a route above.
   app.use((req, res, next) => (!req.path.startsWith('/api/') && isHiddenPath(req.path) ? notFoundPage(req, res) : next()));
   app.use(express.static(pub(''), {
     index: false, maxAge: '7d', extensions: false,
     setHeaders: (res, p) => {
       if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+      // 3.56 website screenshots: the bundled mime table predates AVIF.
+      if (p.endsWith('.avif')) res.setHeader('Content-Type', 'image/avif');
       // The APK/IPA keeps its name across releases: always check for a newer one.
       if (p.endsWith('.apk')) {
         res.setHeader('Cache-Control', 'no-cache');
@@ -368,6 +400,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.use('/api/admin/public-ride', requireAuth(gate), requireAdmin, publicRideAdminRouter(publicRides));
   // 3.55 web admin read-only endpoints (config, revenue aggregates): admin only.
   app.use('/api/admin/web', requireAuth(gate), requireAdmin, require('./web_admin').webAdminApi({ repo, config }));
+  // 3.56 access mode: /api/me/capabilities (rider), /api/public/access (website), /api/admin/access-mode (admin).
+  require('./access_mode').attachAccessModeRoutes({ app, accessMode, repo, gate });
   // 3.56 notifications (src/notifications.js): admin push campaigns, purchase / refund e-mails, server SOS SMS
   // (emergencyGateway.sosSms) and the editable message templates. Jobs start with retention.start().
   const notifications = require('./notifications').attachNotifications({ app, repo, soda, gate, push, emergencyGateway, lease, config, logger,
@@ -441,6 +475,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     guardianPush?.stop();
     notifications.stop();
     featureFlags.stop();
+    accessMode.stop();
     const leaseStopped = lease.stopAll({ waitMs: 8000 });
     retention.stop();
     subscriptions.stop();
@@ -461,7 +496,27 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { notifications, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { notifications, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+}
+
+/**
+ * The text of /.well-known/security.txt (RFC 9116). Contact: a mailto: of a valid address, else the /security page
+ * (which tells reporters to use the in-app feedback). Expires: one year from `now`. Canonical, Policy and
+ * Preferred-Languages point at this site.
+ */
+function securityTxt({ origin, contact, now = Date.now() }) {
+  const { safeEmail } = require('./pages');
+  const email = safeEmail(contact);
+  const expires = new Date(now + 365 * 86400000);
+  expires.setUTCMilliseconds(0);
+  return [
+    `Contact: ${email ? `mailto:${email}` : `${origin}/security`}`,
+    `Expires: ${expires.toISOString().replace('.000Z', 'Z')}`,
+    `Policy: ${origin}/security`,
+    'Preferred-Languages: en',
+    `Canonical: ${origin}/.well-known/security.txt`,
+    '',
+  ].join('\n');
 }
 
 /**
@@ -480,4 +535,4 @@ function plainLivePage(v) {
     + '<p>What to do: call 112, say the location, stay on the line.</p></body></html>';
 }
 
-module.exports = { createApp, createSoda };
+module.exports = { createApp, createSoda, securityTxt };
