@@ -272,6 +272,8 @@ class ConvoyManager extends EventEmitter {
       // Seats of this ride, host included: the host's membership seats (never the server ceiling).
       capacity: this._storedCapacity(m),
       capacityPlan: m.capacityPlan || null,
+      // 3.56 access mode: the group features of this ride ('all', or the list a hybrid free tier includes).
+      groupFeatures: Array.isArray(m.groupFeatures) ? [...m.groupFeatures] : 'all',
       // A solo ride (Community host): the app hides talk, messages, invite and regroup.
       soloRide: this.isSoloRide(room),
       // 3.55: automatic riding roles (front rider leads, last one sweeps), off unless the lead turned it on.
@@ -313,17 +315,68 @@ class ConvoyManager extends EventEmitter {
    */
   async _currentCapacity(room) {
     if (config.paymentsEnabled === false) return clampSeats(config.maxConvoyRiders);
+    // 3.56 operator rides (src/operator_routes.js, operators.operatorCapacity): seats and group features
+    // come from the operator's limits, set when the console starts the ride; the host's plan is not used.
+    if (room.meta.operatorId) return this._storedCapacity(room.meta);
     const ownerId = room.meta.tripOwnerUserId || room.meta.createdByUserId;
-    const plan = await resolvePlan(this.repo, ownerId);
-    if (plan.seats >= 1 && plan.seats > this._storedCapacity(room.meta)) {
-      room.meta.capacity = plan.seats;
-      room.meta.capacityPlan = plan.category;
+    const access = await this._hostAccess(ownerId);
+    // 3.56 access mode: a ride limited to some group features (hybrid free tier) gets them all once
+    // its host may have them all (plan bought, or the admin switched to free / paid-with-plan).
+    let changed = false;
+    if (Array.isArray(room.meta.groupFeatures) && access.groupFeatures === null) {
+      room.meta.groupFeatures = null;
+      changed = true;
+    }
+    if (access.seats >= 1 && access.seats > this._storedCapacity(room.meta)) {
+      room.meta.capacity = access.seats;
+      room.meta.capacityPlan = access.plan.category;
+      changed = true;
+    }
+    if (changed) {
       this._touch(room);
       await this.repo.saveConvoyMeta(room.meta);
       this._emit(room.groupId, 'CONFIG', this._configPayload(room));
-      return plan.seats;
     }
     return this._storedCapacity(room.meta);
+  }
+
+  /**
+   * 3.56: what the host of a ride may do, from the plan AND the admin access mode (access_mode.js):
+   * { plan, seats, canStartTrip, groupFeatures (null = every group feature), freeTier }.
+   * Without an access mode service (unit tests) it is the plan alone, as before.
+   */
+  async _hostAccess(userId) {
+    const plan = await resolvePlan(this.repo, userId);
+    if (!this.accessMode) return { plan, seats: plan.seats, canStartTrip: plan.canStartTrip, groupFeatures: null, freeTier: false };
+    const caps = await this.accessMode.capabilitiesOf(userId, { plan });
+    return {
+      plan, seats: caps.maxRiders, canStartTrip: plan.canStartTrip,
+      groupFeatures: caps.groupFeatures === 'all' ? null : [...caps.groupFeatures], freeTier: !!caps.freeTier,
+    };
+  }
+
+  /** The first of `ids` (feature switch ids) the ride `groupId` leaves out (hybrid free tier), or null. */
+  rideFeatureOff(groupId, ids) {
+    const room = groupId ? this.rooms.get(groupId) : null;
+    if (!room || !room.meta || !Array.isArray(room.meta.groupFeatures)) return null;
+    return require('./access_mode').lockedFeature(room.meta.groupFeatures, ids);
+  }
+
+  /** After an access mode change: every live ride takes the seats / features its host has now (never fewer). */
+  async refreshAllCapacities() {
+    for (const room of [...this.rooms.values()]) {
+      if (!ACTIVE_STATUSES.includes(room.meta.tripStatus)) continue;
+      await this._currentCapacity(room).catch((e) => this.log.warn('[convoys] capacity refresh failed', e.message));
+    }
+  }
+
+  /** Hybrid free tier: the ride counts as one hosted group ride of the month when the first other rider joins. */
+  _countFreeHosting(room, ownerId) {
+    if (!this.accessMode || !room.meta.freeTierHost || room.meta.hostedCounted) return;
+    room.meta.hostedCounted = true;
+    this._touch(room);
+    this.repo.saveConvoyMeta(room.meta).catch(() => {});
+    this.accessMode.countHostedRide(ownerId).catch((e) => this.log.warn('[convoys] hosted ride count failed', e.message));
   }
 
   /**
@@ -379,7 +432,12 @@ class ConvoyManager extends EventEmitter {
     return null;
   }
 
-  async createConvoy(user, p) {
+  /**
+   * `opts.operator` (server only, src/operator_routes.js): { operatorId, rideId, capacity } starts an
+   * operator ride: the seats come from the operator's limits and every group feature is on; the
+   * host's personal plan and access mode are not consulted (the one-active-trip rule still applies).
+   */
+  async createConvoy(user, p, opts = {}) {
     const name = String(p.name || '').trim();
     if (name.length < 2) throw new ConvoyError('Convoy name is required.');
     this._admitNewRider(user.userId);
@@ -387,18 +445,25 @@ class ConvoyManager extends EventEmitter {
     // Concurrency-safe single active trip enforcement when monetization/membership is active
     let capacity = clampSeats(config.maxConvoyRiders);
     let capacityPlan = null;
+    let groupFeatures = null;
+    let freeTierHost = false;
     if (config.paymentsEnabled !== false) {
       const active = await this._activeLock(user.userId);
       if (active && ['PLANNING', 'STARTED', 'PAUSED'].includes(active.status)) {
         throw new ConvoyError('You already have an active trip. End or leave it first.', 409, 'ACTIVE_TRIP_CONFLICT');
       }
-      // The host's plan (membership, or a legacy tier until it ends) decides the seats of the ride.
-      const plan = await resolvePlan(this.repo, user.userId);
-      if (!plan.canStartTrip) {
+      // The host's plan (membership, or a legacy tier until it ends) and the admin access mode
+      // (3.56, access_mode.js) decide the seats of the ride and, on a hybrid free tier, its group features.
+      const access = opts.operator
+        ? { canStartTrip: true, seats: Number(opts.operator.capacity) || 2, plan: { category: 'operator' }, groupFeatures: null, freeTier: false }
+        : await this._hostAccess(user.userId);
+      if (!access.canStartTrip) {
         throw new ConvoyError('Active membership required to create a trip.', 402, 'MEMBERSHIP_EXPIRED');
       }
-      capacity = plan.seats;
-      capacityPlan = plan.category;
+      capacity = clampSeats(access.seats);
+      capacityPlan = access.plan.category;
+      groupFeatures = access.groupFeatures;
+      freeTierHost = access.freeTier;
     }
 
     // Leave any other non-active residues
@@ -435,6 +500,10 @@ class ConvoyManager extends EventEmitter {
       waitRequests: {},
       capacity,
       capacityPlan,
+      // 3.56 access mode: null = every group feature; a list on a hybrid free-tier ride.
+      groupFeatures,
+      freeTierHost,
+      ...(opts.operator ? { operatorId: String(opts.operator.operatorId), operatorRideId: String(opts.operator.rideId) } : {}),
       members: { [user.userId]: memberRecord(user, { ...riderInput, role: 'LEAD' }, t) },
     });
     const rider = buildRider(user, { ...riderInput, role: 'LEAD' }, t);
@@ -491,6 +560,7 @@ class ConvoyManager extends EventEmitter {
       throw new ConvoyError(`This convoy is full (${allowedCapacity} riders).`, 409, 'CONVOY_FULL');
     }
     if (isNew) joining.add(user.userId);
+    if (isNew && user.userId !== ownerId) this._countFreeHosting(room, ownerId);
     try {
       if (!room.riders.has(user.userId)) await this.leaveAll(user.userId, { except: meta.groupId });
 
@@ -2406,6 +2476,8 @@ class ConvoyManager extends EventEmitter {
       capacity: this._storedCapacity(room.meta),
       capacityPlan: room.meta.capacityPlan || null,
       soloRide: this.isSoloRide(room),
+      // 3.56 access mode: 'all', or the group features a hybrid free-tier ride includes.
+      groupFeatures: Array.isArray(room.meta.groupFeatures) ? [...room.meta.groupFeatures] : 'all',
       // 3.55 fix: every group setting rides in CONFIG, so one CONFIG brings a rider fully up to date
       // (automatic roles decide whether a front rider has lead rights; before it came only in
       // AUTO_ROLES and a missed one stayed wrong until the next full snapshot).

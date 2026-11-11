@@ -46,7 +46,8 @@ test('config: PUBLIC_ORIGIN is the link origin; duckdns stays a legacy origin', 
   assert.equal(config.linkOrigin, NEW);
   assert.deepEqual(config.legacyOrigins, ['https://coroute.duckdns.org']);
   assert.deepEqual(D.siteOriginsOf(config), [NEW, 'https://coroute.duckdns.org']);
-  assert.ok(config.providerUserAgent.includes(`+${NEW};`));
+  // The contact part is present only when SUPPORT_EMAIL / GEO_CONTACT is set (no built-in address).
+  assert.ok(config.providerUserAgent.includes(`+${NEW};`) || config.providerUserAgent.endsWith(`+${NEW})`));
   // Without PUBLIC_ORIGIN links fall back to the host that is live today.
   assert.equal(D.linkOriginOf({ publicOrigin: '' }), 'https://coroute.duckdns.org');
   assert.equal(D.normaliseOrigin('https://Coroute.DevMonks.Space:443/'), NEW);

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Motorcycle crash detection and SOS for group rides | Coroute</title>
-<meta name="description" content="How CoRoute looks after riders on long trips: crash detection with a 15 second cancel window, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
+<meta name="description" content="How CoRoute looks after riders on long trips: crash detection with a 30-second check, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <link rel="canonical" href="__ORIGIN__/safety">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="CoRoute">
 <meta property="og:title" content="Motorcycle crash detection and SOS for group rides | Coroute">
-<meta property="og:description" content="How CoRoute looks after riders on long trips: crash detection with a 15 second cancel window, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
+<meta property="og:description" content="How CoRoute looks after riders on long trips: crash detection with a 30-second check, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <meta property="og:url" content="__ORIGIN__/safety">
 <meta property="og:image" content="__ORIGIN__/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -17,7 +17,7 @@
 <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Motorcycle crash detection and SOS for group rides | Coroute">
-<meta name="twitter:description" content="How CoRoute looks after riders on long trips: crash detection with a 15 second cancel window, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
+<meta name="twitter:description" content="How CoRoute looks after riders on long trips: crash detection with a 30-second check, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
@@ -29,7 +29,7 @@
 <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/pages.css">
-<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
+<script src="/assets/theme-init.js"></script>
 <script src="/assets/site.js" defer></script>
 </head>
 <body data-page="safety">
@@ -64,7 +64,7 @@
       </div>
       <ol class="hm-steps" role="list">
         <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg><h3>1. A hard fall is noticed</h3><p>The phone's motion sensors read a hard impact followed by a fall. Ordinary bumps, potholes and braking do not look like that.</p></li>
-        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg><h3>2. 15 seconds to cancel</h3><p>A loud alarm and a full-screen countdown open over the lock screen. Dropped the phone while getting off? Tap cancel and nobody is told.</p></li>
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg><h3>2. 30 seconds to answer</h3><p>A loud alarm and a full-screen countdown open over the lock screen. Dropped the phone while getting off? Tap I'm OK and nobody is told.</p></li>
         <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg><h3>3. Your group is alerted</h3><p>Riders in your group hear a distinct alarm and get a route back to your position.</p></li>
         <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><h3>4. Guardians are notified</h3><p>The family members you added as guardians get a notification and can follow your position on their link.</p></li>
         <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg><h3>5. A text, if there is no internet</h3><p>If the alert cannot go over the internet, CoRoute opens a ready-to-send text with your location to your emergency contact, from your own SIM.</p></li>
@@ -85,7 +85,10 @@
         <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div><h3>Your ride group</h3><p>An alarm tone, your position, and a route to you. Your own group is always alerted first.</p></li>
         <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Your guardians</h3><p>Family members you added get a notification and can follow on their private link.</p></li>
         <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div><h3>Emergency contact by text</h3><p>When the internet is down, a ready-to-send text with your location, from your own SIM.</p></li>
-        <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></div><h3>Nearby riders</h3><p>Riders of other CoRoute groups already on your road, if you allow it. See below.</p></li>
+        <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></div><h3>Nearby riders</h3><p>Riders of other CoRoute groups already on your road. Always on. See below.</p></li>
+        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mesh"/></svg></div><h3>No network at all</h3><p>Group phones on a shared hotspot pass the SOS along, phone to phone, until one of them gets through.</p></li>
+        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div><h3>A text from our server</h3><p>Once the SOS reaches us, by any route, our server texts your emergency contacts if your phone could not, and again when you are safe.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-siren"/></svg></div><h3>Sirens, even in earbuds</h3><p>During a ride the phone listens for ambulance, police and fire sirens and tells riders who cannot hear outside to give way. Nothing is recorded.</p></li>
       </ul>
     </div>
   </section>
@@ -146,7 +149,7 @@
       <dl class="hm-facts">
         <div><dt>Before they agree</dt><dd>They see only the road and the distance<span>No name, no exact position, no group details.</span></dd></div>
         <div><dt>If they tap "I can help"</dt><dd>They get a route to you<span>Your group sees that help is on the way.</span></dd></div>
-        <div><dt>Your choice</dt><dd>You can opt out<span>Switch off nearby help in the app at any time. Your group is still told.</span></dd></div>
+        <div><dt>Always on</dt><dd>Part of every ride<span>Like crash detection and SOS, it has no switch. Your group is always told too.</span></dd></div>
       </dl>
     </div>
   </section>

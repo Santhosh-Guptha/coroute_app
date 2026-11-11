@@ -106,7 +106,7 @@ test('privacy page documents live links, weather, the hospital lookup and tiles 
     assert.ok(privacy.includes(`href="#${id}"`), `privacy toc entry ${id}`);
   }
   for (const s of ['Live emergency links', 'first name', '30 minutes', 'Open-Meteo', 'Weather data by Open-Meteo.com', 'nearest hospital',
-    'OpenStreetMap', 'Save route map', 'never uploaded', 'off until you turn it on', 'does not use Bluetooth', 'rate limited']) {
+    'OpenStreetMap', '7 days after the trip ends', 'never uploaded', 'off until you turn it on', 'does not use Bluetooth', 'rate limited']) {
     assert.ok(privacy.includes(s), `privacy mentions "${s}"`);
   }
   const safety = await (await fetch(t.origin + '/safety')).text();

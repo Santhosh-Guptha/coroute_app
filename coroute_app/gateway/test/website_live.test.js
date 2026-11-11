@@ -183,30 +183,52 @@ test('pricing: no catalog means no prices, only a pointer to the plans page', as
 });
 
 /* ---------- 3D hero and budgets ---------- */
-test('3D hero: lazy, low-power, reduced-motion and no-WebGL fallbacks; static drawing first', async () => {
+test('hero (3.56): real app screens in phone frames, static backdrop, responsive AVIF/WebP with PNG fallback', async () => {
   const html = await (await fetch(base + '/')).text();
-  const hero = html.slice(html.indexOf('<section class="hx"'), html.indexOf('</section>', html.indexOf('<section class="hx"')));
-  assert.match(hero, /data-hero3d data-src="\/assets\/hero3d\.js\?v=[0-9a-f]{10}"/, 'scene script referenced by its hash');
+  const start = html.indexOf('<section class="hx hx--phones"');
+  assert.ok(start > 0, 'hero section');
+  const hero = html.slice(start, html.indexOf('</section>', start));
   assert.ok(hero.includes('class="hx__poster"'), 'static drawing is in the page');
+  assert.ok(!hero.includes('data-hero3d'), 'no 3D scene behind the phones');
   assert.match(hero, /<h1 class="hx__title" id="hero-title">Ride Together\. <span>Stay Safe\.<\/span><\/h1>/, 'the motto is the headline');
-  assert.ok(!/<script[^>]+hero3d/.test(html), 'the scene is not a blocking script');
-  const home = read('assets/home.js');
-  assert.ok(home.includes("'(prefers-reduced-motion: reduce)'") && home.includes("'static'") && home.includes('requestIdleCallback') && home.includes("addEventListener('load'"), 'home.js starts the scene late and never with reduced motion');
-  const scene = read('assets/hero3d.js');
-  assert.doesNotThrow(() => new Function(scene), 'hero3d.js parses');
-  assert.ok(/DPR_CAP = 1\.5/.test(scene), 'device pixel ratio capped at 1.5');
-  assert.ok(/1000 \/ 30/.test(scene), '30 fps on phones');
-  for (const n of ['IntersectionObserver', 'visibilitychange', 'webglcontextlost', "fail('no-webgl')", 'prefers-reduced-motion', "attributeFilter: ['data-theme']"]) {
-    assert.ok(scene.includes(n), `hero3d.js handles ${n}`);
+  const pics = hero.match(/<picture class="dev__shot">[\s\S]*?<\/picture>/g) || [];
+  assert.equal(pics.length, 3, 'three phone screens');
+  for (const pic of pics) {
+    assert.match(pic, /<source type="image\/avif" srcset="\/assets\/screens\/[a-z]+-320\.avif\?v=[0-9a-f]{10} 320w, [^"]+ 636w" sizes="[^"]+">/, 'AVIF srcset');
+    assert.match(pic, /<source type="image\/webp" srcset="[^"]+webp[^"]+"/, 'WebP srcset');
+    assert.match(pic, /<img src="\/assets\/screens\/[a-z]+-480\.png\?v=[0-9a-f]{10}" width="636" height="1386" alt="CoRoute [^"]{20,}"/, 'PNG fallback with size and alt text');
   }
-  assert.ok(!/https?:\/\//.test(scene.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, '')), 'no network URLs in the scene');
+  assert.ok(!/<script[^>]+hero3d/.test(html), 'no scene script');
+  for (const f of ['crash-320.avif', 'crash-636.webp', 'crash-480.png']) {
+    const r = await fetch(base + '/assets/screens/' + f);
+    assert.equal(r.status, 200, f);
+    assert.equal(r.headers.get('content-type').split(';')[0], { avif: 'image/avif', webp: 'image/webp', png: 'image/png' }[f.split('.').pop()], f);
+  }
+  const scene = read('assets/hero3d.js');
+  assert.doesNotThrow(() => new Function(scene), 'hero3d.js still parses (kept for later use)');
+});
+
+test('screens gallery: accessible carousel, lazy images, arrows from site.js', async () => {
+  const html = await (await fetch(base + '/')).text();
+  const start = html.indexOf('id="screens"');
+  const sec = html.slice(start, html.indexOf('</section>', start));
+  assert.ok(/data-gallery role="region" aria-roledescription="carousel" aria-label="[^"]+"/.test(sec), 'carousel region');
+  const slides = sec.match(/class="gal__slide" role="group" aria-roledescription="slide" aria-label="\d+ of \d+: [^"]+"/g) || [];
+  assert.ok(slides.length >= 8, 'at least eight labelled slides');
+  assert.ok(sec.includes('id="gallery-track" tabindex="0"'), 'track is keyboard scrollable');
+  assert.ok(/data-gallery-nav hidden/.test(sec) && sec.includes('aria-controls="gallery-track"') && sec.includes('aria-label="Next screens"'), 'arrow buttons hidden until site.js runs');
+  const imgs = sec.match(/<img [^>]+>/g) || [];
+  assert.equal(imgs.length, slides.length);
+  for (const img of imgs) assert.ok(img.includes('loading="lazy"') && /alt="CoRoute [^"]+"/.test(img), 'lazy with alt text');
+  const js = read('assets/site.js');
+  assert.ok(js.includes("querySelectorAll('[data-gallery]')") && js.includes('scrollBy') && js.includes('prev.disabled'), 'site.js wires the arrows');
 });
 
 test('homepage budgets: JS at most 250 KB gzip with the 3D scene, CSS at most 60 KB gzip', async () => {
   const gz = (rel) => zlib.gzipSync(fs.readFileSync(path.join(PUB, rel)), { level: 9 }).length;
   const html = await (await fetch(base + '/')).text();
   const js = [...html.matchAll(/<script[^>]+src="\/assets\/([^"?]+\.js)/g)].map((m) => m[1]);
-  assert.deepEqual(js.sort(), ['board.js', 'home.js', 'site.js']); // 3.56: board.js fills "Latest from CoRoute"
+  assert.deepEqual(js.sort(), ['board.js', 'home.js', 'site.js', 'theme-init.js']); // 3.56: board.js fills "Latest from CoRoute"; theme-init.js replaces the inline theme line (strict CSP)
   const jsTotal = [...js, 'hero3d.js'].reduce((s, f) => s + gz(`assets/${f}`), 0);
   assert.ok(jsTotal <= 250 * 1024, `homepage JS ${jsTotal} bytes gzip`);
   const css = [...html.matchAll(/<link rel="stylesheet" href="\/assets\/([^"?]+\.css)/g)].map((m) => m[1]);

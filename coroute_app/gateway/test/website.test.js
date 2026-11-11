@@ -44,7 +44,7 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   const robots = await (await fetch(base + '/robots.txt')).text();
   assert.ok(robots.includes(`Sitemap: ${base}/sitemap.xml`));
   const sm = await (await fetch(base + '/sitemap.xml')).text();
-  for (const p of ['/', '/features', '/safety', '/how-it-works', '/about', '/get', '/privacy', '/terms']) {
+  for (const p of ['/', '/features', '/safety', '/how-it-works', '/about', '/get', '/privacy-and-security', '/privacy', '/terms']) {
     assert.ok(sm.includes(`<loc>${base}${p}</loc>`), `sitemap lists ${p}`);
   }
   assert.ok(!sm.includes('/download<'), 'the download redirect is not a page');
@@ -109,7 +109,7 @@ test('internal documentation is not served; public pages follow the site rules',
 });
 
 test('site pages: shared shell, unique head tags, active nav, no placeholders left', async () => {
-  const pages = ['/', '/features', '/safety', '/how-it-works', '/leaderboard', '/about', '/get', '/privacy', '/terms'];
+  const pages = ['/', '/features', '/safety', '/how-it-works', '/leaderboard', '/about', '/get', '/privacy-and-security', '/privacy', '/terms'];
   const titles = new Set(), descs = new Set();
   for (const p of pages) {
     const r = await fetch(base + p);
@@ -276,7 +276,7 @@ test('product pages: shared page styles, real content anchors and honest safety 
   const sprite = await fetch(base + '/assets/pages/icons.svg');
   assert.equal(sprite.status, 200);
   const pages = {
-    '/features': ['id="before"', 'id="during"', 'id="after"', 'Up to ', 'riders can join one group'],
+    '/features': ['id="safety"', 'id="group"', 'id="talk"', 'id="community"', 'id="trips"', 'id="clubs"', 'href="/operators/apply"', 'href="/leaderboard"', 'Up to ', 'riders can join one group', '30-second check'],
     '/safety': ['call 112', 'New in 3.15', 'does not replace', 'only when other Coroute groups are riding', 'id="false-alarms"'],
     '/how-it-works': ['id="create"', 'id="join"', 'id="ride"', 'class="pg-faq"', 'Allow all the time'],
     '/about': ['Built because riders needed it.', 'Clear and open by design.', 'href="/#feedback"'],
@@ -341,7 +341,7 @@ test('pricing comes only from the catalog API: no hard-coded prices, coupons or 
   for (const p of ['/pricing-admin', '/pricing-admin.html']) assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 404, p);
   const sm = await (await fetch(base + '/sitemap.xml')).text();
   assert.ok(!sm.includes('/checkout<') && !sm.includes('/pricing-admin'), 'checkout and admin pages are not listed');
-  for (const p of ['/', '/features', '/how-it-works', '/safety', '/about', '/get', '/privacy', '/terms', '/no-such-page']) {
+  for (const p of ['/', '/features', '/how-it-works', '/safety', '/about', '/get', '/privacy-and-security', '/privacy', '/terms', '/no-such-page']) {
     const html = await (await fetch(base + p)).text();
     assert.ok(!/href="\/checkout|href="\/pricing-admin/.test(html), `${p}: links to checkout or admin`);
     assert.ok(!/Choose Pro|Plans &amp; Pay|hm-plan\b|id="plans"/.test(html), `${p}: old plan section or CTA`);
@@ -351,9 +351,10 @@ test('pricing comes only from the catalog API: no hard-coded prices, coupons or 
   }
   const home = await (await fetch(base + '/')).text();
   assert.ok(home.includes('href="/get"') && home.includes('Get the app'));
-  // The pricing section is an empty frame that home.js fills from the catalog.
+  // 3.56: prices live only on /plans. The home page's #pricing section says what is free and links there.
   const sec = home.slice(home.indexOf('id="pricing"'), home.indexOf('</section>', home.indexOf('id="pricing"')));
-  assert.ok(sec.includes('data-pricing') && sec.includes('id="pricing-list"'), 'home: pricing frame');
+  assert.ok(!sec.includes('data-pricing') && !home.includes('id="pricing-list"') && !home.includes('id="group-plans"'), 'home: no price frame or price chips');
+  assert.ok(sec.includes('Solo riding and every safety feature are free.') && sec.includes('href="/plans"'), 'home: free line and a link to the plans page');
   assert.ok(!/\d/.test(sec.replace(/<[^>]+>/g, '')), 'home: no number written into the pricing section');
   assert.ok(sec.includes('Join a ride you are invited to: Free.'), 'home: joining is free');
   assert.ok(/href="\/plans" data-nav="plans"/.test(home), 'header links to the plans page');
@@ -415,12 +416,12 @@ test('website index contains community stories container and small square checkb
 // ---------------------------------------------------------------------------
 test('home page: touring pitch, safe / secure / memorable sections, moderated reviews, no invented proof', async () => {
   const html = await (await fetch(base + '/')).text();
-  for (const id of ['features', 'long-haul', 'safe', 'secure', 'memorable', 'how', 'pricing', 'numbers', 'reviews', 'faq', 'feedback']) {
+  for (const id of ['standout', 'screens', 'compare', 'features', 'long-haul', 'safe', 'secure', 'memorable', 'how', 'pricing', 'numbers', 'reviews', 'faq', 'feedback']) {
     assert.ok(html.includes(`id="${id}"`), `home: section #${id}`);
   }
   assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, 'home: exactly one h1');
   assert.ok(html.includes('href="/get"') && html.includes('Download for Android') && html.includes('href="/how-it-works"'), 'home: primary and secondary CTA');
-  assert.ok(/<meta name="description" content="[^"]*group motorcycle touring safety app/i.test(html), 'home: description targets touring riders');
+  assert.ok(/<meta name="description" content="[^"]*safety-first app for group and solo motorcycle riders/i.test(html), 'home: description targets riders, safety first');
   assert.ok(html.includes('<meta property="og:title"') && html.includes('<meta name="twitter:title"'), 'home: social titles');
   assert.ok(html.includes('approved') || html.includes('reads each one'), 'home: explains that stories are moderated');
   assert.ok(html.includes('does not replace them') && html.includes('call 112'), 'home: honest safety limits');

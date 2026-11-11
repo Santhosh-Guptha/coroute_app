@@ -201,4 +201,7 @@ module.exports = {
   MEMBERSHIP_PLANS, PAID_PLANS, CATALOG_PLANS, COMMUNITY_PLAN, LEGACY_MEMBERSHIP_PLANS, DEFAULT_SEATS, LEGACY_PLAN_MAP,
   LEGACY_INDIVIDUAL_PLAN, isMembershipPlan, isLegacyTier, isLegacyMembershipPlan, normalizePlanId, effectiveMembership,
   clampSeats, membershipSeats, membershipActive, legacyPlanOf, planFrom, belongsToAccount, resolvePlan, entitlementsFor,
+  // 3.56 operator rides: seats from the operator's limits (null for a normal ride); the personal plan is
+  // not consulted for them (convoys.createConvoy opts.operator, _currentCapacity). See src/operators.js.
+  operatorCapacity: (repo, groupId) => require('./operators').operatorCapacity(repo, groupId),
 };

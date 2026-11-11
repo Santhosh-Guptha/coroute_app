@@ -65,7 +65,7 @@
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Moving to a bigger plan is possible anytime; the unused days of your plan are credited.</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your app shows the same plan. It updates on its own after a payment.</li>
           </ul>
-          <p class="t-small t-muted">Questions about a payment? <a class="link" href="/#feedback">Write to us</a> with the receipt number.</p>
+          <p class="t-small t-muted">Questions about a payment? <a class="link" href="/#feedback">Write to us</a> with the receipt number. Refunds follow our <a class="link" href="/refunds">Refund and Cancellation Policy</a>.</p>
         </div>
       </div>
     </div>
@@ -79,6 +79,20 @@
       </div>
       <div class="sh-table-wrap" id="ac-payments" aria-live="polite" aria-busy="true">
         <p class="t-small t-muted">Loading&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3.56 marketing consent (src/offer_emails.js): offer e-mails are off until the rider turns them on. -->
+  <section class="section section--tight" aria-labelledby="ac-mail-title">
+    <div class="container">
+      <div class="sh-sec-head">
+        <h2 class="t-h3" id="ac-mail-title">E-mails from CoRoute</h2>
+        <p class="t-small t-muted">Receipts and account messages always arrive. Offer e-mails only when you turn them on, and every one has an unsubscribe link.</p>
+      </div>
+      <div class="sh-card" id="ac-consent" aria-live="polite">
+        <label class="sh-check"><input type="checkbox" id="ac-offers" disabled> <span>Send me offer e-mails (plan offers and coupon codes)</span></label>
+        <p class="t-small t-muted" id="ac-offers-note"></p>
       </div>
     </div>
   </section>

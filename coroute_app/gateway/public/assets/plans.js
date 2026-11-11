@@ -31,7 +31,7 @@
   var RANK = ['community', 'individual', 'group_small', 'group_large'];
 
   var st = {
-    plans: [], paymentsEnabled: true, me: null, my: null,
+    plans: [], paymentsEnabled: true, me: null, my: null, access: null,
     selected: null, code: S.cleanCode(S.query('coupon')), quote: null, seq: 0, busy: false
   };
 
@@ -130,7 +130,33 @@
     return out;
   }
 
+  /* 3.56 access mode (GET /api/public/access): "free" = CoRoute is free right now, no checkout. */
+  function renderFree() {
+    S.clear(grid);
+    grid.removeAttribute('aria-busy');
+    grid.setAttribute('data-state', 'free');
+    var a = st.access || {};
+    var card = el('article', 'sh-plan sh-plan--accent sh-plan--free-mode');
+    card.appendChild(el('h3', 'sh-plan__name', 'CoRoute is free right now'));
+    var seats = a.free && a.free.maxRiders ? a.free.maxRiders : 0;
+    card.appendChild(el('p', 'sh-plan__desc', 'Every rider can host group rides with every group feature in the app' + (seats ? ', up to ' + seats + ' riders per ride' : '') + '. There is nothing to buy.'));
+    if (a.changesAt) card.appendChild(el('p', 'sh-plan__note', 'Free until ' + S.date(a.changesAt - 1) + '.'));
+    var cta = el('div', 'sh-plan__cta');
+    var get = el('a', 'btn btn--block btn--primary', 'Get the app');
+    get.setAttribute('href', '/get');
+    cta.appendChild(get);
+    var acc = el('a', 'btn btn--block btn--secondary', 'Your account');
+    acc.setAttribute('href', '/account');
+    cta.appendChild(acc);
+    cta.appendChild(el('p', 'sh-plan__note', 'Already have a plan? It keeps running until its end date. Nothing changes for you.'));
+    card.appendChild(cta);
+    grid.appendChild(card);
+    ['pl-step-1', 'pl-step-2', 'pl-step-3'].forEach(function (id) { var x = S.$(id); if (x && x.parentNode) x.parentNode.hidden = true; });
+    var co = S.$('checkout'); if (co) co.hidden = true;
+  }
+
   function renderPlans() {
+    if (st.access && st.access.mode === 'free') { renderFree(); return; }
     S.clear(grid);
     grid.removeAttribute('aria-busy');
     if (!st.plans.length) {
@@ -460,9 +486,19 @@
   codeInput.value = st.code;
   Promise.all([
     S.api('GET', '/membership/catalog', undefined, { auth: false }),
-    loadMine()
+    loadMine(),
+    S.api('GET', '/public/access', undefined, { auth: false }).catch(function () { return { ok: false }; })
   ]).then(function (rs) {
     var cat = rs[0];
+    st.access = rs[2] && rs[2].ok && rs[2].json ? rs[2].json : null;
+    if (st.access && st.access.mode === 'free') { st.paymentsEnabled = false; renderWho(); renderFree(); return; }
+    if (st.access && st.access.mode === 'hybrid' && st.access.hybrid) {
+      var hy = st.access.hybrid;
+      var hint = el('p', 'sh-codehint');
+      hint.appendChild(S.icon('i-users'));
+      hint.appendChild(el('span', null, 'Hosting group rides is free up to ' + hy.maxRiders + ' riders' + (hy.maxHostedRidesPerMonth ? ' and ' + hy.maxHostedRidesPerMonth + ' group rides a month' : '') + '. A group plan is for bigger or more frequent group rides.'));
+      grid.parentNode.insertBefore(hint, grid);
+    }
     try {
       if (!cat.ok) throw new Error('catalog');
       st.plans = plansFrom(cat.json);

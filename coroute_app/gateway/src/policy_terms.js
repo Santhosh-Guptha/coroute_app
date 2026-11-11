@@ -34,7 +34,32 @@ function forbiddenTermIn(text) {
 
 /** The admin message for a refused push text. */
 function policyRefusal(term, where = 'This push') {
-  return `${where} mentions "${term}". Push notifications reach the Play app, which must not show prices, coupons, discounts, offers or buying words, or link to the plans page (Google Play payments policy). Put offers on the website board or in an e-mail instead.`;
+  return `${where} mentions "${term}". Push notifications reach the Play app, which must not show prices, coupons, discounts, offers or buying words, or link to the plans page (Google Play payments policy). Put offers on the website board or in an e-mail instead: choose Channel "Email" (Offers e-mail, sent only to riders who opted in).`;
 }
 
-module.exports = { APP_SCAN_TERMS, EXTRA_TERMS, FORBIDDEN, STEERING_LINK, forbiddenTermIn, policyRefusal };
+/*
+ * 3.56 "Partner perk" pushes: a real-world perk at a partner that CoRoute curates for riders (e.g.
+ * "10% off a service at Speed Garage for CoRoute riders"). Not a digital good and not a CoRoute plan,
+ * so "% off", "offer", "deal", "discount" and "sale" are allowed here, and only here. Still refused:
+ * every money / buying word of the app scan and rule 2/3 (no ₹ amounts, price, buy, pay, checkout,
+ * coupon, promo code, voucher ...), any mention of CoRoute plans or membership, and links.
+ */
+const PARTNER_ALLOWED = new Set(['discount', '\\boffers?\\b', '\\bsale\\b', '%\\s?off\\b', '\\bdeals?\\b']);
+const PARTNER_EXTRA = ['\\bplans?\\b', 'membership', 'premium', 'promo\\s?codes?', 'vouchers?', '\\bcodes?\\b', 'group plan', 'pro rider', 'road captain'];
+const PARTNER_FORBIDDEN = new RegExp(`(${[...APP_SCAN_TERMS, ...EXTRA_TERMS].filter((t) => !PARTNER_ALLOWED.has(t)).concat(PARTNER_EXTRA).join('|')})`, 'i');
+
+/** The first term a Partner perk push must not use, or null. */
+function partnerPerkTermIn(text) {
+  const s = String(text == null ? '' : text);
+  const m = PARTNER_FORBIDDEN.exec(s);
+  if (m) return m[1];
+  const l = STEERING_LINK.exec(s);
+  return l ? l[1] : null;
+}
+
+/** The admin message for a refused Partner perk text. */
+function partnerPerkRefusal(term) {
+  return `This partner perk mentions "${term}". A partner perk may describe a real-world perk at a partner (for example "10% off a service at a partner garage"), but never a CoRoute plan, a price or amount, a coupon or promo code, or a way to pay (Google Play payments and ads policies). Offers on CoRoute plans go in an Offers e-mail: choose Channel "Email".`;
+}
+
+module.exports = { APP_SCAN_TERMS, EXTRA_TERMS, FORBIDDEN, STEERING_LINK, forbiddenTermIn, policyRefusal, PARTNER_FORBIDDEN, partnerPerkTermIn, partnerPerkRefusal };

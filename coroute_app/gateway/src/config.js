@@ -57,8 +57,14 @@ function trustList(v) {
   return items.length ? items : ['loopback'];
 }
 
-/** The one support / contact address (website contact, map-data providers); SUPPORT_EMAIL overrides it. */
-const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim();
+/**
+ * The one support / contact address (website legal pages, receipts, map-data providers): SUPPORT_EMAIL.
+ * No built-in default: set it to a role address (for example support@<your domain>). When it is empty the
+ * website points riders to Profile > Help > Send feedback in the app instead of an e-mail address.
+ */
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || '').trim();
+/** Security reports (/.well-known/security.txt, /security): SECURITY_CONTACT, else SUPPORT_EMAIL. */
+const SECURITY_CONTACT = (process.env.SECURITY_CONTACT || SUPPORT_EMAIL).trim();
 
 const config = {
   env: process.env.NODE_ENV || 'production',
@@ -378,6 +384,7 @@ const config = {
   minAppBuild: int('MIN_APP_BUILD', 60),
   latestAppBuild: int('LATEST_APP_BUILD', 10019),
   supportEmail: SUPPORT_EMAIL,
+  securityContact: SECURITY_CONTACT,
 
   // Payment Screen & Subscription Gating Toggle
   // When false: disables payment screens and unlocks plan-based features for all users.
@@ -427,7 +434,7 @@ const config = {
 // version, this site's origin and the contact address, in one place.
 // Origin for links built outside a request: PUBLIC_ORIGIN, else the legacy host that is live today.
 config.linkOrigin = require('./domains').linkOriginOf(config);
-config.providerUserAgent = `CoRoute/${require('../package.json').version} (+${config.linkOrigin}; ${config.geoContact})`;
+config.providerUserAgent = `CoRoute/${require('../package.json').version} (+${config.linkOrigin}${config.geoContact ? `; ${config.geoContact}` : ''})`;
 
 if (!isTest && config.jwtSecret.length < 32) {
   throw new Error('[config] JWT_SECRET must be at least 32 characters');

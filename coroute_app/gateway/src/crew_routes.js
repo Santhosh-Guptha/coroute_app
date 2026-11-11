@@ -121,8 +121,12 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     for (const m of await CR.membersOf(soda, crewId)) if (m.userId !== exceptId) notify(m.userId, payload);
   };
 
+  // 3.56 operator clubs (src/operators.js): name, deletion and hand-over are managed in the operator
+  // console; members can always leave. `club` tells the app this crew is a club (old apps ignore it).
+  const CLUB_MANAGED = { error: 'This club is managed in the CoRoute operator console.', code: 'CLUB_MANAGED' };
   const crewView = (crew, me) => ({
     crewId: crew.crewId, name: crew.name, description: crew.description || '',
+    club: crew.club ? { operatorId: crew.club.operatorId, type: crew.club.type || null } : null,
     memberCount: crew.memberCount || 0, createdAt: crew.createdAt,
     settings: { membersCanCreatePolls: !!(crew.settings && crew.settings.membersCanCreatePolls) },
     myRole: me ? me.role : null,
@@ -253,6 +257,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     const found = await mine(req);
     if (!found) return res.status(404).json(NOT_FOUND);
     if (found.me.role !== CR.ROLES.ADMIN) return res.status(403).json({ error: 'Only the crew admin can change the crew.', code: 'NOT_CREW_ADMIN' });
+    if (found.crew.club) return res.status(409).json(CLUB_MANAGED);
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     try {
       const crew = await CR.updateCrew(soda, found.crew, { name: b.name, description: b.description, membersCanCreatePolls: b.membersCanCreatePolls });
@@ -265,6 +270,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     const found = await mine(req);
     if (!found) return res.status(404).json(NOT_FOUND);
     if (found.me.role !== CR.ROLES.ADMIN) return res.status(403).json({ error: 'Only the crew admin can delete the crew.', code: 'NOT_CREW_ADMIN' });
+    if (found.crew.club) return res.status(409).json(CLUB_MANAGED);
     const members = await CR.membersOf(soda, found.crew.crewId);
     await CR.deleteCrew(soda, found.crew.crewId);
     for (const m of members) if (m.userId !== req.user.userId) notify(m.userId, { type: 'CREW_DELETED', crewId: found.crew.crewId, crewName: found.crew.name });
@@ -346,6 +352,8 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
   r.post('/crews/:crewId/leave', writeLimiter, wrap(async (req, res) => {
     const found = await mine(req);
     if (!found) return res.status(404).json(NOT_FOUND);
+    // The operator (club crew admin) cannot leave its own club; members always can.
+    if (found.crew.club && found.me.role === CR.ROLES.ADMIN) return res.status(409).json(CLUB_MANAGED);
     let transferTo = null;
     const raw = req.body && typeof req.body.transferTo === 'string' ? req.body.transferTo : '';
     if (raw && found.me.role === CR.ROLES.ADMIN) {
@@ -390,6 +398,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     const found = await mine(req);
     if (!found) return res.status(404).json(NOT_FOUND);
     if (found.me.role !== CR.ROLES.ADMIN) return res.status(403).json({ error: 'Only the crew admin can hand over the crew.', code: 'NOT_CREW_ADMIN' });
+    if (found.crew.club) return res.status(409).json(CLUB_MANAGED);
     const t = await targetMember(found.crew, req.body?.username);
     if (!t || t.u.userId === req.user.userId || gone(t.u)) return res.status(422).json({ error: 'Pick a member of this crew.', code: 'NOT_A_MEMBER' });
     await CR.transferAdmin(soda, found.crew, t.m);

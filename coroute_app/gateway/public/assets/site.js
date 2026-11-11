@@ -1115,3 +1115,45 @@
   win.Coroute = { count: function (el, to) { el.setAttribute('data-count', String(to)); }, refresh: function () { measureRoutes(doc); updateProgress(true); } };
   win.__corouteReady = true;
 })();
+
+/* ---------- 3.56 screens gallery: [data-gallery] holds a scroll-snap track (#gallery-track); the arrow buttons
+   ([data-gallery-nav], hidden without JS) scroll one slide at a time and are disabled at either end. Swipe, scroll
+   and the keyboard (Tab to the track, then arrow keys) work natively. ---------- */
+(function () {
+  'use strict';
+  var doc = document;
+  Array.prototype.forEach.call(doc.querySelectorAll('[data-gallery]'), function (vp) {
+    var track = vp.querySelector('.gal__track');
+    var section = vp.closest('section') || doc;
+    var nav = section.querySelector('[data-gallery-nav]');
+    var prev = section.querySelector('[data-gallery-prev]');
+    var next = section.querySelector('[data-gallery-next]');
+    var status = section.querySelector('[data-gallery-status]');
+    if (!track || !nav || !prev || !next) return;
+    var slides = track.children;
+    var step = function () {
+      var s = slides[0], s2 = slides[1];
+      return s ? (s2 ? s2.offsetLeft - s.offsetLeft : s.offsetWidth) : track.clientWidth;
+    };
+    var first = function () { return Math.round(track.scrollLeft / Math.max(1, step())); };
+    var update = function () {
+      var max = track.scrollWidth - track.clientWidth - 2;
+      prev.disabled = track.scrollLeft <= 2;
+      next.disabled = track.scrollLeft >= max;
+      nav.hidden = max <= 0 && track.scrollLeft <= 2;
+    };
+    var go = function (dir) {
+      var n = Math.max(1, Math.floor(track.clientWidth / Math.max(1, step())) - 1);
+      track.scrollBy({ left: dir * n * step(), behavior: 'smooth' });
+      var i = Math.min(slides.length - 1, Math.max(0, first() + dir * n));
+      if (status && slides[i]) status.textContent = 'Showing ' + slides[i].getAttribute('aria-label') + '.';
+    };
+    prev.addEventListener('click', function () { go(-1); });
+    next.addEventListener('click', function () { go(1); });
+    var t = 0;
+    track.addEventListener('scroll', function () { if (!t) t = window.requestAnimationFrame(function () { t = 0; update(); }); }, { passive: true });
+    window.addEventListener('resize', update, { passive: true });
+    nav.hidden = false;
+    update();
+  });
+})();

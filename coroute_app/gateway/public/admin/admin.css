@@ -281,3 +281,8 @@ h2.section-gap { margin: 26px 0 12px; }
 .offer-box { padding: 12px; border: 1px dashed var(--c-border-strong); border-radius: var(--r-md); background: var(--c-surface-2); }
 .offer-preview { font-weight: 700; }
 .dialog--wide:has(.bd-edit) { width: min(1060px, 100%); }
+
+/* ---------- 3.56 Operators section (operators.js) ---------- */
+.op-gap { margin-top: 14px; }
+.op-hist { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.88rem; }
+.nav .navcount { margin-left: 6px; }

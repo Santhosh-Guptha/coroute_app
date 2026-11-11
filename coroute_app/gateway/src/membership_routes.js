@@ -694,6 +694,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin, hu
       },
       effectiveEntitlements,
       paymentsEnabled: config.paymentsEnabled,
+      // 3.56 access mode: what the rider may host now (no prices; access_mode.js appPayload).
+      ...(convoys && convoys.accessMode ? { capabilities: await convoys.accessMode.appCapabilities(uid, { plan }).catch(() => undefined) } : {}),
     });
   }));
 
@@ -910,6 +912,10 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin, hu
   r.post('/membership/order', actionLimiter, couponLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
     const body = req.body || {};
+    // 3.56 access mode "free for everyone": nothing to buy, the website hides checkout (access_mode.js).
+    if (convoys && convoys.accessMode && config.paymentsEnabled !== false && convoys.accessMode.isFreeForAll()) {
+      return res.status(409).json({ error: 'CoRoute is free right now. There is nothing to buy.', reason: 'FREE_MODE', code: 'FREE_MODE' });
+    }
     const category = String(body.category || body.categoryId || '').trim();
     // One code per order (coupons never stack): a list of codes is refused, never half-applied.
     if (Array.isArray(body.offerCode) || Array.isArray(body.couponCode) || (body.offerCode && body.couponCode && body.offerCode !== body.couponCode)) {

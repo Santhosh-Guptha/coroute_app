@@ -474,6 +474,8 @@
       var gwBox = h('div.card', loadingNode());
       var auditBox = h('div.card', loadingNode());
       view.appendChild(pageHead('Plans & pricing', 'What riders pay on the website. Community is free and always on; Small Group and Large Group are sold. Changes are recorded in the audit log below.'));
+      // 3.56 access mode (public/admin/access.js): paid / free for everyone / free up to limits.
+      if (CR.accessModeCard) view.appendChild(CR.accessModeCard());
       view.appendChild(plansBox);
       view.appendChild(h('h2', { text: 'Razorpay', class: 'section-gap' }));
       view.appendChild(gwBox);

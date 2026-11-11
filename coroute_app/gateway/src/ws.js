@@ -705,6 +705,10 @@ class Hub {
     // 3.55 admin feature switches: a message of a feature the admin turned off gets the usual ERROR
     // shape (403, reason FEATURE_OFF). Keyed by type, so a case that does not exist yet costs nothing.
     if (firstOff(this.convoys.featureFlags, wsFeaturesFor(msg))) throw new ConvoyError(FEATURE_OFF_MESSAGE, 403, FEATURE_OFF);
+    // 3.56 access mode: a hybrid free-tier ride includes only the group features the admin chose.
+    if (ws.groupId && typeof this.convoys.rideFeatureOff === 'function' && this.convoys.rideFeatureOff(ws.groupId, wsFeaturesFor(msg))) {
+      throw new ConvoyError("This isn't included in this ride.", 403, 'GROUP_FEATURE_LOCKED');
+    }
     switch (msg.type) {
       case 'PING': return this.send(ws, { type: 'PONG', ts: Date.now() });
 
@@ -785,6 +789,15 @@ class Hub {
         return this._once(ws, cid, 'CHAT', () => this.convoys.sendMessage(gid, u, {
           text: msg.text, isQuickCard: msg.isQuickCard, cardType: msg.cardType, clientId: cid, sentAt: msg.sentAt,
         }));
+      }
+      case 'CHAT_REPORT': {
+        // 3.55 ride chat: report a message to the CoRoute team (public ride reports queue).
+        const gid = this._requireRoom(ws);
+        if (!this._allow(ws, 'action', 5)) throw new ConvoyError('Slow down.', 429);
+        if (!this.publicRides) throw new ConvoyError('Reports are not available right now.', 503);
+        const room = await this.convoys.getRoom(gid);
+        const res = await this.publicRides.reportGroupChat(u, room, msg);
+        return void this.send(ws, res);
       }
       case 'WAIT': return this._once(ws, cid, 'WAIT', () => this.convoys.requestWait(this._requireRoom(ws), u));
       case 'SOS': {
@@ -1175,6 +1188,10 @@ class Hub {
       }
       // 3.55: group talk switched off by the admin (only a new stream start is refused).
       if (firstOff(this.convoys.featureFlags, ['intercom'])) return this.sendError(ws, 403, FEATURE_OFF_MESSAGE, FEATURE_OFF);
+      // 3.56 access mode: group talk left out of a hybrid free-tier ride.
+      if (typeof this.convoys.rideFeatureOff === 'function' && this.convoys.rideFeatureOff(gid, ['intercom'])) {
+        return this.sendError(ws, 403, "This isn't included in this ride.", 'GROUP_FEATURE_LOCKED');
+      }
       // Validate target (must be a current room member, and not yourself).
       if (to) {
         const set = this.rooms.get(gid);

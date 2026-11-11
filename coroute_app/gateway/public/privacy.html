@@ -32,7 +32,7 @@
   <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/site.css">
   <link rel="stylesheet" href="/assets/legal.css">
-  <script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
+  <script src="/assets/theme-init.js"></script>
   <script src="/assets/site.js" defer></script>
   <script src="/assets/legal.js" defer></script>
 </head>
@@ -46,11 +46,13 @@
         <div class="legal-hero__inner">
           <p class="eyebrow">Legal</p>
           <h1>CoRoute Privacy Policy</h1>
-          <p class="legal-hero__meta">Effective November 2026 · CoRoute is a motorcycle safety and group coordination
+          <p class="legal-hero__meta">Updated 11 November 2026 · CoRoute is a motorcycle safety and group coordination
             platform, operated by devmonks.space.</p>
           <nav class="legal-hero__switch" aria-label="Legal documents">
             <a href="/privacy" aria-current="page">Privacy Policy</a>
             <a href="/terms">Terms of Use</a>
+            <a href="/refunds">Refunds</a>
+            <a href="/delete-account">Delete Account</a>
           </nav>
         </div>
       </div>
@@ -63,21 +65,26 @@
         <p class="eyebrow">Summary</p>
         <h2 id="plain-words">Privacy, in plain words.</h2>
         <ul class="legal-summary__list">
-          <li>CoRoute is supported by transparent membership plans. We do not sell data, we show no ads, and we have no
-            third-party analytics or tracking SDKs.</li>
+          <li>We do not sell data, we show no ads, and we have no third-party analytics or tracking SDKs. Group plans
+            are bought on our website, not in the app, and hosting group rides may be free for everyone at times.</li>
           <li>Your live location is collected only while you are in an active convoy. It is shown to the members of that
             convoy, and sharing stops when you leave, the convoy ends or you sign out.</li>
           <li>Voice is relayed live and never stored. We keep only who talked to whom and for how long, for 7 days, to
             detect abuse.</li>
-          <li>Crash detection runs on your phone. Motion data is not sent to us and not stored, and you can switch crash
-            detection off.</li>
+          <li>Crash detection runs on your phone and is always on during a ride. Motion data is not sent to us and not
+            stored.</li>
           <li>In an SOS or crash alert your own group is always alerted first. A few riders of other groups on the same
-            road may be asked to help, at most 3 at a time. They never get your phone number, and you can turn this off.
+            road may be asked to help, at most 3 at a time. This is always on, and they never get your phone number.
           </li>
-          <li>Medical info is optional. If you fill it in, it is shown on your lock screen Medical ID and, only while
-            your SOS or crash alert is open, to the people helping you: your convoy, your guardians and a rider who
-            accepted to help. There is no switch for this. Administrators never see it.</li>
-          <li>Emergency texts and Groups nearby are off until they are switched on.</li>
+          <li>Medical info is optional. If you fill it in, it is shown on your lock screen and to the people helping
+            you (your convoy, your guardians and a rider who accepted to help), only while your SOS or crash alert is
+            open. Administrators never see it.</li>
+          <li>Emergency texts are always on: if your SOS cannot reach our server, your phone prepares a text with your
+            position for your emergency contact and ride mates. Groups nearby stays off until your group lead turns it
+            on.</li>
+          <li>If you join a club or a tour operator's ride, the organiser sees your username and first name, your live
+            position only during their rides, and your emergency contact only if you raise an SOS during their
+            ride.</li>
           <li>During an SOS you, or your lead, can share a live link that shows your first name, last position and
             update time for 30 minutes. Weather and nearest hospital lookups send only rounded route points or the alert
             position through our server. Saved map tiles stay on your phone.</li>
@@ -93,11 +100,15 @@
             dialer directly to public emergency operators; CoRoute does not record or route emergency calls.</li>
           <li>Sweeper assignments and rider-down incident reports are shared only with the active group (and approaching
             riders for road safety warnings), with no private personal data leaked.</li>
-          <li>The app keeps a technical log on your phone (app events, alert timing, connection and sensor numbers) to
-            help fix problems. It has no messages, names, phone numbers or exact places, and it is sent to us only when
-            you choose to send it.</li>
-          <li>Recorded routes and exact positions are deleted after 90 days. You can delete your account in the app at
-            any time, and it is removed at once.</li>
+          <li>The app keeps a technical log on your phone to help fix problems. It has no messages, names, phone numbers
+            or exact places, and it is sent to us only when you choose: from Profile, Help, Send feedback, or when you
+            say yes to the question after a ride with an alert.</li>
+          <li>Offer e-mails are sent only if you turn them on in your website account, and each one has an unsubscribe
+            link. You can turn off each kind of news notification in the app; safety notifications always arrive.</li>
+          <li>Recorded routes and exact positions are deleted after 90 days. You can delete your account in the app
+            (Profile, Account, Delete account) and it is removed at once. A request through our
+            <a href="/delete-account">deletion page</a> is completed within 48 hours. Backup copies expire within 30
+            days.</li>
         </ul>
         <p class="legal-summary__note">This is a short summary. The full text below has the details.</p>
       </section>
@@ -131,11 +142,17 @@
             <li><a class="legal-toc__link" href="#website-numbers">Numbers on our website</a></li>
             <li><a class="legal-toc__link" href="#leaderboards">Public leaderboards</a></li>
             <li><a class="legal-toc__link" href="#diagnostics-log">App diagnostics log</a></li>
+            <li><a class="legal-toc__link" href="#clubs-operators">Clubs and tour operators</a></li>
+            <li><a class="legal-toc__link" href="#plans-payments">Plans and payments</a></li>
+            <li><a class="legal-toc__link" href="#emails-notifications">E-mails and notifications</a></li>
             <li><a class="legal-toc__link" href="#who-can-see">Who can see your data</a></li>
             <li><a class="legal-toc__link" href="#where-data-lives">Where your data lives</a></li>
+            <li><a class="legal-toc__link" href="#service-providers">Service providers</a></li>
             <li><a class="legal-toc__link" href="#your-rights">Your choices and rights</a></li>
+            <li><a class="legal-toc__link" href="#delete-account">Deleting your account</a></li>
             <li><a class="legal-toc__link" href="#children">Children</a></li>
             <li><a class="legal-toc__link" href="#changes">Changes</a></li>
+            <li><a class="legal-toc__link" href="#grievance">Grievance Officer</a></li>
             <li><a class="legal-toc__link" href="#contact">Contact</a></li>
           </ol>
         </details>
@@ -147,7 +164,8 @@
             quick status
             messages and SOS alerts, and provides a live voice intercom. This policy explains exactly what the app
             collects, why, how long
-            it is kept, and how to delete it. CoRoute is supported by transparent, nominal membership plans. We do not
+            it is kept, and how to delete it. Group plans are bought on our website; hosting group rides may also be
+            free for everyone at times. We do not
             sell data, we show no ads, and we have no third-party analytics or tracking SDKs. Our <a href="/terms">Terms
               of Use</a> also apply.</p>
         </div>
@@ -186,11 +204,10 @@
                   <td data-label="Kept for">Until you change it or delete your account</td>
                 </tr>
                 <tr>
-                  <td data-label="Data"><b>Nearby rider settings</b>: "Help nearby riders", "Ask nearby riders to help
-                    me", and when you agreed to the nearby rider network</td>
-                  <td data-label="Why">To decide whether you are asked to help other groups, whether other groups are
-                    asked to help you, and what a helper may see</td>
-                  <td data-label="Kept for">Until you change them or delete your account</td>
+                  <td data-label="Data"><b>Nearby rider network</b>: when you saw and agreed to the nearby rider
+                    network (asking and being asked for help are always on since November 2026)</td>
+                  <td data-label="Why">To show that you were told about the network, and what a helper may see</td>
+                  <td data-label="Kept for">Until you delete your account</td>
                 </tr>
                 <tr>
                   <td data-label="Data"><b>Safety log</b>: when an emergency was raised, its status changes, how many
@@ -275,6 +292,19 @@
                   <td data-label="Kept for">Kept during the active convoy and purged with convoy records</td>
                 </tr>
                 <tr>
+                  <td data-label="Data"><b>Plan purchases (website)</b>: order number, plan, price, discount code, the payment id
+                    and refund status from Razorpay, and your name and e-mail for the receipt</td>
+                  <td data-label="Why">To start your plan, send your receipt and handle refunds</td>
+                  <td data-label="Kept for">Your plan goes with your account; the payment record (order, amount, payment
+                    id) is kept after account deletion for accounting</td>
+                </tr>
+                <tr>
+                  <td data-label="Data"><b>E-mail and notification choices</b>: whether you want offer e-mails (with the
+                    time and place you changed it), unsubscribes, and which kinds of news notifications you get</td>
+                  <td data-label="Why">To send only what you asked for</td>
+                  <td data-label="Kept for">Until you change them or delete your account</td>
+                </tr>
+                <tr>
                   <td data-label="Data"><b>Technical</b>: server logs with IP address and request time</td>
                   <td data-label="Why">Security and keeping the service running</td>
                   <td data-label="Kept for">Rotated automatically within a few weeks</td>
@@ -304,15 +334,15 @@
 
         <section class="legal-section" id="crash-detection" aria-labelledby="crash-detection-h">
           <h2 id="crash-detection-h">Crash detection and the motion sensor</h2>
-          <p>During a ride, above 25 km/h, the app can read the phone's motion sensor to notice a crash. This happens on
+          <p>During a ride, from about 12 km/h, the app reads the phone's motion sensor to notice a crash. This happens on
             your phone only.
             Motion data is not sent to us and not stored. If the phone thinks you crashed, it asks "Possible accident
             detected. Are you okay?"
-            and counts down for 15 seconds first. If you tap "I'm OK", nothing is sent. If you tap "Need Help" or do not
+            and counts down for 30 seconds first. If you tap "I'm OK", nothing is sent. If you tap "Need Help" or do not
             answer, an SOS
             marked as automatic goes to your convoy with your position, direction, speed before the impact and the time.
-            You can switch
-            crash detection off in the app.</p>
+            Crash detection is part of CoRoute's safety features and is always on during a ride (since November 2026;
+            earlier versions of the app had a switch).</p>
           <p>Our server also notices when a rider stops suddenly from high speed and does not move for 2 minutes, or
             loses signal right
             after riding fast. It then asks the lead and the nearest riders to check on that rider. This uses only the
@@ -345,11 +375,12 @@
           <p>Riders of other groups who are riding toward an accident on the same road get a short warning ("Rider
             accident reported
             2 km ahead") with the place only, no names.</p>
-          <p>You can turn off "Help nearby riders" (you are then never asked) and "Ask nearby riders to help me" (other
-            groups are then
-            never asked for you; your own group still is) in the app at any time. This works the same whether your group
-            is Public or
-            Private.</p>
+          <p>"Help nearby riders" and "Ask nearby riders to help me" are part of CoRoute's safety features and are
+            always on (since November 2026; earlier versions of the app had a switch for each). What riders of other
+            groups see stays as described above: before anyone accepts, only the emergency point and how far it is; after
+            one accepts, the details listed above, only while your alert is open. Your own group is always told as well.
+            This works the same whether your group is Public or Private. Nearby help can be paused for everyone by
+            CoRoute (for example during maintenance); your own group is still told.</p>
         </section>
 
         <section class="legal-section" id="groups-nearby" aria-labelledby="groups-nearby-h">
@@ -367,17 +398,21 @@
 
         <section class="legal-section" id="emergency-texts" aria-labelledby="emergency-texts-h">
           <h2 id="emergency-texts-h">Emergency texts when there is no internet</h2>
-          <p>This is off until you switch it on. When it is on and your SOS cannot reach the server, your own phone
-            sends a text
-            message (SMS) with a map link to your position. It goes to your emergency contact, your lead and the nearest
-            riders in your
-            convoy, at most 10 people. The texts are sent from your phone and your SIM, not by us, and your carrier may
-            charge for them.</p>
+          <p>This is always on (since November 2026; earlier versions of the app had a switch). When your SOS cannot reach
+            our server, your phone prepares a text message (SMS) with a live link and your position. It goes to your
+            emergency contact, your lead and sweeper and the nearest riders in your convoy, at most 10 people. On the
+            Google Play version the phone's messages app opens with the text ready and you, or someone with you, press
+            Send; a phone that allows the app to send texts sends them directly. These texts go from your phone and your
+            SIM, not from us, and your carrier may charge for them.</p>
+          <p>When your SOS does reach our server and your phone did not text your emergency contact itself, our server
+            can send the text through an SMS provider (MSG91 or Twilio, when CoRoute has turned this on), and a
+            "safe now" text when the alert closes. The provider receives the contact's phone number, your first name,
+            the live link and the time; nothing else.</p>
           <p>To make this work, your phone keeps the phone numbers of the other riders in your convoy during the ride.
             It gets only their
             numbers and their role in the ride, not their names. The numbers are stored encrypted on the phone, are
             never shown on screen,
-            and are deleted when the ride ends, when you leave or sign out, or when you switch the setting off. They are
+            and are deleted when the ride ends, or when you leave or sign out. They are
             used for nothing
             else.</p>
           <p>If you do not want to receive these texts, switch off "Receive emergency texts from my ride group" in your
@@ -388,24 +423,27 @@
 
         <section class="legal-section" id="spoken-alerts" aria-labelledby="spoken-alerts-h">
           <h2 id="spoken-alerts-h">Spoken alerts and the ride notification</h2>
-          <p>The app can read out emergency alerts and warnings using your phone's own text-to-speech engine. The text
-            is spoken on
-            your phone and is not sent anywhere. During a ride the notification shows your destination, the nearest
-            riders ahead and
-            behind with their distance, and quick actions. On the lock screen it shows your own ride only if "Show ride
-            on lock screen"
-            is on; emergencies of other groups show only a short line without names, and phone numbers are never shown
-            there. You can
-            switch spoken alerts, the lock screen view and the large notification off in the app.</p>
+          <p>The app can read out alerts and warnings using your phone's own text-to-speech engine. The text is spoken
+            on your phone and is not sent anywhere. You can switch voice alerts off in Settings; emergencies are always
+            spoken. During a ride the notification shows your destination, the nearest riders ahead and behind with
+            their distance, and quick actions. Your ride, with the distances and an SOS button, is always shown on the
+            lock screen during a ride, so the SOS button can be reached without unlocking. Emergencies of other groups
+            show only a short line without names, and phone numbers are never shown there.</p>
         </section>
 
         <section class="legal-section" id="microphone" aria-labelledby="microphone-h">
           <h2 id="microphone-h">Microphone and Voice Intercom</h2>
-          <p>The microphone is used exclusively for live group intercom communication while an active convoy is running.
-            The microphone is OFF by default. It activates only while you physically hold the Push-to-Talk (PTT) button
+          <p>Voice intercom: the microphone sends voice only during an active convoy, and sending is OFF by default.
+            Voice goes out only while you physically hold the Push-to-Talk (PTT) button
             or when you have explicitly armed Voice-Operated Transmission (VOX) mode. Audio streams are encrypted and
             relayed directly to convoy members in real time over secure WebSockets. We never record, analyze,
             transcribe, or store audio content. Audio buffers are discarded immediately upon transmission.</p>
+          <p>Siren alerts: during a ride, and only while the Siren alerts setting is on (it is on by default), the app
+            listens through the phone's built-in microphone for the sound pattern of ambulance, police and fire engine
+            sirens, so it can warn riders who cannot hear outside. This listening happens entirely on your phone: the
+            audio is analysed in short pieces and thrown away, and nothing from it is recorded or sent to us or anyone
+            else. The microphone is released when the ride ends, during phone calls, when the battery is low, or when
+            you switch Siren alerts off in Settings.</p>
         </section>
 
         <section class="legal-section" id="live-links" aria-labelledby="live-links-h">
@@ -477,13 +515,11 @@
 
         <section class="legal-section" id="offline-maps" aria-labelledby="offline-maps-h">
           <h2 id="offline-maps-h">Maps saved on your phone</h2>
-          <p>Before a ride, on Wi-Fi or when you tap "Save route map", the app can download the map tiles along your
-            planned route
-            from OpenStreetMap and keep them on your phone, so the map still shows when there is no signal. The tiles
-            are kept on the
-            phone only, up to 60 MB, and are deleted after 30 days or when you delete the trip. Nothing about this
-            leaves your phone,
-            and we do not know which tiles were saved.</p>
+          <p>When you plan or start a ride, the app downloads the map tiles along your planned route (and around your
+            stops and your group) from OpenStreetMap and keeps them on your phone, so the map still shows when there is no signal. This
+            is automatic. The saved map of a trip is deleted 7 days after the trip ends, and all saved maps together are
+            kept under 300 MB (the least recently used go first). Maps of past trips are shown from the internet and are
+            not downloaded. Nothing about this leaves your phone, and we do not know which tiles were saved.</p>
         </section>
 
         <section class="legal-section" id="route-essentials" aria-labelledby="route-essentials-h">
@@ -530,15 +566,17 @@
 
         <section class="legal-section" id="hard-braking" aria-labelledby="hard-braking-h">
           <h2 id="hard-braking-h">Hard braking count</h2>
-          <p>While crash detection is on, the phone counts hard stops from the motion sensor it already reads. The count
-            is shown only
-            to you on your own post-ride summary. It is kept on your phone, it is never uploaded and your group never
-            sees it.</p>
+          <p>During a ride the phone counts hard stops from the motion sensor that crash detection already reads. The count
+            is shown to you on your own post-ride summary and your group never sees it. For your rider score, the app
+            sends five numbers per finished ride: hard brakes, breaks, the highest tiredness level, break reminders and
+            minutes over the speed limit. Never your route, position, times or speed. This is always on (since November
+            2026); rides you finished while an earlier version had it switched off are never sent. Your score is shown
+            only to you; the public leaderboards follow the rules below.</p>
         </section>
 
         <section class="legal-section" id="medical-id-lock-screen" aria-labelledby="medical-id-lock-screen-h">
           <h2 id="medical-id-lock-screen-h">Medical ID on the lock screen</h2>
-          <p>"Show my medical ID on the lock screen during an SOS" is off until you turn it on. When it is on, and only
+          <p>This is always on. Only
             while your own
             SOS or crash alert is open, the ride notification on your lock screen shows your blood group, allergies and
             emergency contact
@@ -609,12 +647,43 @@
           <p>The log never contains message text, names, phone numbers, e-mail addresses, medical information,
             passwords or sign-in tokens, or addresses. Locations are rounded to about 100 metres and written only
             during a ride. Account ids are replaced by a short code that only your phone can make.</p>
-          <p>The log stays on your phone unless you send it: from Settings, More, Diagnostics ("Send logs to CoRoute"
-            or "Share log file"), after a ride with an SOS or crash alarm when the app asks you, or when our support
-            team asks for it and you tap Send. Sending safety logs automatically is off until you turn it on. Our
-            server removes personal patterns again, keeps a sent log for 30 days for our support team only (every view
-            and download is recorded), and deletes it at once when you delete your account. You can clear the log on
-            your phone at any time.</p>
+          <p>The log stays on your phone unless you choose to send it: from Profile, Help, Send feedback (turn on
+            "Attach diagnostics log", or open View diagnostics and tap "Send logs to CoRoute" or "Share log file"),
+            when you say yes to the question the app asks once after a ride with an SOS or crash alarm, or when our
+            support team asks for it and you tap Send. "Send safety logs automatically" is off until you turn it on.
+            Our server removes personal patterns again, keeps a sent log for 30 days for our support team only (every
+            view and download is recorded), and deletes it at once when you delete your account. You can clear the log
+            on your phone at any time.</p>
+        </section>
+
+        <section class="legal-section" id="clubs-operators" aria-labelledby="clubs-operators-h">
+          <h2 id="clubs-operators-h">Clubs and tour operators</h2>
+          <p>Riding clubs and tour operators can run rides on CoRoute. When you join a club or sign up for one of their
+            rides, the organiser and their co-organisers see your username and first name, and your live position only
+            during their rides. They never see your phone number, e-mail or medical ID.</p>
+          <p>Your organiser sees your emergency contact only if you raise an SOS during their ride, only while that SOS
+            is open, and every time they look at it is recorded. You can leave a club at any time.</p>
+        </section>
+
+        <section class="legal-section" id="plans-payments" aria-labelledby="plans-payments-h">
+          <h2 id="plans-payments-h">Plans and payments</h2>
+          <p>Group plans are bought on our website (<a href="/plans">Plans</a>), not in the app. At times hosting group
+            rides may be free for everyone, or free up to a limit; safety features are never part of a plan. Payments
+            are handled by Razorpay. We receive the order, the amount, the payment id and whether it succeeded; your
+            card, UPI or bank details go to Razorpay, not to us. We send your receipt by e-mail when e-mail is set up.
+            Refunds follow our <a href="/refunds">Refund and Cancellation Policy</a>.</p>
+        </section>
+
+        <section class="legal-section" id="emails-notifications" aria-labelledby="emails-notifications-h">
+          <h2 id="emails-notifications-h">E-mails and notifications</h2>
+          <p>We send e-mails you need, such as payment receipts and refund notices. Offer e-mails (plan prices and
+            discount codes) are sent only if you turn on "Send me offer e-mails" in your <a href="/account">website
+            account</a>. Every offer e-mail has an unsubscribe link that works with one click, and you can turn them off
+            again in your account at any time.</p>
+          <p>The app can show push notifications through Google Firebase Cloud Messaging. You can turn off all of them
+            in Settings, or each kind of news notification (news and updates, events, safety tips, community, partner
+            perks; partner perks start off). Safety alerts, ride and friend notifications cannot be turned off
+            separately, because they are part of how the app keeps your group safe.</p>
         </section>
 
         <section class="legal-section" id="who-can-see" aria-labelledby="who-can-see-h">
@@ -632,7 +701,8 @@
             to help, the
             safety log and false alarm counts; they cannot see medical info or listen to intercom audio. Riders of other
             groups see only
-            what is described under "Help from nearby riders of other groups" and "Groups nearby".</p>
+            what is described under "Help from nearby riders of other groups" and "Groups nearby". Club and tour operator
+            organisers see only what is described under "Clubs and tour operators".</p>
           <p>Ride Guardian viewers see only the individual rider who created the grant, limited strictly to the chosen
             tier (Basic: aggregate status without exact coordinates; Live: personal location during active ride only;
             Emergency: location only when SOS or crash alert is open). They cannot see convoy chat, rider rosters,
@@ -645,38 +715,114 @@
           <h2 id="where-data-lives-h">Where your data lives</h2>
           <p>Data is stored in an Oracle Cloud Autonomous Database and relayed by our server, both in the Oracle Cloud
             Hyderabad region
-            (India). Connections use TLS. Passwords are stored as bcrypt hashes. If you sign in with Google, we receive
+            (India). Connections use TLS. Passwords are stored as scrypt hashes (older bcrypt hashes are replaced the next time you sign in). If you sign in with Google, we receive
             your e-mail and
             display name from Google; Google's own privacy policy governs that sign-in.</p>
         </section>
 
+        <section class="legal-section" id="service-providers" aria-labelledby="service-providers-h">
+          <h2 id="service-providers-h">Service providers</h2>
+          <p>We use these services to run CoRoute. Each gets only what it needs for its job. None of them may use your
+            data for its own advertising.</p>
+          <!-- [OWNER TO FILL] name the SMTP e-mail provider once chosen, and confirm processor agreements (see docs/handbook/compliance/privacy_compliance_pack.md section 2.7). -->
+          <div class="legal-table-wrap">
+            <table class="legal-table">
+              <thead>
+                <tr>
+                  <th scope="col">Service</th>
+                  <th scope="col">What it does</th>
+                  <th scope="col">What it receives</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td data-label="Service"><b>Oracle Cloud</b> (Hyderabad region, India)</td>
+                  <td data-label="What it does">Hosts our servers, database, backups and stored photos</td>
+                  <td data-label="What it receives">The data described in this policy, stored for us</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>Google Firebase Cloud Messaging</b></td>
+                  <td data-label="What it does">Delivers push notifications to your phone</td>
+                  <td data-label="What it receives">Your phone's push token and the short text of the notification</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>Google Sign-In</b></td>
+                  <td data-label="What it does">Lets you sign in with Google, if you choose</td>
+                  <td data-label="What it receives">Google sends us your e-mail and name</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>Our e-mail provider</b> (sent over SMTP)</td>
+                  <td data-label="What it does">Sends receipts, refund notices and offer e-mails you asked for</td>
+                  <td data-label="What it receives">Your e-mail address, name and the e-mail's content</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>MSG91</b> (India) or <b>Twilio</b> (USA), when turned on</td>
+                  <td data-label="What it does">Sends emergency texts from our server</td>
+                  <td data-label="What it receives">Your emergency contacts' numbers, your first name, the live link and the
+                    time</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>Razorpay</b> (India), on the website only</td>
+                  <td data-label="What it does">Takes payments for plans and processes refunds</td>
+                  <td data-label="What it receives">The order and amount, and the payment details you enter there</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>OpenStreetMap services</b>: Nominatim, Photon, OSRM and Overpass</td>
+                  <td data-label="What it does">Place search and names, routes, and places along the road, asked by our
+                    server</td>
+                  <td data-label="What it receives">Search text and coordinates only, never your name or account</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>OpenStreetMap map tiles</b></td>
+                  <td data-label="What it does">Map images in the app and on live link pages</td>
+                  <td data-label="What it receives">The viewer's IP address and the map area, as with any website</td>
+                </tr>
+                <tr>
+                  <td data-label="Service"><b>Open-Meteo</b></td>
+                  <td data-label="What it does">Weather on the route, asked by our server</td>
+                  <td data-label="What it receives">Up to 5 route points rounded to about 10 km</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="legal-section" id="your-rights" aria-labelledby="your-rights-h">
           <h2 id="your-rights-h">Your choices and rights</h2>
-          <p>You can edit your profile and delete individual trips inside the app. You can delete your account in the
-            app under
-            Account &amp; security, Delete my account; it is removed at once. This deletes your profile, your trips,
-            your recorded routes,
-            your timeline entries, your safety log rows and false alarm count, and your chat messages, SOS alerts and
-            voice log entries. The rides you shared stay in the other
-            riders' history, but your name there is replaced with "Former rider", and your phone, bike number and
-            emergency contact are removed. If you can no longer sign in, e-mail
-            <a href="mailto:santhoshbukka5@gmail.com">santhoshbukka5@gmail.com</a> from the address you registered with
-            and we delete it
-            within 30 days. You may also request a copy of your data. You can revoke location and microphone permissions
-            at any time in
-            your phone's settings; the app will then work in a limited mode. You can switch crash detection, emergency
-            texts, help from nearby riders, spoken alerts and the
-            lock screen view off at any time in the app.
-          </p>
+          <p>You can see and edit your profile, bikes, emergency contact and medical info in the app, and delete
+            individual trips. You can ask us for a summary of your personal data and how we use it, ask us to correct or
+            complete it, or ask us to erase it. You can also name a person who may use these rights for you if you die or
+            cannot act yourself. Write to us <!--support-email-->at <a href="mailto:__SUPPORT_EMAIL__">__SUPPORT_EMAIL__</a><!--/support-email--><!--no-support-email-->through the <a href="/#feedback">contact form on our home page</a><!--/no-support-email--> from the e-mail address you registered with, so we
+            can check it is you.</p>
+          <p>Crash detection, emergency texts, the lock screen ride view, Medical ID during an alert and help from nearby
+            riders are always on, because they are how CoRoute keeps riders safe. You choose the rest: voice alerts,
+            siren alerts, appearing on the leaderboards, news notifications, offer e-mails, sharing your fuel range,
+            receiving emergency texts from your ride group, and which Ride Guardian links you create. You can revoke
+            location and microphone permissions at any time in your phone's settings; the app then works in a limited
+            mode, and safety features that need them cannot work.</p>
           <p>Ride Guardian grants can be paused or revoked at any time by the rider in the app, and dependent records
             are purged upon convoy deletion or account removal. Smart Fuel Profile sharing is entirely optional and can
             be toggled off at any time, keeping tank inputs stored only on your local device.</p>
+          <p>If you are not happy with our answer, you can contact our <a href="#grievance">Grievance Officer</a>. If
+            the matter is still not resolved, you can complain to the Data Protection Board of India.</p>
+        </section>
+
+        <section class="legal-section" id="delete-account" aria-labelledby="delete-account-h">
+          <h2 id="delete-account-h">Deleting your account</h2>
+          <p>In the app, go to Profile, Account, <b>Delete account</b>. Your account is deleted at once. If you cannot
+            use the app, use our <a href="/delete-account">account deletion page</a>; we complete those requests within
+            48 hours after checking that the request comes from the account's e-mail address.</p>
+          <p>Deleting your account deletes your profile, your trips, your recorded routes, your timeline entries, your
+            safety log rows and false alarm count, your sent diagnostics logs, and your chat messages, SOS alerts and
+            voice log entries. The rides you shared stay in the other riders' history, but your name there is replaced
+            with "Former rider", and your phone, bike number and emergency contact are removed. Payment records (order,
+            amount, payment id) are kept for accounting. Encrypted backup copies expire within 30 days.</p>
         </section>
 
         <section class="legal-section" id="children" aria-labelledby="children-h">
           <h2 id="children-h">Children</h2>
-          <p>Coroute is intended for licensed riders aged 18 and over. We do not knowingly collect data from children.
-          </p>
+          <p>CoRoute is only for licensed riders aged 18 and over. We do not knowingly collect data from anyone under
+            18. If you believe a person under 18 has an account, tell us <!--support-email-->at <a href="mailto:__SUPPORT_EMAIL__">__SUPPORT_EMAIL__</a><!--/support-email--><!--no-support-email-->through the <a href="/#feedback">contact form on our home page</a><!--/no-support-email--> and we will delete it.</p>
         </section>
 
         <section class="legal-section" id="changes" aria-labelledby="changes-h">
@@ -685,12 +831,19 @@
             announced in the app.</p>
         </section>
 
+        <section class="legal-section" id="grievance" aria-labelledby="grievance-h">
+          <h2 id="grievance-h">Grievance Officer</h2>
+          <!-- [OWNER TO FILL] Grievance Officer name, role e-mail address, postal address and response times (proposal: acknowledge in 48 hours, resolve in 15 days; check against the DPDP Rules). Until then the visible text points to the support address set in SUPPORT_EMAIL. -->
+          <p>Grievance Officer: contact us <!--support-email-->at <a href="mailto:__SUPPORT_EMAIL__">__SUPPORT_EMAIL__</a><!--/support-email--><!--no-support-email-->through the <a href="/#feedback">contact form on our home page</a><!--/no-support-email-->. Write "Grievance" in the subject and tell us what
+            happened. We will acknowledge your message and reply as soon as we can.</p>
+        </section>
+
         <section class="legal-section" id="contact" aria-labelledby="contact-h">
           <h2 id="contact-h">Contact</h2>
-          <p>devmonks.space · <a href="mailto:santhoshbukka5@gmail.com">santhoshbukka5@gmail.com</a></p>
+          <p>devmonks.space · contact us <!--support-email-->at <a href="mailto:__SUPPORT_EMAIL__">__SUPPORT_EMAIL__</a><!--/support-email--><!--no-support-email-->through the <a href="/#feedback">contact form on our home page</a><!--/no-support-email-->.</p>
         </section>
         <div class="legal-end">
-          <p>See also our <a href="/terms">Terms of Use</a>.</p>
+          <p>See also our <a href="/terms">Terms of Use</a> and <a href="/refunds">Refund and Cancellation Policy</a>.</p>
           <a class="legal-totop" href="#main"><svg class="icon" aria-hidden="true" focusable="false">
               <use href="/assets/icons.svg#i-arrow-right" />
             </svg>Back to top</a>

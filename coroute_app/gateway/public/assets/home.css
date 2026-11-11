@@ -415,7 +415,7 @@
 }
 .hp-final__motto { font-size: var(--fs-label); font-weight: 800; letter-spacing: var(--tr-label); text-transform: uppercase; color: #FFFFFF !important; margin: 0 0 var(--sp-12) !important; }
 .hp-final__box h2 { color: #FFFFFF; font-size: var(--fs-h2); }
-.hp-final__box p { margin-top: var(--sp-8); color: rgba(255, 255, 255, .9); max-width: 38rem; }
+.hp-final__box p { margin-top: var(--sp-8); color: #FFFFFF; max-width: 38rem; }
 .hp-final__cta { display: flex; flex-direction: column; gap: var(--sp-12); }
 .hp-final .btn--primary { background: #FFFFFF; color: #2B7A8C !important; box-shadow: none; }
 .hp-final .btn--primary:hover { background: #D7ECEF; }
@@ -557,3 +557,115 @@
   .hx__scene, .hx__scrim { display: none; }
   .motto__pillars a, .rv-card, .fx-card, .px-card, .hp-numbers__list > div, .px-solo, .hb-card, .gx-list li, .gx-plan, .hp-count { border: 1px solid CanvasText; }
 }
+
+/* ---------- 3.56 hero with real app screens ---------- */
+.hx--phones { min-height: 0; padding-bottom: clamp(40px, 6vw, 72px); }
+.hx--phones .hx__inner { display: grid; gap: clamp(32px, 5vw, 56px); align-items: center; }
+.hx--phones .hx__title { max-width: 12ch; }
+.hx__phones { position: relative; display: flex; justify-content: center; align-items: flex-end; width: 100%; max-width: 560px; margin: 0 auto; padding: 8px 0 12px; }
+.hx__phones .dev { flex: none; }
+.hx__phones .dev--front { position: relative; z-index: 2; width: 44%; }
+.hx__phones .dev--back { width: 36%; margin-bottom: 6%; }
+.hx__phones .dev--left { margin-right: -9%; z-index: 1; }
+.hx__phones .dev--right { margin-left: -9%; z-index: 1; }
+@media (max-width: 899px) {
+  .hx--phones .hx__scene { height: 62%; }
+  .hx--phones .hx__scrim { background: linear-gradient(180deg, var(--c-bg) 0%, var(--c-bg) 42%, color-mix(in srgb, var(--c-bg) 40%, transparent) 70%, transparent 100%), linear-gradient(0deg, var(--c-bg) 0%, transparent 10%); }
+}
+@media (max-width: 599px) {
+  .hx__phones .dev--front { width: 47%; }
+  .hx__phones .dev--back { width: 37%; }
+}
+@media (min-width: 900px) {
+  .hx--phones { min-height: min(100svh, 860px); padding-bottom: clamp(56px, 8vh, 96px); }
+  .hx--phones .hx__inner { grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); }
+}
+@media (min-width: 900px) and (max-width: 1099px) {
+  .hx--phones .hx__lead-more { display: none; }
+}
+
+/* ---------- 3.56 six differentiators ---------- */
+.sx { padding-top: clamp(48px, 6vw, 88px); }
+.sx-grid { display: grid; gap: var(--sp-16); margin-top: clamp(28px, 4vw, 48px); }
+@media (min-width: 640px) { .sx-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .sx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.sx-card {
+  display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; padding: clamp(20px, 2.4vw, 28px);
+  border-radius: var(--r-xl); background: var(--c-surface); border: 1px solid var(--c-border);
+  transition: border-color var(--d-base) var(--ease), box-shadow var(--d-base) var(--ease);
+}
+.sx-card:hover { border-color: var(--c-accent-line); box-shadow: var(--shadow-md); }
+.sx-card h3 { margin-top: var(--sp-12); font-size: var(--fs-h3); line-height: 1.25; }
+.sx-card p { color: var(--c-text-2); font-size: var(--fs-small); line-height: var(--lh-snug); }
+.sx-card--sos { background: linear-gradient(160deg, var(--c-red-soft), var(--c-surface) 62%); }
+.sx-card--amber { background: linear-gradient(160deg, var(--c-safety-light), var(--c-surface) 62%); }
+
+/* ---------- 3.56 screens gallery (scroll-snap; site.js [data-gallery] adds the arrow buttons) ---------- */
+.gal { overflow: hidden; }
+.gal__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-24); }
+.gal__nav { display: flex; gap: var(--sp-8); }
+.gal__btn {
+  display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%;
+  background: var(--c-surface); border: 1px solid var(--c-border-strong); color: var(--c-text);
+  transition: border-color var(--d-fast) var(--ease), color var(--d-fast) var(--ease), opacity var(--d-fast) var(--ease);
+}
+.gal__btn:hover:not(:disabled) { border-color: var(--c-brand); color: var(--c-brand); }
+.gal__btn:disabled { opacity: .4; cursor: default; }
+.gal__viewport { margin-top: clamp(28px, 4vw, 48px); }
+.gal__track {
+  --gal-pad: max(var(--gutter), calc((100vw - var(--container)) / 2 + var(--gutter)));
+  display: flex; gap: clamp(16px, 2.4vw, 28px); overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-padding-inline: var(--gal-pad); padding: 8px var(--gal-pad) 28px;
+  scrollbar-width: thin; scrollbar-color: var(--c-border-strong) transparent;
+}
+.gal__track:focus-visible { outline-offset: -3px; }
+.gal__slide { flex: none; width: min(64vw, 248px); scroll-snap-align: start; }
+.gal__slide .dev { width: 100%; }
+.gal__cap { margin-top: var(--sp-16); }
+.gal__cap h3 { font-size: var(--fs-h4); }
+.gal__cap p { margin-top: 4px; color: var(--c-text-2); font-size: var(--fs-small); line-height: var(--lh-snug); }
+@media (prefers-reduced-motion: no-preference) { .gal__track { scroll-behavior: smooth; } }
+
+/* ---------- 3.56 Why CoRoute: comparison table (cards on phones) ---------- */
+.cmp__wrap { margin-top: clamp(28px, 4vw, 48px); border-radius: var(--r-xl); border: 1px solid var(--c-border); background: var(--c-surface); overflow: hidden; }
+.cmp__wrap:focus-visible { outline-offset: 2px; }
+.cmp__table { width: 100%; border-collapse: collapse; font-size: var(--fs-small); }
+.cmp__table th, .cmp__table td { padding: 14px 16px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--c-border); }
+.cmp__table tbody tr:last-child > * { border-bottom: 0; }
+.cmp__table thead th { font-size: var(--fs-xs); font-weight: 800; letter-spacing: .02em; color: var(--c-text-2); background: var(--c-surface-2); }
+.cmp__table tbody th { font-weight: 700; color: var(--c-text); width: 34%; }
+.cmp__table .cmp__us, .cmp__table td.cmp__c:first-of-type { background: color-mix(in srgb, var(--c-brand-light) 55%, transparent); }
+.cmp__brand { color: var(--c-brand); font-size: var(--fs-small); }
+.cmp__c { color: var(--c-text-2); }
+.cmp__c > span { vertical-align: middle; }
+.cmp__mark { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: 8px; border-radius: 50%; flex: none; }
+.cmp__mark .icon { width: 15px; height: 15px; }
+.cmp__c--yes .cmp__mark { background: var(--c-brand-fill); color: #FFFFFF; }
+.cmp__c--part .cmp__mark { background: var(--c-safety-light); color: var(--c-safety-ink); }
+.cmp__c--no .cmp__mark { background: var(--c-surface-2); color: var(--c-text-3); }
+.cmp__c--yes .cmp__txt { color: var(--c-text); font-weight: 800; }
+.cmp__txt small { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-3); }
+.cmp__c { display: table-cell; }
+.cmp__c .cmp__txt { display: inline-block; vertical-align: middle; }
+.cmp__note { margin-top: var(--sp-16); max-width: 60rem; }
+@media (max-width: 759px) {
+  .cmp__table, .cmp__table tbody, .cmp__table tr { display: block; }
+  .cmp__table thead { display: none; }
+  .cmp__table tbody tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--c-border); }
+  .cmp__table tbody tr:last-child { border-bottom: 0; }
+  .cmp__table tbody th { grid-column: 1 / -1; width: auto; border-bottom: 0; padding: 14px 14px 6px; }
+  .cmp__table td.cmp__c { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border-bottom: 0; padding: 6px 14px 14px; font-size: var(--fs-xs); }
+  .cmp__table td.cmp__c::before { content: attr(data-label); font-size: .6875rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--c-text-3); }
+  .cmp__table td.cmp__c:first-of-type { background: transparent; }
+  .cmp__table td.cmp__c:first-of-type::before { color: var(--c-brand); }
+  .cmp__mark { margin-right: 0; }
+}
+
+/* ---------- 3.56 real screenshots in the Safe and Memorable sections ---------- */
+.hp-shot { margin: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-16); }
+.hp-shot .dev--lg { width: min(70vw, 290px); }
+.hp-shot figcaption { max-width: 22rem; text-align: center; font-size: var(--fs-xs); color: var(--c-text-3); line-height: var(--lh-snug); }
+.hp-safe .hp-shot figcaption { color: inherit; opacity: .78; }
+.hp-secure__links { margin-top: var(--sp-20); }
+.hp-secure__links .link-arrow { margin-top: 0; }
+.px-note { margin-top: var(--sp-24); }

@@ -13,6 +13,7 @@ const { registerSubscriptionPublicRoutes, registerSubscriptionAuthRoutes } = req
 const { registerMembershipPublicRoutes, registerMembershipAuthRoutes } = require('./membership_routes');
 const { registerAdminAnalyticsRoutes, registerPublicUsageRoutes, maxTripsFor } = require('./admin_analytics');
 const { assignPlan } = require('./admin_plans');
+const { MapLinkResolver } = require('./geo_links');
 const { isStaffAccount, isGuestAccount, staffEmails, hasStaffMember } = require('./staff');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -633,9 +634,35 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // ---- places and routes (free OSM services through the gateway cache) ----
   const geoLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => req.user?.userId || req.ip, message: { error: 'Too many place lookups. Wait a moment.' } });
-  r.get('/geo/search', geoLimiter, wrap(async (req, res) => {
+  // 3.56: search as you type and pasted map links get their own budgets. They used to share the
+  // 30-a-minute bucket above with reverse lookups (every map pan in the picker), routes, fuel and
+  // essentials, so a rider typing a few places got 429s that the app showed as "No matching places".
+  const searchLimiter = rateLimit({ windowMs: 60 * 1000, limit: 90, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `search:${req.user?.userId || req.ip}`, message: { error: 'Too many searches. Wait a moment.', code: 'RATE_LIMITED' } });
+  const reverseLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `rev:${req.user?.userId || req.ip}`, message: { error: 'Too many place lookups. Wait a moment.', code: 'RATE_LIMITED' } });
+  const linkLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `link:${req.user?.userId || req.ip}`, message: { error: 'Too many links. Wait a moment.', code: 'RATE_LIMITED' } });
+  const linkResolver = new MapLinkResolver({ geo, fetchImpl: geo.fetch, userAgent: () => config.providerUserAgent, logger: geo.log || console });
+  r.get('/geo/search', searchLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
-    res.json({ results: await geo.search(req.query.q, { lat, lng }) });
+    const everywhere = req.query.everywhere === '1' || req.query.everywhere === 'true';
+    const out = await geo.searchResult(req.query.q, { lat, lng, everywhere });
+    if (out.error) return res.status(503).json({ error: 'Place search is unavailable right now. Try again in a moment.', code: out.error, results: [] });
+    res.set('Cache-Control', 'private, max-age=300').json({ results: out.results });
+  }));
+  // 3.56: a pasted or shared map link / coordinates / plus code -> a place (short links expanded
+  // here, Google hosts only). POST so the link never sits in an access log URL.
+  r.post('/geo/link', linkLimiter, wrap(async (req, res) => {
+    const b = req.body || {};
+    if (typeof b.text !== 'string') return res.status(400).json({ error: 'Paste a map link or coordinates.', code: 'LINK_EMPTY' });
+    try {
+      res.set('Cache-Control', 'no-store').json(await linkResolver.resolve(b.text, { lat: Number(b.lat), lng: Number(b.lng) }));
+    } catch (e) {
+      if (!e.code) throw e;
+      const msg = e.code === 'LINK_UNSUPPORTED' ? 'This link has no place CoRoute can read.'
+        : e.code === 'LINK_NOT_ALLOWED' ? 'Only Google Maps short links can be opened.'
+          : e.code === 'LINK_EMPTY' || e.code === 'LINK_TOO_LONG' ? 'Paste a map link or coordinates.'
+            : 'Could not open this link right now. Try again in a moment.';
+      res.status(e.status || 502).json({ error: msg, code: e.code });
+    }
   }));
   r.get('/geo/nearby-fuel', geoLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
@@ -658,7 +685,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       res.set('Cache-Control', out.pending.length ? 'no-store' : 'private, max-age=3600').json(out);
     } catch (e) { res.status(e.status || 503).json({ error: 'Map places are unavailable.', code: e.code || 'PLACES_UNAVAILABLE' }); }
   }));
-  r.get('/geo/reverse', geoLimiter, wrap(async (req, res) => {
+  r.get('/geo/reverse', reverseLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
     if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) return res.status(400).json({ error: 'Invalid coordinates.' });
     res.json({ name: await geo.reverse(lat, lng) });

@@ -91,6 +91,11 @@ const isInviteId = (v) => typeof v === 'string' && INVITE_RE.test(v);
 const isPollId = (v) => typeof v === 'string' && POLL_RE.test(v);
 const isConflict = (e) => e && (e.status === 409 || /unique|ORA-00001|duplicate/i.test(String(e.message || '')));
 const canManage = (m) => !!m && (m.role === ROLES.ADMIN || m.role === ROLES.CO_ADMIN);
+// 3.56 operator clubs (src/operators.js): a club crew carries `club: {operatorId, maxMembers}`; its
+// roster size is the operator's limit (up to 1000) instead of MAX_MEMBERS, and its invites come from
+// the operator console without the friendship rule (the rider still has to accept).
+const CLUB_MAX_MEMBERS = 1000;
+const capOf = (crew) => (crew && crew.club && Number(crew.club.maxMembers) > 0 ? Math.min(CLUB_MAX_MEMBERS, Number(crew.club.maxMembers)) : LIMITS.MAX_MEMBERS);
 const withKey = (r) => (r ? { ...r.value, key: r.key } : null);
 const stripKey = ({ key, ...v }) => v; // eslint-disable-line no-unused-vars
 
@@ -241,7 +246,7 @@ async function memberOf(soda, crewId, userId) {
 /** Members, oldest first. */
 async function membersOf(soda, crewId) {
   await ensureCrewStore(soda);
-  const rows = (await soda.query(C.members, { crewId }, { limit: LIMITS.MAX_MEMBERS + 50 })).map(withKey);
+  const rows = (await soda.query(C.members, { crewId }, { limit: CLUB_MAX_MEMBERS + 50 })).map(withKey);
   return rows.sort((a, b) => a.joinedAt - b.joinedAt || (a.userId < b.userId ? -1 : 1));
 }
 
@@ -332,8 +337,8 @@ async function inviteToCrew(soda, crew, inviter, targetId, now = Date.now()) {
   }
   const members = (await membersOf(soda, crew.crewId)).length;
   const pending = (await liveInvitesOf(soda, crew.crewId, now)).length;
-  if (members + pending >= LIMITS.MAX_MEMBERS) {
-    throw new CrewError(`A crew has up to ${LIMITS.MAX_MEMBERS} riders, counting invites waiting for an answer.`, 'CREW_FULL', 409);
+  if (members + pending >= capOf(crew)) {
+    throw new CrewError(`A crew has up to ${capOf(crew)} riders, counting invites waiting for an answer.`, 'CREW_FULL', 409);
   }
   const invite = { inviteId: `ci_${hex(8)}`, inviteKey, crewId: crew.crewId, userId: targetId, invitedBy: inviter.userId, createdAt: now, expiresAt: now + LIMITS.INVITE_TTL_MS };
   try {
@@ -382,15 +387,15 @@ async function respondInvite(soda, userId, inviteId, yes, now = Date.now()) {
   }
   const inviter = await memberOf(soda, crew.crewId, inv.invitedBy);
   const stillOk = inviter
-    && await F.areFriends(soda, userId, inv.invitedBy)
+    && (crew.club ? true : await F.areFriends(soda, userId, inv.invitedBy))
     && !(await F.blockedEither(soda, userId, inv.invitedBy))
     && !(await F.blockedEither(soda, userId, crew.adminId));
   if (!stillOk) {
     await soda.remove(C.invites, inv.key);
     throw new CrewError('This invite is no longer valid.', 'INVITE_GONE', 410);
   }
-  if ((await membersOf(soda, crew.crewId)).length >= LIMITS.MAX_MEMBERS) {
-    throw new CrewError(`This crew is full (${LIMITS.MAX_MEMBERS} riders).`, 'CREW_FULL', 409);
+  if ((await membersOf(soda, crew.crewId)).length >= capOf(crew)) {
+    throw new CrewError(`This crew is full (${capOf(crew)} riders).`, 'CREW_FULL', 409);
   }
   if ((await membershipsOf(soda, userId)).length >= LIMITS.MAX_JOINED) {
     throw new CrewError(`You can be in up to ${LIMITS.MAX_JOINED} crews. Leave one first.`, 'TOO_MANY_CREWS', 409);
@@ -610,5 +615,6 @@ module.exports = {
   getCrew, memberOf, membersOf, membershipsOf, liveInvitesOf, createCrew, updateCrew, deleteCrew,
   inviteToCrew, invitesFor, respondInvite, cancelInvite, changeRole, transferAdmin, successorOf, leaveCrew,
   getPoll, pollsOf, createPoll, votesOf, castVote, retractVote, closePoll, deletePoll, forgetCrewUser,
+  setRole, syncCount, capOf, CLUB_MAX_MEMBERS,
   _resetForTests: () => { migrated = new WeakSet(); },
 };

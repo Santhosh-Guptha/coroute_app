@@ -72,8 +72,9 @@ test('shop pages are served with a strict CSP, no inline script, no-store, frami
   assert.ok(!(await page('/signin')).headers.get('content-security-policy').includes('accounts.google.com'), 'no Google without GOOGLE_WEB_CLIENT_ID');
   const g = shop.shopCsp({ google: true });
   assert.ok(g.includes('script-src \'self\' https://accounts.google.com/gsi/client') && g.includes('frame-src https://accounts.google.com/gsi/'));
-  // Other pages keep the site-wide policy.
-  assert.ok(!(await page('/features')).headers.get('content-security-policy').includes("base-uri 'none'"));
+  // Marketing pages have their own strict policy (src/pages.js MARKETING_CSP): no Razorpay, no inline script.
+  const mk = (await page('/features')).headers.get('content-security-policy');
+  assert.ok(mk.includes("script-src 'self';") && !mk.includes('razorpay') && mk.includes("base-uri 'none'"), mk);
   const sm = await (await page('/sitemap.xml')).text();
   assert.ok(sm.includes(`<loc>${origin}/plans</loc>`) && !sm.includes('/account<') && !sm.includes('/signin<'));
 });

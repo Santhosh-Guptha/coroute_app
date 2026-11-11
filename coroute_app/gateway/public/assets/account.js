@@ -154,5 +154,29 @@
     if (!names.individual) names.individual = 'Individual';
     if (rs[2].ok) renderPayments(rs[2].json.payments, names);
     else S.clear(S.$('ac-payments')).appendChild(el('p', 't-small t-muted', 'Payments could not load. Refresh to try again.'));
+    loadConsent();
   });
+
+  /* 3.56 "Offer e-mails" consent (GET / PUT /api/web/marketing-consent): off by default, the rider's choice. */
+  function loadConsent() {
+    var box = S.$('ac-offers');
+    var note = S.$('ac-offers-note');
+    if (!box || !note) return;
+    S.api('GET', '/web/marketing-consent').then(function (r) {
+      if (!r.ok) { note.textContent = 'Your e-mail choices could not load. Refresh to try again.'; return; }
+      box.checked = r.json.offersEmail === true;
+      box.disabled = !r.json.hasEmail;
+      note.textContent = !r.json.hasEmail ? 'Add an e-mail address to your account to get offer e-mails.'
+        : (r.json.offersEmail ? 'On. You can turn this off here or with the link in any offer e-mail.' : 'Off. We never send offers unless you turn this on.');
+    });
+    box.addEventListener('change', function () {
+      var want = box.checked;
+      box.disabled = true;
+      S.api('PUT', '/web/marketing-consent', { offersEmail: want }).then(function (r) {
+        box.disabled = false;
+        if (!r.ok) { box.checked = !want; note.textContent = (r.json && r.json.error) || 'Could not save. Try again.'; return; }
+        note.textContent = r.json.offersEmail ? 'On. You can turn this off here or with the link in any offer e-mail.' : 'Off. We never send offers unless you turn this on.';
+      });
+    });
+  }
 })();

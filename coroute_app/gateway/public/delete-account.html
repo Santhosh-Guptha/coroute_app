@@ -5,13 +5,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Delete Account & Data | CoRoute</title>
-  <meta name="description" content="Request deletion of your CoRoute account and associated personal data. Transparent, permanent, and immediate.">
+  <meta name="description" content="Request deletion of your CoRoute account and associated personal data: at once in the app, or within 48 hours by request.">
   <link rel="canonical" href="__ORIGIN__/delete-account">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="CoRoute">
   <meta property="og:title" content="Delete Account & Data | CoRoute">
   <meta property="og:description"
-    content="Request deletion of your CoRoute account and associated personal data. Transparent, permanent, and immediate.">
+    content="Request deletion of your CoRoute account and associated personal data: at once in the app, or within 48 hours by request.">
   <meta property="og:url" content="__ORIGIN__/delete-account">
   <meta property="og:image" content="__ORIGIN__/og-image.png">
   <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
   <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/site.css">
   <link rel="stylesheet" href="/assets/legal.css">
-  <script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
+  <script src="/assets/theme-init.js"></script>
   <script src="/assets/site.js" defer></script>
 </head>
 
@@ -43,6 +43,7 @@
           <nav class="legal-hero__switch" aria-label="Legal documents">
             <a href="/privacy">Privacy Policy</a>
             <a href="/terms">Terms of Use</a>
+            <a href="/refunds">Refunds</a>
             <a href="/delete-account" aria-current="page">Delete Account</a>
           </nav>
         </div>
@@ -63,23 +64,23 @@
           <ol>
             <li>Open the <strong>CoRoute</strong> app on your Android device.</li>
             <li>Tap the <strong>Profile</strong> tab on the bottom navigation bar.</li>
-            <li>Tap <strong>Account &amp; Security</strong> (or Settings).</li>
-            <li>Scroll down and tap <strong style="color: var(--accent-red, #dc2626);">Delete My Account</strong>.</li>
-            <li>Confirm the prompt. Your active session will terminate immediately and your data will be permanently wiped.</li>
+            <li>Scroll down to the <strong>Account</strong> section.</li>
+            <li>Tap <strong style="color: var(--accent-red, #dc2626);">Delete account</strong>.</li>
+            <li>Confirm the prompt. Your account is deleted at once and you are signed out on this phone.</li>
           </ol>
         </section>
 
         <section id="web-request">
           <h2>Option 2: Web Deletion Request</h2>
-          <p>If you have uninstalled the app or cannot access your device, you can submit an account deletion request via email or through the form below. We process web deletion requests within 24 to 48 hours.</p>
+          <p>If you have uninstalled the app or cannot access your device, send us a deletion request. We complete deletion requests within 48 hours after checking that the request comes from the e-mail address registered with the account.</p>
 
           <div style="background: var(--surface-2, rgba(0,0,0,0.03)); border: 1px solid var(--border-color, #e5e7eb); border-radius: 12px; padding: 24px; margin: 24px 0;">
             <h3 style="margin-top: 0;">Submit Request to Support</h3>
-            <p>Send an email to our official support address with the subject line <code>Delete My CoRoute Account</code>:</p>
-            <p><strong>Support Email:</strong> <a href="mailto:santhoshbukka5@gmail.com?subject=Delete%20My%20CoRoute%20Account">santhoshbukka5@gmail.com</a></p>
+            <!--support-email--><p>Send an email to our support address with the subject line <code>Delete My CoRoute Account</code>:</p>
+            <p><strong>Support Email:</strong> <a href="mailto:__SUPPORT_EMAIL__?subject=Delete%20My%20CoRoute%20Account">__SUPPORT_EMAIL__</a></p><!--/support-email--><!--no-support-email--><p>Use the <a href="/#feedback">contact form on our home page</a>: choose "Something else" and start your message with <code>Delete My CoRoute Account</code>.</p><!--/no-support-email-->
             <p>Please include:</p>
             <ul>
-              <li>Your registered email address or phone number used in CoRoute.</li>
+              <li>Your registered email address or phone number used in CoRoute (write from that e-mail address if you can).</li>
               <li>Your username (if remembered).</li>
             </ul>
             <p style="font-size: 0.9em; opacity: 0.8; margin-bottom: 0;">Once verified, our team will purge your account and send a confirmation reply to your email address.</p>
@@ -96,12 +97,13 @@
             <li><strong>Social Connections:</strong> Friend relationships, crew memberships, and pending requests.</li>
             <li><strong>Reviews &amp; Photos:</strong> Post-trip feedback, submitted road photos, and place ratings.</li>
             <li><strong>Device Identifiers:</strong> Firebase push tokens and temporary device session credentials.</li>
+            <li><strong>Diagnostics:</strong> app logs you sent to our support team.</li>
           </ul>
         </section>
 
         <section id="retention">
           <h2>Retention &amp; Backups</h2>
-          <p>Data deletion from active production databases occurs immediately upon action. Encrypted automated disaster-recovery snapshots are rotated out and completely expire within 30 days. No anonymized personal data or advertising identifiers are retained because CoRoute does not serve ads or sell user information.</p>
+          <p>Deleting in the app removes your data from our live database at once; a request sent to us is completed within 48 hours. Encrypted backup copies are rotated out and expire within 30 days. The rides you shared stay in the other riders' history with your name replaced by "Former rider". Payment records for website plan purchases (order, amount, payment id) are kept for accounting. CoRoute does not serve ads or sell user information, so no advertising identifiers are kept. More detail is in our <a href="/privacy#delete-account">Privacy Policy</a>.</p>
         </section>
       </article>
     </div>

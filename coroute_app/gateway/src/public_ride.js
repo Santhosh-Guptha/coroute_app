@@ -708,6 +708,30 @@ class PublicRides {
     return { type: 'PR_REPORT_OK', ref: msg.ref, reportId };
   }
 
+  /**
+   * 3.55 ride chat: a rider reports a group ride chat message (socket CHAT_REPORT). Stored with the
+   * public ride reports (same admin queue, same 20 a day budget); the transcript holds only the
+   * reported rider's and the reporter's last lines up to that message. Never tells the sender.
+   */
+  async reportGroupChat(u, room, msg, now = this.clock()) {
+    const messageId = String((msg && msg.messageId) || '').slice(0, 40);
+    const list = (room && room.messages) || [];
+    const idx = list.findIndex((m) => m.messageId === messageId);
+    if (idx < 0) throw new ConvoyError('Nothing to report here.', 404, 'REF_GONE');
+    const target = list[idx];
+    const author = target.senderId === 'SYSTEM' ? (target.requestedBy || '') : target.senderId;
+    if (!author || author === u.userId) throw new ConvoyError('Nothing to report here.', 400, 'REF_GONE');
+    if (!this._rateOk(`rep:${u.userId}`, DAY, 20, now)) throw new ConvoyError('Slow down.', 429, 'RATE');
+    const log = [];
+    for (const m of list.slice(0, idx + 1)) {
+      const who = m.senderId === 'SYSTEM' ? (m.requestedBy || '') : m.senderId;
+      if (who === author) log.push({ by: 'B', text: m.text || '', quick: m.isQuickCard ? String(m.cardType || '') : '', at: m.timestamp });
+      else if (who === u.userId) log.push({ by: 'A', text: m.text || '', quick: m.isQuickCard ? String(m.cardType || '') : '', at: m.timestamp });
+    }
+    const reportId = await this._report(u.userId, author, `CHAT:${room.groupId}:${messageId}`, msg.reason, msg.text, log, 'A', now);
+    return { type: 'CHAT_REPORT_OK', messageId, reportId };
+  }
+
   async _report(reporterId, reportedId, ref, reason, note, log, mine, now) {
     const r = REPORT_REASONS.has(reason) ? reason : 'OTHER';
     const n = typeof note === 'string' ? note.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 140) : '';

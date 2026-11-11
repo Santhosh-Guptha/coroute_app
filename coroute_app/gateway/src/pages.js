@@ -7,6 +7,10 @@
  *                                                        reference: stylesheets, scripts, sprites, images, inline url())
  *   __ASSET_V__                                       -> short hash over every file under public/assets
  *   __APP_VERSION__                                   -> package.json version, "3.15.0" shown as "3.15"
+ *   <!--support-email-->..<!--/support-email-->       -> kept (with __SUPPORT_EMAIL__ filled in) when SUPPORT_EMAIL
+ *                                                        is a valid address; <!--no-support-email-->..<!--/no-support-email-->
+ *                                                        kept otherwise (the legal pages then point to the contact form);
+ *                                                        the same with security-email / __SECURITY_EMAIL__ (SECURITY_CONTACT)
  * Per request only the cheap placeholders (__ORIGIN__, __MAX_RIDERS__, __CODE__) are replaced.
  */
 const fs = require('fs');
@@ -27,15 +31,20 @@ const SITE_PAGES = {
   // 3.56 rider shop (src/web_shop.js: strict CSP, no-store): /plans, /account, /signin, /receipt.
   ...require('./web_shop').SHOP_PAGES,
   '/privacy': 'privacy.html',
+  '/privacy-and-security': 'privacy-and-security.html', // 3.56 plain-language data protection page
   '/terms': 'terms.html',
   '/delete-account': 'delete-account.html',
+  '/refunds': 'refund_policy.html', // refund & cancellation policy (website purchases)
+  '/security': 'security.html', // responsible disclosure (linked from /.well-known/security.txt)
 };
 /** Pages rendered by other handlers (not routes of their own). 3.16: the live emergency link pages (/e/<token>). */
-const SPECIAL_PAGES = ['404.html', 'join.html', 'join_friend.html', 'live.html', 'live_expired.html', 'watch.html'];
+const SPECIAL_PAGES = ['404.html', 'join.html', 'join_friend.html', 'live.html', 'live_expired.html', 'watch.html',
+  // 3.56 operator / club console pages, rendered by src/operator_routes.js
+  'operators_apply.html', 'clubs.html', 'ride_public.html'];
 /** Special pages a deployment may still lack (the server then answers with a built-in plain page). */
 const OPTIONAL_PAGES = new Set(['live.html', 'live_expired.html', 'join_friend.html']); // 3.55: friend invite page (social_routes.js)
 /** Sitemap entries: path and priority. */
-const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/how-it-works', '0.7'], ['/leaderboard', '0.6'], ['/updates', '0.6'], ['/get', '0.8'], ['/plans', '0.8'], ['/about', '0.5'], ['/privacy', '0.3'], ['/terms', '0.3'], ['/delete-account', '0.3']];
+const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/how-it-works', '0.7'], ['/leaderboard', '0.6'], ['/updates', '0.6'], ['/get', '0.8'], ['/plans', '0.8'], ['/about', '0.5'], ['/privacy-and-security', '0.6'], ['/privacy', '0.3'], ['/terms', '0.3'], ['/refunds', '0.3'], ['/security', '0.2'], ['/delete-account', '0.3']];
 
 const INCLUDE = /<!--#include ([a-z0-9-]+)-->/g;
 /** An /assets/ file reference in a page (attribute, inline style or url()), with an optional old ?v= query. */
@@ -89,6 +98,7 @@ function loadSite(publicDir) {
     const page = (html.match(/<body\b[^>]*\bdata-page="([a-z0-9-]+)"/) || [])[1];
     if (page) html = html.replaceAll(`data-nav="${page}"`, `data-nav="${page}" aria-current="page"`);
     html = applyPlatformBlocks(html, iosAvailable, playStoreUrl);
+    html = applySupportEmail(html, cfg.supportEmail, cfg.securityContact);
     html = html.replaceAll('__ASSET_V__', assetVersion).replaceAll('__APP_VERSION__', appVersion);
     cache.set(file, versionAssets(html, file));
   }
@@ -131,6 +141,47 @@ function applyPlatformBlocks(html, iosAvailable, playStoreUrl = '') {
     .replace(/<!--no-play-->([\s\S]*?)<!--\/no-play-->/g, (m, inner) => (play ? '' : inner));
 }
 
+/** An e-mail address fit for a page and a mailto: link (plain address, no spaces, quotes or angle brackets); '' otherwise. */
+function safeEmail(email) {
+  const s = String(email || '').trim();
+  return /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/.test(s) ? s : '';
+}
+
+/**
+ * Keeps or strips the support e-mail blocks of a page: <!--support-email-->..<!--/support-email--> (with
+ * __SUPPORT_EMAIL__ inside) when SUPPORT_EMAIL is a valid address, <!--no-support-email-->..<!--/no-support-email-->
+ * otherwise. __SUPPORT_EMAIL__ only ever appears inside support-email blocks.
+ */
+function applySupportEmail(html, email, securityEmail = email) {
+  const blocks = (src, name, token, addr) => {
+    const e = safeEmail(addr);
+    return src
+      .replace(new RegExp(`<!--${name}-->([\\s\\S]*?)<!--\\/${name}-->`, 'g'), (m, inner) => (e ? inner.replaceAll(token, e) : ''))
+      .replace(new RegExp(`<!--no-${name}-->([\\s\\S]*?)<!--\\/no-${name}-->`, 'g'), (m, inner) => (e ? '' : inner));
+  };
+  return blocks(blocks(html, 'support-email', '__SUPPORT_EMAIL__', email), 'security-email', '__SECURITY_EMAIL__', securityEmail);
+}
+
+/**
+ * The Content-Security-Policy of the public marketing and legal pages (SITE_PAGES other than the shop pages,
+ * which set their own): no inline script (the theme line is /assets/theme-init.js), nothing from other sites
+ * except https images (approved story photos may be hosted elsewhere), framing denied.
+ */
+const MARKETING_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "manifest-src 'self'",
+].join('; ');
+
 /** True for paths that must never be served as static files (partials, templates, raw page sources). */
 function isHiddenPath(rawPath) {
   let p;
@@ -139,4 +190,4 @@ function isHiddenPath(rawPath) {
   return p.startsWith('/partials/') || p === '/partials' || /\/_[^/]*$/.test(p) || p.endsWith('.html');
 }
 
-module.exports = { loadSite, isHiddenPath, applyPlatformBlocks, safePlayUrl, SITE_PAGES, SITEMAP };
+module.exports = { loadSite, isHiddenPath, applyPlatformBlocks, applySupportEmail, safeEmail, safePlayUrl, SITE_PAGES, SITEMAP, MARKETING_CSP };

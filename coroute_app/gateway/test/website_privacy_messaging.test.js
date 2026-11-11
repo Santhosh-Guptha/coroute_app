@@ -128,28 +128,28 @@ const sectionOf = (html, id) => {
 };
 const textOf = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-test('home: Community, solo riding is always free (hero, pricing, FAQ)', async () => {
+test('home: Community, solo riding and every safety feature are free (hero, pricing, FAQ)', async () => {
   const html = await (await fetch(base + '/')).text();
   const hero = sectionOf(html, 'hero-title');
-  assert.ok(textOf(hero).includes('Community: solo riding is always free'), 'hero note');
+  assert.ok(textOf(hero).includes('Community: solo riding and every safety feature are free.'), 'hero note');
   assert.ok(hero.includes('href="#community-free"'));
   const pricing = sectionOf(html, 'pricing');
   assert.ok(pricing.includes('id="community-free"'), 'Community banner inside pricing');
-  assert.ok(textOf(pricing).includes('Solo riding is always free.') && textOf(pricing).includes('free for solo riders, forever'), 'pricing: free forever');
+  assert.ok(textOf(pricing).includes('Solo riding and every safety feature are free.') && pricing.includes('href="/plans"'), 'pricing: free line, plans only on /plans');
   assert.ok(!/\d/.test(textOf(pricing)), 'pricing: still no number written into the page');
   const faq = sectionOf(html, 'faq');
   assert.ok(/Is it free\?[\s\S]*Yes for solo riders, always/.test(textOf(faq)), 'FAQ answer');
   assert.ok(textOf(faq).includes('What do the numbers on this site say about me?'), 'FAQ: numbers and privacy');
 });
 
-test('home: group rides section explains what a plan adds, prices only from the catalog', async () => {
+test('home: group rides section explains riding as a group, no prices on the home page', async () => {
   const html = await (await fetch(base + '/')).text();
   const g = sectionOf(html, 'group-rides');
   assert.ok(textOf(g).includes('Get safety for your group rides.'));
-  for (const f of ['Live group map', 'Push-to-talk', 'Group SOS', 'Regroup', 'Lead and sweep', 'Public ride sharing']) assert.ok(g.includes(`<h3>${f}</h3>`), f);
-  assert.ok(/<ul class="gx-plans" id="group-plans"[^>]*hidden>/.test(g), 'price chips hidden until the catalog loads');
+  for (const f of ['Live group map', 'Live intercom', 'Group SOS', 'Regroup', 'Lead and sweep', 'Public ride sharing']) assert.ok(g.includes(`<h3>${f}</h3>`), f);
+  assert.ok(!g.includes('gx-plans'), 'no price chips (3.56: prices only on /plans)');
   assert.ok(!/\d/.test(textOf(g)), 'no price or number in the page');
-  assert.ok(g.includes('href="/get"') && g.includes('href="#pricing"'), 'CTAs');
+  assert.ok(g.includes('href="/get"') && g.includes('href="/plans"'), 'CTAs');
 });
 
 test('home: ride analytics card shows live community totals, never sample numbers (3.55)', async () => {
@@ -241,4 +241,40 @@ test('group plan chips: only paid group plans, with the catalog price and seats'
   const none = await runGroupPlans(null);
   assert.equal(none.hidden, true, 'no catalog, no prices');
   assert.equal(none.children.length, 0);
+});
+
+/* ---------- 3.56: "Your data is protected" page and the honest comparison ---------- */
+test('privacy-and-security page: plain-language promises, true security practices, deletion link, careful DPDP wording', async () => {
+  const r = await fetch(base + '/privacy-and-security');
+  assert.equal(r.status, 200);
+  const html = await r.text();
+  const t = textOf(html);
+  for (const w of ['Encrypted on the way', 'Passwords stored as hashes', 'Location only during rides', 'Voice relayed, never stored', 'Medical info only in emergencies', 'No ads, no trackers, no sale',
+    'Rate limits', 'Signed payment messages', 'Admin audit log', 'AES-256', 'scrypt', 'only when you send it']) {
+    assert.ok(t.includes(w), w);
+  }
+  assert.ok(html.includes('href="/delete-account"'), 'links the deletion page');
+  assert.ok(t.includes("Designed with India's DPDP Act in mind") && t.includes('not a certification'), 'DPDP: design intent, no certification claim');
+  assert.ok(!/DPDP[- ](?:certified|compliant)|certified by/i.test(t), 'no compliance or certification claim');
+  assert.ok(html.includes('data-nav="privacy-and-security" aria-current="page"'), 'nav item current');
+  assert.ok(!/Oracle|WebSocket/.test(t), 'no infrastructure jargon');
+  // The claims are true in the code.
+  assert.ok(read('../src/password_hash.js').includes('crypto.scrypt'), 'scrypt hashing');
+  assert.ok(read('../src/razorpay_gateway.js').includes('verifyWebhook'), 'signed webhooks');
+  assert.ok(read('../src/backup_jobs.js').includes('aes-256-gcm'), 'encrypted backups');
+  const home = await (await fetch(base + '/')).text();
+  assert.ok(home.includes('href="/privacy-and-security" data-nav="privacy-and-security"'), 'header links the page');
+});
+
+test('home: why-CoRoute comparison names no competitor app, makes no price claim, and is honest about WhatsApp encryption', async () => {
+  const html = await (await fetch(base + '/')).text();
+  const cmp = sectionOf(html, 'compare');
+  const t = textOf(cmp);
+  for (const w of ['Typical group-ride apps', 'WhatsApp live location', 'crash detection', 'SOS without mobile data', 'Siren alerts', 'Live intercom', 'without installing an app', 'encrypted in transit', 'No ads', 'Group roles', 'Trip report']) assert.ok(t.toLowerCase().includes(w.toLowerCase()), w);
+  for (const name of ['Asteride', 'RideClan', 'MileVoy', 'Riding Verse', 'Trilyt', 'Triplly', 'Detecht', 'Calimoto', 'REVER', 'Sena', 'Cardo']) assert.ok(!t.includes(name), `names ${name}`);
+  assert.ok(/End-to-end/.test(t), 'WhatsApp encryption stated fairly');
+  assert.ok(!/\d+\s*(?:\/|per) ?month|₹/.test(t), 'no prices');
+  const sx = textOf(sectionOf(html, 'standout'));
+  for (const w of ['Crash detection with a 30-second check', 'SOS that works without signal', "Hears sirens when your earbuds don't", 'Live intercom, hands-free, clean voice', 'Family follows live, no app needed', 'Your data is encrypted, never sold or shared']) assert.ok(sx.includes(w), w);
+  assert.ok(!/15 seconds/.test(textOf(html)), 'crash countdown is 30 seconds (SafetyConstants.crashCountdown)');
 });

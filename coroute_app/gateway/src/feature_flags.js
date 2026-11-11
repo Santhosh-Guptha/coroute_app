@@ -116,6 +116,9 @@ const CATALOG = Object.freeze([
   // 3.55 diagnostics logs (docs/features_355/diagnostics_logs.md): off = POST /me/diagnostics answers 403 FEATURE_OFF
   // (logs stay on the phones; admin reads of logs already sent stay available).
   f('diagnosticsUpload', 'Platform', 'App log upload', 'Riders can send their app log (no personal data) to CoRoute to help fix problems.'),
+  // 3.56 operator / club console (docs/features_355/operators.md): off = applications, the operator console,
+  // club pages and public ride sign-ups answer 403 FEATURE_OFF (live rides and admin review keep working).
+  f('operators', 'Platform', 'Operator & club console', 'Tour operators, clubs and fleets apply, and once approved run rosters and rides from the web console.'),
 ]);
 const BY_ID = new Map(CATALOG.map((e) => [e.id, e]));
 const ID_RE = /^[A-Za-z][A-Za-z0-9]{1,39}$/;

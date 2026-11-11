@@ -29,7 +29,7 @@
 <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/legal.css">
-<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
+<script src="/assets/theme-init.js"></script>
 <script src="/assets/site.js" defer></script>
 <script src="/assets/legal.js" defer></script>
 </head>
@@ -42,10 +42,12 @@
       <div class="legal-hero__inner">
         <p class="eyebrow">Legal</p>
         <h1>CoRoute Terms of Use</h1>
-        <p class="legal-hero__meta">Effective November 2026. CoRoute is a motorcycle safety and group coordination platform operated by devmonks.space.</p>
+        <p class="legal-hero__meta">Updated 11 November 2026. CoRoute is a motorcycle safety and group coordination platform operated by devmonks.space.</p>
         <nav class="legal-hero__switch" aria-label="Legal documents">
           <a href="/privacy">Privacy Policy</a>
           <a href="/terms" aria-current="page">Terms of Use</a>
+          <a href="/refunds">Refunds</a>
+          <a href="/delete-account">Delete Account</a>
         </nav>
       </div>
     </div>
@@ -58,11 +60,13 @@
       <p class="eyebrow">Summary</p>
       <h2 id="plain-words">The terms, in plain words.</h2>
       <ul class="legal-summary__list">
-        <li>CoRoute is supported by transparent membership plans with zero advertising.</li>
+        <li>CoRoute shows no ads. Solo riding, joining a ride and every safety feature are free.</li>
         <li>You need an account and you must be at least 18 years old.</li>
-        <li>CoRoute operates with two designated convoy roles: the Trip Owner (creator and billing lead) and the Trip Head (on-road navigational lead). Invited riders participate free of charge.</li>
-        <li>CoRoute helps a group coordinate. It is not a certified safety device: your phone, GPS or network can fail. In an emergency, contact the local emergency services directly.</li>
-        <li>An SOS reaches your convoy first. It may also be sent to a few riders of other groups who are already riding toward you on the same road, unless you turn this off.</li>
+        <li>Each ride has a Trip owner (the rider who created it), may have a Trip head (a second owner who can change the trip's settings only) and has a Lead (the rider at the front who guides the group on the road).</li>
+        <li>Group plans are bought on our website, not in the app. While a plan is active you can only move to a bigger plan. At times hosting group rides may be free for everyone. Refunds follow our <a href="/refunds">Refund and Cancellation Policy</a>.</li>
+        <li>CoRoute helps you and your group, but it does not replace emergency services. Your phone, GPS or network can fail. In an emergency in India, call 112.</li>
+        <li>An SOS reaches your convoy first. It may also be sent to a few riders of other groups who are already riding toward you on the same road.</li>
+        <li>Clubs and tour operators that run rides on CoRoute are responsible for their own rides.</li>
         <li>Ride within the law and your abilities, and use the app only when it is safe to do so.</li>
         <li>Do not harass, threaten or stalk anyone, and do not track a person without their knowledge and consent. Accounts that break the rules may be suspended.</li>
         <li>Your messages, status cards and ride names remain yours. Voice is relayed live and is not stored.</li>
@@ -78,9 +82,10 @@
         <ol class="legal-toc__list" role="list">
           <li><a class="legal-toc__link" href="#what-coroute-is"><span class="legal-toc__num">1</span>What CoRoute is</a></li>
           <li><a class="legal-toc__link" href="#accounts"><span class="legal-toc__num">2</span>Accounts and Convoy Roles</a></li>
-          <li><a class="legal-toc__link" href="#memberships"><span class="legal-toc__num">3</span>Memberships and Billing</a></li>
+          <li><a class="legal-toc__link" href="#memberships"><span class="legal-toc__num">3</span>Plans, payments and refunds</a></li>
           <li><a class="legal-toc__link" href="#riding-safety"><span class="legal-toc__num">4</span>Riding safety</a></li>
           <li><a class="legal-toc__link" href="#acceptable-use"><span class="legal-toc__num">5</span>Acceptable use</a></li>
+          <li><a class="legal-toc__link" href="#operators"><span class="legal-toc__num">5a</span>Clubs and tour operators</a></li>
           <li><a class="legal-toc__link" href="#your-content"><span class="legal-toc__num">6</span>Your content</a></li>
           <li><a class="legal-toc__link" href="#privacy"><span class="legal-toc__num">7</span>Privacy</a></li>
           <li><a class="legal-toc__link" href="#availability"><span class="legal-toc__num">8</span>Availability and changes</a></li>
@@ -96,28 +101,42 @@
     <article class="legal-doc" aria-label="CoRoute Terms of Use, full text" data-legal-text>
       <section class="legal-section" id="what-coroute-is" aria-labelledby="what-coroute-is-h">
       <h2 id="what-coroute-is-h">1. What CoRoute is</h2>
-      <p>CoRoute is a mobile application that helps a group of riders stay together: it shares each member's position with the other members of the same convoy, provides a live voice intercom, quick status messages and SOS alerts, and keeps a history of rides. Invited riders join convoys free of charge, supported by transparent Trip Owner memberships with zero advertising.</p>
+      <p>CoRoute is a mobile application that helps a group of riders stay together: it shares each member's position with the other members of the same convoy, provides a live voice intercom, quick status messages and SOS alerts, and keeps a history of rides. Joining a ride you are invited to is free, solo riding is free, and safety features are never part of a plan. CoRoute shows no ads.</p>
       </section>
 
       <section class="legal-section" id="accounts" aria-labelledby="accounts-h">
       <h2 id="accounts-h">2. Accounts and Convoy Roles</h2>
       <p>You need an account (e-mail and password, or Google Sign-In) to use CoRoute. You must be at least 18 years old. Keep your password confidential and tell us if you believe your account has been used by someone else. You are responsible for activity on your account. We may suspend accounts that abuse the service or other riders.</p>
-      <p>A convoy operates with two designated coordination roles: the <b>Trip Owner</b> (the rider who creates the convoy, holds the membership plan that sets how many riders can join, manages invites, and handles membership billing) and the <b>Trip Head</b> (the lead rider responsible for route navigation, pace, waypoints, and on-road group decisions). Invited riders participate free of charge.</p>
+      <p>Each ride has these roles:</p>
+      <ul>
+        <li><b>Trip owner</b>: the rider who created the ride. The trip owner invites riders, removes riders and ends the trip, and their plan (if any) sets how many riders can join.</li>
+        <li><b>Trip head</b> (optional): a second owner chosen by the trip owner, who can change the trip's settings only. A trip head cannot remove riders or end the trip, and is not the Lead unless also given that role.</li>
+        <li><b>Lead</b>: a riding role, the rider at the front who guides the group on the road. The trip owner or the Lead runs the ride on the road (stops, route, regrouping). The Sweeper rides at the back.</li>
+      </ul>
+      <p>Riders you invite join free of charge.</p>
       </section>
 
       <section class="legal-section" id="memberships" aria-labelledby="memberships-h">
-      <h2 id="memberships-h">3. Memberships and Billing</h2>
-      <p>CoRoute offers transparent, capacity-based membership plans managed directly inside the mobile app. Memberships cover operational server infrastructure, safety relay systems, and map services. The plans are Individual (solo trips), Small Group (up to 6 riders) and Large Group (up to 12 riders). Joining a ride you are invited to is free, and safety features (including offline crash detection and emergency alerts) are never behind a plan. If a Trip Owner's membership expires during an active ride, ongoing trip tracking and emergency safety services are never interrupted until the ride concludes.</p>
+      <h2 id="memberships-h">3. Plans, payments and refunds</h2>
+      <p>Group plans (for example Small Group and Large Group) set how many riders a trip owner can host. Plans are shown and bought only on our website at <a href="/plans">/plans</a>, not in the app. Prices are the ones shown on that page when you pay, and payments are handled by Razorpay. A plan runs for the period shown at purchase and does not renew on its own, so there is nothing to cancel. While a plan is active you can only move to a bigger plan; the unused days of your current plan are credited against the new price.</p>
+      <p>CoRoute may make hosting group rides free for everyone, or free up to a limit, for a time. A plan you already paid for keeps running unchanged when that happens. Joining a ride you are invited to is always free, and safety features (including crash detection, SOS and emergency texts) are never part of a plan. If a plan ends during a ride, the ride and its safety features continue until the ride ends.</p>
+      <p>Refunds and cancellations follow our <a href="/refunds">Refund and Cancellation Policy</a>.</p>
       </section>
 
       <section class="legal-section" id="riding-safety" aria-labelledby="riding-safety-h">
       <h2 id="riding-safety-h">4. Riding safety</h2>
-      <p>CoRoute is an aid to group coordination, not a safety device. It depends on your phone, its GPS and its mobile network connection, any of which can fail or be delayed. Always ride within the law and your abilities, keep your eyes on the road, and interact with the app only when it is safe to do so. In an emergency contact the local emergency services directly; an SOS alert in CoRoute reaches the members of your convoy first, and may also be sent to a few riders of other groups who are already riding toward you on the same road, with only the information described in the <a href="/privacy#nearby-help">Privacy Policy</a>, unless you turn off "Ask nearby riders to help me".</p>
+      <p>CoRoute assists you and your group: it shares positions, raises alerts and helps others reach you. It is not a certified safety device and it does not replace emergency services. It depends on your phone, its GPS, its sensors and its mobile network, any of which can fail or be delayed, and crash detection can miss a crash or raise a false alarm. Always ride within the law and your abilities, keep your eyes on the road, and interact with the app only when it is safe to do so. <b>In an emergency in India, call 112</b> (108 for an ambulance) first. An SOS alert in CoRoute reaches the members of your convoy first, and may also be sent to a few riders of other groups who are already riding toward you on the same road, with only the information described in the <a href="/privacy#nearby-help">Privacy Policy</a>. Riders who answer an alert are volunteers, not professional responders.</p>
       </section>
 
       <section class="legal-section" id="acceptable-use" aria-labelledby="acceptable-use-h">
       <h2 id="acceptable-use-h">5. Acceptable use</h2>
       <p>Do not use CoRoute to harass, threaten or stalk anyone, to share unlawful content over the intercom or chat, to track a person without their knowledge and consent, or to interfere with the service or other users. Do not attempt to access other convoys or other riders' data. We may remove content, dissolve convoys and suspend accounts that break these rules.</p>
+      </section>
+
+      <section class="legal-section" id="operators" aria-labelledby="operators-h">
+      <h2 id="operators-h">5a. Clubs and tour operators</h2>
+      <!-- [OWNER TO FILL] link the operator terms once legally reviewed (docs/handbook/operators/operator_terms_DRAFT.md). -->
+      <p>Riding clubs and tour operators can run rides on CoRoute after we approve their application. They agree to these terms and to the operator rules we give them when they are approved. An operator, not CoRoute, organises its rides and is responsible for them, including its briefings, routes and any fees it charges. Operators see only what the <a href="/privacy#clubs-operators">Privacy Policy</a> describes; a member's emergency contact is shown to them only during that member's open SOS, and they may use it only to help in that emergency. We may suspend an operator that misuses the service or riders' data.</p>
       </section>
 
       <section class="legal-section" id="your-content" aria-labelledby="your-content-h">
@@ -142,12 +161,12 @@
 
       <section class="legal-section" id="third-party" aria-labelledby="third-party-h">
       <h2 id="third-party-h">10. Third-party services</h2>
-      <p>Map imagery is provided by OpenStreetMap contributors under their terms. Google Sign-In is provided by Google under its terms. We are not responsible for third-party services.</p>
+      <p>Map imagery is provided by OpenStreetMap contributors under their terms. Google Sign-In is provided by Google under its terms. Payments on our website are processed by Razorpay under its terms. The service providers we use are listed in the <a href="/privacy#service-providers">Privacy Policy</a>. We are not responsible for third-party services.</p>
       </section>
 
       <section class="legal-section" id="ending" aria-labelledby="ending-h">
       <h2 id="ending-h">11. Ending your use</h2>
-      <p>You can stop using CoRoute at any time and request deletion of your account as described in the Privacy Policy. We may terminate accounts that breach these terms.</p>
+      <p>You can stop using CoRoute at any time. You can delete your account in the app (Profile, Account, Delete account) or through our <a href="/delete-account">account deletion page</a>, as described in the <a href="/privacy#delete-account">Privacy Policy</a>. We may terminate accounts that breach these terms.</p>
       </section>
 
       <section class="legal-section" id="governing-law" aria-labelledby="governing-law-h">
@@ -157,10 +176,10 @@
 
       <section class="legal-section" id="contact" aria-labelledby="contact-h">
       <h2 id="contact-h">13. Contact</h2>
-      <p>devmonks.space, <a href="mailto:santhoshbukka5@gmail.com">santhoshbukka5@gmail.com</a></p>
+      <p>devmonks.space. Contact us <!--support-email-->at <a href="mailto:__SUPPORT_EMAIL__">__SUPPORT_EMAIL__</a><!--/support-email--><!--no-support-email-->through the <a href="/#feedback">contact form on our home page</a><!--/no-support-email-->. For privacy complaints, see the <a href="/privacy#grievance">Grievance Officer</a> section of the Privacy Policy.</p>
       </section>
       <div class="legal-end">
-        <p>See also our <a href="/privacy">Privacy Policy</a>.</p>
+        <p>See also our <a href="/privacy">Privacy Policy</a> and <a href="/refunds">Refund and Cancellation Policy</a>.</p>
         <a class="legal-totop" href="#main"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg>Back to top</a>
       </div>
     </article>

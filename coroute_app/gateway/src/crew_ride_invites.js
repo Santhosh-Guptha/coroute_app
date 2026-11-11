@@ -194,6 +194,10 @@ function registerCrewRideInviteRoutes({ r, repo, hub = null, convoys, wrap, flag
     }
     const { meta, room } = found;
     if (!rideActive(meta)) return res.status(409).json({ error: 'This ride has ended.', code: 'RIDE_ENDED' });
+    // 3.56 access mode: crew ride invites left out of a hybrid free-tier ride.
+    if (typeof convoys.rideFeatureOff === 'function' && convoys.rideFeatureOff(meta.groupId, ['crewRides'])) {
+      return res.status(403).json({ error: "This isn't included in this ride.", code: 'GROUP_FEATURE_LOCKED', feature: 'crewRides' });
+    }
     const names = cleanUsernames(req.body?.usernames ?? req.body?.username);
     if (!names.length) return res.status(422).json({ error: 'Pick at least one crew member.', code: 'NO_INVITEES' });
     if (names.length > LIMITS.NAMES_PER_REQUEST) {
