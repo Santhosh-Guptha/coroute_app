@@ -30,7 +30,7 @@ const path = require('path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { preparePhoto, PhotoError } = require('./review_photos');
-const { forbiddenTermIn, policyRefusal } = require('./policy_terms');
+const { forbiddenTermIn, policyRefusal, partnerPerkTermIn, partnerPerkRefusal } = require('./policy_terms');
 const { NEWS_TARGETS } = require('./push');
 
 const C = Object.freeze({ campaigns: 'push_campaigns', images: 'push_images', prefs: 'push_prefs', caps: 'push_news_caps', tokens: 'push_tokens' });
@@ -44,6 +44,43 @@ const AUDIENCES = Object.freeze(['all', 'active', 'plan', 'users']);
 const CAMPAIGN_ID = /^pc_[a-f0-9]{20}$/;
 const IMAGE_ID = /^pi_[a-f0-9]{24}$/;
 const IMAGE_TYPES = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+
+/**
+ * 3.56 push kinds. Each has its own Android notification channel (CoRouteMessagingService.kt) and its own
+ * opt-out switch in the app's notification settings (`pref`, PUT /api/me/push-prefs). The FCM type stays
+ * NEWS (older apps show every kind on "News and updates"); `kind` rides in the data.
+ * Safety alerts, ride and social pushes are not campaign kinds and can never be turned off here.
+ *   update        product news and new features            on by default
+ *   event         rides, meet-ups and community events      on by default
+ *   safety_tip    riding safety tips (editorial)            on by default
+ *   community     community stories and milestones          on by default
+ *   partner_perk  a real-world perk at a CoRoute-curated partner (non-digital; no CoRoute plan, price,
+ *                 coupon or purchase link): OFF until the rider turns it on (Google Play ads policy:
+ *                 no third-party advertising in notifications the rider did not ask for).
+ * Offers, coupons and prices for CoRoute plans are never a push: they go by e-mail (offer_emails.js).
+ */
+const KINDS = Object.freeze({
+  update: Object.freeze({ id: 'update', label: 'Update', pref: 'news', channel: 'coroute_news', defaultOn: true }),
+  event: Object.freeze({ id: 'event', label: 'Event', pref: 'events', channel: 'coroute_events', defaultOn: true }),
+  safety_tip: Object.freeze({ id: 'safety_tip', label: 'Safety tip', pref: 'safetyTips', channel: 'coroute_safety_tips', defaultOn: true }),
+  community: Object.freeze({ id: 'community', label: 'Community', pref: 'community', channel: 'coroute_community', defaultOn: true }),
+  partner_perk: Object.freeze({ id: 'partner_perk', label: 'Partner perk', pref: 'partnerPerks', channel: 'coroute_partner_perks', defaultOn: false }),
+});
+const KIND_IDS = Object.freeze(Object.keys(KINDS));
+const PREF_KEYS = Object.freeze(KIND_IDS.map((k) => KINDS[k].pref));
+/** At most one partner perk per rider per 7 days (on top of the daily cap). */
+const PERK_WINDOW_DAYS = 7;
+
+/** {news, events, safetyTips, community, partnerPerks} with the defaults filled in. */
+function prefsFrom(row) {
+  const out = {};
+  for (const k of KIND_IDS) {
+    const { pref, defaultOn } = KINDS[k];
+    const v = row && typeof row[pref] === 'boolean' ? row[pref] : undefined;
+    out[pref] = v === undefined ? defaultOn : v;
+  }
+  return out;
+}
 
 class CampaignError extends Error {
   constructor(message, code = 'BAD_CAMPAIGN', status = 400) { super(message); this.code = code; this.status = status; }
@@ -122,15 +159,30 @@ class PushCampaigns {
   }
 
   // ------------------------------------------------------------ rider preference
-  async newsEnabled(userId) {
+  /** Every category switch of the rider ({news, events, safetyTips, community, partnerPerks}). */
+  async prefsOf(userId) {
     await this.ensureStore();
     const row = await this.soda.findOne(C.prefs, { userId });
-    return !(row && row.value.news === false);
+    return prefsFrom(row && row.value);
+  }
+  /** Is a push of `kind` allowed for this rider (their switch, or the kind's default)? */
+  async kindEnabled(userId, kind = 'update') {
+    const k = KINDS[kind] || KINDS.update;
+    return (await this.prefsOf(userId))[k.pref] !== false;
+  }
+  async newsEnabled(userId) { return this.kindEnabled(userId, 'update'); }
+  /** Saves some switches (unknown keys refused by the router); the others keep their value. */
+  async setPrefs(userId, patch) {
+    await this.ensureStore();
+    const row = await this.soda.findOne(C.prefs, { userId });
+    const next = { ...prefsFrom(row && row.value) };
+    for (const key of PREF_KEYS) if (typeof patch[key] === 'boolean') next[key] = patch[key];
+    await this.soda.upsertBy(C.prefs, { userId }, { userId, ...next, updatedAt: this.clock() });
+    return next;
   }
   async setNews(userId, on) {
-    await this.ensureStore();
-    await this.soda.upsertBy(C.prefs, { userId }, { userId, news: !!on, updatedAt: this.clock() });
-    return { news: !!on };
+    const p = await this.setPrefs(userId, { news: !!on });
+    return { news: p.news };
   }
   async forgetUser(userId) {
     await this.ensureStore();
@@ -180,9 +232,23 @@ class PushCampaigns {
     if (title.length > MAX_TITLE) throw new CampaignError(`The title is longer than ${MAX_TITLE} characters.`, 'TITLE_TOO_LONG');
     if (!body) throw new CampaignError('Write the message.', 'BODY_REQUIRED');
     if (body.length > MAX_BODY) throw new CampaignError(`The message is longer than ${MAX_BODY} characters.`, 'BODY_TOO_LONG');
-    const term = forbiddenTermIn(`${title}\n${body}`);
-    if (term) throw new CampaignError(policyRefusal(term), 'PLAY_POLICY', 422);
-    if (/(https?:\/\/|www\.)/i.test(`${title} ${body}`)) throw new CampaignError('Links are not allowed in a push. Choose the screen it opens instead.', 'NO_LINKS', 422);
+    const kind = b.kind == null || b.kind === '' ? 'update' : String(b.kind);
+    if (!KINDS[kind]) throw new CampaignError(`Choose a kind: ${KIND_IDS.map((k) => KINDS[k].label).join(', ')}.`, 'BAD_KIND');
+    let partnerName = null;
+    if (kind === 'partner_perk') {
+      // A CoRoute-curated perk at a named real-world partner, labelled "Partner perk" on the phone.
+      partnerName = oneLine(b.partnerName);
+      if (partnerName.length < 2 || partnerName.length > 60) throw new CampaignError('Name the partner (2 to 60 characters).', 'PARTNER_REQUIRED');
+      const pt = partnerPerkTermIn(`${title}\n${body}\n${partnerName}`);
+      if (pt) throw new CampaignError(partnerPerkRefusal(pt), 'PLAY_POLICY', 422);
+      if (b.curated !== true) {
+        throw new CampaignError('Confirm that CoRoute curated this perk: a real-world perk at a partner, not a CoRoute plan, not a digital good, with no purchase link.', 'PERK_NOT_CONFIRMED');
+      }
+    } else {
+      const term = forbiddenTermIn(`${title}\n${body}`);
+      if (term) throw new CampaignError(policyRefusal(term), 'PLAY_POLICY', 422);
+    }
+    if (/(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|in|net|org|co|app|io|shop|store)\b)/i.test(`${title} ${body} ${partnerName || ''}`)) throw new CampaignError('Links are not allowed in a push. Choose the screen it opens instead.', 'NO_LINKS', 422);
     if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(`${title} ${body}`) || /(?:\+?\d[\s-]?){9,}/.test(`${title} ${body}`)) {
       throw new CampaignError('A push must not contain an e-mail address or a phone number.', 'PERSONAL_DATA', 422);
     }
@@ -197,7 +263,7 @@ class PushCampaigns {
       if (!/^https:\/\//.test(this.origin)) throw new CampaignError('Images need the site to run on https (PUBLIC_ORIGIN). Send it without an image.', 'IMAGE_NEEDS_HTTPS');
       image = { imageId: row.value.imageId, ext: row.value.ext, url: this.imageUrlOf(row.value) };
     }
-    const out = { title, body, target, image };
+    const out = { title, body, target, image, kind, partnerName };
     if (test) return out;
     out.audience = await this.validateAudience(b.audience);
     const now = this.clock();
@@ -281,11 +347,11 @@ class PushCampaigns {
     return [...withTokens];
   }
 
-  async audienceCount(input) {
+  async audienceCount(input, kind = 'update') {
     const aud = await this.validateAudience(input);
     const ids = await this.resolveAudience(aud);
     let optedOut = 0;
-    for (const uid of ids) if (!(await this.newsEnabled(uid))) optedOut++;
+    for (const uid of ids) if (!(await this.kindEnabled(uid, kind))) optedOut++;
     return { riders: ids.length - optedOut, optedOut };
   }
 
@@ -301,7 +367,7 @@ class PushCampaigns {
     await this.ensureStore();
     const now = this.clock();
     const doc = {
-      campaignId: `pc_${crypto.randomBytes(10).toString('hex')}`, title: c.title, body: c.body, target: c.target,
+      campaignId: `pc_${crypto.randomBytes(10).toString('hex')}`, title: c.title, body: c.body, target: c.target, kind: c.kind, partnerName: c.partnerName,
       imageId: c.image ? c.image.imageId : null, imageUrl: c.image ? c.image.url : null, audience: c.audience,
       sendAt: c.sendAt, status: 'SCHEDULED', test: false, createdAt: now, createdBy: String(by).slice(0, 120), updatedAt: now,
       stats: { targeted: 0, reached: 0, optedOut: 0, capped: 0, noToken: 0, sent: 0, failed: 0, pruned: 0 }, cursor: 0, recipients: null,
@@ -345,7 +411,7 @@ class PushCampaigns {
     await this.ensureStore();
     const now = this.clock();
     const doc = {
-      campaignId: `pc_${crypto.randomBytes(10).toString('hex')}`, title: c.title, body: c.body, target: c.target,
+      campaignId: `pc_${crypto.randomBytes(10).toString('hex')}`, title: c.title, body: c.body, target: c.target, kind: c.kind, partnerName: c.partnerName,
       imageId: c.image ? c.image.imageId : null, imageUrl: c.image ? c.image.url : null, audience: { kind: 'test' }, sendAt: now,
       status: r.disabled ? 'FAILED' : 'SENT', test: true, createdAt: now, createdBy: String(by).slice(0, 120), updatedAt: now, startedAt: now, finishedAt: now,
       stats: { targeted: 1, reached: r.sent > 0 ? 1 : 0, optedOut: 0, capped: 0, noToken: r.sent || r.failed ? 0 : 1, sent: r.sent, failed: r.failed - (r.pruned || 0), pruned: r.pruned || 0 },
@@ -361,8 +427,13 @@ class PushCampaigns {
 
   _message(c, id) {
     const image = c.image ? c.image.url : c.imageUrl;
+    const kind = KINDS[c.kind] ? c.kind : 'update';
+    // `kind` picks the Android channel and the app's switch; `channel` is the channel id itself;
+    // a partner perk carries the partner's name for the "Partner perk · <name>" label.
+    const data = { campaignId: id, eventId: `NEWS:${id}`, kind, channel: KINDS[kind].channel };
+    if (kind === 'partner_perk' && c.partnerName) data.partner = c.partnerName;
     return {
-      type: 'NEWS', title: c.title, body: c.body, data: { campaignId: id, eventId: `NEWS:${id}` },
+      type: 'NEWS', title: c.title, body: c.body, data,
       imageUrl: image || undefined, target: c.target || 'home', collapseKey: `news_${id}`, skipConnected: false,
     };
   }
@@ -420,6 +491,18 @@ class PushCampaigns {
     if (row) await this.soda.replace(C.caps, row.key, doc); else await this.soda.insert(C.caps, doc).catch(() => this.soda.upsertBy(C.caps, { key }, doc));
   }
 
+  /** Partner perks: at most one per rider per PERK_WINDOW_DAYS (India days). */
+  _perkKey(userId) { return `${userId}:perk:${Math.floor((this.clock() + IST) / (PERK_WINDOW_DAYS * DAY))}`; }
+  async _perkOk(userId) {
+    const row = await this.soda.findOne(C.caps, { key: this._perkKey(userId) });
+    return !row;
+  }
+  async _perkAdd(userId) {
+    const key = this._perkKey(userId);
+    const doc = { key, userId, day: 'perk', count: 1, expiresAt: this.clock() + (PERK_WINDOW_DAYS + 1) * DAY };
+    await this.soda.insert(C.caps, doc).catch(() => this.soda.upsertBy(C.caps, { key }, doc));
+  }
+
   async _run(state) {
     const d = state.doc;
     if (!this.push || !this.push.enabled) {
@@ -441,9 +524,11 @@ class PushCampaigns {
       const stats = { ...state.doc.stats };
       const day = istDay(this.clock());
       let tokensSent = 0;
+      const kind = KINDS[state.doc.kind] ? state.doc.kind : 'update';
       for (const uid of slice) {
-        if (!(await this.newsEnabled(uid))) { stats.optedOut++; continue; }
+        if (!(await this.kindEnabled(uid, kind))) { stats.optedOut++; continue; }
         if (!(await this._capOk(uid, day))) { stats.capped++; continue; }
+        if (kind === 'partner_perk' && !(await this._perkOk(uid))) { stats.capped++; continue; }
         const r = await this.push.notifyUsers([uid], message);
         if (r.disabled) {
           await this._save(state, { status: 'FAILED', error: this._disabledText(r.disabled), stats, finishedAt: this.clock() });
@@ -451,7 +536,11 @@ class PushCampaigns {
         }
         stats.sent += r.sent; stats.pruned += r.pruned || 0; stats.failed += r.failed - (r.pruned || 0);
         tokensSent += r.sent + r.failed;
-        if (r.sent > 0) { stats.reached++; await this._capAdd(uid, day); } else if (!r.failed) stats.noToken++;
+        if (r.sent > 0) {
+          stats.reached++;
+          await this._capAdd(uid, day);
+          if (kind === 'partner_perk') await this._perkAdd(uid);
+        } else if (!r.failed) stats.noToken++;
       }
       // A cancelled-from-elsewhere or taken-over campaign stops here (the other worker continues).
       if (!(await this._save(state, { cursor: state.doc.cursor + slice.length, stats }))) return;
@@ -478,6 +567,7 @@ function adminPushRouter({ campaigns, push }) {
   r.get('/config', (req, res) => {
     res.json({
       enabled: !!(push && push.enabled), targets: NEWS_TARGETS, plans: PLAN_TARGETS, dailyCap: campaigns.dailyCap, ratePerSec: campaigns.ratePerSec,
+      kinds: KIND_IDS.map((k) => ({ id: k, label: KINDS[k].label, channel: KINDS[k].channel, defaultOn: KINDS[k].defaultOn })), perkWindowDays: PERK_WINDOW_DAYS,
       limits: { title: MAX_TITLE, body: MAX_BODY, imageBytes: MAX_IMAGE_BYTES }, imagesAllowed: /^https:\/\//.test(campaigns.origin),
     });
   });
@@ -497,7 +587,12 @@ function adminPushRouter({ campaigns, push }) {
   r.post('/check', async (req, res, next) => {
     try { await campaigns.validate(req.body, { test: true }); res.json({ ok: true }); } catch (e) { fail(res, e, next); }
   });
-  r.post('/audience-count', async (req, res, next) => { try { res.json(await campaigns.audienceCount(req.body && req.body.audience)); } catch (e) { fail(res, e, next); } });
+  r.post('/audience-count', async (req, res, next) => {
+    try {
+      const kind = req.body && KINDS[req.body.kind] ? req.body.kind : 'update';
+      res.json(await campaigns.audienceCount(req.body && req.body.audience, kind));
+    } catch (e) { fail(res, e, next); }
+  });
   r.post('/images', express.raw({ type: () => true, limit: MAX_IMAGE_BYTES + 1024 }), async (req, res, next) => {
     try { res.status(201).json({ image: await campaigns.saveImage(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), by(req)) }); } catch (e) {
       if (e && e.type === 'entity.too.large') return res.status(413).json({ error: 'The image is larger than 1 MB. Please use a smaller one.', code: 'IMAGE_TOO_LARGE' });
@@ -529,15 +624,24 @@ function pushPrefsRouter({ campaigns }) {
   const r = express.Router();
   const limiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => req.user?.userId || req.ip,
     message: { error: 'Too many requests. Wait a minute.', code: 'RATE_LIMITED' } });
-  r.get('/', limiter, async (req, res, next) => { try { res.set('Cache-Control', 'no-store').json({ news: await campaigns.newsEnabled(req.user.userId), safety: true }); } catch (e) { next(e); } });
+  // 3.56: one switch per push kind ({news, events, safetyTips, community, partnerPerks}); `safety: true`
+  // says safety, ride and social pushes are always on (they are not campaign kinds).
+  r.get('/', limiter, async (req, res, next) => { try { res.set('Cache-Control', 'no-store').json({ ...(await campaigns.prefsOf(req.user.userId)), safety: true }); } catch (e) { next(e); } });
   r.put('/', limiter, async (req, res, next) => {
     try {
-      const b = req.body && typeof req.body === 'object' ? req.body : {};
-      if (typeof b.news !== 'boolean') return res.status(400).json({ error: 'news must be true or false.', code: 'BAD_PREF' });
-      res.set('Cache-Control', 'no-store').json({ ...(await campaigns.setNews(req.user.userId, b.news)), safety: true });
+      const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const keys = Object.keys(b).filter((k) => k !== 'safety');
+      if (!keys.length) return res.status(400).json({ error: `Send at least one of: ${PREF_KEYS.join(', ')}.`, code: 'BAD_PREF' });
+      for (const k of keys) {
+        if (!PREF_KEYS.includes(k)) return res.status(400).json({ error: `Unknown switch "${k.slice(0, 30)}".`, code: 'BAD_PREF' });
+        if (typeof b[k] !== 'boolean') return res.status(400).json({ error: `${k} must be true or false.`, code: 'BAD_PREF' });
+      }
+      if (b.safety === false) return res.status(400).json({ error: 'Safety and ride alerts cannot be turned off.', code: 'SAFETY_ALWAYS_ON' });
+      res.set('Cache-Control', 'no-store').json({ ...(await campaigns.setPrefs(req.user.userId, b)), safety: true });
     } catch (e) { next(e); }
   });
   return r;
 }
 
-module.exports = { PushCampaigns, CampaignError, adminPushRouter, pushMediaRouter, pushPrefsRouter, createImageStore, C, MAX_TITLE, MAX_BODY, MAX_IMAGE_BYTES, PLAN_TARGETS };
+module.exports = { PushCampaigns, CampaignError, adminPushRouter, pushMediaRouter, pushPrefsRouter, createImageStore, C, MAX_TITLE, MAX_BODY, MAX_IMAGE_BYTES, PLAN_TARGETS,
+  KINDS, KIND_IDS, PREF_KEYS, PERK_WINDOW_DAYS, prefsFrom };

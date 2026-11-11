@@ -11,11 +11,20 @@
   var h = CR.util.h, clear = CR.util.clear, ui = CR.ui, api = CR.api;
   var TARGET_LABELS = { home: 'Home', friends: 'Friends and people', crews: 'Crews', rides: 'Ride history', settings: 'Settings' };
   var PLAN_LABELS = { community: 'Community (free)', group_small: 'Small Group', group_large: 'Large Group' };
+  // 3.56 push kinds (src/push_campaigns.js KINDS): each has its own Android channel and in-app switch.
+  var KIND_LABELS = { update: 'Update', event: 'Event', safety_tip: 'Safety tip', community: 'Community', partner_perk: 'Partner perk' };
+  var KIND_HINTS = {
+    update: 'New features and app news. Riders turn this off with "News and updates".',
+    event: 'Rides, meet-ups and community events. Own channel "Events".',
+    safety_tip: 'Riding safety tips. Own channel "Safety tips". (SOS, crash and ride alerts are never campaigns and are always on.)',
+    community: 'Community stories and milestones. Own channel "Community".',
+    partner_perk: 'A real-world perk at a partner CoRoute curated (e.g. "10% off a service at a partner garage"). Only riders who turned "Partner perks" on get it, at most one a week. Never a CoRoute plan, price, coupon or purchase link.'
+  };
   var STATUS = { SCHEDULED: ['Scheduled', 'info'], SENDING: ['Sending', 'warn'], SENT: ['Sent', 'ok'], FAILED: ['Failed', 'bad'], CANCELLED: ['Cancelled', ''] };
 
   function tabs(active) {
     var nav = h('div.row.eng-tabs', { role: 'tablist', 'aria-label': 'Notifications' });
-    [['', 'Compose push'], ['history', 'History'], ['sms', 'SMS']].forEach(function (t) {
+    [['', 'Compose push'], ['email', 'Offers e-mail'], ['history', 'History'], ['sms', 'SMS']].forEach(function (t) {
       nav.appendChild(h('button.btn.btn--sm', { type: 'button', 'aria-pressed': String(active === t[0]), text: t[1], onclick: function () { CR.go('#/notifications' + (t[0] ? '/' + t[0] : '')); } }));
     });
     return nav;
@@ -38,7 +47,8 @@
   /** Android-style notification card (collapsed text + big picture), light or dark. */
   function previewCard(theme, st) {
     var card = h('div.np-card.np-card--' + theme, { 'aria-label': 'Preview, ' + theme + ' theme' });
-    card.appendChild(h('div.np-card__top', h('span.np-card__icon', { 'aria-hidden': 'true' }), h('span', { text: 'CoRoute · now' })));
+    var label = st.pushKind === 'partner_perk' ? 'CoRoute · Partner perk' + (st.partnerName ? ' · ' + st.partnerName : '') + ' · now' : 'CoRoute · ' + (KIND_LABELS[st.pushKind] || 'Update') + ' · now';
+    card.appendChild(h('div.np-card__top', h('span.np-card__icon', { 'aria-hidden': 'true' }), h('span', { text: label })));
     card.appendChild(h('div.np-card__title', { text: st.title || 'Title' }));
     card.appendChild(h('div.np-card__body', { text: st.body || 'Your message appears here.' }));
     if (st.imageBlobUrl) card.appendChild(h('img.np-card__img', { src: st.imageBlobUrl, alt: '' }));
@@ -47,7 +57,15 @@
 
   // ==================================================================== compose
   function renderCompose(view) {
-    var st = { title: '', body: '', target: 'home', imageId: null, imageBlobUrl: null, kind: 'all', days: 30, plans: ['community'], usernames: '', when: 'now', at: '' };
+    var st = { title: '', body: '', target: 'home', imageId: null, imageBlobUrl: null, kind: 'all', days: 30, plans: ['community'], usernames: '', when: 'now', at: '', pushKind: 'update', partnerName: '' };
+    var channel = CR.ui.select([['push', 'Push notification'], ['email', 'E-mail (Offers)']], 'push');
+    channel.addEventListener('change', function () { if (channel.value === 'email') CR.go('#/notifications/email'); });
+    var pushKind = CR.ui.select(Object.keys(KIND_LABELS).map(function (k) { return [k, KIND_LABELS[k]]; }), 'update');
+    var kindHint = h('div.small.muted', { text: KIND_HINTS.update });
+    var partner = h('input', { type: 'text', maxlength: '60', placeholder: 'Speed Garage, Indiranagar' });
+    var curated = h('input', { type: 'checkbox' });
+    var partnerField = h('div.stack', CR.ui.field('Partner', partner, 'the real-world business offering the perk'),
+      h('label.check', curated, 'CoRoute curated this perk: a real-world perk at this partner, not a CoRoute plan or digital good, with no purchase link.'));
     var cfg = null;
     var policy = h('div');
     var previews = h('div.np-previews');
@@ -83,10 +101,13 @@
     }
     function payload() {
       return { title: title.value, body: body.value, target: target.value, imageId: st.imageId || undefined, audience: audience(),
+        kind: pushKind.value, partnerName: pushKind.value === 'partner_perk' ? partner.value : undefined, curated: pushKind.value === 'partner_perk' ? curated.checked : undefined,
         sendAt: st.when === 'later' ? CR.util.fromLocalInput(at.value) : 0 };
     }
     function redraw() {
-      st.title = title.value; st.body = body.value;
+      st.title = title.value; st.body = body.value; st.pushKind = pushKind.value; st.partnerName = partner.value.trim();
+      partnerField.hidden = st.pushKind !== 'partner_perk';
+      kindHint.textContent = KIND_HINTS[st.pushKind] || '';
       clear(previews).appendChild(previewCard('light', st));
       previews.appendChild(previewCard('dark', st));
       daysField.hidden = st.kind !== 'active'; planField.hidden = st.kind !== 'plan'; usersField.hidden = st.kind !== 'users';
@@ -98,11 +119,12 @@
       clearTimeout(checkTimer);
       checkTimer = setTimeout(function () {
         if (!title.value.trim() || !body.value.trim()) { clear(policy); return; }
-        api('POST', '/admin/push/check', { title: title.value, body: body.value, target: target.value }).then(function () { clear(policy); })
+        api('POST', '/admin/push/check', { title: title.value, body: body.value, target: target.value, kind: pushKind.value, partnerName: partner.value, curated: curated.checked }).then(function () { clear(policy); })
           .catch(function (e) { clear(policy).appendChild(h('div.banner.banner--bad', { role: 'alert', text: e.message })); });
       }, 450);
     }
-    [title, body].forEach(function (el) { el.addEventListener('input', function () { redraw(); check(); }); });
+    [title, body, partner].forEach(function (el) { el.addEventListener('input', function () { redraw(); check(); }); });
+    [pushKind, curated].forEach(function (el) { el.addEventListener('change', function () { reach.textContent = ''; redraw(); check(); }); });
     kind.addEventListener('change', function () { st.kind = kind.value; reach.textContent = ''; redraw(); });
     when.addEventListener('change', function () { st.when = when.value; redraw(); });
     file.addEventListener('change', function () {
@@ -125,8 +147,8 @@
     });
     countBtn.addEventListener('click', function () {
       reach.textContent = 'Counting…';
-      api('POST', '/admin/push/audience-count', { audience: audience() }).then(function (r) {
-        reach.textContent = r.riders + ' rider(s) with the app' + (r.optedOut ? ', ' + r.optedOut + ' turned News off' : '') + '. At most ' + ((cfg && cfg.dailyCap) || 2) + ' a day per rider.';
+      api('POST', '/admin/push/audience-count', { audience: audience(), kind: pushKind.value }).then(function (r) {
+        reach.textContent = r.riders + ' rider(s) with the app' + (r.optedOut ? ', ' + r.optedOut + ' turned ' + (KIND_LABELS[pushKind.value] || 'this kind') + (pushKind.value === 'partner_perk' ? ' not on' : ' off') : '') + '. At most ' + ((cfg && cfg.dailyCap) || 2) + ' a day per rider.';
       }).catch(function (e) { reach.textContent = e.message; });
     });
     testBtn.addEventListener('click', function () {
@@ -156,6 +178,8 @@
     view.appendChild(banner);
     view.appendChild(h('div.np-grid.section-gap',
       h('div.card.stack',
+        CR.ui.field('Channel', channel, 'prices, coupons and plan offers: e-mail only'),
+        CR.ui.field('Kind', pushKind, 'own Android channel and in-app switch'), kindHint, partnerField,
         CR.ui.field('Title', title, null), h('div.row.row--end', counter(title, 65)),
         CR.ui.field('Message', body), h('div.row.row--end', counter(body, 240)),
         policy,
@@ -164,7 +188,7 @@
         CR.ui.field('Audience', kind), daysField, planField, usersField,
         h('div.row', countBtn, reach),
         CR.ui.field('When', when), atField,
-        h('div.banner.banner--info', { text: 'Google Play policy: no prices, coupons, discounts, offers, buying or upgrade words, and no links to the plans page. Put offers on the website board or in an e-mail.' }),
+        h('div.banner.banner--info', { text: 'Google Play policy: pushes reach the Play app, which must not show prices, coupons, discounts, offers, buying or upgrade words, or links to the plans page (payments policy), and must not carry third-party ads (ads policy). Offers and coupons for CoRoute plans are e-mail only: choose Channel "E-mail (Offers)"; it goes only to riders who opted in on the website, with an unsubscribe link.' }),
         h('div.row.row--end', testBtn, sendBtn)),
       h('div.card', h('div.card__head', h('h3', { text: 'Preview' }), h('p', { text: 'Android, expanded. Phones may shorten the text.' })), previews)));
     redraw();
@@ -283,6 +307,12 @@
     render: function (view, arg) {
       if (arg === 'history') return renderHistory(view);
       if (arg === 'sms') return renderSms(view);
+      if (arg === 'email') {
+        view.appendChild(ui.pageHead('Notifications', 'Offers e-mail: plan offers and coupon codes, sent only to riders who turned on offer e-mails on the website.'));
+        view.appendChild(tabs('email'));
+        if (CR.renderOfferEmail) return CR.renderOfferEmail(view);
+        return view.appendChild(h('div.banner.banner--bad', { text: 'The e-mail composer did not load. Reload the page.' }));
+      }
       return renderCompose(view);
     },
   };
