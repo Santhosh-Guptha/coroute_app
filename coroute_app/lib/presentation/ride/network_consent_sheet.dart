@@ -85,44 +85,46 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
         children: [
           const AppSheetHeader(title: 'Riders helping riders', subtitle: 'Safety does not depend on your group being public.'),
           Flexible(
-            child: ListView(
-              shrinkWrap: true,
+            child: SingleChildScrollView(
               padding: EdgeInsets.zero,
-              children: [
-                DsCard(
-                  tinted: true,
-                  borderColor: AppTheme.tint,
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.volunteer_activism_outlined, size: 24, color: AppTheme.accentText),
-                      const SizedBox(width: Space.s12),
-                      Expanded(
-                        child: Text(
-                          'If you have an accident, CoRoute can also ask one to three riders from other groups who are already riding towards you, '
-                          'when they may reach you faster than your own group. They see only where you are and how far. '
-                          'Name, bike and your medical info are shared only after one accepts, while your alert is open. Never your phone number.',
-                          style: AppText.body,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DsCard(
+                    tinted: true,
+                    borderColor: AppTheme.tint,
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.volunteer_activism_outlined, size: 24, color: AppTheme.accentText),
+                        const SizedBox(width: Space.s12),
+                        Expanded(
+                          child: Text(
+                            'If you have an accident, CoRoute can also ask one to three riders from other groups who are already riding towards you, '
+                            'when they may reach you faster than your own group. They see only where you are and how far. '
+                            'Name, bike and your medical info are shared only after one accepts, while your alert is open. Never your phone number.',
+                            style: AppText.body,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: Space.s12),
-                DsCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Column(
-                    children: [
-                      _AlwaysOnLine(icon: Icons.emergency_share_rounded, title: SafetyTexts.askTitle, subtitle: SafetyTexts.askExplain),
-                      Divider(color: AppTheme.border),
-                      _AlwaysOnLine(icon: Icons.volunteer_activism_rounded, title: SafetyTexts.helpTitle, subtitle: SafetyTexts.helpExplain),
-                    ],
+                  const SizedBox(height: Space.s12),
+                  DsCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Column(
+                      children: [
+                        _AlwaysOnLine(icon: Icons.emergency_share_rounded, title: SafetyTexts.askTitle, subtitle: SafetyTexts.askExplain),
+                        Divider(color: AppTheme.border),
+                        _AlwaysOnLine(icon: Icons.volunteer_activism_rounded, title: SafetyTexts.helpTitle, subtitle: SafetyTexts.helpExplain),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: Space.s8),
-                Text(NetworkConsentSheet.alwaysOnNote, style: AppText.caption),
-              ],
+                  const SizedBox(height: Space.s8),
+                  Text(NetworkConsentSheet.alwaysOnNote, style: AppText.caption),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: Space.s16),

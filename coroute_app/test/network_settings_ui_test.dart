@@ -179,7 +179,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Riders helping riders'), findsOneWidget);
     expect(find.byType(Switch), findsNothing, reason: 'always on since Nov 11: an explanation, no switches');
-    expect(find.text(NetworkConsentSheet.alwaysOnNote), findsOneWidget);
+    expect(find.text(NetworkConsentSheet.alwaysOnNote, skipOffstage: false), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('Later'));
     await tester.pumpAndSettle();

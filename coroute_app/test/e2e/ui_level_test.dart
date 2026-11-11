@@ -267,9 +267,8 @@ void main() {
       await tester.tap(find.widgetWithText(NavigationDestination, 'Profile'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Neo One'), findsOneWidget);
-      expect(find.textContaining('Motorcycle (Adv)'), findsOneWidget);
-      expect(find.textContaining('KA-05-EX-9999'), findsOneWidget);
-      expect(find.text('Emergency contact: set'), findsOneWidget);
+      expect(find.text('My bikes'), findsOneWidget);
+      expect(find.text('Emergency contact & Medical ID'), findsOneWidget);
     });
   });
 

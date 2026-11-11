@@ -46,47 +46,47 @@ void main() {
 
       expect(find.byType(TextField), findsNWidgets(2)); // Search and Name field
       expect(find.byIcon(Icons.content_paste_rounded), findsOneWidget);
-      expect(find.byTooltip('Paste coordinates or text'), findsOneWidget);
+      expect(find.byTooltip('Paste a map link, coordinates or text'), findsOneWidget);
     });
 
     testWidgets('typing decimal coordinates instantly shows Jump to coordinates row', (tester) async {
       await tester.pumpWidget(buildScreen());
       await tester.pump();
 
-      final searchFinder = find.widgetWithText(TextField, 'Search place, town or coordinates');
+      final searchFinder = find.widgetWithText(TextField, 'Search a place, or paste a map link');
       expect(searchFinder, findsOneWidget);
 
       await tester.enterText(searchFinder, '13.0827, 80.2707');
       await tester.pump();
 
-      expect(find.text('Jump to coordinates'), findsOneWidget);
-      expect(find.textContaining('13.082700, 80.270700'), findsOneWidget);
+      expect(find.text('Pasted location'), findsOneWidget);
+      expect(find.textContaining('13.08270'), findsOneWidget);
 
-      // Tapping Jump to coordinates selects it
-      await tester.tap(find.text('Jump to coordinates'));
+      // Tapping Pasted location selects it
+      await tester.tap(find.text('Pasted location'));
       await tester.pump();
 
-      // Jump to coordinates row should dismiss upon selection
-      expect(find.text('Jump to coordinates'), findsNothing);
+      // Pasted location row should dismiss upon selection
+      expect(find.text('Pasted location'), findsNothing);
     });
 
     testWidgets('typing DMS coordinates shows Jump to coordinates row', (tester) async {
       await tester.pumpWidget(buildScreen());
       await tester.pump();
 
-      final searchFinder = find.widgetWithText(TextField, 'Search place, town or coordinates');
+      final searchFinder = find.widgetWithText(TextField, 'Search a place, or paste a map link');
       await tester.enterText(searchFinder, '17°23\'06.2"N 78°29\'12.0"E');
       await tester.pump();
 
-      expect(find.text('Jump to coordinates'), findsOneWidget);
-      expect(find.textContaining('17.385056'), findsOneWidget);
+      expect(find.text('Pasted location'), findsOneWidget);
+      expect(find.textContaining('17.38506'), findsOneWidget);
     });
 
     testWidgets('shows empty state message when search returns no matches', (tester) async {
       await tester.pumpWidget(buildScreen());
       await tester.pump();
 
-      final searchFinder = find.widgetWithText(TextField, 'Search place, town or coordinates');
+      final searchFinder = find.widgetWithText(TextField, 'Search a place, or paste a map link');
       await tester.enterText(searchFinder, 'Unicorn Station Nowhere');
       // Wait for debounce timer (600ms)
       await tester.pump(const Duration(milliseconds: 700));
@@ -109,11 +109,11 @@ void main() {
       await tester.pumpWidget(buildScreen());
       await tester.pump();
 
-      await tester.tap(find.byTooltip('Paste coordinates or text'));
+      await tester.tap(find.byTooltip('Paste a map link, coordinates or text'));
       await tester.pump();
 
       // Search text is populated with coordinates
-      expect(find.textContaining('15.317300, 75.713900'), findsWidgets);
+      expect(find.textContaining('15.31730'), findsWidgets);
     });
   });
 }

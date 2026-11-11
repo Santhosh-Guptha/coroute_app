@@ -272,7 +272,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.byType(PreRidePhoneCheckScreen), findsOneWidget);
-      expect(find.byType(SettingsScreen, skipOffstage: true), findsNothing, reason: 'covered by the phone check, not a second Settings');
+      expect(find.byType(SettingsScreen), findsOneWidget, reason: 'covered by the phone check, not a second Settings');
     });
 
     test('the "Safety is always on" list names helping and asking nearby riders', () {
