@@ -345,6 +345,9 @@ void main() {
         'bikeTankL': 15.0,
         'bikeMileageKmL': 45.0,
         'bikeCooling': 'air',
+        // 3.56: the confirmed type ('' = not confirmed) and the fuel type round-trip too.
+        'bikeType': '',
+        'bikeFuel': 'petrol',
       });
       final odd = GarageBinding.bikeSummaryOf(const BikeProfile(
           id: 'x', name: 'Big tank', tankCapacityL: 60, expectedMileageKmL: 200, engineCc: 30, colour: 'red\nline'));

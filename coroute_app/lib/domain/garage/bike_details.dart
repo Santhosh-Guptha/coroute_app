@@ -38,7 +38,7 @@ class BikeDetails {
   static List<BikeDetailField> missing(BikeProfile? bike) {
     if (bike == null) return BikeDetailField.values.toList();
     final ev = _isEv(bike);
-    final (mMin, mMax) = ev ? (2.0, 25.0) : (5.0, 120.0);
+    final (mMin, mMax) = ev ? (2.0, 60.0) : (5.0, 120.0);
     return [
       if ('${bike.make} ${bike.model}'.trim().length < 2) BikeDetailField.model,
       if (bike.bikeType == null) BikeDetailField.type,
@@ -62,7 +62,7 @@ class BikeDetails {
 
 /// The garage form check with the 3.55 mandatory details: everything [validateBikeInput] checks,
 /// plus make / model, bike type, colour and (not for electric) engine size. Electric bikes may
-/// leave the battery size empty (then [tank] is not checked); their mileage is km per kWh (2 to 25).
+/// leave the battery size empty (then [tank] is not checked); their mileage is km per kWh (2 to 60; scooters often do 30-40).
 /// Field → message (empty map: all good).
 Map<String, String> validateBikeDetails({
   required String name,
@@ -101,7 +101,7 @@ Map<String, String> validateBikeDetails({
   }
   if (ev) {
     final m = parseBikeNumber(mileage);
-    if (m == null || m < 2 || m > 25) errors['mileage'] = 'Electric mileage is 2 to 25 km/kWh (range ÷ battery)';
+    if (m == null || m < 2 || m > 60) errors['mileage'] = 'Electric mileage is 2 to 60 km/kWh (range ÷ battery)';
     if (evNoBattery) {
       errors.remove('tank');
       errors.remove('reserve');

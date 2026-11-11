@@ -113,9 +113,9 @@ void main() {
     test('electric: no engine size or tank needed, mileage in km/kWh', () {
       const ev = BikeProfile(
         id: 'e', name: 'Ather', make: 'Ather', model: '450X', bikeType: BikeType.electric, fuelType: BikeFuelType.ev,
-        colour: 'White', tankCapacityL: 0, expectedMileageKmL: 30,
+        colour: 'White', tankCapacityL: 0, expectedMileageKmL: 75,
       );
-      expect(BikeDetails.missing(ev), [BikeDetailField.mileage], reason: '30 km/kWh is out of the 2..25 range');
+      expect(BikeDetails.missing(ev), [BikeDetailField.mileage], reason: '75 km/kWh is out of the 2..60 range');
       expect(BikeDetails.isComplete(ev.copyWith(expectedMileageKmL: 20)), isTrue);
     });
 
@@ -141,7 +141,7 @@ void main() {
     test('garage form: electric skips engine size and allows no battery', () {
       expect(check(fuel: BikeFuelType.ev, model: 'Ather 450X', type: BikeType.electric, cc: '', tank: '', reserve: '', mileage: '20'), isEmpty);
       expect(check(fuel: BikeFuelType.ev, type: BikeType.electric, cc: '', tank: '3.7', reserve: '0.4', mileage: '20'), isEmpty);
-      expect(check(fuel: BikeFuelType.ev, type: BikeType.electric, cc: '', tank: '', mileage: '40')['mileage'], contains('km/kWh'));
+      expect(check(fuel: BikeFuelType.ev, type: BikeType.electric, cc: '', tank: '', mileage: '70')['mileage'], contains('km/kWh'));
     });
 
     test('suggestions from the model: preset details and type', () {

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../data/services/auth_service.dart';
+import '../../data/services/garage_binding.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/garage/bike_details.dart';
 import '../../domain/garage/bike_input.dart';
 import '../../domain/garage/bike_profile.dart';
+import '../../domain/garage/bike_sync.dart';
 import '../../domain/garage/bike_type.dart';
 import '../../domain/places/fuel_match.dart';
 import 'bike_silhouette.dart';
@@ -23,29 +27,58 @@ class BikeGate {
 
   /// True when [pillionAccount] (the profile says pillion) or the bike is complete; otherwise the
   /// sheet. [allowPillion] offers "I'm riding pillion" (joining a ride).
+  ///
+  /// 3.56 (asked every time): decided only from the garage's active bike, after the garage has
+  /// loaded and after the profile on the gateway had the chance to fill what this phone is
+  /// missing (a new install / phone). The sheet saves into the garage, so the next create / join
+  /// goes straight on.
   static Future<BikeGateResult> ensureReady(BuildContext context, {bool pillionAccount = false, bool allowPillion = true, GarageService? garage}) async {
     if (pillionAccount) return BikeGateResult.pillion;
     final g = garage ?? GarageService.shared;
     await g.load();
-    final bike = g.activeBikeNotifier.value;
-    if (BikeDetails.isComplete(bike)) return BikeGateResult.rider;
+    var step = BikeGatePlan.decide(pillionAccount: false, loaded: g.isLoaded, active: g.activeBikeNotifier.value);
+    if (step == BikeGateStep.ask && context.mounted) {
+      final binding = _binding(context, g);
+      if (binding != null) {
+        await binding.restoreFromServer();
+        step = BikeGatePlan.decide(pillionAccount: false, loaded: g.isLoaded, active: g.activeBikeNotifier.value);
+      }
+    }
+    if (step == BikeGateStep.rider) return BikeGateResult.rider;
     if (!context.mounted) return BikeGateResult.cancelled;
     final r = await showCompleteBikeSheet(context, garage: g, allowPillion: allowPillion);
     return r ?? BikeGateResult.cancelled;
   }
 
+  /// The app's garage binding (restores from the profile), when it binds this garage.
+  static GarageBinding? _binding(BuildContext context, GarageService g) {
+    try {
+      final b = Provider.of<GarageBinding>(context, listen: false);
+      return identical(b.garage, g) ? b : null;
+    } catch (_) {
+      return null; // no provider (tests, previews)
+    }
+  }
+
   static const String _promptedKey = 'coroute_bike_details_prompted_v1';
 
-  /// Existing riders whose active bike misses details are asked once (never again after that;
-  /// creating or joining a ride still asks until the bike is complete).
+  /// Existing riders whose active bike misses details are asked once (never again after that,
+  /// shown or dismissed; never for a pillion account; creating or joining a ride still asks until
+  /// the bike is complete).
   static Future<void> promptOnce(BuildContext context, {GarageService? garage}) async {
     final g = garage ?? GarageService.shared;
     try {
       final sp = await SharedPreferences.getInstance();
-      if (sp.getBool(_promptedKey) == true) return;
+      if (sp.getBool(_promptedKey) == true || !context.mounted) return;
+      var pillion = false;
+      try {
+        pillion = Provider.of<AuthService>(context, listen: false).isPillion;
+      } catch (_) {}
+      if (pillion) return;
+      final binding = _binding(context, g);
       await g.load();
-      final bike = g.activeBikeNotifier.value;
-      if (bike == null || BikeDetails.isComplete(bike)) return; // no bike yet: the join / create asks
+      if (binding != null) await binding.restoreFromServer();
+      if (!BikeGatePlan.shouldPromptOnce(alreadyPrompted: false, pillionAccount: pillion, loaded: g.isLoaded, active: g.activeBikeNotifier.value)) return;
       await sp.setBool(_promptedKey, true);
       if (!context.mounted) return;
       await showCompleteBikeSheet(context, garage: g, allowPillion: false, intro: 'Your group now sees your bike\'s shape and colour on the map. Check these details once.');

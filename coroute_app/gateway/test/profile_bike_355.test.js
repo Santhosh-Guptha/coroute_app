@@ -28,7 +28,7 @@ test('bikeFields validates types, ranges and control characters', () => {
     { bikeColour: 'c'.repeat(31) }, { bikeColour: 'red‮' },
     { bikeCc: 49 }, { bikeCc: 2501 }, { bikeCc: 349.5 }, { bikeCc: 'big' }, { bikeCc: true }, { bikeCc: -100 },
     { bikeTankL: 1.5 }, { bikeTankL: 41 }, { bikeTankL: Infinity },
-    { bikeMileageKmL: 4 }, { bikeMileageKmL: 121 },
+    { bikeMileageKmL: 1.5 }, { bikeMileageKmL: 121 },
     { bikeCooling: 'water' }, { bikeCooling: 1 },
   ];
   for (const b of bad) {
@@ -36,6 +36,7 @@ test('bikeFields validates types, ranges and control characters', () => {
   }
   // Limits are inclusive.
   assert.deepEqual(bikeFields({ bikeCc: 50, bikeTankL: 2, bikeMileageKmL: 120 }), { bikeCc: 50, bikeTankL: 2, bikeMileageKmL: 120 });
+  assert.deepEqual(bikeFields({ bikeMileageKmL: 2 }), { bikeMileageKmL: 2 }, 'electric km/kWh');
   assert.deepEqual(bikeFields({ bikeCc: 2500, bikeTankL: 40, bikeMileageKmL: 5 }), { bikeCc: 2500, bikeTankL: 40, bikeMileageKmL: 5 });
 });
 

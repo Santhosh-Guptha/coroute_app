@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/feature_gates.dart';
+import '../../domain/garage/bike_details.dart';
 import '../../domain/garage/bike_profile.dart';
 import '../../domain/safety/fuel_profile.dart';
 
@@ -15,6 +16,10 @@ class GarageService {
   final ValueNotifier<BikeProfile?> activeBikeNotifier = ValueNotifier<BikeProfile?>(null);
 
   bool _loaded = false;
+
+  /// True once the stored garage has been read (before that the lists are empty, which does not
+  /// mean "no bike": 3.56, nothing decides or syncs on them until then).
+  bool get isLoaded => _loaded;
 
   Future<void>? _loading;
 
@@ -133,7 +138,11 @@ class GarageService {
     final sp = await SharedPreferences.getInstance();
     await _persistBikes(sp, currentBikes);
 
-    if (activeBikeNotifier.value?.id == bike.id || currentBikes.length == 1) {
+    // 3.56: a complete bike also becomes the ride bike when the active one is incomplete (or
+    // none), so adding the bike in the garage ends the "Complete your bike" question.
+    final active = activeBikeNotifier.value;
+    final replacesIncomplete = active == null || (active.id != bike.id && !BikeDetails.isComplete(active) && BikeDetails.isComplete(bike));
+    if (active?.id == bike.id || currentBikes.length == 1 || replacesIncomplete) {
       activeBikeNotifier.value = bike;
       await sp.setString(_keyActiveBike, bike.id);
     }

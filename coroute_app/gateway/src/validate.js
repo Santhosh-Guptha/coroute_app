@@ -118,8 +118,13 @@ function profileFields(input, { optionalEmpty = [] } = {}) {
 
 // ---------------------------------------------------------------- bike summary (3.55)
 /** The active bike's summary a rider's app sends for engine-care and fuel analysis (owner + admin only). */
-const BIKE_KEYS = ['bikeModel', 'bikeCc', 'bikeColour', 'bikeTankL', 'bikeMileageKmL', 'bikeCooling'];
+// 3.56 (bike details once): also the confirmed bike type and the fuel type, so a reinstalled app
+// (or a second phone) gets the whole bike back and is not asked for the details again.
+const BIKE_KEYS = ['bikeModel', 'bikeCc', 'bikeColour', 'bikeTankL', 'bikeMileageKmL', 'bikeCooling', 'bikeType', 'bikeFuel'];
 const BIKE_COOLING = new Set(['unknown', 'air', 'oil', 'liquid']);
+/** Bike type ids (app BikeType, rider record vehicleKind); '' = not confirmed yet. */
+const BIKE_TYPES = new Set(['commuter', 'scooter', 'sport', 'cruiser', 'adventure', 'offroad', 'electric', 'retro']);
+const BIKE_FUELS = new Set(['petrol', 'diesel', 'cng', 'ev']);
 
 /**
  * Validates the optional bike summary. Only keys present (not undefined) are checked and
@@ -150,7 +155,17 @@ function bikeFields(input) {
   text('bikeColour', 30, 'bike colour');
   number('bikeCc', 50, 2500, 'Engine size must be a whole number from 50 to 2500 cc.', { int: true });
   number('bikeTankL', 2, 40, 'Tank size must be from 2 to 40.');
-  number('bikeMileageKmL', 5, 120, 'Mileage must be from 5 to 120 km per unit.');
+  // From 2: an electric bike's mileage is km per kWh (2 to 60); petrol bikes are 5 to 120 in the app.
+  number('bikeMileageKmL', 2, 120, 'Mileage must be from 2 to 120 km per unit.');
+  const choice = (key, allowed, message) => {
+    const v = input[key];
+    if (v === undefined) return;
+    if (v === null || v === '') { out[key] = ''; return; }
+    if (typeof v !== 'string' || !allowed.has(v)) { errors[key] = message; return; }
+    out[key] = v;
+  };
+  choice('bikeType', BIKE_TYPES, 'Pick a bike type from the list.');
+  choice('bikeFuel', BIKE_FUELS, 'Pick a fuel type from the list.');
   if (input.bikeCooling !== undefined) {
     const c = input.bikeCooling === null ? 'unknown' : input.bikeCooling;
     if (typeof c !== 'string' || !BIKE_COOLING.has(c)) errors.bikeCooling = 'Pick a cooling type from the list.'; else out.bikeCooling = c;

@@ -66,6 +66,8 @@ function bikeSummary(u) {
     bikeTankL: Number(u.bikeTankL) || 0,
     bikeMileageKmL: Number(u.bikeMileageKmL) || 0,
     bikeCooling: ['air', 'oil', 'liquid'].includes(u.bikeCooling) ? u.bikeCooling : 'unknown',
+    bikeType: typeof u.bikeType === 'string' ? u.bikeType : '',
+    bikeFuel: typeof u.bikeFuel === 'string' ? u.bikeFuel : '',
   };
 }
 

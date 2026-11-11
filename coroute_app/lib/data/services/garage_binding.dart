@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../domain/garage/bike_details.dart';
 import '../../domain/garage/bike_profile.dart';
+import '../../domain/garage/bike_sync.dart';
 import '../../domain/garage/engine_care.dart';
 import '../../domain/safety/fuel_profile.dart';
 import 'auth_service.dart';
@@ -66,7 +67,10 @@ class GarageBinding {
   BikeProfile? get activeBike => garage.activeBikeNotifier.value;
 
   void _onBike() {
-    if (_disposed) return;
+    if (_disposed || !garage.isLoaded) return;
+    // 3.56: an empty or incomplete garage takes what the profile on the gateway keeps first (a
+    // new install / phone); the restored bike fires this listener again.
+    if (_restoreNow()) return;
     final bike = activeBike;
     final care = engineCare;
     // Setting the bike restarts the advisor's stretch: only when it really changed.
@@ -85,6 +89,10 @@ class GarageBinding {
     final user = auth?.currentUserId;
     final changed = user != _lastUser;
     _lastUser = user;
+    // 3.56: nothing is decided or sent before the garage has loaded (the load shares it):
+    // an empty summary sent at start-up used to wipe the rider's bike on the server.
+    if (!garage.isLoaded) return;
+    if (_restoreNow()) return;
     final bike = activeBike;
     // A different rider on this phone has their own fuel settings.
     if (changed) _shareFuel(bike);
@@ -108,7 +116,45 @@ class GarageBinding {
   void _shareSummary(BikeProfile? bike) {
     final a = auth;
     if (a == null || a.currentUserId == null) return;
+    // 3.56: never an empty garage's summary (it would clear the bike the server keeps).
+    if (!BikeSync.mayShare(garageLoaded: garage.isLoaded, bike: bike)) return;
     a.syncBikeSummary(bikeSummaryOf(bike)).ignore();
+  }
+
+  bool _restoring = false;
+
+  static String _newBikeId() => 'bike_${DateTime.now().millisecondsSinceEpoch}';
+
+  /// Starts a restore when the gateway's copy fills something the garage is missing.
+  bool _restoreNow() {
+    if (_restoring) return false;
+    if (BikeSync.merge(activeBike, auth?.bikeOnServer, newId: 'probe') == null) return false;
+    restoreFromServer().ignore();
+    return true;
+  }
+
+  /// 3.56: fills the garage's active bike from the profile on the gateway (a new install, a new
+  /// phone, or details given on another phone); only what the phone is missing, never an empty
+  /// value over one the rider gave. Creates the bike (and makes it active) in an empty garage.
+  /// Awaited by the ride's bike check before it decides to ask.
+  Future<void> restoreFromServer() async {
+    if (_disposed || _restoring) return;
+    _restoring = true;
+    var restored = false;
+    try {
+      await garage.load();
+      final merged = BikeSync.merge(activeBike, auth?.bikeOnServer, newId: _newBikeId());
+      if (merged != null && await garage.saveBike(merged)) {
+        await garage.setActiveBike(merged.id);
+        restored = true;
+      }
+    } catch (e) {
+      debugPrint('garage restore note: $e');
+    } finally {
+      _restoring = false;
+    }
+    // The listener ran while restoring (and skipped the share): share the result now.
+    if (restored && !_disposed) _onBike();
   }
 
   /// The fuel profile a bike gives (null without tank and mileage).
@@ -140,27 +186,9 @@ class GarageBinding {
     return m.length > 40 ? m.substring(0, 40).trim() : m;
   }
 
-  /// The summary the gateway accepts (values outside its ranges are sent as "not given").
-  static Map<String, Object> bikeSummaryOf(BikeProfile? bike) {
-    String text(String s, int max) {
-      final t = s.replaceAll(RegExp(r'[\u0000-\u001F\u007F-\u009F  ]'), ' ').replaceAll(RegExp(' +'), ' ').trim();
-      return t.length > max ? t.substring(0, max).trim() : t;
-    }
-
-    double inRange(double v, double min, double max) => v.isFinite && v >= min && v <= max ? (v * 10).round() / 10 : 0;
-    if (bike == null) {
-      return {'bikeModel': '', 'bikeCc': 0, 'bikeColour': '', 'bikeTankL': 0, 'bikeMileageKmL': 0, 'bikeCooling': 'unknown'};
-    }
-    final makeModel = '${bike.make} ${bike.model}'.trim();
-    return {
-      'bikeModel': text(makeModel.isNotEmpty ? makeModel : bike.name, 60),
-      'bikeCc': bike.engineCc >= 50 && bike.engineCc <= 2500 ? bike.engineCc : 0,
-      'bikeColour': text(bike.colour, 30),
-      'bikeTankL': inRange(bike.tankCapacityL, 2, 40),
-      'bikeMileageKmL': inRange(bike.expectedMileageKmL, 5, 120),
-      'bikeCooling': bike.cooling.name,
-    };
-  }
+  /// The summary the gateway accepts (values outside its ranges are sent as "not given");
+  /// 3.56: also the confirmed bike type and the fuel type ([BikeSync.summaryOf]).
+  static Map<String, Object> bikeSummaryOf(BikeProfile? bike) => BikeSync.summaryOf(bike);
 
   void dispose() {
     _disposed = true;
