@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/medical_info.dart';
 import '../../data/services/auth_service.dart';
+import '../safety/emergency_texts_disclosure.dart';
 import '../safety/safety_card_sheet.dart';
 
 /// The one profile form: name, mobile number, bike (or pillion), the
@@ -17,6 +18,11 @@ import '../safety/safety_card_sheet.dart';
 ///
 /// It is a scrolling list itself, so place it directly in a Scaffold body.
 class ProfileForm extends StatefulWidget {
+  /// 3.57: the emergency contact gets an automatic text from the rider's phone after an SOS.
+  static const String contactNote =
+      'We text this person from your phone in an emergency (SOS or a crash alarm you do not answer). '
+      'SOS also lets you call them in one tap.';
+
   /// Shown above the fields (for example a short notice).
   final Widget? header;
   final String saveLabel;
@@ -212,6 +218,9 @@ class _ProfileFormState extends State<ProfileForm> {
     if (ok) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile saved.')));
+      // 3.57: with a contact set, the emergency texts disclosure once (then the SEND_SMS prompt).
+      if (_contactPhone.text.trim().isNotEmpty) await EmergencyTextsDisclosure.offerOnce(context);
+      if (!mounted) return;
       widget.onSaved?.call();
     } else {
       setState(() => _error = auth.lastProfileError ?? 'Could not save your profile. Check your connection and try again.');
@@ -315,7 +324,7 @@ class _ProfileFormState extends State<ProfileForm> {
         ],
         _section('Emergency contact'),
         Text(
-          'SOS lets you call or text this person in one tap.',
+          ProfileForm.contactNote,
           style: AppText.caption,
         ),
         const SizedBox(height: Space.s12),

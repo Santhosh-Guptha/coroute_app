@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/permissions_service.dart';
+import '../safety/emergency_texts_disclosure.dart';
 
 /// Explains each permission before asking for it. Opened in context (before
 /// starting or joining a ride) and from the Profile tab.
@@ -72,7 +73,12 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
     if (_isRequesting) return;
     _isRequesting = true;
     try {
-      await PermissionsService.request(p.key);
+      if (p.key == 'sms') {
+        // 3.57: the one-screen disclosure first, then the system prompt.
+        await EmergencyTextsDisclosure.show(context);
+      } else {
+        await PermissionsService.request(p.key);
+      }
       await _refresh();
     } finally {
       if (mounted) setState(() => _isRequesting = false);
@@ -144,6 +150,7 @@ class _PermissionRow extends StatelessWidget {
         'notification' => Icons.notifications_none_outlined,
         'battery' => Icons.battery_std_outlined,
         'fullScreen' => Icons.lock_open_outlined,
+        'sms' => Icons.sms_outlined,
         _ => Icons.shield_outlined,
       };
 

@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:coroute_app/data/models/device_diagnostic_report.dart';
 import 'package:coroute_app/data/services/device_diagnostic_service.dart';
+import 'package:coroute_app/data/services/sms_sender.dart';
 
 /// A phone with fixed readings (no platform code).
 class FakeProbe extends PhoneProbe {
@@ -44,6 +45,8 @@ class FakeProbe extends PhoneProbe {
   Future<({int? level, bool charging})> battery() async => (level: level, charging: charging);
   @override
   Future<bool> smsComposerAvailable() async => compose;
+  @override
+  Future<SmsCapability> smsCapability() async => SmsCapability(hasTelephony: compose, permission: compose, simReady: compose);
   @override
   Future<bool?> canDial() async => null;
   @override
@@ -97,6 +100,18 @@ void main() {
     }
     expect(item(r, 'accel_stream').metadata?['hz'], 50);
     expect(DeviceDiagnosticReport.validatePrivacySafety(r.toJson()), isTrue);
+  });
+
+  test('3.57 emergency texts: allowed with a SIM passes; not allowed warns with the disclosure fix', () async {
+    final ok = await DeviceDiagnosticService(probe: FakeProbe(nat: healthy, level: 80)).runFullDiagnostic();
+    expect(item(ok, 'sos_sms_capability').verdict, CheckVerdict.pass);
+    const denied = SmsCapability(hasTelephony: true, permission: false, simReady: true);
+    expect(DeviceDiagnosticService.emergencyTextsReady(denied, canCompose: true, android: true), isFalse);
+    expect(DeviceDiagnosticService.emergencyTextsDetail(denied, canCompose: true, android: true), contains('messages app'));
+    const noSim = SmsCapability(hasTelephony: true, permission: true, simReady: false);
+    expect(DeviceDiagnosticService.emergencyTextsDetail(noSim, canCompose: true, android: true), contains('no SIM'));
+    const ready = SmsCapability(hasTelephony: true, permission: true, simReady: true);
+    expect(DeviceDiagnosticService.emergencyTextsDetail(ready, canCompose: true, android: true), contains('by itself'));
   });
 
   test('a phone with safety problems is "not ready", each with a one-tap fix, and stays rideable', () async {

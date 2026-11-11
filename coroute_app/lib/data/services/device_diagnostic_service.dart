@@ -203,6 +203,7 @@ class DeviceDiagnosticService extends ChangeNotifier {
       final batteryF = probe.battery();
       final netF = _network();
       final composeF = probe.smsComposerAvailable();
+      final smsF = probe.smsCapability();
       final dialF = probe.canDial();
       final compassF = probe.compassAvailable();
 
@@ -213,6 +214,7 @@ class DeviceDiagnosticService extends ChangeNotifier {
       final battery = await batteryF;
       final net = await netF;
       final canCompose = await composeF;
+      final smsCap = await smsF;
       final dialed = await dialF;
       final canDialOut = (android || probe.isIOS) ? (nat['canDial'] is bool ? nat['canDial'] as bool : null) : dialed;
       final compass = await compassF;
@@ -379,13 +381,16 @@ class DeviceDiagnosticService extends ChangeNotifier {
           net.gateway ? 'Reachable.' : 'Not reachable now. An SOS is kept and sent again; texts are the backup.',
           fix: net.gateway ? null : PhoneCheckFix.retry,
         ),
+        // 3.57 phone-first emergency texts: allowed -> sent by themselves from this phone's SIM.
         _item(
           'sos_sms_capability',
-          'Text messages',
-          canCompose ? DiagnosticStatus.ready : DiagnosticStatus.limited,
-          canCompose
-              ? 'Without internet, the SOS text opens ready to send.'
-              : 'This phone cannot send texts. Without internet an SOS cannot reach anyone.',
+          'Emergency texts',
+          emergencyTextsReady(smsCap, canCompose: canCompose, android: probe.isAndroid)
+              ? DiagnosticStatus.ready
+              : DiagnosticStatus.limited,
+          emergencyTextsDetail(smsCap, canCompose: canCompose, android: probe.isAndroid),
+          fix: probe.isAndroid && smsCap.hasTelephony && !smsCap.permission ? PhoneCheckFix.sms : null,
+          data: {'direct': smsCap.ready, 'allowed': smsCap.permission},
         ),
         if (canDialOut != null)
           _item(
@@ -634,6 +639,25 @@ class DeviceDiagnosticService extends ChangeNotifier {
   static const double _minHz = 15;
 
   static double _num(Object? v) => v is num && v.isFinite ? v.toDouble() : 0.0;
+
+  /// 3.57 Safety health "Emergency texts": ready when they go out by themselves (Android, allowed,
+  /// SIM ready), or on iOS when Messages can open with the text.
+  static bool emergencyTextsReady(SmsCapability cap, {required bool canCompose, required bool android}) =>
+      android ? cap.ready : canCompose;
+
+  static String emergencyTextsDetail(SmsCapability cap, {required bool canCompose, required bool android}) {
+    if (!android) {
+      return canCompose ? 'The SOS text opens in Messages, ready to send.' : 'This phone cannot send texts.';
+    }
+    if (!cap.hasTelephony) return 'This phone cannot send texts. Without internet an SOS cannot reach anyone by text.';
+    if (!cap.permission) {
+      return 'Not allowed: the SOS text opens in your messages app and someone has to press Send. '
+          'Allow it so your contacts get the text by itself.';
+    }
+    if (!cap.simReady) return 'Allowed, but no SIM is ready. Insert a SIM or turn off airplane mode.';
+    return 'Your emergency contact gets a text from your phone by itself after an SOS or a crash alarm. '
+        'Carrier SMS charges apply.';
+  }
 
   /// Brands known to close background apps unless their own autostart / battery page allows it.
   static bool _aggressiveBrand(String manufacturer) {
@@ -985,6 +1009,16 @@ class PhoneProbe {
       return (level: level, charging: state == BatteryState.charging || state == BatteryState.full);
     } catch (_) {
       return (level: null, charging: false);
+    }
+  }
+
+  /// 3.57: SEND_SMS allowed, telephony and a ready SIM (no READ_PHONE_STATE needed).
+  Future<SmsCapability> smsCapability() async {
+    if (!isAndroid) return SmsCapability.none;
+    try {
+      return await NativeSmsSender().capability();
+    } catch (_) {
+      return SmsCapability.none;
     }
   }
 

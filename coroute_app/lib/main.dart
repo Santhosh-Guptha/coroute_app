@@ -335,6 +335,8 @@ class CoRouteApp extends StatelessWidget {
             safety.onRideStatsEnded = () => RiderScoreService.syncAfterRide(scoreApi);
             // Automatic offline maps (Nov 11): kept 7 days after the trip, then deleted (300 MB cap).
             safety.onTripEnded = (gid) => OfflineMapRetentionService.tripEnded(gid).ignore();
+            // 3.57 phone-first emergency texts: an SOS closed anywhere sends "I'm safe now".
+            convoys.onMySosClosed = safety.noteMySosClosed;
             return safety;
           },
         ),

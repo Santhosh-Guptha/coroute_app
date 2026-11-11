@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import '../../domain/safety/emergency_texts.dart';
 
 /// What this phone can do for emergency texts (no READ_PHONE_STATE needed).
 class SmsCapability {
@@ -51,8 +55,8 @@ abstract class SmsSender {
 }
 
 /// The phone's messages app, opened with the SOS text and every recipient filled in.
-/// Play builds have no SEND_SMS permission, so this is how emergency texts go out without
-/// internet: the rider (or a bystander) presses Send. Never throws.
+/// The fallback when SEND_SMS is not allowed (3.57: the Play build declares it, the rider may
+/// deny it): the rider (or a bystander) presses Send. Never throws.
 class SmsComposer {
   SmsComposer._();
 
@@ -147,6 +151,85 @@ class NativeSmsSender implements SmsSender {
         return SmsStatus.timeout;
       default:
         return SmsStatus.failed;
+    }
+  }
+}
+
+/// 3.57 phone-first emergency texts: the native queue that sends from the rider's own SIM without
+/// a tap (SmsChannel.kt -> EmergencyTexts.kt). It sends each job once its grace window is over,
+/// retries retryable failures with the given delays (also when the network comes back), reports
+/// sent / delivered per job, and keeps the queue on disk across an app kill or reboot.
+abstract class EmergencyTextQueue {
+  /// Adds jobs (a known id is ignored: dedupe). Returns the ids accepted.
+  Future<List<String>> enqueue(List<EmergencyTextJob> jobs, {required List<int> retryDelaysMs});
+
+  /// Cancels jobs that have not left the phone yet.
+  Future<void> cancel(List<String> ids);
+
+  /// Every job the queue still knows (finished ones for 48 h).
+  Future<List<EmergencyTextStatus>> statuses();
+
+  /// Job state changes as they happen (sent / delivered reports, retries).
+  Stream<List<EmergencyTextStatus>> get updates;
+}
+
+/// Android: the `coroute/sms` channel. Elsewhere every call is a no-op (no direct texts on iOS).
+class NativeEmergencyTextQueue implements EmergencyTextQueue {
+  NativeEmergencyTextQueue() {
+    if (supported) {
+      _channel.setMethodCallHandler((call) async {
+        if (call.method == 'textStatus') {
+          final list = _parse(call.arguments);
+          if (list.isNotEmpty) _updates.add(list);
+        }
+        return null;
+      });
+    }
+  }
+
+  static const MethodChannel _channel = MethodChannel('coroute/sms');
+  final StreamController<List<EmergencyTextStatus>> _updates = StreamController<List<EmergencyTextStatus>>.broadcast();
+
+  static bool get supported => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  static List<EmergencyTextStatus> _parse(Object? raw) => [
+        if (raw is List)
+          for (final e in raw)
+            ?EmergencyTextStatus.fromWire(e),
+      ];
+
+  @override
+  Stream<List<EmergencyTextStatus>> get updates => _updates.stream;
+
+  @override
+  Future<List<String>> enqueue(List<EmergencyTextJob> jobs, {required List<int> retryDelaysMs}) async {
+    if (!supported || jobs.isEmpty) return const [];
+    try {
+      final res = await _channel.invokeMethod<Object?>('enqueue', <String, Object>{
+        'jobs': [for (final j in jobs) j.toWire()],
+        'retryMs': retryDelaysMs,
+      });
+      return [if (res is List) for (final id in res) id.toString()];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> cancel(List<String> ids) async {
+    if (!supported || ids.isEmpty) return;
+    try {
+      await _channel.invokeMethod<Object?>('cancelTexts', <String, Object>{'ids': ids});
+    } catch (_) {}
+  }
+
+  @override
+  Future<List<EmergencyTextStatus>> statuses() async {
+    if (!supported) return const [];
+    try {
+      return _parse(await _channel.invokeMethod<Object?>('textStatuses'));
+    } catch (_) {
+      return const [];
     }
   }
 }

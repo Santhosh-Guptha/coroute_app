@@ -124,8 +124,9 @@ class RideStartView extends StatelessWidget {
           title: const Text('Ride solo without internet?'),
           content: Text(
             'Crash detection runs on this phone once you ride (from about 12 km/h). If it senses a crash '
-            'and you do not answer within 30 seconds, your messages app opens with an SOS text and your '
-            'location for your emergency contact, and you can call them or 112.'
+            'and you do not answer within 30 seconds, your phone texts your emergency contact an SOS with '
+            'your location by itself (if emergency texts are not allowed, your messages app opens with the '
+            'text), and you can call them or 112.'
             '${hasContact ? '' : '\n\nAdd an emergency contact in your profile first, so there is someone to text.'}',
           ),
           actions: [
@@ -600,7 +601,7 @@ class _OfflineSoloCard extends StatelessWidget {
     }
     final crashOn = context.select<SettingsService?, bool>((s) => s?.crashDetection ?? false);
     final sos = safety.offlineSoloSos;
-    final smsLine = safety.smsStatus?.text ?? '';
+    final smsLine = [safety.contactTextsLine, safety.smsStatus?.text ?? ''].where((t) => t.isNotEmpty).join(' ');
     final String status;
     if (!crashOn) {
       status = 'Crash detection is off. Turn it on in Settings.';

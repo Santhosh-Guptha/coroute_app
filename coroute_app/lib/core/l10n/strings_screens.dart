@@ -91,7 +91,7 @@ const Map<String, Map<String, String>> screenStrings = {
     'settings.language': 'Language',
     'settings.language.hint': 'Safety screens and spoken alerts. Other screens stay in English for now.',
     'settings.crash.hint': "Only during a ride, above {speed} km/h. If the phone senses a crash it rings first: you have {sec} seconds to tap I'm OK, and then nothing is sent.",
-    'settings.sms.hint': 'Only when an SOS cannot be sent: your phone texts your emergency contact, the lead and the nearest riders (up to {max}) with a map link. Numbers stay on this phone only during the ride. Normal SMS charges apply.',
+    'settings.sms.hint': 'Your phone texts your emergency contact by itself after an SOS or a crash alarm you do not answer. When an SOS cannot go online, the lead and the nearest riders (up to {max}) get a text with a map link too. Sent from your own number; normal SMS charges apply.',
     'settings.sms.denied': 'Texts need the SMS permission. You can allow it in Permissions.',
     'settings.fatigue.hint': 'After {h} h of riding without a {min} min stop, a gentle reminder for you only.',
     'settings.checkin.title': 'Check on me when I am far from the group',

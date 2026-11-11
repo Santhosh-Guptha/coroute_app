@@ -1239,7 +1239,11 @@ class ConvoyService extends ChangeNotifier {
             _showSosOk('${a.userName.isNotEmpty ? a.userName : 'The rider'} says they are OK.');
           }
         }
+        // 3.57: my own SOS closed by someone else (the lead, "Help reached"): the contacts I texted hear I'm safe.
+        final mineResolved = resolvedId != null &&
+            (resolvedId == _deliveredSosAlertId || convoy.activeAlerts.any((a) => a.alertId == resolvedId && a.userId == _myUserId));
         if (resolvedId != null && resolvedId == _deliveredSosAlertId) _deliveredSosAlertId = null;
+        if (mineResolved) _mySosClosed();
         if (_pendingResolves.remove(resolvedId) != null) _savePendingResolves();
         _liveLinks.remove(resolvedId);
         _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != resolvedId).toList());
@@ -3792,6 +3796,19 @@ class ConvoyService extends ChangeNotifier {
     });
   }
 
+  /// 3.57: called when this rider's own SOS is cancelled or resolved (here, from another screen,
+  /// or by the lead), so the phone-first emergency texts can stop and send "I'm safe now"
+  /// (SafetyService.noteMySosClosed; repeated calls are harmless).
+  void Function()? onMySosClosed;
+
+  void _mySosClosed() {
+    final hook = onMySosClosed;
+    if (hook == null) return;
+    try {
+      hook();
+    } catch (_) {}
+  }
+
   /// Cancels this rider's own SOS: resolves it on the server if it was delivered, and drops
   /// it from the phone if it is still waiting to be sent.
   /// [reason]: false alarm by default ("I am safe"); "Help reached me" passes [ResolveReason.resolved].
@@ -3805,6 +3822,7 @@ class ConvoyService extends ChangeNotifier {
     }
     final id = myOpenSosAlertId ?? _deliveredSosAlertId;
     if (id != null) resolveSosAlert(id, reason: reason);
+    _mySosClosed();
   }
 
   /// Closes an SOS. The [reason] goes to a gateway with the safety network only.
@@ -3813,6 +3831,7 @@ class ConvoyService extends ChangeNotifier {
   void resolveSosAlert(String alertId, {ResolveReason reason = ResolveReason.resolved}) {
     final gid = _activeGroupId;
     if (gid == null) return;
+    final mine = alertId == myOpenSosAlertId || alertId == _deliveredSosAlertId;
     _liveLinks.remove(alertId); // the server revokes it with the alert
     final convoy = _allConvoys[gid];
     if (convoy != null) {
@@ -3823,6 +3842,7 @@ class ConvoyService extends ChangeNotifier {
     _pendingResolvesGid = gid;
     _savePendingResolves();
     if (_rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId, if (_netOn) 'reason': reason.wire})) _resolvesSentAt = _clock();
+    if (mine) _mySosClosed();
   }
 
   /// Resolves not yet confirmed by the server (alertId -> reason), for the active ride only.

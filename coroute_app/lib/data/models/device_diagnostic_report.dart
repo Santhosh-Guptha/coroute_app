@@ -90,6 +90,9 @@ class PhoneCheckFix {
   /// Background use blocked for CoRoute: opens the app's battery page (not the app settings root).
   static const String backgroundUse = 'backgroundUse';
   static const String crashDetection = 'crashDetection';
+
+  /// 3.57: the emergency texts disclosure, then the SEND_SMS prompt.
+  static const String sms = 'sms';
   static const String retry = 'retry';
 }
 

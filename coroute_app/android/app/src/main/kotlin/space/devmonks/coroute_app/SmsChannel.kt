@@ -40,12 +40,37 @@ import java.util.concurrent.atomic.AtomicReference
  * opens with every contact and the text filled in. Cancelled: answers false (the rider can tap
  * "Text the group now" again). The messages app queues and retries the text itself when there is
  * no signal yet.
+ *
+ * 3.57 phone-first emergency texts (SEND_SMS declared, asked after an in-app disclosure):
+ * - enqueue {jobs: [{id, incident, kind, to, body, notBefore}], retryMs} -> accepted ids
+ * - cancelTexts {ids} -> null (jobs that have not left the phone)
+ * - textStatuses -> [{id, kind, state, attempts, code, last3, updatedAt}]
+ * - Dart gets "textStatus" [status...] on every change (set [events]).
+ * The queue itself is [EmergencyTexts] (works without this channel: alarm, reports, boot).
  */
 class SmsChannel(context: Context, private val activity: () -> Activity? = { null }) : MethodChannel.MethodCallHandler {
     private val app: Context = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val sequence = AtomicInteger(0)
+
+    /** The channel for "textStatus" calls back to Dart (MainActivity sets it). */
+    var events: MethodChannel? = null
+
+    private val textListener: (List<Map<String, Any>>) -> Unit = { list ->
+        main.post {
+            try {
+                events?.invokeMethod("textStatus", list)
+            } catch (e: Exception) {
+                // the engine is gone; Dart reads textStatuses at the next start
+            }
+        }
+    }
+
+    init {
+        EmergencyTexts.listener = textListener
+        EmergencyTexts.tick(app) // resumes texts left from before an app kill
+    }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -59,6 +84,16 @@ class SmsChannel(context: Context, private val activity: () -> Activity? = { nul
                 }
                 send(to, body, result)
             }
+            "enqueue" -> {
+                val jobs = call.argument<List<Any?>>("jobs").orEmpty().filterIsInstance<Map<*, *>>()
+                val retry = call.argument<List<Any?>>("retryMs").orEmpty().mapNotNull { (it as? Number)?.toLong() }
+                EmergencyTexts.enqueue(app, jobs, retry) { ids -> main.post { result.success(ids) } }
+            }
+            "cancelTexts" -> {
+                val ids = call.argument<List<Any?>>("ids").orEmpty().mapNotNull { it as? String }
+                EmergencyTexts.cancel(app, ids) { main.post { result.success(null) } }
+            }
+            "textStatuses" -> EmergencyTexts.statuses(app) { list -> main.post { result.success(list) } }
             "launchSmsIntent" -> {
                 val body = call.argument<String>("body").orEmpty()
                 // Several people at once (emergency texts without SEND_SMS): the rider or a
@@ -120,6 +155,8 @@ class SmsChannel(context: Context, private val activity: () -> Activity? = { nul
 
     fun dispose() {
         worker.shutdown()
+        events = null
+        if (EmergencyTexts.listener === textListener) EmergencyTexts.listener = null
     }
 
     private fun hasTelephony(): Boolean =

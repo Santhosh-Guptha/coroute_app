@@ -12,9 +12,12 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/device_diagnostic_service.dart';
 import '../../data/services/permissions_service.dart';
+import '../../data/services/safety_service.dart';
+import '../../domain/safety/emergency_texts.dart';
 import '../../data/services/safety_native.dart';
 import '../../data/services/settings_service.dart';
 import '../safety/oem_battery_guide.dart';
+import '../safety/emergency_texts_disclosure.dart';
 import '../safety/mount_check_line.dart';
 
 /// Pre-ride phone check: a short checklist (pass / warn / fail) with a one-tap fix for each
@@ -185,6 +188,9 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
           await OemBatteryGuide.show(context);
         case PhoneCheckFix.crashDetection:
           await Provider.of<SettingsService?>(context, listen: false)?.setCrashDetection(true);
+        case PhoneCheckFix.sms:
+          // 3.57: the one-screen disclosure, then the system prompt.
+          await EmergencyTextsDisclosure.show(context);
         default:
           // location, notification, microphone, bluetooth, battery, fullScreen
           await PermissionsService.request(fix);
@@ -450,6 +456,7 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
               if (_showPassed) ...passed.map(_passRow),
               const SizedBox(height: 8),
               const MountCheckLine(), // 3.55 phone-mount check: where the phone was last ride
+              if (!kIsWeb && Platform.isAndroid) _buildTestText(),
               _buildSubmissionTile(report),
             ],
           ),
@@ -533,6 +540,73 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
         ],
       ),
     );
+  }
+
+  bool _testing = false;
+
+  /// 3.57 "Send a test text": one short text to the first emergency contact, after a confirmation
+  /// (never sent by a test alarm or anything else on its own).
+  Widget _buildTestText() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          key: const ValueKey('safety_health_test_text'),
+          icon: _testing
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.sms_outlined, size: 18),
+          label: const Text('Send a test text to my emergency contact'),
+          onPressed: _testing ? null : _sendTestText,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendTestText() async {
+    final auth = context.read<AuthService?>();
+    final safety = context.read<SafetyService?>();
+    if (safety == null) return;
+    final who = (auth?.emergencyContactName ?? '').trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send a test text?'),
+        content: Text(
+          'Your phone sends "${EmergencyTexts.test}" to ${who.isEmpty ? 'your emergency contact' : who}. '
+          'Normal SMS charges from your carrier apply.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _testing = true);
+    var outcome = await safety.sendTestText();
+    if (outcome == EmergencyTestOutcome.notAllowed && mounted) {
+      if (await EmergencyTextsDisclosure.show(context)) outcome = await safety.sendTestText();
+    }
+    if (!mounted) return;
+    setState(() => _testing = false);
+    final String message;
+    switch (outcome) {
+      case EmergencyTestOutcome.queued:
+        message = 'Test text sent from your phone. Ask your contact if it arrived.';
+      case EmergencyTestOutcome.noContact:
+        message = 'Add an emergency contact first (Profile).';
+      case EmergencyTestOutcome.notAllowed:
+        message = 'Emergency texts are not allowed, so nothing was sent.';
+      case EmergencyTestOutcome.noSim:
+        message = 'No SIM is ready. Insert a SIM or turn off airplane mode.';
+      case EmergencyTestOutcome.dailyCap:
+        message = 'Daily text limit reached. Try again tomorrow.';
+      case EmergencyTestOutcome.unavailable:
+        message = 'This phone cannot send texts.';
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    _runDiagnostics();
   }
 
   /// Optional: send this report to CoRoute support (explicit consent, data shown first).

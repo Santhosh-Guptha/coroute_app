@@ -17,6 +17,7 @@ import '../../domain/places/fuel_advisor.dart';
 import '../../domain/places/fuel_ahead.dart';
 import '../../domain/safety/fuel_range.dart';
 import '../../domain/safety/hard_brake_counter.dart';
+import '../../domain/safety/emergency_texts.dart';
 import '../../domain/safety/sms_plan.dart';
 import '../../domain/safety/solo_check_in.dart';
 import '../../domain/safety/sun_helper.dart';
@@ -146,6 +147,9 @@ class CrashAlarmState {
         traumaLevel: traumaLevel ?? this.traumaLevel,
       );
 }
+
+/// Result of Safety health's "Send a test text" (3.57).
+enum EmergencyTestOutcome { queued, noContact, notAllowed, noSim, dailyCap, unavailable }
 
 enum SmsFallbackState { idle, sending, sent, partly, failed, notAllowed, composer, composerWaiting }
 
@@ -415,8 +419,10 @@ class SafetyService extends ChangeNotifier {
     WeatherService? weather,
     TilePrefetcher? tiles,
     Stream<TrackPoint> Function()? soloFixes,
+    EmergencyTextQueue? texts,
   }) : this._(ConvoySafetyPort(convoys, auth), settings, accel ?? NativeAccelSource(), sms ?? NativeSmsSender(), null, true,
-            voice: voice, weather: weather, tiles: tiles, soloFixes: soloFixes);
+            voice: voice, weather: weather, tiles: tiles, soloFixes: soloFixes,
+            texts: texts ?? (NativeEmergencyTextQueue.supported ? NativeEmergencyTextQueue() : null));
 
   @visibleForTesting
   SafetyService.forTest(
@@ -430,9 +436,10 @@ class SafetyService extends ChangeNotifier {
     TilePrefetcher? tiles,
     Future<String> Function()? networkKind,
     Stream<TrackPoint> Function()? soloFixes,
+    EmergencyTextQueue? texts,
   }) : this._(port, settings, accel, sms, clock, false,
             voice: voice, weather: weather, tiles: tiles, networkKind: networkKind,
-            soloFixes: soloFixes);
+            soloFixes: soloFixes, texts: texts);
 
   SafetyService._(
     this._port,
@@ -446,8 +453,11 @@ class SafetyService extends ChangeNotifier {
     this._tiles,
     Future<String> Function()? networkKind,
     Stream<TrackPoint> Function()? soloFixes,
+    EmergencyTextQueue? texts,
   })  : _networkKind = networkKind ?? SafetyNative.networkKind,
-        _soloFixSource = soloFixes ?? nativeSoloFixes {
+        _soloFixSource = soloFixes ?? nativeSoloFixes,
+        _texts = texts {
+    _textSub = texts?.updates.listen(_onTextUpdates);
     _port.addListener(_onConvoy);
     _settings.addListener(_onSettings);
     _lowDataWas = _settings.lowData; // 3.55 fix: see _onSettings
@@ -474,6 +484,17 @@ class SafetyService extends ChangeNotifier {
   final WeatherService? _weather;
   final TilePrefetcher? _tiles;
   final Future<String> Function() _networkKind;
+
+  // 3.57 phone-first emergency texts (null: off, e.g. iOS or a test without a queue).
+  final EmergencyTextQueue? _texts;
+  StreamSubscription<List<EmergencyTextStatus>>? _textSub;
+  EmergencyTextLedger? _ledger;
+  Future<void> _textChain = Future<void>.value();
+  String? _autoTextFor;
+  String? _textIncident;
+  bool _textsViaComposer = false;
+  bool _testAlarmRaise = false;
+  final Map<String, EmergencyTextStatus> _textStatus = {};
 
   // Offline solo ride (3.54): crash detection and a local SOS without a convoy or internet.
   final Stream<TrackPoint> Function() _soloFixSource;
@@ -684,6 +705,7 @@ class SafetyService extends ChangeNotifier {
   void resolveOfflineSoloSos() {
     if (_soloSos == null) return;
     _soloSos = null;
+    noteMySosClosed(); // 3.57: "I'm safe now" to the contacts already texted
     notifyListeners();
   }
 
@@ -732,6 +754,7 @@ class SafetyService extends ChangeNotifier {
       source: source,
     );
     notifyListeners();
+    _maybeAutoText(_soloSos!);
     _smsRound(manual: manual).ignore();
   }
 
@@ -1545,6 +1568,8 @@ class SafetyService extends ChangeNotifier {
     if (!_alarmRiderDown && _alarmExternal == null) sensorSafety.onRealAlarm(e.scenario); // 3.55 learning
     // An impact from outside the phone (wearable hook) is sent as such, whatever the answer.
     final external = _alarmExternal != null;
+    // 3.57: the hidden developer impact is a test alarm: it never texts anyone.
+    _testAlarmRaise = _alarmExternal == ExternalImpactSource.developer;
     DiagLog.warn(DiagCat.crash, 'alarm_send', {'source': source, 'external': external, 'solo': _soloOnly, 'afterMs': _now() - a.startedAtMs, 'riderDown': _alarmRiderDown});
     _alarmExternal = null;
 
@@ -1597,6 +1622,7 @@ class SafetyService extends ChangeNotifier {
         occurredAtMs: e.impactAtMs,
       );
     }
+    _testAlarmRaise = false;
     final isUnresponsive = source == EmergencySource.crashAuto;
     _alarm = a.copyWith(
       sent: true,
@@ -2185,6 +2211,7 @@ class SafetyService extends ChangeNotifier {
       _pendingSeenFor = p.clientId;
       _pendingSeenAt = _now();
     }
+    _maybeAutoText(p); // 3.57: the emergency contacts get a text from this phone at once
     if (!_settings.smsFallback || _smsRounds.contains(p.clientId) || _smsTimerFor == p.clientId) return;
     _smsTimer?.cancel();
     _smsTimerFor = p.clientId;
@@ -2252,7 +2279,7 @@ class SafetyService extends ChangeNotifier {
       final validRoster = roster != null && roster.isValidFor(p.groupId, now) ? roster : null;
       final serverCap = validRoster?.cap ?? SafetyConstants.smsMaxRecipients;
       final uid = _port.myUserId;
-      final plan = SmsPlanner.plan(
+      var plan = SmsPlanner.plan(
         roster: validRoster,
         contact: _port.myEmergencyContact,
         lastPositions: {
@@ -2267,6 +2294,17 @@ class SafetyService extends ChangeNotifier {
         selfUserId: uid,
         selfPhone: _port.myPhone,
       );
+      // 3.57: numbers the automatic emergency texts already cover for this SOS are not texted again.
+      final ledger = (_texts != null && !viaComposer) ? await _textLedgerAfterAuto() : null;
+      if (_disposed) return;
+      if (ledger != null && ledger.hasIncident(p.clientId)) {
+        final rest = [for (final r in plan.recipients) if (!ledger.alreadyTexted(p.clientId, r.phone)) r];
+        if (rest.isEmpty) {
+          await log.save(p.clientId, _now());
+          return; // the contact texts' own status line says what happened
+        }
+        plan = SmsPlan(recipients: List.unmodifiable(rest), eligible: plan.eligible, capped: plan.capped);
+      }
       final total = plan.recipients.length;
       if (total == 0) {
         _setSms(SmsFallbackStatus(state: SmsFallbackState.failed, sent: 0, total: 0, capped: plan.capped, at: _now()), p.clientId);
@@ -2330,6 +2368,227 @@ class SafetyService extends ChangeNotifier {
     }
   }
 
+  // ------------------------------------------------------------------ 3.57 phone-first texts
+  // The rider's emergency contacts get a text from this phone (their own SIM, no tap) as soon as
+  // an SOS is raised: SOS hold, crash alarm not answered, rider-down, missing rider and solo
+  // check-in escalations all raise the same pending SOS. The native queue sends, retries and
+  // reports; this side decides who, when and what (EmergencyTextLedger, pure and tested).
+
+  /// The rider's emergency contacts (the profile holds one today; the queue takes up to 5).
+  List<RosterContact> get _emergencyContacts {
+    final c = _port.myEmergencyContact;
+    return [if (c != null && c.phone.trim().isNotEmpty) c];
+  }
+
+  /// Runs [step] after every earlier text step (raise, close and test never interleave).
+  Future<void> _serialText(Future<void> Function() step) {
+    final next = _textChain.then((_) => step()).catchError((Object e) {
+      debugPrint('emergency text note: ${e.runtimeType}');
+    });
+    _textChain = next;
+    return next;
+  }
+
+  Future<EmergencyTextLedger> _loadLedger() async => _ledger ??= await EmergencyTextStore.load();
+
+  /// The ledger once every queued text step has run (the fallback round must see the auto texts).
+  Future<EmergencyTextLedger> _textLedgerAfterAuto() async {
+    await _textChain;
+    return _loadLedger();
+  }
+
+  /// A new SOS that is not texted still closes any older open one (no stray "safe now" later).
+  Future<void> _recordUntexted(String incident) async {
+    final ledger = await _loadLedger();
+    ledger.recordWithoutTexts(incident, _now());
+    await EmergencyTextStore.save(ledger);
+  }
+
+  void _maybeAutoText(PendingSos p) {
+    final texts = _texts;
+    if (texts == null || _disposed || _autoTextFor == p.clientId) return;
+    _autoTextFor = p.clientId;
+    if (_testAlarmRaise) {
+      DiagLog.info(DiagCat.sos, 'contact_texts_skip', {'why': 'test_alarm'});
+      _serialText(() => _recordUntexted(p.clientId)).ignore();
+      return;
+    }
+    _serialText(() => _autoText(texts, p)).ignore();
+  }
+
+  Future<void> _autoText(EmergencyTextQueue texts, PendingSos p) async {
+    final ledger = await _loadLedger();
+    if (_disposed) return;
+    if (ledger.hasIncident(p.clientId)) {
+      // Resent, relayed, upgraded to a crash or restored after a restart: never texted twice.
+      _textIncident = p.clientId;
+      await _refreshTextStatus(texts);
+      return;
+    }
+    final contacts = _emergencyContacts;
+    if (contacts.isEmpty) {
+      DiagLog.warn(DiagCat.sos, 'contact_texts_skip', {'why': 'no_contact'});
+      await _recordUntexted(p.clientId);
+      return;
+    }
+    final cap = await _sms.capability();
+    if (_disposed) return;
+    if (!cap.hasTelephony || !cap.permission) {
+      // Not allowed (or no SIM radio): the prefilled messages app of the fallback round instead.
+      _textIncident = p.clientId;
+      _textsViaComposer = true;
+      DiagLog.warn(DiagCat.sos, 'contact_texts_skip', {'why': cap.hasTelephony ? 'not_allowed' : 'no_telephony'});
+      await _recordUntexted(p.clientId);
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    final now = _now();
+    if (p.createdAt > 0 && now - p.createdAt > EmergencyTextPolicy.maxIncidentAge.inMilliseconds) {
+      DiagLog.warn(DiagCat.sos, 'contact_texts_skip', {'why': 'stale'}); // an old SOS restored from disk
+      await _recordUntexted(p.clientId);
+      return;
+    }
+    final crash = p.auto || p.type == SosTypes.crash || p.source == EmergencySource.crashAuto;
+    final press = !crash && (p.source == EmergencySource.manual || p.source == EmergencySource.notification);
+    final body = EmergencyTexts.alert(
+      name: _port.myName,
+      crash: crash,
+      lat: p.lat,
+      lng: p.lng,
+      at: DateTime.fromMillisecondsSinceEpoch(p.createdAt > 0 ? p.createdAt : now),
+      liveLink: SmsText.liveLinkFor(AppConfig.apiBaseUrl, p.linkToken),
+      convoyName: _port.activeConvoy?.name,
+    );
+    final jobs = ledger.planAlert(
+      incident: p.clientId,
+      contacts: contacts,
+      body: body,
+      nowMs: now,
+      grace: EmergencyTextPolicy.graceFor(deliberatePress: press),
+      selfPhone: _port.myPhone,
+    );
+    await EmergencyTextStore.save(ledger);
+    if (jobs.isEmpty) {
+      DiagLog.warn(DiagCat.sos, 'contact_texts_skip', {'why': 'daily_cap'});
+      return;
+    }
+    _textIncident = p.clientId;
+    _textsViaComposer = false;
+    for (final j in jobs) {
+      _textStatus[j.id] = EmergencyTextStatus(id: j.id, state: EmergencyTextState.queued, last3: EmergencyTexts.last3(j.to), updatedAt: now);
+    }
+    if (!_disposed) notifyListeners();
+    final accepted = await texts.enqueue(jobs, retryDelaysMs: EmergencyTextPolicy.retryDelaysMs);
+    DiagLog.warn(DiagCat.sos, 'contact_texts_queued', {
+      'count': jobs.length,
+      'accepted': accepted.length,
+      'crash': crash,
+      'graceS': press ? EmergencyTextPolicy.pressGrace.inSeconds : 0,
+      'parts': jobs.first.parts,
+    });
+    await _refreshTextStatus(texts);
+  }
+
+  /// The rider's SOS was cancelled or resolved (ConvoyService.onMySosClosed, the solo ride's
+  /// "I'm safe now"): texts still in their grace window or waiting for a retry are cancelled, and
+  /// every contact whose alert text left the phone gets "I'm safe now" (always on).
+  void noteMySosClosed() {
+    final texts = _texts;
+    if (texts == null || _disposed) return;
+    _serialText(() => _closeTexts(texts)).ignore();
+  }
+
+  Future<void> _closeTexts(EmergencyTextQueue texts) async {
+    final ledger = await _loadLedger();
+    final incident = ledger.openIncidentAt(_now());
+    if (incident == null || _disposed) return;
+    final before = await texts.statuses();
+    final cancel = ledger.toCancel(incident, before);
+    if (cancel.isNotEmpty) await texts.cancel(cancel);
+    final after = cancel.isEmpty ? before : await texts.statuses();
+    final now = _now();
+    final jobs = ledger.planSafe(
+      incident: incident,
+      contacts: _emergencyContacts,
+      statuses: after,
+      body: EmergencyTexts.safeNow(name: _port.myName, at: DateTime.fromMillisecondsSinceEpoch(now)),
+      nowMs: now,
+    );
+    await EmergencyTextStore.save(ledger);
+    if (jobs.isNotEmpty) await texts.enqueue(jobs, retryDelaysMs: EmergencyTextPolicy.retryDelaysMs);
+    DiagLog.warn(DiagCat.sos, 'contact_texts_closed', {'cancelled': cancel.length, 'safeNow': jobs.length});
+    await _refreshTextStatus(texts);
+  }
+
+  Future<void> _refreshTextStatus(EmergencyTextQueue texts) async {
+    final list = await texts.statuses();
+    if (_disposed) return;
+    for (final s in list) {
+      _textStatus[s.id] = s;
+    }
+    notifyListeners();
+  }
+
+  void _onTextUpdates(List<EmergencyTextStatus> list) {
+    if (_disposed) return;
+    for (final s in list) {
+      final was = _textStatus[s.id];
+      _textStatus[s.id] = s;
+      if (was?.state != s.state || was?.attempts != s.attempts) {
+        DiagLog.info(DiagCat.sos, 'contact_text', {
+          'kind': s.kind?.name ?? '?',
+          'state': s.state.name,
+          'try': s.attempts,
+          'code': s.code,
+          'to3': s.last3.isEmpty ? '' : '***${s.last3}',
+        });
+      }
+    }
+    notifyListeners();
+  }
+
+  /// One line about the automatic contact texts of the current SOS ('' when none).
+  String get contactTextsLine {
+    final incident = _textIncident;
+    if (incident == null) return '';
+    if (_textsViaComposer) return EmergencyTextSummary.composerFallback;
+    final line = EmergencyTextSummary.line(_textStatus.values.where((s) => s.incident == incident));
+    final safe = _textStatus.values.any((s) => s.incident == incident && s.kind == EmergencyTextKind.safe && s.state.reached);
+    return safe ? '$line Told them you are safe now.'.trim() : line;
+  }
+
+  /// Every known text status (Safety health shows the test text's state).
+  List<EmergencyTextStatus> get textStatuses => List.unmodifiable(_textStatus.values);
+
+  /// Safety health "Send a test text": "CoRoute test: emergency texts work" to the first emergency
+  /// contact, only after the rider confirmed. Test crash alarms never text anyone.
+  Future<EmergencyTestOutcome> sendTestText() async {
+    final texts = _texts;
+    if (texts == null) return EmergencyTestOutcome.unavailable;
+    final cap = await _sms.capability();
+    if (!cap.hasTelephony) return EmergencyTestOutcome.unavailable;
+    if (!cap.permission) return EmergencyTestOutcome.notAllowed;
+    if (!cap.simReady) return EmergencyTestOutcome.noSim;
+    var out = EmergencyTestOutcome.unavailable;
+    await _serialText(() async {
+      final ledger = await _loadLedger();
+      final (plan, job) = ledger.planTest(contacts: _emergencyContacts, nowMs: _now(), selfPhone: _port.myPhone);
+      if (plan == EmergencyTestPlan.noContact) {
+        out = EmergencyTestOutcome.noContact;
+        return;
+      }
+      if (plan == EmergencyTestPlan.dailyCap || job == null) {
+        out = EmergencyTestOutcome.dailyCap;
+        return;
+      }
+      await EmergencyTextStore.save(ledger);
+      final accepted = await texts.enqueue([job], retryDelaysMs: const []);
+      out = accepted.isEmpty ? EmergencyTestOutcome.unavailable : EmergencyTestOutcome.queued;
+      DiagLog.info(DiagCat.sos, 'contact_text_test', {'queued': accepted.isNotEmpty});
+    });
+    return out;
+  }
+
   /// Suppresses "Rider Stopped" and "Rider Separated" false alarms during active tunnel coasting (FEAT-09).
   bool shouldSuppressFalseAlarm(String alertType) {
     final uid = _port.myUserId;
@@ -2358,6 +2617,8 @@ class SafetyService extends ChangeNotifier {
     _fatigueTimer?.cancel();
     _fatigueTimer = null;
     _smsTimer?.cancel();
+    _textSub?.cancel();
+    _textSub = null;
     if (BiometricSafetyBridge().isActive) {
       BiometricSafetyBridge().stop();
     }

@@ -89,7 +89,7 @@ class SettingsScreen extends StatefulWidget {
   static List<(IconData, String)> get alwaysOn => [
     (Icons.car_crash_rounded, SafetyTexts.crashTitle),
     (Icons.sos_rounded, 'SOS, also on the lock screen'),
-    (Icons.sms_rounded, 'Emergency texts'),
+    (Icons.sms_rounded, 'Emergency texts from your phone'),
     (Icons.medical_information_rounded, 'Medical ID for responders'),
     (Icons.person_search_rounded, '"Are you OK?" check-in'),
     (Icons.timer_rounded, 'Solo ride ETA check-in'),

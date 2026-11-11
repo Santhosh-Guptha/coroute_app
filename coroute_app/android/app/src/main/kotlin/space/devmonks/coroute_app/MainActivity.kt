@@ -37,7 +37,9 @@ class MainActivity : FlutterActivity() {
         val self = java.lang.ref.WeakReference(this)
         val sms = SmsChannel(applicationContext) { self.get() }
         smsChannel = sms
-        MethodChannel(messenger, "coroute/sms").setMethodCallHandler(sms)
+        val smsMethods = MethodChannel(messenger, "coroute/sms")
+        smsMethods.setMethodCallHandler(sms)
+        sms.events = smsMethods // 3.57: emergency text status (sent / delivered / retry) back to Dart
 
         // 3.15: the big ride notification (replaces the foreground service notification in
         // place) and spoken alerts with the phone's text-to-speech engine.

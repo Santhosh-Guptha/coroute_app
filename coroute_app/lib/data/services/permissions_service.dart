@@ -36,6 +36,8 @@ class PermissionsService {
     // Full-screen alarms can be denied only on Android 14 (SDK 34) and newer.
     final sdk = android ? (await SafetyNative.deviceInfo()).sdkInt : 0;
     final fullScreen = sdk >= 34 ? await SafetyNative.canUseFullScreenIntent() : true;
+    final sms = android ? await isSmsGranted() : false;
+    final canText = android && await SmsComposer.available();
     return [
       PermissionItem(key: 'location', title: 'Location while using the app', reason: 'We need your location so your riding group can see your position during an active ride.', required: true, granted: loc.isGranted),
       // Google Play prominent disclosure: what is collected, that it happens when the app is closed
@@ -46,6 +48,10 @@ class PermissionsService {
       PermissionItem(key: 'notification', title: 'Notifications', reason: 'Enable ride alerts to receive group separation and emergency updates.', required: false, granted: notif.isGranted),
       if (Platform.isAndroid)
         PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute during long rides.', required: false, granted: battery),
+      // 3.57 phone-first emergency texts. The reason is the prominent disclosure (the permissions
+      // screen also opens the one-screen disclosure before the system prompt).
+      if (canText)
+        PermissionItem(key: 'sms', title: 'Emergency texts', reason: emergencyTextsDisclosure, required: false, granted: sms),
       if (sdk >= 34)
         PermissionItem(key: 'fullScreen', title: 'Alarm on the lock screen', reason: 'Shows the crash alarm over the lock screen, so you can cancel it without unlocking.', required: false, granted: fullScreen),
     ];
@@ -96,9 +102,12 @@ class PermissionsService {
         await BackgroundService.requestIgnoreBatteryOptimizations();
         return BackgroundService.isIgnoringBatteryOptimizations();
       case 'sms':
-        // No SEND_SMS in the Play build (policy): emergency texts open the messages app with
-        // the SOS filled in, so "Text the group" only needs a phone that can text.
-        return SmsComposer.available();
+        // 3.57: SEND_SMS, asked only after the in-app disclosure ([emergencyTextsDisclosure],
+        // EmergencyTextsDisclosure). Denied: the SOS text opens in the messages app instead.
+        if (!Platform.isAndroid) return false;
+        final r = await Permission.sms.request();
+        if (r.isPermanentlyDenied) await openAppSettings();
+        return isSmsGranted();
       case 'fullScreen':
         // A system page: the result is read again when the rider comes back.
         if (await SafetyNative.canUseFullScreenIntent()) return true;
@@ -142,6 +151,22 @@ class PermissionsService {
     return (await Permission.bluetooth.status).isGranted;
   }
 
+  /// 3.57 prominent disclosure for SEND_SMS (Google Play): what, when, and the carrier charges.
+  static const String emergencyTextsDisclosure =
+      'CoRoute sends a text from your phone to your emergency contacts when you raise an SOS or after a crash alarm, '
+      "even if you can't touch the phone. Normal SMS charges from your carrier apply.";
+
+  /// SEND_SMS is granted (Android only; the manifest declares no other SMS permission, so
+  /// permission_handler's SMS group asks for SEND_SMS alone).
+  static Future<bool> isSmsGranted() async {
+    if (!_mobile || !Platform.isAndroid) return false;
+    try {
+      return (await Permission.sms.status).isGranted;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> isNotificationGranted() async {
     if (!_mobile) return true;
     return (await Permission.notification.status).isGranted;
@@ -165,7 +190,7 @@ class PermissionsService {
       case 'battery':
         return BackgroundService.isIgnoringBatteryOptimizations();
       case 'sms':
-        return SmsComposer.available();
+        return isSmsGranted();
       case 'fullScreen':
         return Platform.isAndroid ? await SafetyNative.canUseFullScreenIntent() : true;
       default:

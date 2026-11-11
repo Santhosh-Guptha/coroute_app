@@ -389,7 +389,7 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('Play build (no SEND_SMS): a solo SOS opens the messages app for the emergency contact', (tester) async {
+    testWidgets('SEND_SMS denied: a solo SOS opens the messages app for the emergency contact', (tester) async {
       await setUp0(tester);
       final opened = <List<String>>[];
       SafetyService.smsComposerOverride = (to, body) async {
@@ -623,7 +623,7 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('no SEND_SMS (Play build): the messages app opens with everyone, and can open again', (tester) async {
+    testWidgets('SEND_SMS denied: the messages app opens with everyone, and can open again', (tester) async {
       await setUp0(tester, prefs: {SafetyConstants.keySmsFallback: true});
       final opened = <List<String>>[];
       String? text;

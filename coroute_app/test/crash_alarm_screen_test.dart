@@ -262,7 +262,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('settings_always_on_list')), findsOneWidget);
     expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
-    expect(find.text('Emergency texts'), findsOneWidget);
+    expect(find.text('Emergency texts from your phone'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

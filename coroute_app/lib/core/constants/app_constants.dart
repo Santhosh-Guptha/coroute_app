@@ -33,6 +33,10 @@ class AppConstants {
   static const String keyTripHistory = 'coroute_trip_history_v3';
   /// An SOS the convoy has not confirmed yet (sent again after reconnecting).
   static const String keyPendingSos = 'coroute_pending_sos';
+
+  /// 3.57 phone-first emergency texts: texted incidents (number hashes only), daily cap, disclosure.
+  static const String keyEmergencyTexts = 'coroute_emergency_texts_v1';
+  static const String keyEmergencyTextsDisclosure = 'coroute_emergency_texts_disclosure_v1';
   /// Data saver mode (intercom at 8 kHz, positions every 5 s, fewer map tiles).
   static const String keyLowData = 'coroute_low_data';
   /// Pre-ride checklist: "do not show again until" (epoch ms).

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
+import '../../domain/safety/emergency_texts.dart';
 import 'network_wire.dart';
 
 /// What happened when the rider pressed SOS.
@@ -214,6 +215,30 @@ class PendingSosStore {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(AppConstants.keyPendingSos);
+    } catch (_) {}
+  }
+}
+
+/// 3.57: the emergency text ledger, kept next to the pending SOS (same SharedPreferences): which
+/// incidents were texted from this phone (number hashes only), "safe now" sent, and the send
+/// times of the daily cap. The texts themselves wait in the native queue, which survives an app
+/// kill on its own (EmergencyTexts.kt).
+class EmergencyTextStore {
+  static Future<EmergencyTextLedger> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(AppConstants.keyEmergencyTexts);
+      if (raw == null || raw.isEmpty) return EmergencyTextLedger.empty();
+      return EmergencyTextLedger.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return EmergencyTextLedger.empty();
+    }
+  }
+
+  static Future<void> save(EmergencyTextLedger ledger) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(AppConstants.keyEmergencyTexts, jsonEncode(ledger.toJson()));
     } catch (_) {}
   }
 }

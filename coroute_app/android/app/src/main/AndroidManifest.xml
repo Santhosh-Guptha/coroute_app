@@ -29,12 +29,19 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <!-- flutter_local_notifications: re-schedules plan expiry reminders after a reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <!-- Rider safety: crash alarm over the lock screen. Direct SMS permission removed for Play compliance; emergency SOS uses SMS composer intent. -->
+    <!-- Rider safety: crash alarm over the lock screen. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- 3.57 phone-first emergency texts: an SOS or an unanswered crash alarm texts the rider's
+         emergency contacts from their own SIM without a tap (EmergencyTexts.kt). Asked after an
+         in-app prominent disclosure; Play "Physical safety / emergency alerts" exception with the
+         Permissions Declaration Form (docs/handbook/compliance/play_store_compliance.md).
+         Denied: the SOS text opens prefilled in the messages app instead. No READ_SMS,
+         RECEIVE_SMS or READ_PHONE_STATE: the default SMS SIM is used without listing SIMs. -->
+    <uses-permission android:name="android.permission.SEND_SMS"/>
     <!-- 3.55: lets the rider allow CoRoute's "Critical ride alerts" channel through Do Not Disturb
          (Settings > Do Not Disturb access; normal permission, nothing is asked at install). -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
-    <!-- SEND_SMS would otherwise make Play hide CoRoute from tablets without a SIM. -->
+    <!-- SEND_SMS implies telephony: without this Play would hide CoRoute from tablets without a SIM. -->
     <uses-feature android:name="android.hardware.telephony" android:required="false"/>
 
     <application
@@ -188,6 +195,16 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+        <!-- 3.57 emergency texts: sent / delivered reports (this app's own PendingIntents), the
+             queue's retry alarm, and boot / app update so waiting texts resume. -->
+        <receiver
+            android:name=".EmergencyTextReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
         <!-- 3.55 push notifications: FCM data messages (friend requests, crew invites, polls, ride
              invites). Not exported: only Google Play services delivers to it. -->
         <service
@@ -215,7 +232,7 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="sms"/>
         </intent>
-        <!-- Emergency texts open the messages app (no SEND_SMS); the phone check looks for it. -->
+        <!-- Emergency texts open the messages app when SEND_SMS is denied; the phone check looks for it. -->
         <intent>
             <action android:name="android.intent.action.SENDTO"/>
             <data android:scheme="smsto"/>

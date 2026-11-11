@@ -263,10 +263,11 @@ class EmergencySosSheet extends StatelessWidget {
     final mapsUrl = formatMapsLink(lat, lng);
     // Emergency texts (opt-in): status line, and "Text the group now" while the SOS is not delivered.
     final smsOn = context.select<SettingsService?, bool>((s) => s?.smsFallback ?? false);
-    final (smsStatus, smsAvailable) = context.select<SafetyService?, (SmsFallbackStatus?, bool)>(
-      (s) => (s?.smsStatus, s?.smsAvailable ?? false),
+    final (smsStatus, smsAvailable, contactLine) = context.select<SafetyService?, (SmsFallbackStatus?, bool, String)>(
+      (s) => (s?.smsStatus, s?.smsAvailable ?? false, s?.contactTextsLine ?? ''),
     );
-    final smsLine = smsStatus?.text ?? '';
+    // 3.57: the automatic texts to the emergency contacts first, then the group fallback round.
+    final smsLine = [contactLine, smsStatus?.text ?? ''].where((t) => t.isNotEmpty).join(' ');
     // 3.54: an offline solo ride's SOS has no group; the button opens the text to the emergency contact.
     final soloSos = context.select<SafetyService?, bool>((s) => s?.offlineSoloSos != null);
     final showSmsButton = (smsOn && pending && status != SosSheetStatus.delivered) || soloSos;
