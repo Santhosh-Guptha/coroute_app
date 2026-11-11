@@ -54,7 +54,7 @@ life or health, legal obligations). Proposed bases are for legal review.
 | 34 | Server SOS SMS rows (numbers, names, links) | Deduplicate and track delivery | s.7 | Admins | Personal fields purged **48 h** after last status change | automatic |
 | 35 | Technical logs (IP, request time, request id) | Security, operations | Legitimate use | Operators of the service | journald rotation (privacy.html says "within a few weeks") | automatic |
 | 36 | Website page counts (no cookies) | Site analytics | Not personal (aggregated per day/path) | Admins | — | — |
-| 37 | Local on-phone data: offline map tiles, SMS roster (encrypted), fuel profile, coupon code from QR | Offline use, SOS fallback | On-device | The phone only | Maps 7 days after trip (30 if never ended, 300 MB cap); roster deleted at ride end; coupon 7 days | Uninstall / sign out |
+| 37 | Local on-phone data: offline map tiles, SMS roster (encrypted), fuel profile, coupon code from QR, 3.57 emergency text queue (contact numbers + text until sent) and ledger (number hashes) | Offline use, SOS fallback, phone-first emergency texts | On-device | The phone only | Maps 7 days after trip (30 if never ended, 300 MB cap); roster deleted at ride end; coupon 7 days; text queue 48 h after each text finished | Uninstall / sign out |
 
 ## 2. DPDP Act 2023 considerations
 

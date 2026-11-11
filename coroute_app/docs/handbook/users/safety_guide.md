@@ -48,8 +48,10 @@ You may see a request with the emergency point and the distance. Tap **I Can Hel
 ### When there is no internet
 
 - Your SOS is saved on the phone and sent the moment the phone reconnects. It is never sent twice. The app says: "SOS queued. It goes out the moment the phone reconnects. Call 112 if you can."
-- **Emergency texts (SMS fallback):** CoRoute prepares a text to your emergency contact, your lead and sweeper, and the nearest riders, with your name, the time, a live link and your coordinates. On phones from Google Play, the text opens in your messages app with everything filled in: tap **Send** (or tap **Text the group now** on the SOS screen). The status shows, for example, "Texted 2 of 3". Your carrier may charge for these texts.
-- If your phone could not text your emergency contact, CoRoute's server can text them once your SOS reaches it, where text alerts are available. When the SOS is closed, they get a "safe now" text.
+- **Emergency texts:** when you hold SOS, or a crash alarm runs out without an answer, your phone texts your emergency contact **by itself**, from your own number, even with the screen locked: your name, what happened, the time, a live link and your coordinates. After pressing SOS you have 10 seconds to cancel before the text goes; a crash alarm's countdown is that window. The SOS screen shows the status, for example "Texted your emergency contact from your phone. Delivered." With no signal the phone tries again by itself (after 30 s, 2, 5 and 10 minutes, and when the network returns). When the SOS is closed, they get a "safe now" text. Your carrier's normal SMS charges apply (at most 30 emergency texts a day).
+- To make this work, allow **Emergency texts** when CoRoute asks (after you save your emergency contact, or in **Safety health**). If you do not allow it, the text opens in your messages app with everything filled in: tap **Send** (or **Text the group now** on the SOS screen).
+- Without internet, your lead, sweeper and the nearest riders get a text too (status, for example, "Texted 2 of 3").
+- **Test it:** **Safety health › Send a test text to my emergency contact** sends one short text after you confirm. Test alarms never text anyone.
 - **Ride solo without internet** (Home): crash detection and SOS by text work on your phone alone, with no group and no data.
 
 ## 3. Crash detection

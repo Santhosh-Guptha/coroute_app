@@ -127,7 +127,7 @@ Before any build artifact is tagged for production deployment, every item on thi
 ### 5.1 Safety & Emergency Architecture Checklist
 - [ ] Emergency SOS dispatch verified via WebSocket with unique client-side UUIDv4 (`clientId`).
 - [ ] Emergency deduplication verified: simultaneous transmissions produce exactly one canonical incident.
-- [ ] Zero-permission SMS fallback intent verified on Android 12 through 15 without requesting `android.permission.SEND_SMS`.
+- [ ] 3.57: automatic emergency SMS after SOS and after the crash countdown with the screen locked (sent + delivered status), airplane-mode retry, dual SIM, and with `SEND_SMS` denied the prefilled composer fallback, on Android 12 through 16.
 - [ ] Direct dialler integration verified for Indian emergency services: 112, 108, 100, and 1073.
 - [ ] 30-second pre-alert grace countdown allows cancellation with zero network side-effects.
 - [ ] Sweeper distress reverse-escalation alerts Lead within 90 seconds of unexpected Sweeper stop.

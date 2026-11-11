@@ -51,7 +51,7 @@ PRIVACY
 Your position is shared only with the convoy you are in, and only while you are in it. In an emergency you raise, riders of other groups who are asked to help see the emergency point only. Voice is relayed live and never stored. Recorded routes are deleted after 90 days; your account and ride summaries stay until you delete them, which you can do in the app. Full policy: https://coroute.duckdns.org/privacy
 
 PERMISSIONS
-Location, including in the background, so your convoy still sees you with the phone in your pocket. Microphone for the intercom. Both only while you are in an active convoy. SMS, only if you switch on emergency texts. Full-screen alarm for the crash alarm and the hold-to-send SOS screen on the lock screen. The motion sensor is read on your phone only, during a ride. Spoken alerts use your phone's own text-to-speech. No Bluetooth.
+Location, including in the background, so your convoy still sees you with the phone in your pocket. Microphone for the intercom. Both only while you are in an active convoy. SMS (send only), asked with an explanation: after an SOS or an unanswered crash alarm your phone texts your emergency contacts by itself; carrier SMS charges apply. Full-screen alarm for the crash alarm and the hold-to-send SOS screen on the lock screen. The motion sensor is read on your phone only, during a ride. Spoken alerts use your phone's own text-to-speech. No Bluetooth.
 
 **Category:** Maps & Navigation
 **Tags:** motorcycle, group ride, convoy, intercom, touring

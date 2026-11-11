@@ -82,7 +82,7 @@ RideNotificationChannel.postUrgent`, push router hooks, audio diagnostics sink).
 | `coroute/phone_call`, `coroute/phone_call_events` | `PhoneCallChannel.kt` | Call state for call-aware alerts |
 | `coroute/ride_notification` | `RideNotification.kt` | Rich ride notification (speed, limit, buttons SOS / Talk / Mute / Leave), urgent full-screen posts |
 | (activities) | `UrgentAlertActivity.kt`, `RideSosActivity`, `MedicalIdActivity.kt`, `MedicalTileService.kt` | Another rider's SOS over the lock screen, SOS hold screen, Medical ID on the lock screen, quick-settings tile |
-| `coroute/sms` | `SmsChannel.kt` | Open the messages app prefilled (no `SEND_SMS` in Play build); keyguard dismiss before opening |
+| `coroute/sms` | `SmsChannel.kt`, `EmergencyTexts.kt` | 3.57 phone-first emergency texts (enqueue / cancelTexts / textStatuses, "textStatus" back to Dart; sent+delivered reports, retries, survives app kill); fallback: open the messages app prefilled (keyguard dismiss first) |
 | `coroute/safety` | `SafetyChannel.kt` | Phone check fixes: notification settings, app battery page, battery optimisation dialog, full-screen intent page |
 | `coroute/push` | `PushChannel.kt`, `CoRouteMessagingService.kt` | FCM init from build values, token, per-kind channels and opt-outs, launch message |
 | `coroute/in_app_review` | `InAppReviewChannel.kt` | Google Play in-app review card |
@@ -109,7 +109,7 @@ their **first compile** is part of the release procedure (MASTER_AGENT_PROMPT se
 | `ACCESS_NOTIFICATION_POLICY` | Critical alerts through Do Not Disturb (when allowed) | — |
 | `WAKE_LOCK`, `VIBRATE`, `RECEIVE_BOOT_COMPLETED`, `INTERNET`, `ACCESS_NETWORK_STATE` | Normal | — |
 
-Not requested: `SEND_SMS` (emergency texts open the messages app), camera beyond `image_picker`,
+Requested since 3.57: `SEND_SMS` (after the in-app disclosure; emergency texts from the rider's SIM). Not requested: `READ_SMS`, `RECEIVE_SMS`, `READ_PHONE_STATE`, camera beyond `image_picker`,
 contacts, phone state beyond what `PhoneCallChannel` needs. Runtime requests go through
 `permissions_service.dart`; the mic is never requested mid-ride for siren detection.
 

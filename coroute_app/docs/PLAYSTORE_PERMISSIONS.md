@@ -19,13 +19,14 @@ Keep this file in step with them. Last reviewed: 2026-11-06.
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | OEMs kill multi-hour rides; asked once from phone check / checklist | User taps "Allow" | Be ready to justify (core safety function stops otherwise). Remove if Play rejects; phone check still links to the battery settings page |
 | `WAKE_LOCK` | Motion sensor keeps running in deep sleep during a ride (bounded, renewed every 10 min) | none | none |
 | `VIBRATE` | Crash alarm and alert haptics | none | none |
-| `RECEIVE_BOOT_COMPLETED` | flutter_local_notifications re-schedules plan expiry reminders | none | none (the ride service has `autoRunOnBoot: false`) |
+| `RECEIVE_BOOT_COMPLETED` | flutter_local_notifications re-schedules plan expiry reminders; 3.57: `EmergencyTextReceiver` resumes emergency texts still waiting | none | none (the ride service has `autoRunOnBoot: false`) |
+| `SEND_SMS` (3.57) | Phone-first emergency texts: an SOS or an unanswered crash alarm texts the rider's emergency contacts from their own SIM without a tap, "safe now" when closed (`EmergencyTexts.kt`) | Runtime, after the in-app disclosure (`EmergencyTextsDisclosure`: contact form once, permissions screen, Safety health) | Permissions Declaration Form, "Physical safety / emergency alerts" + video 2 (`docs/handbook/compliance/play_store_compliance.md` 3a/3b). Denied: the messages app opens prefilled (`SmsComposer`) |
+
+`<uses-feature android:name="android.hardware.telephony" android:required="false"/>`: tablets without a SIM stay eligible.
 
 Removed / not used:
-- `SEND_SMS` is **not** declared (Play SMS policy). Emergency texts without internet open the
-  messages app with the SOS text and all recipients filled in (`SmsComposer`, `ACTION_SENDTO`); the
-  rider or a bystander presses Send. Online, the server sends SMS to emergency contacts.
-  "Text the group" can now be switched on without any SMS permission.
+- `READ_SMS`, `RECEIVE_SMS`, `READ_PHONE_STATE` are **not** declared: the default SMS SIM is used
+  without listing SIMs, and no message is ever read.
 - `BLUETOOTH_SCAN` is not declared; the app no longer asks for it (it made Bluetooth always look "denied").
 - `HIGH_SAMPLING_RATE_SENSORS` not needed: crash detection samples at 50 Hz (cap 200 Hz).
 - `FOREGROUND_SERVICE_HEALTH` not needed: sensors run inside the `location` service.
@@ -70,7 +71,7 @@ Data is encrypted in transit (HTTPS only, `usesCleartextTraffic=false`). Riders 
 | Financial info: purchase history | Yes | No | Optional | Subscription | Card/UPI data handled by Razorpay (check Razorpay SDK's own disclosure) |
 | App info & performance: diagnostics | Yes | No | Optional (explicit consent) | Analytics / support | Phone-check report: model, OS, check results. No IMEI/serial/recordings/location trail |
 | Device or other IDs | No | | | | |
-| Messages / contacts / photos / files | No | | | | SMS composer is the user's own app |
+| Messages / contacts / photos / files | No | | | | Emergency texts are sent by the rider's phone to the contact the rider chose (SEND_SMS); no message is read or uploaded |
 
 *Transfers to the rider's own group or emergency contacts are user-initiated (exempt); SMS/
 maps providers act as service providers.

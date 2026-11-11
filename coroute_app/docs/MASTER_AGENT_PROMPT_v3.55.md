@@ -26,10 +26,12 @@ UNCOMMITTED in the working tree (this round, verify and commit):
   g) Navigate hand-off to Google Maps (two-wheeler mode) / Mappls / any map app (nav_handoff.dart, NavHandoffChannel.kt, manifest <queries>).
   h) Website overhaul: new home (real screenshots, six differentiators, gallery, "Why CoRoute" comparison without naming competitors), rebuilt Features page, new /privacy-and-security page, privacy policy corrected (30 s crash countdown, scrypt, siren mic), responsive 360-1920 px, OG image, JSON-LD.
   i) Competitor analysis doc (Trilyt etc.), master prompt (this file), Play video kit (tool/play_video), Play Store graphics (store/play_assets).
+  j) Minimal Profile and Settings (Nov 11): Profile top box (photo, name, @username → My profile; gear → Settings), My bikes, Emergency contact & Medical ID, rider score + Leaderboard; Help = Send feedback (one screen: Report a problem / Suggest a safety feature / Other + optional diagnostics log), Rate CoRoute, Privacy & terms; Account = Sign out, Delete account only. Removed from Profile: Your plan, Ride history, ride analytics (Edit details / Change password moved into My profile). Settings: help/ask nearby riders, give-way side, safety report in score, offline maps, duplicate feedback/rate/diagnostics rows removed — fixed safe defaults with a one-time migration (settings key version 2; one PATCH /me assistHelp/assistAsk=true). Offline maps automatic: route maps kept 7 days after the trip, 30 days if a trip never ended, 300 MB LRU cap; past trips view online tiles. "Safety health" (cockpit + Settings) now opens the Safety health (phone check) screen with fix buttons to specific system pages (new SafetyChannel.kt methods). Website privacy/safety/terms wording updated to match (help/ask nearby always on; rider score sends per-ride counts).
+  k) Documentation handbook: docs/handbook/ (investors/, operators/, users/, technical/, compliance/ + README.md master index) and PROJECT_CONTEXT.md (full context). Website legal pages brought in line with the app: privacy.html, terms.html, delete-account.html, privacy-and-security.html, new /refunds, /security and /.well-known/security.txt, strict CSP on marketing pages (theme-init.js), operator pages privacy line. Fill the [OWNER TO FILL] items (grievance officer, refund timelines, support contacts) before Play submission.
 
 === 2. COMMIT AND CLEAN ===
 1. git status; make sure no secret file is tracked or staged (.gitignore has CLUSTER_CREDENTIALS.md). Move stray files out of the repo: ../generate_disclosure_video.py and ../play_store_assets/ are outside coroute_app — leave them or ask the owner.
-2. Commit the uncommitted work in logical chunks (a..i above), message prefix "feat(v3.55):" / "docs(v3.55):". Delete coroute_app/_to_delete/ (ask for delete permission if your shell can't delete).
+2. Commit the uncommitted work in logical chunks (a..k above), message prefix "feat(v3.55):" / "docs(v3.55):". Delete coroute_app/_to_delete/ (ask for delete permission if your shell can't delete).
 3. git push origin release/v3.55.0.
 
 === 3. BUILD AND TEST ===
@@ -56,6 +58,8 @@ UNCOMMITTED in the working tree (this round, verify and commit):
    REVIEW_PHOTO_STORE=par, DIAG_LOG_STORE=par (+ Object Storage PAR settings per docs/features_355/platform.md)
    GOOGLE_WEB_CLIENT_ID=<optional>      (Google sign-in on the website)
    OPERATOR_REVIEW_EMAIL=<owner email>  (operator applications)
+   SUPPORT_EMAIL=<role address, e.g. support@devmonks.space>   (REQUIRED: legal pages, receipts, map-provider User-Agent contact; the code no longer has a default)
+   SECURITY_CONTACT=<security role address>   (/.well-known/security.txt; falls back to SUPPORT_EMAIL)
    Keep RAZORPAY_* as they are; RAZORPAY_WEBHOOK_URL default = subscription.
 4. Caddy: both names already configured (Caddyfile.vm1/vm2); certificates valid. After 1 week stable on the new domain, raise HSTS on coroute.devmonks.space to max-age=31536000 and reload Caddy (owner decision).
 5. Deploy VM2, restart, check; then VM1. Checks on both hosts:
@@ -71,11 +75,14 @@ UNCOMMITTED in the working tree (this round, verify and commit):
 1. Rotate the JWT secret (24-72 h grace, runbook in docs/features_355/platform.md) and the DB password.
 2. Owner regenerates the DuckDNS token (it is in git history); store only in Vault + Caddy env; verify certificates still renew.
 3. Move vm_provision_ssh.key off VM1 (Vault / admin machine only).
+4. Replace the owner's personal e-mail with a role address where it still appears: setup scripts (bootstrap admin), gateway/deploy/PLAY_STORE_CHECKLIST.md, store/LISTING.md, PLAY_STORE_RELEASE_CHECKLIST.md, VM_OPERATIONS_LOG.md, some Dart tests (ask the owner which address).
+5. Before Play submission, get the owner to fill the [OWNER TO FILL] items: grievance officer (name/contact) in privacy.html, refund timelines (/refunds), security response targets (/security), support contacts; operator terms / waiver / data note need legal review (docs/handbook/operators/*_DRAFT.md).
 
 === 6. DEVICE SAFETY GATE (2-4 Android phones; one group ride + one solo ride) ===
 Record phone model, Android version, pass/fail, notes. Any failure in A = STOP (no Play release).
 A. Safety: SOS 3 s hold sends; crash alarm test opens a 30 s countdown and riding away cancels it; potholes/speed breakers then a red light → no alarm; emergency text opens the messages app with the live link; lock-screen Medical ID; "Bike down?" on a tipped parked bike; missing-rider "Send SOS" hold; SOS with mobile data off.
 B. Alerts and audio: overspeed spoken within ~2 s; music lowers when speeding (also on Bluetooth); alerts duck/pause Spotify; a call during a ride holds normal lines and lets critical ones through; siren recording → "Ambulance/Police siren close by" after ~3 s with ANC earbuds; Siren alerts switch off → mic indicator disappears; hands-free intercom ignores wind/breath; lock-screen Talk/Mute.
+C0. Profile/Settings: Profile shows no plan and no ride history; Help has 3 rows; Send feedback with "Attach diagnostics log" arrives in /admin; Settings has no help/ask/give-way/offline-map rows; after upgrade an old "off" for help/ask nearby becomes on (check /me); Safety health from the cockpit and from Settings opens the phone check screen and its fix buttons open CoRoute's notification page / battery page (test Pixel, Samsung, Xiaomi); a finished trip's offline map is deleted after 7 days and a past trip still shows its map online.
 C. Group: roles; trip head can only change settings; pillion seat on 2 phones with one "I'm OK" answering for both; 3D bikes rotate correctly in light/dark; ride chat quick actions spoken, typing hidden while moving; Navigate opens Google Maps two-wheeler navigation and CoRoute keeps running; map search and pasted maps.app.goo.gl link; Share to CoRoute from Google Maps; bike details asked only once.
 D. Social and notifications: friend request shows in People → Requests; crew invite; crew ride invite with the app killed → push → invitation screen; admin push with image arrives on its channel and per-kind opt-out works.
 E. Play-specific: no prices anywhere in the app; Google in-app review card from Settings › Rate CoRoute (Play-installed build only); Diagnostics → Send logs appears in /admin.

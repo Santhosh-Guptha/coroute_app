@@ -56,7 +56,8 @@ The microphone is used only during a ride: for group talk when you talk, and for
 ## Emergency texts and live links
 
 - In an SOS your emergency contact gets a text with your name, the time, a live link and your coordinates. The live link shows your first name and position for 30 minutes, or until the alert closes.
-- If your phone sends the text, it goes from your SIM. CoRoute's server can also send it through an SMS provider, which gets only what it needs; numbers are removed from delivery records 48 hours later.
+- The text is sent by your phone, from your own number through your carrier (normal SMS charges apply), only if you allowed emergency texts. CoRoute cannot read your messages. When the SOS closes, the same people get a "safe now" text.
+- CoRoute's servers do not send these texts. An SMS provider would be used only if CoRoute turns one on (off today).
 
 ## Diagnostics: your choice
 

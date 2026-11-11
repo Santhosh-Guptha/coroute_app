@@ -4,6 +4,11 @@ After a successful website payment the rider gets one receipt e-mail with the pa
 After a refund they get one refund e-mail. The e-mails go out over SMTP (nodemailer). When SMTP is
 not configured they are off and nothing else changes.
 
+3.57: the same mailer and `mail_log` also carry the **welcome** and **ride summary** e-mails, and riders
+choose e-mail categories (Account and receipts always on, Ride summaries, Tips and news, Offers). See
+[lifecycle_emails.md](lifecycle_emails.md). Receipts and refunds belong to "Account and receipts" and
+cannot be turned off.
+
 ## When they are sent
 
 Every write of a ledger order goes through `repo.updateRazorpayOrder`. `attachPurchaseEmail`
@@ -20,7 +25,8 @@ without changing them:
   and nothing is sent.
 - The e-mail is sent in the background, never on the payment request.
 - A failed SMTP send is marked RETRY. The leased job `mail-retry` (every 5 min) tries again, 3
-  tries in all.
+  tries in all. It picks receipt and refund rows only (`kind` receipt / refund); the welcome and ride
+  summary rows in the same log have their own job, `lifecycle-mail` (3.57).
 - **No receipt** for a ₹0 / free activation.
 - The `mail_log` row keeps a masked address only (`a***@example.com`) plus the message id or the
   error code. Logs never carry addresses or bodies.
@@ -84,7 +90,8 @@ id and full / part refund.
 
 ## Files
 
-- `gateway/src/mailer.js`: SMTP transport from env; `send()` never throws.
+- `gateway/src/mailer.js`: SMTP transport from env; `send()` never throws. 3.57: optional
+  `attachments` (the inline route picture of the ride summary).
 - `gateway/src/purchase_email.js`: the hook, idempotency, layout, retry, `/api/web/receipt-email`.
 - `gateway/src/templates.js`: `purchase_receipt`, `refund`.
 - `gateway/public/plans.html`, `gateway/public/assets/plans.js`: the optional receipt address.

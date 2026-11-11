@@ -81,7 +81,7 @@ Key design answers:
 
 - Consumption-only: no payment SDK; the Play policy scan enforces it.
 - Diagnostics redaction on the phone and again on the server.
-- No `SEND_SMS` in the Play build; emergency texts go through the messages app.
+- 3.57: `SEND_SMS` only (no READ_SMS / RECEIVE_SMS / READ_PHONE_STATE), asked after a disclosure; emergency texts go from the rider's SIM to their own contacts, max 30 a day; numbers stay in a private prefs file until 48 h after sending; logs keep the last 3 digits at most. Denied: the messages app opens prefilled.
 - Release builds refuse non-HTTPS gateway overrides; the `COROUTE_API` value is never logged.
 - Exported components: App Links verified by `assetlinks.json`; Share-in activity only parses
   text/links (`geo_links` on the server validates).

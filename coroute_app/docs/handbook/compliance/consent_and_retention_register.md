@@ -13,6 +13,12 @@ when the person acts.
 | # | Item | Type / default | Where the person controls it | Stored as | Record of consent | Source |
 |---|---|---|---|---|---|---|
 | 1 | Offer e-mails (plan prices, coupons) | **Opt-in, off** | Website `/account` "Send me offer e-mails"; unsubscribe link (RFC 8058 one-click) in every mail | `marketing_consent` (`offersEmail`), `email_suppression` | Yes: time + source, last 20 changes | `offer_emails.js`, `GET/PUT /api/web/marketing-consent` |
+| 1d | Marketing e-mails from the E-mail studio (3.57: offers, coupons, news, ride ideas, club invitations; unique single-use codes) | **Opt-in, off** (the same consent as 1) | as 1; unsubscribe link carries `cid=` for the campaign report | `marketing_consent`, `email_suppression`, `mail_log` (`kind: marketing`) | Yes: as 1 | `email_marketing.js`; consent and suppression checked again for every e-mail at send time |
+| 1e | "Plan ending soon" account notice (3.57, no coupon / price; only riders whose website plan ends or ended) | **Fixed** (transactional, about the rider's own plan) | "Manage e-mails" link; not sent to a hard-suppressed address | `mail_log` (`kind: marketing`, `category: account`) | — | `email_marketing.js` (server refuses a coupon, price or coupon / price variable in an account e-mail) |
+| 1f | Click counting in marketing e-mails (3.57) | On, admin switch (Settings > Count clicks); no open pixels | — (minimal, pseudonymous; described in /privacy) | `email_events` (campaign, rider HMAC hash, path, time) | — | `email_marketing.js` `/r/:token` |
+| 1a | Ride summary e-mails (3.57: summary of the rider's own ride, at least 2 km / 10 min) | Opt-out, on | Website `/account` "Ride summaries"; signed one-click unsubscribe link (`c=ride_summaries`) in every summary | `email_preferences.rideSummaries` | Yes: category, value, time + source, last 20 changes | `lifecycle_emails.js`, `GET/PUT /api/web/email-preferences` |
+| 1b | Tips and news e-mails (3.57: the welcome e-mail's group rides / plans block, product news) | Opt-out, on | Website `/account` "Tips and news"; signed one-click unsubscribe link (`c=tips_news`) in the welcome e-mail | `email_preferences.tipsNews` | Yes: as 1a | `lifecycle_emails.js` |
+| 1c | Account and receipt e-mails (receipts, refunds, the welcome e-mail's account part) | **Fixed** (transactional) | none; not sent to a hard-suppressed (bounce / complaint / admin) address for lifecycle mail | `mail_log` (masked address) | — | `purchase_email.js`, `lifecycle_emails.js` |
 | 2 | Partner perk pushes | **Opt-in, off** | App Settings > Push notifications (per kind) | `push_prefs.partnerPerks` | Pref value only | `push_campaigns.js` |
 | 3 | Push kinds Update, Event, Safety tip, Community | Opt-out, on | App settings per kind; Android channel settings | `push_prefs` | Pref value | `push_campaigns.js` |
 | 4 | Push notifications overall | Opt-out, on (hidden in builds without Firebase) | Settings > Push notifications; Android notification permission | token removed when off | — | `push.js`, `PushChannel.kt` |
@@ -28,7 +34,7 @@ when the person acts.
 | 14 | Groups nearby (discovery) | Opt-in per ride / feature | Ride sheet | ride config | — | `discovery.js` |
 | 15 | Public ride | Off per ride by default | Group settings | ride config | — | `public_ride.js` |
 | 16 | Receive emergency texts from my ride group (`smsOptOut`) | Opt-out (on: number given to riders for SOS texts) | Profile | `users.smsOptOut` | — | `validate.js` SWITCHES |
-| 17 | Emergency texts (sending, SMS fallback) | **Fixed on** | none | — | — | SETTINGS_MINIMAL |
+| 17 | Emergency texts (3.57 phone-first: sent from the rider's SIM after an SOS / unanswered crash alarm, plus the group fallback) | **Fixed on**; needs the Android SEND_SMS permission (asked after a disclosure; denied = messages app prefilled) | Safety health (Allow, test text) | on-device queue (`coroute_emergency_texts` prefs: numbers purged 48 h after sending) + ledger (number hashes only) | — | SETTINGS_MINIMAL, sos_sms.md |
 | 18 | Crash detection | **Fixed on** (admin switch locked) | none | — | — | SETTINGS_MINIMAL |
 | 19 | Medical info sharing with responders | **Fixed** (no consent switch, owner Nov 9); entering medical info is optional | Profile (fill or clear) | `users` medical fields | — | V3_55_RELEASE §1d |
 | 20 | Medical ID on lock screen | **Fixed on** (when entered) | none | — | — | SETTINGS_MINIMAL |
@@ -82,6 +88,14 @@ confirmation at sign-up; DPDP review of the fixed-on items 11, 12, 19, 25 (see p
 | Accounts, profile, social data, memberships | until account deletion (immediate cascade) | `DELETE /api/me` | `auth.deleteAccount` |
 | E-mail suppression hash | kept after erase (so the address is not mailed again) | — | notifications_admin.md |
 | Marketing consent history | last 20 changes; erased with account | — | `offer_emails.js` |
+| E-mail category choices (`email_preferences`) | last 20 changes; erased with account | account erase cascade | `lifecycle_emails.js` |
+| E-mail send log (`mail_log`): receipts / refunds | masked address, message id or error code; **no automatic purge** (idempotency key) | — | `purchase_email.js` |
+| E-mail send log (`mail_log`): welcome / ride summary | masked address, status, reason; kept as the once-only key; erased with account | account erase cascade | `lifecycle_emails.js` |
+| E-mail send log (`mail_log`): marketing (3.57) | masked address, status, campaign / rule id, coupon code; kept as the once-only key and for the weekly cap and reports; erased with account | account erase cascade | `email_marketing.js` |
+| Marketing click / unsubscribe events (`email_events`, 3.57) | rider HMAC hash only; **400 days**, erased with account | `email-studio` job, account erase cascade | `email_marketing.js` |
+| Unique coupon code claims (`email_coupon_codes`, 3.57) | until account erase (the child coupon itself stays as a payment record) | account erase cascade | `email_marketing.js` |
+| E-mail studio preview pages (`email_previews`) | 15 minutes (sample data only) | removed on the next preview | `email_marketing.js` |
+| Ride summary route picture | not stored (built when the e-mail is sent, attached inline) | — | `route_png.js` |
 | Encrypted backups | **30 days** | `backup_jobs.js` / lifecycle rule | `BACKUP_RETENTION_DAYS` |
 | Server logs (journald) | rotated by the OS ("within a few weeks" per privacy.html) **[OWNER TO CONFIRM journald limits]** | OS | — |
 | Feedback messages, operator applications, payment ledger | **no automatic purge found** **[OWNER TO DECIDE; ledger per tax law]** | — | — |
@@ -104,3 +118,5 @@ confirmation at sign-up; DPDP review of the fixed-on items 11, 12, 19, 25 (see p
 | Date | Change | By |
 |---|---|---|
 | 11 Nov 2026 | Register created from code (handbook) | docs agent |
+| 11 Nov 2026 | 3.57 E-mail studio: marketing e-mails (1d), plan-ending account notice (1e), click counting (1f); marketing `mail_log`, `email_events`, `email_coupon_codes`, `email_previews` retention | dev agent |
+| 11 Nov 2026 | 3.57 e-mail categories: ride summaries (1a), tips and news (1b), account and receipts (1c); `email_preferences` and lifecycle `mail_log` retention | dev agent |

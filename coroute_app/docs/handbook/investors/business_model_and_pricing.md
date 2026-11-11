@@ -11,7 +11,9 @@ Sources in the codebase: `gateway/src/plan_pricing.js` (the single price computa
 1. **Safety is never gated.** SOS, crash alerts, emergency texts, medical ID, guardians, missing-rider check, stretch alert, buddy pairs and roll call are outside any plan or mode. They cannot be in the list of features a mode leaves out, and SOS, crash detection, emergency texts and medical ID are locked on in the admin feature switches.
 2. **Joining a ride is free.** One member with a plan hosts; everyone else joins with the code and gets the host's group features for that ride ("one plan per group ride").
 3. **The Play app sells nothing.** No payment SDK, no prices, no buying words, no steering to the website. Plans are bought and managed only on the website (`/plans`, `/account`). The app shows only neutral status: plan name, what it includes, status, end date, and "Your plan is managed in your CoRoute account."
-4. **Offers go only by opt-in e-mail**, never in a push or in the app.
+4. **Offers go only by opt-in e-mail**, never in a push or in the app. Since 3.57 the web admin's E-mail
+   studio runs these as templated campaigns and automations (win-back, plan ending) with single-use coupon
+   codes per rider, so redemptions and clicks can be attributed per campaign (docs/features_355/email_marketing.md).
 
 ---
 

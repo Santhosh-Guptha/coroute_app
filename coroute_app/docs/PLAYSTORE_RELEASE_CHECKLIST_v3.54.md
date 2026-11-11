@@ -38,7 +38,7 @@ flutter build appbundle --release     # -> build/app/outputs/bundle/release/app-
 - [ ] **Foreground service types:** `location` (ride tracking and crash detection, including the new offline solo ride) and `microphone` (intercom). One short video each.
 - [ ] **Full-screen intent:** crash alarm (safety alarm with countdown and "I'm OK").
 - [ ] **Battery optimisation exemption:** justification text from PLAYSTORE_PERMISSIONS.md (long rides killed by OEMs otherwise).
-- [ ] No SEND_SMS / CALL_PHONE: SOS texts open the messages app; calls open the dialer.
+- [ ] No CALL_PHONE: calls open the dialer. (3.57: SEND_SMS IS declared for phone-first emergency texts; file the SMS declaration, see docs/handbook/compliance/play_store_compliance.md 3a.)
 
 ## 5. Data safety form
 

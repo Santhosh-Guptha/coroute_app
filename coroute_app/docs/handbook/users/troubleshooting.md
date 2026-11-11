@@ -112,11 +112,12 @@ Also: do not swipe CoRoute away during a ride, and avoid "ultra" or "extreme" po
 
 ## 9. SOS text (SMS) not sent
 
-1. On Google Play phones, CoRoute does not send texts by itself: it opens your messages app with the text ready. Tap **Send**, or tap **Text the group now** on the SOS screen.
-2. If the phone is locked, tapping **Text the group now** asks you to unlock first.
-3. Check you have a default messages app and SIM credit, and that your emergency contact's number is correct (**Profile › Emergency contact & Medical ID**).
-4. With no signal, the messages app queues the text and sends it when signal returns.
-5. Once your SOS reaches CoRoute's server, the server can text your contact, where text alerts are available.
+1. Open **Safety health** and look at **Emergency texts**. "Not allowed": tap **Allow** and allow texts. Until then CoRoute opens your messages app with the text ready: tap **Send**, or **Text the group now** on the SOS screen (it asks you to unlock first when the phone is locked).
+2. "No SIM is ready": insert a SIM or turn off airplane mode. With two SIMs, set a default SIM for SMS in the phone's settings (otherwise the phone picks one or may ask).
+3. No signal: the SOS screen says "No signal yet". The phone tries again by itself (30 s, 2, 5 and 10 minutes, and as soon as the network returns), also with the screen locked or after the app was closed.
+4. Check your SIM credit / SMS pack and that your emergency contact's number is correct (**Profile › Emergency contact & Medical ID**). Tap **Send a test text to my emergency contact** in Safety health.
+5. Cancelled the SOS within 10 seconds of pressing it? Then nothing was sent, on purpose.
+6. More than 30 emergency texts in a day: the daily limit stops further texts until the next day.
 
 **Send diagnostics** after any real or test SOS where texts did not go out.
 

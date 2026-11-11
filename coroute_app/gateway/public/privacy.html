@@ -79,9 +79,10 @@
           <li>Medical info is optional. If you fill it in, it is shown on your lock screen and to the people helping
             you (your convoy, your guardians and a rider who accepted to help), only while your SOS or crash alert is
             open. Administrators never see it.</li>
-          <li>Emergency texts are always on: if your SOS cannot reach our server, your phone prepares a text with your
-            position for your emergency contact and ride mates. Groups nearby stays off until your group lead turns it
-            on.</li>
+          <li>Emergency texts are always on: when you raise an SOS, or a crash alarm runs out without an answer, your
+            phone texts your emergency contact from your own number (if you allowed CoRoute to send texts), with your
+            position and a live link. If your SOS cannot reach our server, your ride mates get a text too. Groups nearby
+            stays off until your group lead turns it on.</li>
           <li>If you join a club or a tour operator's ride, the organiser sees your username and first name, your live
             position only during their rides, and your emergency contact only if you raise an SOS during their
             ride.</li>
@@ -103,8 +104,10 @@
           <li>The app keeps a technical log on your phone to help fix problems. It has no messages, names, phone numbers
             or exact places, and it is sent to us only when you choose: from Profile, Help, Send feedback, or when you
             say yes to the question after a ride with an alert.</li>
-          <li>Offer e-mails are sent only if you turn them on in your website account, and each one has an unsubscribe
-            link. You can turn off each kind of news notification in the app; safety notifications always arrive.</li>
+          <li>We send a welcome e-mail when you join, receipts, and a short summary of your own rides. Ride summaries and
+            tips and news can be turned off in your website account or with the link in each e-mail. Offer e-mails are
+            sent only if you turn them on. You can turn off each kind of news notification in the app; safety
+            notifications always arrive.</li>
           <li>Recorded routes and exact positions are deleted after 90 days. You can delete your account in the app
             (Profile, Account, Delete account) and it is removed at once. A request through our
             <a href="/delete-account">deletion page</a> is completed within 48 hours. Backup copies expire within 30
@@ -123,7 +126,7 @@
             <li><a class="legal-toc__link" href="#crash-detection">Crash detection and the motion sensor</a></li>
             <li><a class="legal-toc__link" href="#nearby-help">Help from nearby riders of other groups</a></li>
             <li><a class="legal-toc__link" href="#groups-nearby">Groups nearby (optional)</a></li>
-            <li><a class="legal-toc__link" href="#emergency-texts">Emergency texts when there is no internet</a></li>
+            <li><a class="legal-toc__link" href="#emergency-texts">Emergency texts from your phone</a></li>
             <li><a class="legal-toc__link" href="#spoken-alerts">Spoken alerts and the ride notification</a></li>
             <li><a class="legal-toc__link" href="#microphone">Microphone</a></li>
             <li><a class="legal-toc__link" href="#live-links">Live emergency links</a></li>
@@ -299,8 +302,9 @@
                     id) is kept after account deletion for accounting</td>
                 </tr>
                 <tr>
-                  <td data-label="Data"><b>E-mail and notification choices</b>: whether you want offer e-mails (with the
-                    time and place you changed it), unsubscribes, and which kinds of news notifications you get</td>
+                  <td data-label="Data"><b>E-mail and notification choices</b>: which e-mails you want (ride summaries,
+                    tips and news, offer e-mails, each with the time and place you changed it), unsubscribes, which kinds
+                    of news notifications you get, and a short log of the e-mails we sent you (with your address masked)</td>
                   <td data-label="Why">To send only what you asked for</td>
                   <td data-label="Kept for">Until you change them or delete your account</td>
                 </tr>
@@ -397,17 +401,23 @@
         </section>
 
         <section class="legal-section" id="emergency-texts" aria-labelledby="emergency-texts-h">
-          <h2 id="emergency-texts-h">Emergency texts when there is no internet</h2>
-          <p>This is always on (since November 2026; earlier versions of the app had a switch). When your SOS cannot reach
-            our server, your phone prepares a text message (SMS) with a live link and your position. It goes to your
-            emergency contact, your lead and sweeper and the nearest riders in your convoy, at most 10 people. On the
-            Google Play version the phone's messages app opens with the text ready and you, or someone with you, press
-            Send; a phone that allows the app to send texts sends them directly. These texts go from your phone and your
-            SIM, not from us, and your carrier may charge for them.</p>
-          <p>When your SOS does reach our server and your phone did not text your emergency contact itself, our server
-            can send the text through an SMS provider (MSG91 or Twilio, when CoRoute has turned this on), and a
-            "safe now" text when the alert closes. The provider receives the contact's phone number, your first name,
-            the live link and the time; nothing else.</p>
+          <h2 id="emergency-texts-h">Emergency texts from your phone</h2>
+          <p>This is always on (since November 2026; earlier versions of the app had a switch). When you raise an SOS, or
+            a crash alarm counts down without an answer (also a "Bike down?" check or a missed check-in that raises an
+            SOS), your phone sends a text message (SMS) to your emergency contact by itself, even with the screen
+            locked: your first name, what happened, the time, a live link and your position. When the SOS is closed,
+            the same people get a short "safe now" text.</p>
+          <p>These texts are sent <b>from your own phone number, through your own mobile carrier</b>, not by CoRoute.
+            Your carrier's normal SMS charges apply. The app asks for the Android permission to send texts only after
+            telling you what it is for; it cannot read your messages. If you do not allow it, the messages app opens
+            with the text ready and you, or someone with you, press Send. To limit costs the app sends at most 30
+            emergency texts a day. It keeps the numbers it still has to text only on your phone and deletes them 48
+            hours after the text was sent.</p>
+          <p>When your SOS cannot reach our server, your lead and sweeper and the nearest riders in your convoy (at most
+            10 people) get the text too.</p>
+          <p>CoRoute's servers do not send these texts. Our server can send them through an SMS provider (MSG91 or
+            Twilio) only if CoRoute turns that on; it is off today. If it is turned on, the provider receives the
+            contact's phone number, your first name, the live link and the time; nothing else.</p>
           <p>To make this work, your phone keeps the phone numbers of the other riders in your convoy during the ride.
             It gets only their
             numbers and their role in the ride, not their names. The numbers are stored encrypted on the phone, are
@@ -676,10 +686,34 @@
 
         <section class="legal-section" id="emails-notifications" aria-labelledby="emails-notifications-h">
           <h2 id="emails-notifications-h">E-mails and notifications</h2>
-          <p>We send e-mails you need, such as payment receipts and refund notices. Offer e-mails (plan prices and
-            discount codes) are sent only if you turn on "Send me offer e-mails" in your <a href="/account">website
-            account</a>. Every offer e-mail has an unsubscribe link that works with one click, and you can turn them off
-            again in your account at any time.</p>
+          <p>These are the e-mails we send:</p>
+          <ul>
+            <li><b>Welcome</b>: once, when you create your account, with first steps and a link to the
+              <a href="/guide">quick start guide</a>. Its short "Group rides" part (how group rides work and a link to
+              the group plans on our website) is left out if you turn off tips and news.</li>
+            <li><b>Receipts</b>: payment receipts and refund notices. These are part of your account and are always
+              sent.</li>
+            <li><b>Ride summaries</b>: after a ride of at least 2 km and 10 minutes, a summary of your own ride: date,
+              distance, riding time, stops and how many riders were in the group, with a small picture of your route.
+              The first and the last 300 m of the route are left off the picture, so it never shows where you started
+              or ended, and it has no map, places or other riders' names. On until you turn it off.</li>
+            <li><b>Tips and news</b>: occasional product news and riding tips. On until you turn it off.</li>
+            <li><b>Offers</b>: plan prices and discount codes, and our other marketing e-mails (new features, ride
+              ideas, club invitations), only if you turn on "Send me offer e-mails". Some contain a discount code made
+              only for you, which only you can use, once. We pick who gets one from what we already hold for the
+              service (for example when you joined, whether you rode recently, your plan, or whether you run a crew
+              or a club), never from your location. At most a few a week, and not at night (India time).</li>
+            <li><b>Plan ending</b>: if you bought a plan on our website, a note shortly before it ends (or after). It
+              is about your account and has no offers or prices.</li>
+          </ul>
+          <p>Links in our marketing e-mails may go through a short redirect on our site (<code>/r/...</code>) so we
+            can count how many people clicked each link. We store the campaign, the page and a scrambled code
+            instead of your name or e-mail, delete it with your account (and after about a year), and never use
+            hidden images to see whether you opened an e-mail.</p>
+          <p>Choose what you get under "E-mails from CoRoute" in your <a href="/account">website account</a>. Every
+            e-mail you can turn off has an unsubscribe link at the bottom that works with one click, and the link turns
+            off only that kind of e-mail. If e-mails to your address bounce or are reported as spam, we stop sending
+            them.</p>
           <p>The app can show push notifications through Google Firebase Cloud Messaging. You can turn off all of them
             in Settings, or each kind of news notification (news and updates, events, safety tips, community, partner
             perks; partner perks start off). Safety alerts, ride and friend notifications cannot be turned off
@@ -752,12 +786,13 @@
                 </tr>
                 <tr>
                   <td data-label="Service"><b>Our e-mail provider</b> (sent over SMTP)</td>
-                  <td data-label="What it does">Sends receipts, refund notices and offer e-mails you asked for</td>
+                  <td data-label="What it does">Sends the welcome e-mail, receipts, refund notices, ride summaries, tips and
+                    news, and offer e-mails you asked for</td>
                   <td data-label="What it receives">Your e-mail address, name and the e-mail's content</td>
                 </tr>
                 <tr>
-                  <td data-label="Service"><b>MSG91</b> (India) or <b>Twilio</b> (USA), when turned on</td>
-                  <td data-label="What it does">Sends emergency texts from our server</td>
+                  <td data-label="Service"><b>MSG91</b> (India) or <b>Twilio</b> (USA), only if turned on (off today)</td>
+                  <td data-label="What it does">Would send emergency texts from our server; today your phone sends them</td>
                   <td data-label="What it receives">Your emergency contacts' numbers, your first name, the live link and the
                     time</td>
                 </tr>
@@ -796,7 +831,7 @@
             can check it is you.</p>
           <p>Crash detection, emergency texts, the lock screen ride view, Medical ID during an alert and help from nearby
             riders are always on, because they are how CoRoute keeps riders safe. You choose the rest: voice alerts,
-            siren alerts, appearing on the leaderboards, news notifications, offer e-mails, sharing your fuel range,
+            siren alerts, appearing on the leaderboards, news notifications, ride summary, tips and offer e-mails, sharing your fuel range,
             receiving emergency texts from your ride group, and which Ride Guardian links you create. You can revoke
             location and microphone permissions at any time in your phone's settings; the app then works in a limited
             mode, and safety features that need them cannot work.</p>

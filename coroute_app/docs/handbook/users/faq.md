@@ -86,7 +86,7 @@ Only while your SOS or crash alert is open: your ride group, your guardians and 
 They can bring help sooner. Before anyone accepts, riders of other groups see only the emergency point and distance. After one accepts, they see your first name, bike and, while the alert is open, your medical info and emergency contact. Never your phone number.
 
 **24. Will my emergency contact get a text?**
-Yes. When there is no internet, your phone prepares the text in your messages app (tap **Send**). CoRoute's server can also text your contact once your SOS reaches it, where text alerts are available. Your carrier may charge for texts you send.
+Yes. When you hold SOS, or a crash alarm runs out without an answer, your phone texts them by itself from your own number (allow **Emergency texts** when asked, or in **Safety health**), with your name, what happened, the time, a live link and your position. When you are safe they get a "safe now" text. If you did not allow texts, the text opens in your messages app (tap **Send**). Your carrier's normal SMS charges apply.
 
 ## Group rides
 

@@ -25,7 +25,7 @@ Screenshots of the HTML replica (390x844, design tokens from `lib/core/theme/app
 | Crash detection | Switch, off asked to confirm (on) | **Fixed** | On | Safety: a crash with detection off reaches nobody |
 | SOS, incl. lock-screen SOS | No switch | **Fixed** | On | Safety |
 | Ride on lock screen (distances + SOS button) | Switch (on) | **Fixed** | On | The SOS button must be reachable without unlocking. Other groups' emergencies show no names |
-| Emergency texts (SMS fallback) | Switch, asked for SEND_SMS (**off**) | **Fixed** | On | Safety: an undelivered SOS must still reach people. Without SEND_SMS (Play build), the texts open in the messages app, ready to send. SMS charges apply |
+| Emergency texts | Switch, asked for SEND_SMS (**off**) | **Fixed** | On | Safety: 3.57 phone-first, every SOS texts the emergency contacts from the rider's SIM by itself (SEND_SMS asked after the disclosure; "safe now" follow-up always on); an undelivered SOS also texts the group. SEND_SMS denied: the texts open in the messages app, ready to send. Carrier SMS charges apply |
 | Medical ID on the lock screen | No switch | **Fixed** | On | Already mandatory |
 | "Are you OK?" check-in (far from group) | Switch (on) | **Fixed** | On | Safety |
 | Solo ETA check-in | Switch (on), admin `soloCheckIn` | **Fixed** | On | Safety. Still needs an emergency contact; the admin switch still applies |

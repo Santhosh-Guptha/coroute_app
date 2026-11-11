@@ -261,7 +261,7 @@ sequenceDiagram
     G->>S: one text per contact, row key alertId:SOS:sha256(number)
     S->>C: "CoRoute SOS ... Live: /e/<code>"
   else no internet
-    R->>C: messages app opens prefilled (no SEND_SMS in Play build), rider presses Send
+    R->>C: 3.57: SMS from the rider's SIM by itself (SEND_SMS); denied: messages app prefilled, rider presses Send
     R->>R: resend over internet when back online (same clientId)
   end
   Note over R,C: On resolve or cancel: ALERT_RESOLVED to group, "safe now" SMS to the same contacts

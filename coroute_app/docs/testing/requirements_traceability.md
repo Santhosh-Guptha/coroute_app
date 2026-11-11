@@ -75,7 +75,7 @@ Release Priority Definitions:
 All code modifications targeting `main` or release tags must pass their associated gates in the automated continuous integration pipeline:
 
 1. Gate `GATE-P0-SMS-SAFETY`:
-   - Verification: Launching emergency SOS on Android 12 through Android 15 triggers `Intent.ACTION_SENDTO` with pre-filled coordinates. Zero runtime `SEND_SMS` permissions requested.
+   - Verification (3.57): with `SEND_SMS` granted, an SOS texts the emergency contact from the phone without a tap (`EmergencyTexts.kt`, `test/emergency_texts_357_test.dart`); denied, it triggers `Intent.ACTION_SENDTO` with pre-filled coordinates.
    - Test Command: `flutter test test/sms_fallback_test.dart test/scenario_f_indian_emergency_fallback_test.dart`
 2. Gate `GATE-P0-GUARDIAN-REVOKE`:
    - Verification: Revoking a Guardian capability token terminates all open WebSockets within 500 ms and returns HTTP 410 on all subsequent snapshot/ticket queries.

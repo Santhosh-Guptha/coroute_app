@@ -61,7 +61,9 @@ either console render the same (same JSON schema v1, relative geometry, units at
   15 s and when the tab becomes visible), and when the JWT expires.
 - **Headers on every `/admin` response** (`src/web_admin.js`): `Content-Security-Policy: default-src
   'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self';
-  connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'`
+  connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'`
+  (3.57: `frame-src 'self'` only for the E-mail studio preview frame `/email/preview/<token>`, which is
+  sandboxed and has its own CSP without scripts)
   (no inline script or style, no third party, not even Razorpay), `X-Frame-Options: DENY`,
   `X-Robots-Tag: noindex, nofollow, noarchive`, `Referrer-Policy: no-referrer`,
   `Cache-Control: no-store` on the page. Assets are versioned (`?v=<hash>`); `robots.txt` disallows `/admin`.
@@ -91,11 +93,19 @@ either console render the same (same JSON schema v1, relative geometry, units at
     tip, Community, Partner perk, with partner name and the "curated" confirmation);
   * new tab **Offers e-mail** (`public/admin/offers.js`) with the composer, campaigns and the
     suppression list.
+  * 3.57: that tab is now the **E-mail studio** (`public/admin/email_studio.js`, `email_studio.css`):
+    Compose (block editor + live preview), Templates, Campaigns (reports), Automation, Settings (cap,
+    quiet hours, click tracking, suppression list, the 3.56 campaigns). See [email_marketing.md](email_marketing.md).
+* **Coupons** (3.57): "N unique e-mail codes" under a parent coupon, the single-use codes in its details,
+  and **E-mail this coupon** (opens the studio with the coupon block filled in). Single-use child codes are
+  left out of the main list.
   * See [notifications_admin.md](notifications_admin.md).
 
 ## New endpoints
 
 - 3.56: `GET/PUT /api/admin/pricing-rules` (minimum price), `GET /api/admin/membership/catalog` now also returns `effective` (price now per plan) and `rules`; `PUT /api/admin/membership/catalog` accepts `listPriceInr` and `offer` (audited as `pricing.plan_price`). Board endpoints: see [marketing_board.md](marketing_board.md).
+
+- 3.57: `/api/admin/email/studio/*` (E-mail studio), public `GET /r/:token` and `GET /email/preview/:token`: see [email_marketing.md](email_marketing.md).
 
 - `GET /api/admin/web/config` (admin): `{ publicOrigin, plansUrl, paymentsEnabled, version, user }`.
 - `GET /api/admin/web/revenue?days=7..366&months=3..36` (admin, read only): `daily[]` and `monthly[]`

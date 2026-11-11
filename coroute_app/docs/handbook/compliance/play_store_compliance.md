@@ -36,7 +36,7 @@ not offer in-app purchase if the app itself contains no purchase flow, prices or
 | Location: approximate | Yes (derived) | No | App functionality | — | |
 | Personal info: name | Yes | Yes, with other users in the ride | Account, app functionality | Required | Username public on leaderboards unless opted out |
 | Personal info: e-mail | Yes | No (processors only) | Account management, communications (opt-in offers) | Required | |
-| Personal info: phone number | Yes | Yes, with ride members; SMS provider for emergency texts | App functionality, safety | Required for group rides | Never to other groups |
+| Personal info: phone number | Yes | Yes, with ride members (an SMS provider only if the server SMS path is turned on; off today) | App functionality, safety | Required for group rides | Never to other groups. Emergency texts are sent by the rider's own phone (SEND_SMS) to the contact the rider chose: user-initiated transfer, not "shared" by CoRoute |
 | Personal info: user IDs | Yes | No | Account | Required | |
 | Personal info: other (vehicle, emergency contact) | Yes | Yes, with ride members / helpers during SOS | Safety | Emergency contact required for group rides | |
 | Health and fitness: health info | Yes (Medical ID: blood group, allergies, notes) | Yes, with responders **only during an open SOS** | Safety | **Optional** | Never to admins |
@@ -64,9 +64,66 @@ No ads; no data sale; no third-party analytics SDKs.
 | `USE_FULL_SCREEN_INTENT` | Alarm / safety category: crash alarm countdown and another rider's SOS over the lock screen so the rider can answer without unlocking. Falls back to heads-up when denied (Android 14+). | Screenshot of crash alarm |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Core safety function (multi-hour ride tracking and crash detection) is killed by OEM battery managers otherwise; asked once from the phone check after explanation. **If Play rejects: remove the permission and keep the "open battery settings" fix button.** | Phone check screen |
 | `RECORD_AUDIO` | Intercom and siren detection; nothing recorded or uploaded. | Settings subtitle "Listens on your phone during rides. Nothing is recorded." |
+| `SEND_SMS` (3.57) | Permissions Declaration Form, section 3a below. | In-app prominent disclosure (`EmergencyTextsDisclosure`) + video 2 (section 3b) |
 
-Not declared: `SEND_SMS` (SMS policy: texts open the messages app instead), `READ_CONTACTS`,
+Not declared: `READ_SMS`, `RECEIVE_SMS`, `READ_PHONE_STATE`, `READ_CALL_LOG`, `READ_CONTACTS`,
 `BLUETOOTH_SCAN`, `HIGH_SAMPLING_RATE_SENSORS`, `FOREGROUND_SERVICE_HEALTH`.
+`<uses-feature android:name="android.hardware.telephony" android:required="false"/>` keeps tablets
+without a SIM eligible (Play would otherwise filter them out because SEND_SMS implies telephony).
+
+### 3a. SEND_SMS: Permissions Declaration Form (SMS and Call Log permissions)
+
+CoRoute is **not** the default SMS handler. It qualifies under the exception
+**"Physical safety / emergency alerts: apps that send SMS alerts in emergency situations"**
+(Play Console > App content > Sensitive app permissions > SMS and Call Log permissions).
+Only `SEND_SMS` is requested; no SMS or call log data is read.
+
+Paste into the form:
+
+- **Core functionality**: Physical safety / emergency alerts (send SMS in emergency situations).
+- **Why the app needs the permission** (text field):
+
+  > CoRoute is a motorcycle ride-safety app. When the rider raises an SOS, or when crash detection
+  > rings for 30 seconds and the rider does not answer (they may be unconscious), the app sends a
+  > text message from the rider's own phone to the emergency contacts the rider chose. The text says
+  > who, what happened (SOS or possible crash), the time, a live location link and the coordinates.
+  > When the emergency is closed, the same contacts get a short "safe now" text. Texts are sent
+  > automatically because an injured rider may not be able to touch the phone; this is the core
+  > safety purpose of the app. Without the permission the app can only open the messages app with
+  > the text filled in, which needs a tap. The app sends at most 30 emergency texts a day, never
+  > sends marketing or other messages, never reads SMS, and asks for the permission only after an
+  > in-app disclosure that explains this and that carrier SMS charges apply. Riders can also send
+  > one test text from Safety health after confirming.
+
+- **Is the app the default SMS handler?** No.
+- **Video link**: video 2 below (YouTube, Unlisted).
+- **Data safety**: phone numbers of emergency contacts stay on the device for sending; nothing
+  about the texts is uploaded (the diagnostics log keeps at most the last 3 digits, and only when the
+  rider sends the log).
+
+### 3b. Video 2: emergency texts (for the SMS declaration)
+
+`tool/play_video/` is not in this tree, so the script lives here. 60 to 90 s, screen recording of a
+Play-signed build (internal track), phone language English, no real personal numbers on screen
+(use a team phone as the contact). Upload as YouTube **Unlisted**.
+
+1. (0-10 s) Title card: "CoRoute: emergency texts from the rider's phone (SEND_SMS)".
+2. (10-25 s) Profile > Emergency contact: type a name and the team phone number, Save. The note
+   "We text this person from your phone in an emergency" is visible.
+3. (25-40 s) The disclosure screen opens: show the full text ("CoRoute sends a text from your phone
+   to your emergency contacts when you raise an SOS or after a crash alarm, even if you can't touch
+   the phone. Normal SMS charges from your carrier apply."), tap **Allow texts**, then the Android
+   permission dialog, tap **Allow**.
+4. (40-50 s) Safety health: "Emergency texts" shows as ready.
+5. (50-70 s) Start a ride, lock the phone, open SOS from the ride notification, hold SOS. Do not touch
+   the phone: after 10 s the SOS screen says "Texted your emergency contact from your phone.
+   Delivered." (Alternative take: let a crash alarm count down to 0 without answering.)
+6. (70-85 s) Cut to the second phone: the received SMS (name, "needs help" / "may have crashed",
+   time, live link, coordinates). Tap the live link: the live page opens.
+7. (85-90 s) Back on the rider phone: "I'm safe now"; the second phone receives "safe now".
+
+Optional extra take for the reviewer: deny the permission and show that the SOS text then opens in
+the messages app instead.
 
 ## 4. In-app review rules
 
@@ -127,7 +184,9 @@ testers opted in for 14 continuous days** before applying for production (MASTER
 - [ ] Ads: **No ads**.
 - [ ] App access: reviewer account (e-mail + password) with a group plan assigned in `/admin`, or
       access mode Free; written steps (create ride, see map, SOS hold screen and cancel).
-      Reviewer's emergency contact must be a team number.
+      Reviewer's emergency contact must be a team number (an SOS texts it automatically when
+      SEND_SMS is allowed; cancelling within 10 s of the press texts nobody).
+- [ ] Sensitive app permissions: SMS and Call Log form for `SEND_SMS` (section 3a) with video 2.
 - [ ] Content rating questionnaire: users interact; location shared with other users; no violence etc.
 - [ ] Target audience: **18+**.
 - [ ] News / Government / Financial features: No. Health: user-entered emergency medical info only (not a health app).

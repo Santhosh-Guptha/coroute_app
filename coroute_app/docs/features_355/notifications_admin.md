@@ -11,6 +11,23 @@ Related: [push_notifications.md](push_notifications.md) (the FCM pipeline),
 [purchase_email.md](purchase_email.md), [sos_sms.md](sos_sms.md),
 [play_payments_policy.md](play_payments_policy.md).
 
+## 3.57 E-mail studio (extends the Offers e-mail)
+
+The Notifications tab **Offers e-mail** is now **E-mail studio** (`public/admin/email_studio.js`,
+`src/email_marketing.js`): customised marketing e-mails with coupons built from templates (8 starters,
+saved and versioned templates), a block editor (header image, heading, rich text, coupon, price, button,
+image, divider, footer always last) with a live preview (desktop / mobile, light / dark, plain text),
+variables (`{firstName}` ... `{link}`, unknown ones refused), audiences (opted-in riders, joined / no ride /
+never hosted / plan ending / plan ended / crew admins / operators / usernames), single-use unique coupon
+codes per rider, send now / schedule / automation rules, a weekly cap (default 2), quiet hours (21:00 to
+09:00 IST), signed click links `/r/<token>` (no open pixels; can be switched off) and a report per
+campaign (sent, failed, unsubscribed, clicks, coupon redemptions). "Plan ending soon" without a coupon or
+price can be an account notice (plan segments only); anything with a coupon or price is marketing and
+needs the Offers consent. Every marketing e-mail carries the unsubscribe link, the sender and the postal
+address (`MAIL_POSTAL_ADDRESS`, needed for real sends). The 3.56 composer's campaigns and the suppression
+list are under **E-mail studio > Settings**; the 3.56 `/api/admin/email/offers/*` endpoints still work.
+Full description: [email_marketing.md](email_marketing.md).
+
 ## 3.56 push kinds, and Offers e-mail for prices and coupons
 
 The composer first asks for a **Channel**:
@@ -200,6 +217,8 @@ A scheduled campaign can be cancelled until it starts.
 | --- | --- | --- |
 | Purchase receipt e-mail | e-mail | name, plan, period, amount, orderId, paymentId, date, receiptUrl, supportEmail |
 | Refund e-mail | e-mail | name, plan, amount, orderId, paymentId, refundId, date, receiptUrl, supportEmail |
+| Welcome e-mail (3.57) | e-mail | name, username, guideUrl, accountUrl, supportEmail ([lifecycle_emails.md](lifecycle_emails.md)) |
+| Ride summary e-mail (3.57) | e-mail | name, rideName, distance, ridingTime, date, stops, riders, groupName, reportUrl |
 | SOS SMS (DLT) | SMS | name, token, lat, lng, time; `{{origin}}` = the site address (fixed) |
 | SOS safe-now SMS (DLT) | SMS | name, time |
 | Push: plan active | push | plan |
@@ -210,6 +229,10 @@ A scheduled campaign can be cancelled until it starts.
   (a typo such as `{{nmae}}`) or a stray `{ }` is refused.
 - **E-mail**: the subject, heading, intro and footer are editable. The layout and the payment
   lines are built by the server, and every value is HTML-escaped.
+- **Welcome and ride summary e-mails** (3.57) have more word fields (steps, safety line, group ride
+  lines; rate line). Their preview also returns the whole e-mail as sent (sample rider, facts, route
+  picture) with a "Download HTML preview". The Welcome e-mail page has the **Welcome coupon code**
+  setting (an active public coupon, or none).
 - **DLT SMS**: the variables and their order must stay exactly as registered. Each value is cut
   to 30 characters (the DLT `{#var#}` limit). Saving a changed text shows a warning that the new
   text must be registered first (and its template id set in Notifications > SMS). Non-GSM
@@ -244,8 +267,11 @@ All `/api/admin/*` endpoints are MASTER_ADMIN only (`requireAuth` + `requireAdmi
 | `PUT /api/admin/templates/:id` | `{fields}` -> `{version, warnings}` (400 with the errors) |
 | `POST /api/admin/templates/:id/reset` | defaults as a new version |
 | `GET /api/admin/templates/:id/history` | the last 20 versions |
+| `GET` / `PUT /api/admin/email/lifecycle/settings` | 3.57 welcome coupon (`{welcomeCoupon}`), e-mail job settings |
 | `GET` / `PUT /api/me/push-prefs` | rider: `{news}` (safety pushes always on) |
 | `GET /media/push/:file` | public image (cached 30 days, nosniff, `default-src 'none'`) |
+| `/api/admin/email/studio/*` | 3.57 E-mail studio: templates, preview, test, campaigns, rules, settings, unique codes, image library ([email_marketing.md](email_marketing.md)) |
+| `GET /r/:token`, `GET /email/preview/:token` | 3.57 signed click redirect; the studio's sandboxed preview frame (public) |
 
 ## Environment
 
@@ -256,6 +282,8 @@ All `/api/admin/*` endpoints are MASTER_ADMIN only (`requireAuth` + `requireAdmi
 | `PUSH_IMAGE_DIR` | `<data>/push-images` (next to `REVIEW_PHOTO_DIR`) | Disk store for images. With `REVIEW_PHOTO_STORE=par` the images go to the bucket under `push-images/`. |
 | `PUSH_CAMPAIGN_RATE` | 50 | Tokens per second |
 | `PUSH_NEWS_DAILY_CAP` | 2 | Campaign pushes per rider per India day |
+| `MAIL_POSTAL_ADDRESS` | none | 3.57: postal address in every marketing e-mail footer; real campaigns and rules need it **[OWNER TO FILL]** |
+| `OFFER_EMAIL_RATE` | 5 | Offers / E-mail studio e-mails per second |
 
 ## Files
 

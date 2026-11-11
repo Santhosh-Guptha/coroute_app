@@ -1,55 +1,108 @@
-# SOS SMS: from the phone and from the server (3.56)
+# SOS SMS: phone-first (3.57), server provider optional
 
-An SOS reaches the rider's emergency contacts by text in two ways:
+**Owner decision (3.57)**: there is no SMS provider. Emergency texts are sent **by the rider's own
+phone, from their SIM**, automatically, without a tap. The server path (MSG91 / Twilio, section 2)
+stays in the code but is **off** (`SMS_PROVIDER=off`); it is not the plan.
 
-1. **From the rider's phone**: when the SOS cannot reach the group over the internet.
-2. **From the server**: through an SMS provider (MSG91 or Twilio), when the SOS reaches the
-   gateway (directly, or relayed by another rider's phone) and the phone did not text the
-   contacts itself. When the SOS is resolved or cancelled, the same contacts get a "safe now"
-   text.
+An SOS reaches the rider's emergency contacts by text in these ways:
+
+1. **Phone-first automatic texts** (3.57): every SOS of the rider (SOS hold, crash alarm ran out,
+   rider-down, missing-rider and solo check-in escalations that raise an SOS) texts the emergency
+   contacts from the phone, with retries, delivery status and an "I'm safe now" follow-up.
+2. **Group fallback round** (3.56): when the SOS cannot reach the group over the internet for 45 s,
+   the lead, sweeper and nearest riders get a text too (numbers already texted are skipped).
+3. **Server provider** (optional, off): section 2.
 
 Ride Guardian watchers get the SOS and the arrival through browser push, as before
-(`guardian_push.js`, checked every 15 s; the emergency push is sent with high urgency). The
-arrival words are the editable template "Guardian: arrived safely".
+(`guardian_push.js`, checked every 15 s; the emergency push is sent with high urgency).
 
 ## 1. From the rider's phone (app)
 
-`lib/data/services/safety_service.dart` `_smsRound`, `lib/domain/safety/sms_plan.dart`:
+### 1.1 Permission and disclosure
 
-- **Who**: the emergency contact, then the ride's lead and sweeper, then the nearest riders.
-  - `SmsPlanner`: never the sender, never the same number twice, at most
-    `smsMaxRecipients`, within the phone's text budget.
-  - An offline solo ride texts the contact without waiting for the "Text the group" opt-in.
-- **Text**: name, time, the **live link**, the coordinates as text, plus the map link and ride
-  name only while the text still fits one SMS part. Example:
+- `AndroidManifest.xml` declares `SEND_SMS` and
+  `<uses-feature android:name="android.hardware.telephony" android:required="false"/>` (tablets without
+  a SIM stay eligible on Play). No `READ_SMS`, `RECEIVE_SMS` or `READ_PHONE_STATE`.
+- Play: the "Physical safety / emergency alerts" exception, with the Permissions Declaration Form and
+  video 2 (`docs/handbook/compliance/play_store_compliance.md` 3a, 3b).
+- Prominent disclosure (`lib/presentation/safety/emergency_texts_disclosure.dart`), one calm screen
+  before the system prompt: "CoRoute sends a text from your phone to your emergency contacts when you
+  raise an SOS or after a crash alarm, even if you can't touch the phone. Normal SMS charges from
+  your carrier apply." Shown:
+  - once after the rider saves an emergency contact (profile form);
+  - from the permissions screen ("Emergency texts", optional);
+  - from Safety health ("Emergency texts" item, **Allow** fix button).
+- **Denied**: nothing is sent automatically; the SOS screen says so and the 3.56 composer flow stays
+  (the messages app opens prefilled, the rider or a bystander presses Send). Safety health shows
+  "Not allowed" with the fix.
+
+### 1.2 Automatic texts
+
+`SafetyService` (section "3.57 phone-first texts") + `lib/domain/safety/emergency_texts.dart`
+(pure, tested) + `android/.../EmergencyTexts.kt` (native queue) + `SmsChannel.kt` (channel).
+
+- **When**: a new pending SOS of this rider (`_watchPendingSos`, and the offline solo ride's
+  SOS). All automatic escalations raise that same SOS, so one hook covers them.
+  - A deliberate press (SOS hold, ride notification) waits **10 s** (`pressGrace`): cancelling the
+    SOS within it texts nobody. Automatic SOS (crash countdown ran out, Need Help, rider-down,
+    check-in escalations) go at once: the countdown was the cancel window.
+  - The hidden developer impact (a test alarm) never texts. An SOS older than 2 h restored from disk
+    is not texted.
+- **Who**: the emergency contacts (the profile holds one today; the queue takes up to **5**), each
+  number once, never the rider's own number.
+- **Text** (`EmergencyTexts.alert` = `SmsText.sos` with the live link): name, "SOS ... needs help" or
+  "may have crashed", time, live link `https://<origin>/e/<code>` (`PendingSos.linkToken`),
+  coordinates as text, plus the map link and ride name only while the text still fits one part.
+  Longer texts (long or non-GSM names) go multipart. Example:
   `CoRoute SOS: Kiran needs help at 14:05. Live: https://coroute.devmonks.space/e/Ab3dEf6hIj9lMn0pQr2tUv Lat 12.97160 Lng 77.59456`
-  - The live link code (`PendingSos.linkToken`, 22 random characters made when the SOS is
-    raised) is stored with the pending SOS and sent with it as `smsLinkToken`.
-  - When the SOS reaches the gateway, directly or relayed, the gateway registers it
-    (`EmergencySmsGateway.registerClientLink`). From then on `/e/<code>` shows the rider's live
-    position for 30 minutes or until the alert is closed.
-  - Before that the link shows the "link has expired" page, and the coordinates in the text
-    still work.
-  - An SOS stored by an older version has no code and gets the map link text as before.
-- **How**: the Play build (and the website APK, which is the same build) has no `SEND_SMS`
-  permission. The text goes through the phone's messages app with every recipient and the text
-  filled in, and the rider or a bystander presses Send.
-  - Android does not let an app open another app from the background. The automatic round
-    therefore only shows a waiting status (`composerWaiting`), and **Text the group now** opens
-    it once the phone is in hand.
-  - A build with `SEND_SMS` granted sends directly. It waits for the sent report of each part,
-    up to 20 s, and stops at "no service".
-- **Lock screen**: when the SOS screen is shown over the lock screen, tapping "Text the group
-  now" asks Android to unlock first (`KeyguardManager.requestDismissKeyguard`, `SmsChannel.kt`).
-  The messages app then opens. If the rider cancels the unlock, it can be tapped again.
-- **Retries when offline**: the messages app queues the text and sends it when there is signal.
-  - The pending SOS itself is kept on disk and resent over the internet (same `clientId`, so
-    never duplicated) as soon as the phone is back online.
-  - Once it arrives, the server texts any contact the phone could not reach (below).
-- **Status**: the SOS screen shows the text status, for example "Texted 2 of 3"
-  (`SmsFallbackStatus`).
+- **Dedupe per incident**: the incident is the SOS `clientId`. `EmergencyTextLedger` (kept with the
+  pending SOS, `EmergencyTextStore`, number hashes only) records each texted incident, so a resent,
+  relayed, crash-upgraded or restored SOS never texts twice. Job ids are
+  `<clientId>|A|<fnv32(number key)>`; the native queue also ignores a known id.
+- **Daily cap**: 30 texts per rolling 24 h (alert and test texts). "Safe now" only follows texts
+  already sent.
+- **Sending** (native, `EmergencyTexts.kt`):
+  - Jobs are committed to a private SharedPreferences file before sending, so an app kill or reboot
+    does not lose them (`BOOT_COMPLETED` / `MY_PACKAGE_REPLACED` resume the queue).
+  - SIM: the default SMS SIM, else the default SIM, else the system default (no SIM listing, so no
+    READ_PHONE_STATE). With dual SIM set to "ask every time" the system default is used.
+  - One text per contact; multipart when needed. Sent and delivered `PendingIntent`s per part
+    (explicit broadcasts to `EmergencyTextReceiver`, `FLAG_IMMUTABLE`, unique request codes), so
+    reports arrive with the screen locked, the app in the background or the process restarted.
+  - Delivery: a delivery report counts as delivered (immutable intents get no PDU to read).
+  - **Retries**: `NO_SERVICE`, `RADIO_OFF` (airplane mode), `GENERIC_FAILURE`, and no sent report
+    within 3 min, after **30 s, 2 min, 5 min, 10 min**, then FAILED. Woken by a Handler while the
+    process lives, by an inexact `AlarmManager.setAndAllowWhileIdle` alarm otherwise (no exact-alarm
+    permission), and 3 s after a network comes back (`ConnectivityManager`, ACCESS_NETWORK_STATE).
+- **Status**: per job QUEUED / SENDING / SENT / DELIVERED / FAILED / CANCELLED back to Dart
+  ("textStatus"), shown on the SOS screen and the solo card (`contactTextsLine`, for example
+  "Texted your emergency contact from your phone. Delivered."), and written to the diagnostics log
+  (`contact_text`: kind, state, try, code, `***210`; never full numbers or text).
+- **Cancelled / resolved** (`ConvoyService.onMySosClosed`: the rider's cancel or "Help reached me",
+  the lead's resolve, `ALERT_RESOLVED` for the rider's own alert; the solo ride's "I'm safe now"):
+  waiting texts are cancelled, and every contact whose alert left the phone gets
+  `CoRoute: <name> is safe now. The SOS was closed at HH:MM. No action is needed.` once (always on).
+- **Safety health**: "Emergency texts" (ready / not allowed / no SIM / no telephony) with the fix,
+  and **Send a test text to my emergency contact** (after a confirmation; "CoRoute test: emergency
+  texts work. No action is needed.").
+- **Solo check-in by ETA** (`solo_guardian_service.dart`) already sends its overdue / fine-now
+  texts with the same permission.
 
-## 2. From the server (gateway)
+### 1.3 Group fallback round (3.56, unchanged apart from dedupe)
+
+`_smsRound`, `lib/domain/safety/sms_plan.dart`:
+
+- When the SOS cannot reach the group over the internet for 45 s: the lead, sweeper and nearest
+  riders (`SmsPlanner`, at most `smsMaxRecipients`, within the 30-min text budget). Numbers the
+  automatic texts already cover for this SOS are skipped.
+- With SEND_SMS denied: the messages app opens with every recipient (the rider or a bystander presses
+  Send); in the background the round only shows `composerWaiting`, and **Text the group now** opens it
+  once the phone is in hand (it asks to unlock first over the lock screen).
+- The pending SOS itself is kept on disk and resent over the internet with the same `clientId`.
+
+## 2. From the server (gateway) - optional, off (`SMS_PROVIDER=off`)
+
+Kept for a future provider; not used while the owner has none. With `off`, nothing here sends.
 
 `gateway/src/sos_sms.js` (`SosSms`), attached to `EmergencySmsGateway` as `sosSms` by
 `src/notifications.js`.
@@ -140,6 +193,8 @@ CoRoute: {{name}} is safe now. The SOS alert was closed at {{time}} IST. No acti
 
 ## Owner setup
 
+Not needed for 3.57 (phone-first). Only if a server SMS provider is added later.
+
 ### A. DLT registration (India, required for both providers)
 
 1. Register the business as a **Principal Entity** on an operator DLT portal: Jio TrueConnect,
@@ -229,5 +284,9 @@ CoRoute: {{name}} is safe now. The SOS alert was closed at {{time}} IST. No acti
     link works, a repeat does nothing, and resolve sends "safe now".
 - `test/sos_sms_text_356_test.dart`: the phone's text and link builder, the link code in the SOS
   message, and NEWS routing.
+- `test/emergency_texts_357_test.dart` (pure): text variants and parts, dedupe per incident, retry
+  schedule, daily cap, cancel before send, "safe now" follow-up, test text, status line.
+- `test/emergency_texts_safety_357_test.dart`: the same through SafetyService with a fake queue
+  (press grace, cancel, crash at once, denied fallback, test alarm never texts, test text).
 - The earlier suites stay green: `emergency_sms_gateway.test.js`, `ride_scenarios_e.test.js` and
   `large_group_security_e.test.js` (provider `off`).

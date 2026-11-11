@@ -64,7 +64,7 @@ While you ride, the map shows your group, the route, your speed and the speed li
 
 ## 2. Safety
 
-Every safety feature is free and on for every rider. In **Settings › Safety is always on** you can see the full list: crash detection; SOS, also on the lock screen; emergency texts; Medical ID for responders; "Are you OK?" check-in; solo ride ETA check-in; no-signal ahead; break reminder; road warnings; auto re-route; help nearby riders; ask nearby riders to help me; clear voice in group talk; screen stays on while riding.
+Every safety feature is free and on for every rider. In **Settings › Safety is always on** you can see the full list: crash detection; SOS, also on the lock screen; emergency texts from your phone (your contact gets a text by itself after an SOS or an unanswered crash alarm; allow texts when asked); Medical ID for responders; "Are you OK?" check-in; solo ride ETA check-in; no-signal ahead; break reminder; road warnings; auto re-route; help nearby riders; ask nearby riders to help me; clear voice in group talk; screen stays on while riding.
 
 The *CoRoute safety guide* explains each one in depth, with limits and what to do in an emergency. Here is the short version.
 
