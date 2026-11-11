@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>CoRoute Operator console</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/admin/admin.css">
+<link rel="stylesheet" href="/operator/operator.css">
+<script defer src="/operator/map.js"></script>
+<script defer src="/operator/operator.js"></script>
+</head>
+<body>
+<noscript><p class="noscript">The CoRoute operator console needs JavaScript.</p></noscript>
+
+<main id="signin" class="signin" hidden>
+  <form id="signin-form" class="signin__card" novalidate>
+    <div class="brandline"><img src="/favicon.svg" alt="" width="36" height="36"><span>CoRoute <b>Operator</b></span></div>
+    <h1>Sign in</h1>
+    <p class="muted">For approved tour operators, clubs and fleets, and their co-organisers. Use the account you ride with.</p>
+    <label class="field"><span>Email or callsign</span><input id="signin-id" name="identifier" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label class="field"><span>Password</span><input id="signin-pw" name="password" type="password" autocomplete="current-password" required></label>
+    <p id="signin-error" class="form-error" role="alert" hidden></p>
+    <button id="signin-btn" class="btn btn--primary btn--block" type="submit">Sign in</button>
+    <p class="muted small">Not an operator yet? <a href="/operators/apply">Apply for the console</a>. You are signed out after 60 minutes without activity.</p>
+  </form>
+</main>
+
+<main id="noop" class="signin" hidden>
+  <div class="signin__card">
+    <div class="brandline"><img src="/favicon.svg" alt="" width="36" height="36"><span>CoRoute <b>Operator</b></span></div>
+    <h1 id="noop-title">No operator account</h1>
+    <p class="muted" id="noop-text">This account does not run an operator account and is not a co-organiser of one.</p>
+    <div class="row"><a class="btn btn--primary" id="noop-apply" href="/operators/apply">Apply for the console</a><button class="btn" type="button" id="noop-out">Sign out</button></div>
+  </div>
+</main>
+
+<div id="shell" class="shell" hidden>
+  <aside class="side">
+    <div class="brandline"><img src="/favicon.svg" alt="" width="28" height="28"><span>CoRoute <b>Operator</b></span></div>
+    <select id="op-switch" class="select--sm" aria-label="Operator" hidden></select>
+    <nav id="nav" class="nav" aria-label="Sections">
+      <a href="#/overview" data-section="overview">Overview</a>
+      <a href="#/roster" data-section="roster">Roster</a>
+      <a href="#/rides" data-section="rides">Rides</a>
+      <a href="#/live" data-section="live">Live map <span class="navbadge" id="sos-badge" hidden>SOS</span></a>
+      <a href="#/reports" data-section="reports">Attendance &amp; reports</a>
+      <a href="#/broadcasts" data-section="broadcasts">Broadcasts</a>
+    </nav>
+    <div class="side__foot">
+      <div id="whoami" class="whoami"></div>
+      <div class="side__row">
+        <select id="theme" class="select select--sm" aria-label="Theme">
+          <option value="system">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <button id="signout" class="btn btn--ghost btn--sm" type="button">Sign out</button>
+      </div>
+    </div>
+  </aside>
+  <main id="view" class="view" tabindex="-1"></main>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

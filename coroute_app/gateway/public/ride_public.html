@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__RIDE_TITLE__ | __OPERATOR_NAME__ on Coroute</title>
+<meta name="description" content="__RIDE_DESC__">
+<meta name="robots" content="index, follow">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="__ORIGIN__/rides/__SLUG__">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<link rel="stylesheet" href="/assets/operators.css">
+<!-- Strict CSP on this page: no inline script (src/operator_routes.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/ride_public.js" defer></script>
+</head>
+<body data-page="rides">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo sh-hero">
+    <div class="container">
+      <div class="sh-auth">
+        <div class="page-hero__inner sh-auth__intro" id="rp-intro" data-slug="__SLUG__">
+          <p class="eyebrow" id="rp-operator">__OPERATOR_NAME__</p>
+          <h1 id="rp-title">__RIDE_TITLE__</h1>
+          <dl class="sh-facts op-facts" id="rp-facts"></dl>
+          <p class="t-body" id="rp-notes"></p>
+        </div>
+        <div class="sh-card sh-auth__card" id="rp-card" aria-busy="true">
+          <div class="sh-notice" id="rp-notice" role="status" hidden></div>
+          <p class="sh-plancard__label">Seats</p>
+          <p class="op-seats"><span class="t-num" id="rp-seats">&nbsp;</span> <span class="t-muted" id="rp-seats-of"></span></p>
+          <p class="sh-badge" id="rp-badge" hidden></p>
+          <p class="t-small" id="rp-text"></p>
+          <div class="sh-actions" id="rp-actions"></div>
+          <div class="op-join-code" id="rp-join" hidden>
+            <p class="t-small">The ride is live. Open CoRoute and join with this code:</p>
+            <p class="op-code t-num" id="rp-code"></p>
+            <a class="btn btn--primary btn--block" id="rp-join-link" href="/">Open in the app</a>
+          </div>
+          <p class="t-xs t-faint">Signing up shares your username and first name with the organiser. Your phone, e-mail and medical ID stay private. Your organiser sees your emergency contact only if you raise an SOS during their ride. <a href="/privacy#clubs-operators">Privacy</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your clubs | Coroute</title>
+<meta name="description" content="Clubs and tour operators you ride with on CoRoute: invites, upcoming rides and messages.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="__ORIGIN__/clubs">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<link rel="stylesheet" href="/assets/operators.css">
+<!-- Strict CSP on this page: no inline script (src/operator_routes.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/clubs.js" defer></script>
+</head>
+<body data-page="clubs">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo sh-hero">
+    <div class="container">
+      <div class="sh-acc-head">
+        <div class="page-hero__inner">
+          <p class="eyebrow">Clubs</p>
+          <h1>Your clubs.</h1>
+          <p class="t-lead" id="cl-who">Clubs, tour operators and fleets you ride with.</p>
+        </div>
+        <div class="sh-acc-head__actions">
+          <a class="btn btn--secondary" href="/operators/apply">Run a club</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="section section--tight">
+    <div class="container">
+      <div class="sh-notice" id="cl-notice" role="status" hidden></div>
+      <div class="sh-card op-join" id="cl-join" hidden>
+        <p class="sh-plancard__label">Club invite link</p>
+        <h2 class="sh-card__title" id="cl-join-name"></h2>
+        <p class="t-small t-muted" id="cl-join-meta"></p>
+        <p class="t-small">Joining shares your username and first name with the organiser, and your live position only during their rides. Your phone, e-mail and medical ID stay private. Your organiser sees your emergency contact only if you raise an SOS during their ride. <a href="/privacy#clubs-operators">Privacy</a></p>
+        <div class="sh-actions"><button class="btn btn--primary" type="button" id="cl-join-btn">Join club</button><a class="btn btn--ghost" href="/clubs">Not now</a></div>
+      </div>
+      <h2 class="t-h3 op-h op-h--first">Invites</h2>
+      <div id="cl-invites" class="op-list" aria-live="polite"><p class="t-muted">Loading&hellip;</p></div>
+      <h2 class="t-h3 op-h">Clubs you are in</h2>
+      <div id="cl-clubs" class="op-list"><p class="t-muted">Loading&hellip;</p></div>
+      <p class="t-xs t-faint op-privacy" id="cl-privacy"></p>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Operator console for clubs and tour operators | Coroute</title>
+<meta name="description" content="Tour operators, riding clubs and rental or corporate fleets can apply for the CoRoute operator console: one roster, many rides, live safety on one map.">
+<meta name="robots" content="index, follow">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="__ORIGIN__/operators/apply">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<link rel="stylesheet" href="/assets/operators.css">
+<!-- Strict CSP on this page: no inline script (src/operator_routes.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/operators_apply.js" defer></script>
+</head>
+<body data-page="operators">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo sh-hero">
+    <div class="container">
+      <div class="sh-auth">
+        <div class="page-hero__inner sh-auth__intro">
+          <p class="eyebrow">For clubs and operators</p>
+          <h1>Run every ride from one console.</h1>
+          <p class="t-lead">Tour operators, riding clubs, rental and corporate fleets: one roster, scheduled rides, every live group on one map, attendance and reports.</p>
+          <ul class="sh-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Invite riders by username or link. They accept in the app.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg>All your live rides on one map, with roles, alerts and SOS first.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg>Riders' phone, e-mail and medical ID stay private. An emergency contact is shown to you only during that rider's SOS.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Reviewed by the CoRoute team. Limits are set when you are approved.</li>
+          </ul>
+        </div>
+
+        <div class="sh-card sh-auth__card" id="op-card" aria-busy="true">
+          <div class="sh-notice" id="op-notice" role="status" hidden></div>
+
+          <div id="op-signin" hidden>
+            <h2 class="sh-card__title">Sign in to apply</h2>
+            <p class="t-small t-muted">Use the CoRoute account you ride with. The console signs in with the same account.</p>
+            <div class="sh-actions"><button class="btn btn--primary btn--lg btn--block" type="button" id="op-signin-btn">Sign in</button></div>
+            <p class="t-xs t-faint">No account yet? <a class="link" href="/get">Get the app</a> and create one first.</p>
+          </div>
+
+          <div id="op-status" hidden>
+            <p class="sh-plancard__label">Your application</p>
+            <h2 class="sh-card__title" id="op-status-name"></h2>
+            <p class="sh-badge" id="op-status-badge"></p>
+            <dl class="sh-facts" id="op-status-facts"></dl>
+            <p class="t-small" id="op-status-text"></p>
+            <div class="sh-actions" id="op-status-actions"></div>
+          </div>
+
+          <form id="op-form" class="sh-form" novalidate hidden>
+            <h2 class="sh-card__title">Apply for the operator console</h2>
+            <div class="form-group">
+              <label class="form-label" for="op-type">You are a</label>
+              <select class="form-input" id="op-type" name="type" required>
+                <option value="">Choose one</option>
+                <option value="TOUR_OPERATOR">Tour operator</option>
+                <option value="RIDING_CLUB">Riding club</option>
+                <option value="RENTAL_FLEET">Rental fleet</option>
+                <option value="CORPORATE_FLEET">Corporate fleet</option>
+              </select>
+              <span class="op-err" data-err="type"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="op-name">Organisation name</label>
+              <input class="form-input" id="op-name" name="name" type="text" maxlength="80" autocomplete="organization" required>
+              <span class="op-err" data-err="name"></span>
+            </div>
+            <div class="op-row">
+              <div class="form-group">
+                <label class="form-label" for="op-city">City</label>
+                <input class="form-input" id="op-city" name="city" type="text" maxlength="60" autocomplete="address-level2" required>
+                <span class="op-err" data-err="city"></span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="op-riders">Expected riders</label>
+                <input class="form-input" id="op-riders" name="expectedRiders" type="number" min="1" max="100000" inputmode="numeric" required>
+                <span class="op-err" data-err="expectedRiders"></span>
+              </div>
+            </div>
+            <fieldset class="op-private">
+              <legend><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>Business contact <span class="t-xs t-faint">(only the CoRoute team sees it)</span></legend>
+              <div class="form-group">
+                <label class="form-label" for="op-email">Business e-mail</label>
+                <input class="form-input" id="op-email" name="email" type="email" maxlength="254" autocomplete="email" required>
+                <span class="op-err" data-err="email"></span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="op-phone">Business phone</label>
+                <input class="form-input" id="op-phone" name="phone" type="tel" maxlength="20" autocomplete="tel" required>
+                <span class="op-err" data-err="phone"></span>
+              </div>
+            </fieldset>
+            <div class="form-group">
+              <label class="form-label" for="op-web">Website or social page <span class="t-xs t-faint">(optional)</span></label>
+              <input class="form-input" id="op-web" name="website" type="url" maxlength="200" placeholder="https://">
+              <span class="op-err" data-err="website"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="op-desc">What rides do you run?</label>
+              <textarea class="form-input form-textarea" id="op-desc" name="description" rows="4" maxlength="500" required></textarea>
+              <span class="t-xs t-faint"><span id="op-desc-n">0</span>/500. No phone numbers or e-mail here.</span>
+              <span class="op-err" data-err="description"></span>
+            </div>
+            <p class="sh-status" id="op-form-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="submit" id="op-submit">Send application</button>
+            <p class="t-xs t-faint">We review applications within a few working days and reply to your business e-mail.</p>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

@@ -1,0 +1,27 @@
+/* 3.56 operator / club pages on the website: /operators/apply, /clubs, /rides/<slug> (docs/features_355/operators.md).
+   Builds on site.css tokens and shop.css cards. */
+.op-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-12); }
+@media (max-width: 520px) { .op-row { grid-template-columns: 1fr; } }
+.op-err { display: block; min-height: 0; font-size: var(--fs-xs); font-weight: 700; color: var(--c-danger); }
+.op-err:empty { display: none; }
+.op-private { border: 1px dashed var(--c-border-strong); border-radius: var(--r-lg); padding: var(--sp-12) var(--sp-16) var(--sp-4); margin: var(--sp-8) 0 var(--sp-16); }
+.op-private legend { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; font-weight: 800; font-size: var(--fs-small); color: var(--c-text-2); }
+.op-private legend .icon { width: 16px; height: 16px; }
+.op-h { margin: var(--sp-32) 0 var(--sp-12); }
+.op-list { display: grid; gap: var(--sp-12); }
+.op-item { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-12); align-items: center; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-16) var(--sp-20, 20px); }
+.op-item__name { font-weight: 800; font-size: var(--fs-body); color: var(--c-text); }
+.op-item__meta { font-size: var(--fs-small); color: var(--c-text-3); margin-top: 2px; }
+.op-item__more { grid-column: 1 / -1; display: grid; gap: 6px; border-top: 1px solid var(--c-border); padding-top: var(--sp-12); font-size: var(--fs-small); }
+.op-item__more b { color: var(--c-text); }
+.op-item__actions { display: flex; flex-wrap: wrap; gap: var(--sp-8); justify-content: flex-end; }
+@media (max-width: 560px) { .op-item { grid-template-columns: 1fr; } .op-item__actions { justify-content: flex-start; } }
+.op-empty { color: var(--c-text-3); font-size: var(--fs-small); padding: var(--sp-16); border: 1px dashed var(--c-border); border-radius: var(--r-lg); }
+.op-join { margin-bottom: var(--sp-24); border-color: var(--c-accent-line); }
+.op-privacy { margin-top: var(--sp-24); max-width: 70ch; }
+.op-seats { margin: var(--sp-4) 0 0; font-size: var(--fs-small); }
+.op-seats .t-num { font-size: clamp(36px, 5vw, 48px); font-weight: 800; color: var(--c-text); line-height: 1; }
+.op-facts { max-width: 34rem; }
+.op-join-code { margin-top: var(--sp-16); padding: var(--sp-16); border-radius: var(--r-lg); background: var(--c-surface-2); }
+.op-code { font-size: 32px; letter-spacing: 0.2em; font-weight: 800; margin: var(--sp-8) 0 var(--sp-12); color: var(--c-text); }
+.op-h--first { margin-top: 0; }
