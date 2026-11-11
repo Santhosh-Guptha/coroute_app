@@ -22,4 +22,5 @@
 .tp-mail__brand { color: #5B4BD6; font-weight: 700; font-size: 0.85rem; }
 .tp-mail__heading { font-size: 1.2rem; font-weight: 700; margin-top: 6px; }
 .tp-mail__lines { border-top: 1px solid #ECEAE6; border-bottom: 1px solid #ECEAE6; padding: 10px 0; font-size: 0.8rem; color: #6B7280; }
+.tp-mail__text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 0.85rem; line-height: 1.5; }
 .tp-sms { background: var(--c-surface-2); border-radius: 14px 14px 14px 4px; padding: 10px 12px; font-size: 0.9rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 420px; }

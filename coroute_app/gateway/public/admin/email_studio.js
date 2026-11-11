@@ -1,0 +1,680 @@
+/* CoRoute web admin: Notifications > "E-mail studio" (3.57, src/email_marketing.js, docs/features_355/email_marketing.md).
+   Extends the 3.56 Offers e-mail composer: customised marketing e-mails with coupons, built from templates.
+   #/notifications/email              compose: block editor + live preview (mobile / desktop, light / dark) + audience and sending
+   #/notifications/email/templates    starters and saved templates (use, edit, duplicate, archive, versions)
+   #/notifications/email/campaigns    campaigns with their report (sent, failed, unsubscribed, clicks, coupon redemptions)
+   #/notifications/email/automation   automation rules (segment -> template, once per rider per N days)
+   #/notifications/email/settings     frequency cap, quiet hours, click tracking, suppression list, earlier offers e-mails
+   Text is always set as text. The preview is the server's HTML in a sandboxed same-origin frame (/email/preview/<token>,
+   its own CSP, no scripts); the console's CSP allows frames from this site only. Every rule (consent, links, variables,
+   categories, caps) is enforced by the server; this page only helps. */
+(function () {
+  'use strict';
+  var CR = window.CR;
+  if (!CR) return;
+  var h = CR.util.h, clear = CR.util.clear, ui = CR.ui, api = CR.api;
+  var BASE = '/admin/email/studio';
+  var STATUS = { SCHEDULED: ['Scheduled', 'info'], SENDING: ['Sending', 'warn'], SENT: ['Sent', 'ok'], FAILED: ['Failed', 'bad'], CANCELLED: ['Cancelled', ''] };
+  var PLAN_NAMES = { group_small: 'Small Group', group_large: 'Large Group' };
+  var BLOCK_HINTS = {
+    header_image: 'A wide picture at the top.', heading: 'A title line.', text: '**bold**, *italic*, [label](/path), "- " bullets, blank line = new paragraph.',
+    coupon: 'An active coupon: code, discount, validity and a button to /plans?coupon=CODE.', price: 'List price struck through and the offer price, read from Plans & pricing when the e-mail is sent.',
+    button: 'Opens a page of this site.', image: 'A picture, optionally linking to a page of this site.', divider: 'A thin line.', footer: 'Always last: unsubscribe, sender, postal address.'
+  };
+  var cfg = null;
+  var seq = 0;
+  var uid = function () { seq++; return 'b' + seq; };
+
+  function tabs(active) {
+    var nav = h('div.row.eng-tabs.es-tabs', { role: 'tablist', 'aria-label': 'E-mail studio' });
+    [['', 'Compose'], ['templates', 'Templates'], ['campaigns', 'Campaigns'], ['automation', 'Automation'], ['settings', 'Settings']].forEach(function (t) {
+      nav.appendChild(h('button.btn.btn--sm', { type: 'button', role: 'tab', 'aria-selected': String(active === t[0]), 'aria-pressed': String(active === t[0]), text: t[1],
+        onclick: function () { CR.go('#/notifications/email' + (t[0] ? '/' + t[0] : '')); } }));
+    });
+    return nav;
+  }
+  function loadConfig() {
+    if (cfg) return Promise.resolve(cfg);
+    return api('GET', BASE + '/config').then(function (c) { cfg = c; return c; });
+  }
+  function errorList(e) {
+    var list = (e && e.body && e.body.errors) || [e && e.message];
+    var box = h('div.banner.banner--bad', { role: 'alert' });
+    if (list.length === 1) box.textContent = list[0];
+    else box.appendChild(h('ul.es-errs', list.slice(0, 8).map(function (x) { return h('li', { text: x }); })));
+    return box;
+  }
+  function strip(design) {
+    return { subject: design.subject, preheader: design.preheader, blocks: design.blocks.map(function (b) { var o = {}; Object.keys(b).forEach(function (k) { if (k.charAt(0) !== '_') o[k] = b[k]; }); return o; }) };
+  }
+  function withIds(design) {
+    var d = JSON.parse(JSON.stringify(design || { subject: '', preheader: '', blocks: [] }));
+    d.blocks = (d.blocks || []).map(function (b) { b._id = uid(); return b; });
+    if (!d.blocks.some(function (b) { return b.type === 'footer'; })) d.blocks.push({ type: 'footer', note: '', _id: uid() });
+    return d;
+  }
+  function newBlock(type) {
+    var b = { type: type, _id: uid() };
+    if (type === 'heading') { b.text = 'A new heading'; b.level = 1; }
+    if (type === 'text') b.text = 'Hi {firstName},\n\nWrite your message here.';
+    if (type === 'button') { b.label = 'See plans'; b.path = '/plans'; b.style = 'primary'; }
+    if (type === 'coupon') { b.code = ''; b.headline = ''; b.note = ''; b.buttonLabel = 'Use {couponCode}'; }
+    if (type === 'price') { b.planId = 'group_large'; b.buttonLabel = 'See the offer'; b.note = ''; }
+    if (type === 'image' || type === 'header_image') { b.imageId = ''; b.alt = ''; }
+    return b;
+  }
+  function audienceText(a) {
+    if (!a) return '-';
+    var seg = (cfg && cfg.segments || []).filter(function (s) { return s.kind === a.kind; })[0];
+    var label = seg ? seg.label : a.kind;
+    if (a.days) label = label.replace('N days', a.days + ' days');
+    if (a.kind === 'usernames') label = (a.usernames || []).length + ' username(s)';
+    if (a.kind === 'plan') label = 'Plan: ' + (a.plans || []).join(', ');
+    return label;
+  }
+
+  // ==================================================================== compose
+  /** Shared compose state (kept while switching tabs in this page load). */
+  var draft = null;
+  function freshDraft() {
+    return { templateId: null, version: 0, name: '', category: 'marketing', design: withIds({ subject: '', preheader: '', blocks: [newBlock('heading'), newBlock('text')] }),
+      unique: { enabled: false, prefix: '', validDays: 14 }, audience: { kind: 'all', days: 30, usernames: '' }, when: 'now', at: '', track: null, dirty: false };
+  }
+  function loadIntoDraft(t, opts) {
+    draft = freshDraft();
+    draft.templateId = t.starter ? null : t.templateId;
+    draft.version = t.version || 0;
+    draft.name = t.starter ? t.name : t.name;
+    draft.category = t.category || 'marketing';
+    draft.design = withIds(t.design);
+    draft.fromStarter = t.starter ? t.id : null;
+    if (opts && opts.coupon) draft.design.blocks.forEach(function (b) { if (b.type === 'coupon') b.code = opts.coupon; });
+  }
+
+  function renderCompose(view) {
+    if (!draft) draft = freshDraft();
+    var pre = CR.state.studioPrefill; CR.state.studioPrefill = null;
+    if (pre && pre.coupon) {
+      var hasCoupon = draft.design.blocks.some(function (b) { return b.type === 'coupon'; });
+      if (!hasCoupon) draft.design.blocks.splice(Math.max(0, draft.design.blocks.length - 1), 0, newBlock('coupon'));
+      draft.design.blocks.forEach(function (b) { if (b.type === 'coupon') b.code = pre.coupon; });
+    }
+    var d = draft;
+    var coupons = [];
+    var lastField = null;
+    var problems = h('div.es-problems');
+    var frame = h('iframe.es-frame', { title: 'E-mail preview', sandbox: 'allow-popups', referrerpolicy: 'no-referrer', loading: 'lazy' });
+    var frameWrap = h('div.es-frame-wrap.es-frame-wrap--desktop', frame);
+    var textOut = h('pre.es-textout', { text: '' });
+    var subjOut = h('div.es-inbox', h('b', { text: 'Subject' }), h('span', { text: '' }), h('b', { text: 'Preheader' }), h('span', { text: '' }));
+    var pv = { device: 'desktop', scheme: 'light', urls: null, view: 'html' };
+    var blockList = h('div.es-blocks');
+    var nameIn = h('input', { type: 'text', maxlength: '80', value: d.name, placeholder: 'Template name', 'aria-label': 'Template name' });
+    var catSel = ui.select([['marketing', 'Marketing (Offers consent only)'], ['account', 'Account notice (plan ending, no coupon)']], d.category, { 'aria-label': 'Category' });
+    var subject = h('input', { type: 'text', maxlength: '150', value: d.design.subject, placeholder: '{firstName}, a festive ride offer for your crew' });
+    var preheader = h('input', { type: 'text', maxlength: '200', value: d.design.preheader || '', placeholder: 'The line mail apps show after the subject' });
+    var verChip = h('span');
+    var dirtyChip = h('span');
+
+    function touched() { d.dirty = true; dirtyChip.textContent = ''; dirtyChip.appendChild(ui.chip('Unsaved changes', 'warn')); schedulePreview(); }
+    function trackFocus(el) { el.addEventListener('focus', function () { lastField = el; }); return el; }
+    trackFocus(subject); trackFocus(preheader);
+    subject.addEventListener('input', function () { d.design.subject = subject.value; touched(); });
+    preheader.addEventListener('input', function () { d.design.preheader = preheader.value; touched(); });
+    nameIn.addEventListener('input', function () { d.name = nameIn.value; d.dirty = true; });
+    catSel.addEventListener('change', function () { d.category = catSel.value; syncAudience(); touched(); });
+    function drawVersion() {
+      clear(verChip);
+      if (d.templateId) verChip.appendChild(ui.chip('Template v' + d.version, 'info'));
+      else if (d.fromStarter) verChip.appendChild(ui.chip('From a starter (not saved yet)', ''));
+      else verChip.appendChild(ui.chip('New e-mail', ''));
+    }
+
+    // ---------- variables bar
+    var varBar = h('div.es-vars', { 'aria-label': 'Insert a variable' });
+    function insertVar(name) {
+      var el = lastField;
+      if (!el || !document.body.contains(el)) { ui.toast('Click into a text field first.', true); return; }
+      var token = '{' + name + '}';
+      var s = el.selectionStart || el.value.length, e = el.selectionEnd || el.value.length;
+      el.value = el.value.slice(0, s) + token + el.value.slice(e);
+      el.focus(); el.setSelectionRange(s + token.length, s + token.length);
+      el.dispatchEvent(new Event('input'));
+    }
+
+    // ---------- blocks
+    function move(i, delta) {
+      var j = i + delta; var bl = d.design.blocks;
+      if (j < 0 || j >= bl.length - 1 || bl[i].type === 'footer') return;
+      var t = bl[i]; bl[i] = bl[j]; bl[j] = t; drawBlocks(); touched();
+    }
+    var couponFills = [];
+    function drawBlocks() {
+      couponFills = [];
+      clear(blockList);
+      d.design.blocks.forEach(function (b, i) { blockList.appendChild(blockCard(b, i)); });
+      blockList.appendChild(addBar());
+    }
+    function addBar() {
+      var sel = ui.select([['', 'Add a block…']].concat((cfg.blockTypes || []).filter(function (t) { return t.type !== 'footer'; }).map(function (t) { return [t.type, t.label]; })), '', { 'aria-label': 'Add a block' });
+      sel.addEventListener('change', function () {
+        if (!sel.value) return;
+        if (sel.value === 'coupon' && d.design.blocks.some(function (b) { return b.type === 'coupon'; })) { ui.toast('One coupon block per e-mail.', true); sel.value = ''; return; }
+        d.design.blocks.splice(d.design.blocks.length - 1, 0, newBlock(sel.value)); drawBlocks(); touched();
+      });
+      return h('div.es-addbar', sel);
+    }
+    function input(b, key, attrs) {
+      attrs = attrs || {};
+      var a = {};
+      Object.keys(attrs).forEach(function (k) { if (k !== 'multiline') a[k] = attrs[k]; });
+      if (!attrs.multiline) a.type = 'text';
+      a.value = b[key] || '';
+      var el = h(attrs.multiline ? 'textarea' : 'input', a);
+      el.addEventListener('input', function () { b[key] = el.value; touched(); });
+      return trackFocus(el);
+    }
+    function blockCard(b, i) {
+      var label = (cfg.blockTypes.filter(function (t) { return t.type === b.type; })[0] || {}).label || b.type;
+      var isFoot = b.type === 'footer';
+      var last = d.design.blocks.length - 1;
+      var tools = h('div.es-block__tools',
+        h('button.btn.btn--ghost.btn--icon', { type: 'button', 'aria-label': 'Move up', title: 'Move up', text: '↑', disabled: isFoot || i === 0, onclick: function () { move(i, -1); } }),
+        h('button.btn.btn--ghost.btn--icon', { type: 'button', 'aria-label': 'Move down', title: 'Move down', text: '↓', disabled: isFoot || i >= last - 1, onclick: function () { move(i, 1); } }),
+        h('button.btn.btn--ghost.btn--icon', { type: 'button', 'aria-label': 'Duplicate', title: 'Duplicate', text: '⧉', disabled: isFoot || b.type === 'coupon', onclick: function () {
+          var c = JSON.parse(JSON.stringify(b)); c._id = uid(); d.design.blocks.splice(i + 1, 0, c); drawBlocks(); touched();
+        } }),
+        h('button.btn.btn--ghost.btn--icon', { type: 'button', 'aria-label': 'Delete', title: 'Delete', text: '×', disabled: isFoot, onclick: function () { d.design.blocks.splice(i, 1); drawBlocks(); touched(); } }));
+      var body = h('div.es-block__body');
+      if (b.type === 'heading') {
+        var lv = ui.select([['1', 'Large'], ['2', 'Small']], String(b.level || 1), { 'aria-label': 'Size' });
+        lv.addEventListener('change', function () { b.level = Number(lv.value); touched(); });
+        body.appendChild(h('div.es-row2', ui.field('Heading', input(b, 'text', { maxlength: '150' })), ui.field('Size', lv)));
+      } else if (b.type === 'text') {
+        var ta = input(b, 'text', { multiline: true, rows: '6', maxlength: '3000' });
+        var wrap = function (before, after, ph) {
+          var s = ta.selectionStart, e = ta.selectionEnd; var sel = ta.value.slice(s, e) || ph;
+          ta.value = ta.value.slice(0, s) + before + sel + after + ta.value.slice(e); ta.focus(); ta.setSelectionRange(s + before.length, s + before.length + sel.length); ta.dispatchEvent(new Event('input'));
+        };
+        var fmt = h('div.es-fmt', h('button.btn.btn--sm', { type: 'button', title: 'Bold', 'aria-label': 'Bold', onclick: function () { wrap('**', '**', 'bold'); } }, h('b', { text: 'B' })),
+          h('button.btn.btn--sm', { type: 'button', title: 'Italic', 'aria-label': 'Italic', onclick: function () { wrap('*', '*', 'italic'); } }, h('i', { text: 'I' })),
+          h('button.btn.btn--sm', { type: 'button', text: 'Link', onclick: function () {
+            var path = h('select'); ['/plans', '/updates', '/guide', '/operators/apply', '/account', '/features', '/safety', '/clubs'].forEach(function (p) { path.appendChild(h('option', { value: p, text: p })); });
+            ui.dialog({ title: 'Link to a page of this site', body: [ui.field('Page', path), h('p.small.muted', { text: 'Links may only point to this site. Other sites are refused.' })], actions: [{ label: 'Cancel', value: null }, { label: 'Insert', kind: 'primary', value: true }] })
+              .then(function (ok) { if (ok) wrap('[', '](' + path.value + ')', 'label'); });
+          } }), h('button.btn.btn--sm', { type: 'button', text: '• List', onclick: function () { wrap('\n- ', '', 'item'); } }));
+        body.appendChild(fmt); body.appendChild(ta);
+      } else if (b.type === 'button') {
+        var path = ui.select(cfg.buttonPaths.map(function (p) { return [p, p]; }), (b.path || '/plans').split('?')[0], { 'aria-label': 'Page' });
+        var style = ui.select([['primary', 'Filled'], ['secondary', 'Outline']], b.style || 'primary', { 'aria-label': 'Style' });
+        path.addEventListener('change', function () { b.path = path.value; touched(); });
+        style.addEventListener('change', function () { b.style = style.value; touched(); });
+        body.appendChild(h('div.grid3', ui.field('Text', input(b, 'label', { maxlength: '40' })), ui.field('Opens', path), ui.field('Style', style)));
+      } else if (b.type === 'coupon') {
+        var csel = h('select', { 'aria-label': 'Coupon' });
+        var info = h('div.small.muted');
+        var fill = function () {
+          clear(csel); csel.appendChild(h('option', { value: '', text: coupons.length ? 'Choose an active coupon…' : 'No active coupons: create one in Coupons' }));
+          coupons.forEach(function (c) { csel.appendChild(h('option', { value: c.code, text: c.code + ' · ' + couponLabel(c), selected: c.code === b.code })); });
+          if (b.code && !coupons.some(function (c) { return c.code === b.code; })) csel.appendChild(h('option', { value: b.code, text: b.code + ' (not active)', selected: true }));
+          var c = coupons.filter(function (x) { return x.code === b.code; })[0];
+          info.textContent = c ? couponLabel(c) + ' · valid until ' + CR.util.date(c.expiresAt) + (c.status === 'SCHEDULED' ? ' · starts ' + CR.util.date(c.validFrom) : '') : '';
+        };
+        csel.addEventListener('change', function () { b.code = csel.value; fill(); touched(); });
+        couponFills.push(fill);
+        fill();
+        body.appendChild(h('div.es-row2', ui.field('Coupon', csel), ui.field('Button text', input(b, 'buttonLabel', { maxlength: '40', placeholder: 'Use {couponCode}' }))));
+        body.appendChild(info);
+        body.appendChild(h('div.grid2', ui.field('Headline', input(b, 'headline', { maxlength: '80', placeholder: 'Festive offer' }), 'optional'), ui.field('Note', input(b, 'note', { maxlength: '160', placeholder: 'Valid until {validUntil}.' }), 'optional')));
+      } else if (b.type === 'price') {
+        var plan = ui.select(cfg.plans.map(function (p) { return [p, PLAN_NAMES[p] || p]; }), b.planId || 'group_large', { 'aria-label': 'Plan' });
+        plan.addEventListener('change', function () { b.planId = plan.value; touched(); });
+        body.appendChild(h('div.grid3', ui.field('Plan', plan), ui.field('Button text', input(b, 'buttonLabel', { maxlength: '40', placeholder: 'See plans' })), ui.field('Note', input(b, 'note', { maxlength: '160' }), 'optional')));
+        body.appendChild(h('p.small.muted', { text: 'The prices come from Plans & pricing at send time: a running offer shows the list price struck through.' }));
+      } else if (b.type === 'header_image' || b.type === 'image') {
+        body.appendChild(imagePicker(b));
+      } else if (b.type === 'footer') {
+        body.appendChild(ui.field('Extra footer note', input(b, 'note', { multiline: true, rows: '2', maxlength: '500', placeholder: 'Optional, e.g. "Ride safe."' }), 'optional'));
+        body.appendChild(h('p.small.muted', { text: 'Always added: why the rider gets this e-mail, ' + (d.category === 'account' ? '' : 'Unsubscribe (Offers), ') + 'Manage e-mails, "Sent by CoRoute", the postal address' + (cfg.postalAddressSet ? '' : ' (not set yet: MAIL_POSTAL_ADDRESS)') + ' and the support address.' }));
+      }
+      return h('section.es-block' + (isFoot ? '.es-block--locked' : ''), { 'aria-label': label },
+        h('div.es-block__head', h('span.es-block__type', { text: label }), h('span.es-block__hint.small.muted', { text: BLOCK_HINTS[b.type] || '' }), h('span.spacer'), tools), body);
+    }
+    function couponLabel(c) {
+      var v = Number(c.discountValue) || 0;
+      if (c.discountType === 'percentage') return v + '% off';
+      if (c.discountType === 'fixed') return '₹' + v + ' off';
+      if (c.discountType === 'free') return 'free period';
+      return 'discount';
+    }
+    function imagePicker(b) {
+      var thumb = h('div.es-thumb', b._url ? h('img', { src: b._url, alt: '' }) : h('span.small.muted', { text: b.imageId ? 'Image chosen' : 'No image yet' }));
+      var file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', 'aria-label': 'Upload an image' });
+      var status = h('span.small.muted');
+      var set = function (img) { b.imageId = img.imageId; b._url = img.url ? img.url.replace(/^https?:\/\/[^/]+/, '') : ''; clear(thumb).appendChild(b._url ? h('img', { src: b._url, alt: '' }) : h('span.small', { text: 'Image chosen' })); touched(); };
+      file.addEventListener('change', function () {
+        var f = file.files && file.files[0]; if (!f) return;
+        if (f.size > 1024 * 1024) { ui.toast('The image is larger than 1 MB.', true); file.value = ''; return; }
+        status.textContent = 'Uploading…';
+        api('POST', '/admin/push/images', f, { type: f.type || 'application/octet-stream' }).then(function (r) { status.textContent = ''; set(r.image); })
+          .catch(function (e) { status.textContent = e.message; file.value = ''; });
+      });
+      var lib = h('button.btn.btn--sm', { type: 'button', text: 'From the image library', onclick: function () { pickFromLibrary().then(function (img) { if (img) set(img); }); } });
+      var link = null;
+      if (b.type === 'image') {
+        link = ui.select([['', 'No link']].concat(cfg.buttonPaths.map(function (p) { return [p, 'Links to ' + p]; })), b.path || '', { 'aria-label': 'Image link' });
+        link.addEventListener('change', function () { b.path = link.value || undefined; if (!link.value) delete b.path; touched(); });
+      }
+      return h('div.es-img', thumb, h('div.stack', h('div.row', h('label.btn.btn--sm.es-upload', 'Upload', file), lib, status),
+        ui.field('Alt text', input(b, 'alt', { maxlength: '120', placeholder: 'Describe the picture' })), link ? ui.field('Link', link) : null));
+    }
+
+    // ---------- preview
+    var pvTimer = null; var pvGen = 0;
+    function schedulePreview() { clearTimeout(pvTimer); pvTimer = setTimeout(refreshPreview, 600); }
+    function payload(forSend) {
+      var u = d.unique.enabled ? { enabled: true, prefix: d.unique.prefix, validDays: Number(d.unique.validDays) || 14 } : undefined;
+      return { design: strip(d.design), category: d.category, uniqueCoupon: u, forSend: forSend };
+    }
+    function refreshPreview() {
+      var gen = ++pvGen;
+      if (!d.design.subject.trim()) { clear(problems).appendChild(h('div.banner', { text: 'Write a subject to see the preview.' })); return; }
+      api('POST', BASE + '/preview', payload(false)).then(function (r) {
+        if (gen !== pvGen) return;
+        clear(problems);
+        (r.warnings || []).forEach(function (w) { problems.appendChild(h('div.banner', { text: w })); });
+        if (!r.postalAddressSet) problems.appendChild(h('div.banner', { text: 'The postal address is not set (MAIL_POSTAL_ADDRESS): the footer shows a placeholder and only test sends work.' }));
+        var newThumbs = false;
+        d.design.blocks.forEach(function (b) { if (b.imageId && !b._url && r.images && r.images[b.imageId]) { b._url = r.images[b.imageId]; newThumbs = true; } });
+        if (newThumbs && !blockList.contains(document.activeElement)) drawBlocks();
+        pv.urls = { light: r.previewUrl, dark: r.darkPreviewUrl };
+        frame.src = pv.scheme === 'dark' && pv.urls.dark ? pv.urls.dark : pv.urls.light;
+        textOut.textContent = r.text;
+        subjOut.children[1].textContent = r.subject; subjOut.children[3].textContent = r.preheader || '-';
+      }).catch(function (e) { if (gen === pvGen) clear(problems).appendChild(errorList(e)); });
+    }
+    function seg(opts, value, onPick, label) {
+      var g = h('div.es-seg', { role: 'group', 'aria-label': label });
+      opts.forEach(function (o) {
+        g.appendChild(h('button.btn.btn--sm', { type: 'button', 'aria-pressed': String(o[0] === value), text: o[1], onclick: function () {
+          Array.prototype.forEach.call(g.children, function (c) { c.setAttribute('aria-pressed', 'false'); }); this.setAttribute('aria-pressed', 'true'); onPick(o[0]);
+        } }));
+      });
+      return g;
+    }
+    var deviceSeg = seg([['desktop', 'Desktop'], ['mobile', 'Mobile']], pv.device, function (v) { pv.device = v; frameWrap.className = 'es-frame-wrap es-frame-wrap--' + v; }, 'Device');
+    var schemeSeg = seg([['light', 'Light'], ['dark', 'Dark']], pv.scheme, function (v) { pv.scheme = v; if (pv.urls) frame.src = v === 'dark' && pv.urls.dark ? pv.urls.dark : pv.urls.light; }, 'Colour scheme');
+    var viewSeg = seg([['html', 'E-mail'], ['text', 'Plain text']], 'html', function (v) { frameWrap.hidden = v !== 'html'; textOut.hidden = v !== 'text'; }, 'View');
+    textOut.hidden = true;
+
+    // ---------- template actions
+    function saveTemplate(asNew) {
+      var name = (d.name || '').trim();
+      var go = function (n) {
+        var body = { name: n, category: d.category, design: strip(d.design) };
+        var req = d.templateId && !asNew ? api('PUT', BASE + '/templates/' + d.templateId, Object.assign(body, { baseVersion: d.version })) : api('POST', BASE + '/templates', body);
+        return req.then(function (r) {
+          d.templateId = r.template.templateId; d.version = r.template.version; d.name = r.template.name; d.fromStarter = null; d.dirty = false; nameIn.value = d.name;
+          clear(dirtyChip); drawVersion(); ui.toast((asNew || !body.baseVersion ? 'Saved as a new template: ' : 'Saved version ' + r.template.version + ' of ') + r.template.name + '.');
+        }).catch(function (e) { clear(problems).appendChild(errorList(e)); ui.toast(e.message, true); });
+      };
+      if (name && !(asNew && d.templateId)) return go(name);
+      var n = h('input', { type: 'text', maxlength: '80', value: asNew && name ? name + ' (copy)' : name });
+      ui.dialog({ title: asNew ? 'Save as a new template' : 'Save template', body: [ui.field('Name', n)], actions: [{ label: 'Cancel', value: null }, { label: 'Save', kind: 'primary', onClick: function () {
+        if (!n.value.trim()) throw new Error('Name the template.');
+        return go(n.value.trim()).then(function () { return true; });
+      } }] });
+    }
+
+    // ---------- audience & sending
+    var segSel = h('select', { 'aria-label': 'Audience' });
+    var days = h('input', { type: 'number', min: '1', max: '365', value: String(d.audience.days || 30) });
+    var daysField = ui.field('N days', days);
+    var users = h('textarea', { rows: '2', placeholder: 'SwiftFalcon482, @RoadRunner77', value: d.audience.usernames || '' });
+    var usersField = ui.field('Usernames', users, 'comma or space separated');
+    var reach = h('span.small.muted');
+    function syncAudience() {
+      clear(segSel);
+      cfg.segments.filter(function (s) { return d.category === 'account' ? s.account : true; }).forEach(function (s) { segSel.appendChild(h('option', { value: s.kind, text: s.label, selected: s.kind === d.audience.kind })); });
+      if (!segSel.value || segSel.selectedIndex < 0) segSel.selectedIndex = 0;
+      d.audience.kind = segSel.value;
+      var s = cfg.segments.filter(function (x) { return x.kind === segSel.value; })[0] || {};
+      daysField.hidden = !s.days; usersField.hidden = segSel.value !== 'usernames';
+      reach.textContent = '';
+    }
+    segSel.addEventListener('change', function () { d.audience.kind = segSel.value; syncAudience(); });
+    days.addEventListener('input', function () { d.audience.days = Number(days.value); reach.textContent = ''; });
+    users.addEventListener('input', function () { d.audience.usernames = users.value; reach.textContent = ''; });
+    function audience() {
+      var a = { kind: d.audience.kind };
+      var s = cfg.segments.filter(function (x) { return x.kind === a.kind; })[0] || {};
+      if (s.days) a.days = Number(days.value);
+      if (a.kind === 'usernames') a.usernames = users.value;
+      if (a.kind === 'plan') a.plans = ['community', 'group_small', 'group_large'];
+      return a;
+    }
+    var uniqOn = h('input', { type: 'checkbox', checked: d.unique.enabled });
+    var uniqPrefix = h('input', { type: 'text', maxlength: '10', value: d.unique.prefix, placeholder: 'XMAS', autocapitalize: 'characters' });
+    var uniqDays = h('input', { type: 'number', min: '1', max: '90', value: String(d.unique.validDays || 14) });
+    var uniqFields = h('div.grid2', ui.field('Code prefix', uniqPrefix, '2 to 10 letters or digits'), ui.field('Valid for (days)', uniqDays, 'or until the parent ends'));
+    function syncUnique() { uniqFields.hidden = !uniqOn.checked; }
+    uniqOn.addEventListener('change', function () { d.unique.enabled = uniqOn.checked; syncUnique(); touched(); });
+    uniqPrefix.addEventListener('input', function () { d.unique.prefix = uniqPrefix.value.toUpperCase(); touched(); });
+    uniqDays.addEventListener('input', function () { d.unique.validDays = Number(uniqDays.value); touched(); });
+    var when = ui.select([['now', 'Send now'], ['later', 'Schedule (India time)']], d.when, { 'aria-label': 'When' });
+    var at = h('input', { type: 'datetime-local', value: d.at });
+    var atField = ui.field('Date and time (IST)', at);
+    var track = h('input', { type: 'checkbox', checked: d.track === null ? !!cfg.settings.clickTracking : d.track });
+    var campName = h('input', { type: 'text', maxlength: '80', placeholder: 'Diwali 2026 offer' });
+    var sendBtn = h('button.btn.btn--primary', { type: 'button', text: 'Send now' });
+    function syncWhen() { atField.hidden = when.value !== 'later'; sendBtn.textContent = when.value === 'later' ? 'Schedule' : 'Send now'; }
+    when.addEventListener('change', function () { d.when = when.value; syncWhen(); });
+    at.addEventListener('input', function () { d.at = at.value; });
+    track.addEventListener('change', function () { d.track = track.checked; });
+    var countBtn = h('button.btn.btn--sm', { type: 'button', text: 'Count riders', onclick: function () {
+      reach.textContent = 'Counting…';
+      api('POST', BASE + '/audience-count', { audience: audience(), category: d.category }).then(function (r) {
+        reach.textContent = r.riders + ' rider(s) ' + (r.category === 'account' ? 'with a valid, not bounced e-mail' : 'opted in to offers, with a valid, unsuppressed e-mail') + '.';
+      }).catch(function (e) { reach.textContent = e.message; });
+    } });
+    var testBtn = h('button.btn', { type: 'button', text: 'Send test to me', onclick: function () {
+      testBtn.disabled = true;
+      api('POST', BASE + '/test', payload(true)).then(function (r) {
+        ui.toast(r.sent ? 'Test sent to ' + r.to + (r.uniqueCode ? ' with your own code ' + r.uniqueCode : '') + '.' : 'Not sent: ' + (r.error || 'unknown error'), !r.sent);
+      }).catch(function (e) { clear(problems).appendChild(errorList(e)); ui.toast(e.message, true); }).then(function () { testBtn.disabled = false; });
+    } });
+    sendBtn.addEventListener('click', function () {
+      var p = payload(true);
+      p.audience = audience(); p.name = campName.value || d.name; p.templateId = d.templateId || undefined; p.trackClicks = track.checked;
+      p.sendAt = when.value === 'later' ? CR.util.fromLocalInput(at.value) : 0;
+      if (when.value === 'later' && !p.sendAt) { ui.toast('Choose the date and time.', true); return; }
+      var what = when.value === 'later' ? 'Schedule this e-mail for ' + CR.util.date(p.sendAt, true) + ' (IST)?' : 'Send this e-mail now?';
+      var who = d.category === 'account' ? ' It goes to riders whose plan ends soon or ended recently (account notice).' : ' Only riders who turned on offer e-mails get it, at most ' + cfg.settings.maxPerWeek + ' marketing e-mails per rider per week.';
+      ui.confirm(when.value === 'later' ? 'Schedule e-mail' : 'Send e-mail', what + who + ' Audience: ' + audienceText(p.audience) + '.', when.value === 'later' ? 'Schedule' : 'Send').then(function (ok) {
+        if (!ok) return;
+        sendBtn.disabled = true;
+        api('POST', BASE + '/campaigns', p).then(function (r) {
+          ui.toast((when.value === 'later' ? 'Scheduled.' : r.quietNow ? 'Queued: quiet hours now, it goes out when they end.' : 'Sending.'));
+          CR.go('#/notifications/email/campaigns');
+        }).catch(function (e) { clear(problems).appendChild(errorList(e)); ui.toast(e.message, true); }).then(function () { sendBtn.disabled = false; });
+      });
+    });
+
+    // ---------- layout
+    view.appendChild(h('div.es-compose',
+      h('div.es-editor.stack',
+        h('div.card.stack',
+          h('div.row', h('h3', { text: 'E-mail' }), verChip, dirtyChip, h('span.spacer'),
+            h('button.btn.btn--sm', { type: 'button', text: 'Templates…', onclick: function () { CR.go('#/notifications/email/templates'); } }),
+            h('button.btn.btn--sm', { type: 'button', text: 'New blank', onclick: function () {
+              var go = function () { draft = freshDraft(); CR.go('#/notifications/email'); };
+              if (!d.dirty) return go();
+              ui.confirm('Discard changes?', 'The unsaved changes of this e-mail are lost.', 'Discard', true).then(function (ok) { if (ok) go(); });
+            } })),
+          h('div.es-row2', ui.field('Template name', nameIn), ui.field('Category', catSel)),
+          ui.field('Subject', subject, 'variables allowed'), ui.field('Preheader', preheader, 'optional'),
+          h('div', h('div.panel-title.small.muted', { text: 'Variables: click to insert at the cursor. Unknown names are refused; missing values get a safe fallback.' }), varBar),
+          h('div.row', h('button.btn.btn--sm', { type: 'button', text: 'Save template', onclick: function () { saveTemplate(false); } }),
+            h('button.btn.btn--sm', { type: 'button', text: 'Save as new', onclick: function () { saveTemplate(true); } }))),
+        h('div.card.stack', h('div.card__head', h('h3', { text: 'Blocks' }), h('p', { text: 'Reorder with the arrows. The footer always stays last.' })), blockList),
+        h('div.card.stack', h('div.card__head', h('h3', { text: 'Audience and sending' }),
+          h('p', { text: d.category === 'account' ? 'Account notices go to the plan segments only.' : 'Marketing e-mails go only to riders who turned on offer e-mails on the website, never to a suppressed address.' })),
+          h('div.es-row2', ui.field('Audience', segSel), daysField), usersField, h('div.row', countBtn, reach),
+          h('fieldset.stack.es-fieldset', h('legend', { text: 'Unique coupon codes' }), h('label.check', uniqOn, 'A single-use code per rider, made from the coupon block\'s coupon'), uniqFields),
+          h('div.es-row2', ui.field('Campaign name', campName, 'for the report'), ui.field('When', when)), atField,
+          h('label.check', track, 'Count clicks (signed redirect links, no open pixels)'),
+          h('div.row.row--end', testBtn, sendBtn))),
+      h('aside.es-preview.card',
+        h('div.row', h('h3', { text: 'Preview' }), h('span.spacer'), viewSeg),
+        h('div.row', deviceSeg, schemeSeg, h('span.spacer'), h('button.btn.btn--sm.btn--ghost', { type: 'button', text: 'Refresh', onclick: refreshPreview })),
+        problems, subjOut, frameWrap, textOut,
+        h('p.small.muted', { text: 'Sample rider "Asha". Prices are today\'s; each rider gets their own name, code and unsubscribe link.' }))));
+
+    loadConfig().then(function () {
+      cfg.variables.forEach(function (v) { varBar.appendChild(h('button.btn.btn--sm.es-var', { type: 'button', title: v.label, text: '{' + v.name + '}', onclick: function () { insertVar(v.name); } })); });
+      drawVersion(); drawBlocks(); syncAudience(); syncUnique(); syncWhen();
+      track.checked = d.track === null ? !!cfg.settings.clickTracking : d.track;
+      refreshPreview();
+      if (!cfg.enabled) problems.appendChild(h('div.banner.banner--bad', { text: 'E-mail is not configured on this server (SMTP_HOST / MAIL_FROM).' }));
+      return api('GET', '/admin/coupons');
+    }).then(function (r) {
+      coupons = ((r && r.coupons) || []).filter(function (c) { return (c.status === 'ACTIVE' || c.status === 'SCHEDULED') && !c.parentCode && !(c.allowedUserIds && c.allowedUserIds.length); });
+      couponFills.forEach(function (f) { f(); });
+    }).catch(function (e) { view.appendChild(ui.error(e)); });
+  }
+
+  /** The marketing studio and board images; resolves with an imported { imageId, url } or null. */
+  function pickFromLibrary() {
+    return new Promise(function (resolve) {
+      var grid = h('div.es-lib', ui.loading());
+      var urls = [];
+      var chosen = null;
+      api('GET', BASE + '/images/library').then(function (r) {
+        clear(grid);
+        if (!r.images.length) { grid.appendChild(h('p.muted', { text: 'No images in the marketing studio or on the board yet. Export a studio PNG and upload it instead.' })); return; }
+        r.images.forEach(function (img) {
+          var im = h('img', { alt: img.source + ' image' });
+          var btn = h('button.es-lib__item', { type: 'button', 'aria-label': 'Use this ' + img.source + ' image', onclick: function () { chosen = img; grid.querySelectorAll('.es-lib__item').forEach(function (b) { b.classList.remove('is-on'); }); btn.classList.add('is-on'); } },
+            im, h('span.small', { text: (img.source === 'board' ? 'Board' : 'Studio') + (img.width ? ' · ' + img.width + '×' + img.height : '') }));
+          grid.appendChild(btn);
+          api('GET', img.previewUrl.replace(/^\/api/, ''), null, { raw: true }).then(function (res) { return res.blob(); }).then(function (bl) { var u = URL.createObjectURL(bl); urls.push(u); im.src = u; }).catch(function () {});
+        });
+      }).catch(function (e) { clear(grid).appendChild(ui.error(e)); });
+      ui.dialog({ title: 'Image library', wide: true, body: [h('p.small.muted', { text: 'Images from the Marketing studio and the Board. The chosen one is copied to the public e-mail image store (up to 1 MB).' }), grid],
+        actions: [{ label: 'Cancel', value: null }, { label: 'Use image', kind: 'primary', onClick: function () {
+          if (!chosen) throw new Error('Choose an image.');
+          return api('POST', BASE + '/images/import', { source: chosen.source, id: chosen.id }).then(function (r) { return r.image; });
+        } }] }).then(function (v) { urls.forEach(function (u) { URL.revokeObjectURL(u); }); resolve(v || null); });
+    });
+  }
+
+  // ==================================================================== templates
+  function renderTemplates(view) {
+    var showArchived = false;
+    var box = h('div', ui.loading());
+    var toggle = h('label.check', h('input', { type: 'checkbox', onchange: function () { showArchived = this.checked; load(); } }), 'Show archived');
+    view.appendChild(h('div.row.section-gap', h('h2', { text: 'Starters' }), h('span.small.muted', { text: 'Read-only. "Use" opens a copy in the editor; save it to make it yours.' })));
+    var starters = h('div.es-cards');
+    view.appendChild(starters);
+    view.appendChild(h('div.row.section-gap', h('h2', { text: 'Your templates' }), h('span.spacer'), toggle));
+    view.appendChild(box);
+    function card(t, actions) {
+      return h('div.card.es-tcard', h('div.row', h('b', { text: t.name }), h('span.spacer'), ui.chip(t.category === 'account' ? 'Account' : 'Marketing', t.category === 'account' ? 'warn' : 'info')),
+        h('div.small.es-tcard__subj', { text: t.design.subject }), t.description ? h('p.small.muted', { text: t.description }) : null,
+        h('div.small.muted', { text: t.design.blocks.filter(function (b) { return b.type !== 'footer'; }).map(function (b) { return b.type.replace('_', ' '); }).join(' · ') }),
+        h('div.row.row--end', actions));
+    }
+    function useIt(t) {
+      var go = function () { api('GET', BASE + '/templates/' + encodeURIComponent(t.templateId || t.id)).then(function (r) { loadIntoDraft(r.template); CR.go('#/notifications/email'); }).catch(function (e) { ui.toast(e.message, true); }); };
+      if (draft && draft.dirty) ui.confirm('Replace the e-mail in the editor?', 'It has unsaved changes.', 'Replace', true).then(function (ok) { if (ok) go(); }); else go();
+    }
+    function history(t) {
+      api('GET', BASE + '/templates/' + t.templateId).then(function (r) {
+        var tb = h('tbody');
+        r.template.history.forEach(function (v) {
+          tb.appendChild(h('tr', h('td', { text: 'v' + v.version }), h('td', { text: CR.util.date(v.savedAt, true) }), h('td.small', { text: v.savedBy || '-' }), h('td.small', { text: v.subject || '' }),
+            h('td', h('button.btn.btn--sm', { type: 'button', text: 'Open', onclick: function () {
+              api('GET', BASE + '/templates/' + t.templateId + '/versions/' + v.version).then(function (x) {
+                document.querySelectorAll('.scrim').forEach(function (s) { s.remove(); });
+                loadIntoDraft({ templateId: t.templateId, version: r.template.version, name: r.template.name, category: x.version.category, design: x.version.design });
+                draft.dirty = true; ui.toast('Version ' + v.version + ' is in the editor. Save it to make it the current version.');
+                CR.go('#/notifications/email');
+              }).catch(function (e) { ui.toast(e.message, true); });
+            } }))));
+        });
+        ui.dialog({ title: 'Versions of ' + r.template.name, wide: true, body: [h('div.table-wrap', h('table.table', h('thead', h('tr', ['Version', 'Saved', 'By', 'Subject', ''].map(function (c) { return h('th', { text: c }); }))), tb))] });
+      }).catch(function (e) { ui.toast(e.message, true); });
+    }
+    function load() {
+      api('GET', BASE + '/templates' + (showArchived ? '?archived=1' : '')).then(function (r) {
+        clear(starters);
+        r.starters.forEach(function (s) { starters.appendChild(card(s, [h('button.btn.btn--sm.btn--primary', { type: 'button', text: 'Use', onclick: function () { useIt(s); } })])); });
+        clear(box);
+        if (!r.templates.length) { box.appendChild(h('p.empty', { text: 'No saved templates yet. Use a starter and save it.' })); return; }
+        var grid = h('div.es-cards');
+        r.templates.forEach(function (t) {
+          var arch = t.status === 'archived';
+          grid.appendChild(card(t, [
+            h('span.small.muted', { text: 'v' + t.version + ' · ' + CR.util.date(t.updatedAt) }), h('span.spacer'),
+            h('button.btn.btn--sm', { type: 'button', text: 'Versions', onclick: function () { history(t); } }),
+            h('button.btn.btn--sm', { type: 'button', text: 'Duplicate', onclick: function () { api('POST', BASE + '/templates/' + t.templateId + '/duplicate', {}).then(function () { ui.toast('Duplicated.'); load(); }).catch(function (e) { ui.toast(e.message, true); }); } }),
+            h('button.btn.btn--sm', { type: 'button', text: arch ? 'Unarchive' : 'Archive', onclick: function () { api('POST', BASE + '/templates/' + t.templateId + (arch ? '/unarchive' : '/archive'), {}).then(load).catch(function (e) { ui.toast(e.message, true); }); } }),
+            arch ? null : h('button.btn.btn--sm.btn--primary', { type: 'button', text: 'Edit', onclick: function () { useIt(t); } })]));
+        });
+        box.appendChild(grid);
+      }).catch(function (e) { clear(box).appendChild(ui.error(e)); });
+    }
+    load();
+  }
+
+  // ==================================================================== campaigns
+  function reportDialog(title, id, isRule) {
+    var body = h('div.stack', ui.loading());
+    api('GET', BASE + (isRule ? '/rules/' + id + '/report' : '/campaigns/' + id)).then(function (r) {
+      var rep = r.report; var c = r.campaign;
+      clear(body);
+      var tiles = h('div.tiles');
+      [['Queued', rep.queued], ['Sent', rep.sent], ['Failed', rep.failed], ['Unsubscribed', rep.unsubscribed], ['Clicks', rep.clicks.total, rep.clicks.unique + ' rider(s)'],
+        ['Coupon redemptions', rep.redemptions.count, rep.redemptions.count ? '₹' + rep.redemptions.discountInr + ' off · ₹' + rep.redemptions.revenueInr + ' paid' : '']].forEach(function (x) { tiles.appendChild(ui.tile(x[0], String(x[1]), x[2])); });
+      body.appendChild(tiles);
+      if (c) {
+        var s = c.stats || {};
+        var kv = h('dl.kv');
+        [['Status', (STATUS[c.status] || [c.status])[0]], ['Audience', audienceText(c.audience)], ['Category', c.category === 'account' ? 'Account notice' : 'Marketing (Offers consent)'],
+          ['When', CR.util.date(c.sendAt, true) + ' IST'], ['Targeted', String(s.targeted || 0)], ['Skipped at send time', String(s.skipped || 0) + ' (consent, suppression, account gone)'],
+          ['Over the weekly cap', String(s.capped || 0)], ['Coupon', c.couponCode ? c.couponCode + (c.uniqueCoupon ? ' (unique codes ' + c.uniqueCoupon.prefix + '-…)' : '') : '-'],
+          ['Click tracking', c.trackClicks ? 'On' : 'Off'], ['Error', c.error || '-']].forEach(function (x) { kv.appendChild(h('dt', { text: x[0] })); kv.appendChild(h('dd', { text: x[1] })); });
+        body.appendChild(kv);
+      }
+      if (rep.clicks.byLink.length) {
+        var tb = h('tbody');
+        rep.clicks.byLink.forEach(function (l) { tb.appendChild(h('tr', h('td.mono', { text: l.path }), h('td.num', { text: String(l.total) }))); });
+        body.appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', { text: 'Link' }), h('th.num', { text: 'Clicks' }))), tb)));
+      }
+      body.appendChild(h('p.small.muted', { text: 'Clicks are counted through signed redirect links, without open pixels. Redemptions: the campaign\'s codes used by its recipients after it started (successful payments).' }));
+    }).catch(function (e) { clear(body).appendChild(ui.error(e)); });
+    ui.dialog({ title: title, wide: true, body: [body] });
+  }
+
+  function renderCampaigns(view) {
+    var box = h('div', ui.loading());
+    view.appendChild(box);
+    api('GET', BASE + '/campaigns?limit=100').then(function (r) {
+      var tb = h('tbody');
+      (r.campaigns || []).forEach(function (c) {
+        var s = STATUS[c.status] || [c.status, '']; var st = c.stats || {};
+        tb.appendChild(h('tr.is-link', { tabindex: '0', onclick: function () { reportDialog(c.name, c.campaignId); }, onkeydown: function (e) { if (e.key === 'Enter') reportDialog(c.name, c.campaignId); } },
+          h('td.nowrap', { text: CR.util.date(c.sendAt, true) }), h('td', h('b', { text: c.name }), h('div.small.muted', { text: c.design.subject })),
+          h('td.small', { text: audienceText(c.audience) }), h('td', { text: c.couponCode || '-' }), h('td', ui.chip(s[0], s[1])),
+          h('td.num', { text: String(st.targeted || 0) }), h('td.num', { text: String(st.sent || 0) }), h('td.num', { text: String((st.skipped || 0) + (st.capped || 0)) }), h('td.num', { text: String(st.failed || 0) }),
+          h('td', c.status === 'SCHEDULED' ? h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Cancel', onclick: function (e) {
+            e.stopPropagation();
+            api('POST', BASE + '/campaigns/' + c.campaignId + '/cancel', {}).then(function () { CR.go('#/notifications/email/campaigns'); }).catch(function (er) { ui.toast(er.message, true); });
+          } }) : null)));
+      });
+      if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '10', class: 'empty', text: 'No campaigns yet. Compose one.' })));
+      clear(box).appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['When (IST)', 'Campaign', 'Audience', 'Coupon', 'Status', 'Riders', 'Sent', 'Skipped', 'Failed', ''].map(function (c, i) { return h('th', { class: i >= 5 && i <= 8 ? 'num' : '', text: c }); }))), tb)));
+    }).catch(function (e) { clear(box).appendChild(ui.error(e)); });
+  }
+
+  // ==================================================================== automation
+  function renderAutomation(view) {
+    var box = h('div', ui.loading());
+    var templates = [];
+    view.appendChild(h('div.row.section-gap', h('p.small.muted', { text: 'A rule sends a saved template to a segment, checked every minute outside the quiet hours: once per rider per occurrence, never above the weekly cap, with consent checked at send time.' }),
+      h('span.spacer'), h('button.btn.btn--primary', { type: 'button', text: 'New rule', onclick: function () { edit(null); } })));
+    view.appendChild(box);
+    function edit(rule) {
+      var x = rule || {};
+      var trig = ui.select(cfg.triggers.map(function (t) { return [t.id, t.label]; }), x.trigger || 'inactive');
+      var name = h('input', { type: 'text', maxlength: '80', value: x.name || '' });
+      var daysIn = h('input', { type: 'number', min: '1', max: '365', value: String(x.days || 30) });
+      var cool = h('input', { type: 'number', min: '0', max: '730', value: String(x.cooldownDays !== undefined ? x.cooldownDays : 90) });
+      var tpl = ui.select(templates.map(function (t) { return [t.templateId, t.name + (t.category === 'account' ? ' (account)' : '')]; }), x.templateId || (templates[0] && templates[0].templateId));
+      var coupon = h('input', { type: 'text', maxlength: '24', value: x.couponCode || '', placeholder: 'BACK20', autocapitalize: 'characters' });
+      var uq = h('input', { type: 'checkbox', checked: !!(x.uniqueCoupon && x.uniqueCoupon.enabled) });
+      var uqp = h('input', { type: 'text', maxlength: '10', value: (x.uniqueCoupon && x.uniqueCoupon.prefix) || '' });
+      var uqd = h('input', { type: 'number', min: '1', max: '90', value: String((x.uniqueCoupon && x.uniqueCoupon.validDays) || 14) });
+      var en = h('input', { type: 'checkbox', checked: x.enabled !== false });
+      trig.addEventListener('change', function () { var t = cfg.triggers.filter(function (y) { return y.id === trig.value; })[0]; daysIn.value = t.defaultDays; cool.value = t.cooldown; });
+      if (!templates.length) { ui.toast('Save a template first (Templates > Use a starter > Save).', true); return; }
+      ui.dialog({ title: rule ? 'Edit rule' : 'New automation rule', wide: true, body: [
+        h('div.grid2', ui.field('Name', name), ui.field('When', trig)),
+        h('div.grid2', ui.field('N days', daysIn), ui.field('Once per rider per N days', cool, '0 = once per occurrence (plan rules: once per plan period)')),
+        h('div.grid2', ui.field('Template', tpl), ui.field('Coupon for the coupon block', coupon, 'when the template has one')),
+        h('div.row', h('label.check', uq, 'Unique single-use codes'), ui.field('Prefix', uqp), ui.field('Valid days', uqd)),
+        h('label.check', en, 'Enabled')],
+      actions: [{ label: 'Cancel', value: null }, { label: 'Save', kind: 'primary', onClick: function () {
+        var body = { name: name.value, trigger: trig.value, days: Number(daysIn.value), cooldownDays: Number(cool.value), templateId: tpl.value, couponCode: coupon.value.trim() || undefined,
+          uniqueCoupon: uq.checked ? { enabled: true, prefix: uqp.value, validDays: Number(uqd.value) } : undefined, enabled: en.checked };
+        return (rule ? api('PUT', BASE + '/rules/' + rule.ruleId, body) : api('POST', BASE + '/rules', body)).then(function () { ui.toast('Rule saved.'); load(); return true; });
+      } }] });
+    }
+    function load() {
+      Promise.all([api('GET', BASE + '/rules'), api('GET', BASE + '/templates')]).then(function (r) {
+        templates = r[1].templates;
+        var tb = h('tbody');
+        r[0].rules.forEach(function (x) {
+          var t = templates.filter(function (y) { return y.templateId === x.templateId; })[0];
+          var trigLabel = (cfg.triggers.filter(function (y) { return y.id === x.trigger; })[0] || {}).label || x.trigger;
+          tb.appendChild(h('tr', h('td', h('b', { text: x.name }), h('div.small.muted', { text: trigLabel.replace('N days', x.days + ' days') })),
+            h('td', { text: t ? t.name : '(missing template)' }), h('td', { text: x.couponCode || '-' }), h('td.small', { text: x.cooldownDays ? 'once per ' + x.cooldownDays + ' days' : 'once per occurrence' }),
+            h('td', ui.chip(x.enabled ? 'On' : 'Off', x.enabled ? 'ok' : '')), h('td.num', { text: String((x.stats && x.stats.sent) || 0) }), h('td.small', { text: x.lastRunAt ? CR.util.date(x.lastRunAt, true) : '-' }),
+            h('td', h('div.row.row--end', h('button.btn.btn--sm', { type: 'button', text: 'Report', onclick: function () { reportDialog(x.name, x.ruleId, true); } }),
+              h('button.btn.btn--sm', { type: 'button', text: x.enabled ? 'Turn off' : 'Turn on', onclick: function () { api('PUT', BASE + '/rules/' + x.ruleId, { enabled: !x.enabled }).then(load).catch(function (e) { ui.toast(e.message, true); }); } }),
+              h('button.btn.btn--sm', { type: 'button', text: 'Edit', onclick: function () { edit(x); } }),
+              h('button.btn.btn--sm.btn--danger', { type: 'button', text: 'Delete', onclick: function () { ui.confirm('Delete rule?', 'It stops sending. Its sent e-mails stay in the reports.', 'Delete', true).then(function (ok) { if (ok) api('DELETE', BASE + '/rules/' + x.ruleId).then(load).catch(function (e) { ui.toast(e.message, true); }); }); } })))));
+        });
+        if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '8', class: 'empty', text: 'No rules yet. Example: "No ride for 30 days" -> Win-back template, once per rider per 90 days.' })));
+        clear(box).appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['Rule', 'Template', 'Coupon', 'Repeat', 'Status', 'Sent', 'Last run', ''].map(function (c, i) { return h('th', { class: i === 5 ? 'num' : '', text: c }); }))), tb)));
+      }).catch(function (e) { clear(box).appendChild(ui.error(e)); });
+    }
+    loadConfig().then(load);
+  }
+
+  // ==================================================================== settings
+  function renderSettings(view) {
+    var s = cfg.settings;
+    var cap = h('input', { type: 'number', min: '1', max: '14', value: String(s.maxPerWeek) });
+    var qs = h('input', { type: 'number', min: '0', max: '23', value: String(s.quietStartHour) });
+    var qe = h('input', { type: 'number', min: '0', max: '23', value: String(s.quietEndHour) });
+    var trk = h('input', { type: 'checkbox', checked: !!s.clickTracking });
+    view.appendChild(h('div.grid2.section-gap',
+      h('div.card.stack', h('h3', { text: 'Sending rules' }),
+        ui.field('Marketing e-mails per rider per week', cap, 'campaigns and rules together; account notices do not count'),
+        h('div.grid2', ui.field('Quiet hours from (IST hour)', qs), ui.field('until (IST hour)', qe)), h('p.small.muted', { text: 'Nothing is sent in the quiet hours; a campaign due then goes out when they end. Same hour twice = no quiet hours.' }),
+        h('label.check', trk, 'Count clicks in marketing e-mails (signed redirect links /r/…; no open pixels)'),
+        h('div.row.row--end', h('button.btn.btn--primary', { type: 'button', text: 'Save', onclick: function () {
+          api('PUT', BASE + '/settings', { maxPerWeek: Number(cap.value), quietStartHour: Number(qs.value), quietEndHour: Number(qe.value), clickTracking: trk.checked })
+            .then(function (r) { cfg.settings = r; ui.toast('Saved.'); }).catch(function (e) { ui.toast(e.message, true); });
+        } }))),
+      h('div.card.stack', h('h3', { text: 'Sender identity' }),
+        h('dl.kv', h('dt', { text: 'Postal address' }), h('dd', cfg.postalAddressSet ? ui.chip('Set (MAIL_POSTAL_ADDRESS)', 'ok') : ui.chip('Not set: ' + cfg.postalPlaceholder, 'bad')),
+          h('dt', { text: 'Site address' }), h('dd', { text: cfg.origin || 'PUBLIC_ORIGIN not set' }), h('dt', { text: 'SMTP' }), h('dd', cfg.enabled ? ui.chip('Configured', 'ok') : ui.chip('Not configured', 'bad')),
+          h('dt', { text: 'Rate' }), h('dd', { text: cfg.ratePerSec + ' e-mails per second (OFFER_EMAIL_RATE)' })),
+        h('p.small.muted', { text: 'Every marketing e-mail has the Offers unsubscribe link and one-click headers, "Sent by CoRoute", the postal address and the support address. Real campaigns need the postal address; test sends work without it.' }))));
+    var supp = h('div');
+    view.appendChild(h('h2.section-gap', { text: 'Suppression list' }));
+    view.appendChild(supp);
+    if (CR.renderSuppression) CR.renderSuppression(supp);
+    var legacy = h('div');
+    view.appendChild(h('h2.section-gap', { text: 'Earlier offers e-mails (3.56 composer)' }));
+    view.appendChild(legacy);
+    if (CR.renderLegacyOffers) CR.renderLegacyOffers(legacy);
+  }
+
+  CR.renderEmailStudio = function (view, sub) {
+    view.appendChild(tabs(sub || ''));
+    var inner = h('div.es-view');
+    view.appendChild(inner);
+    loadConfig().then(function () {
+      if (sub === 'templates') return renderTemplates(inner);
+      if (sub === 'campaigns') return renderCampaigns(inner);
+      if (sub === 'automation') return renderAutomation(inner);
+      if (sub === 'settings') return renderSettings(inner);
+      return renderCompose(inner);
+    }).catch(function (e) { inner.appendChild(ui.error(e)); });
+  };
+  /** Coupons page: "E-mail this coupon" opens the composer with the coupon block filled in. */
+  CR.emailCoupon = function (code) { CR.state.studioPrefill = { coupon: code }; CR.go('#/notifications/email'); };
+})();

@@ -3,7 +3,9 @@
    riders who turned on offer e-mails on the website account page. Every e-mail has an unsubscribe link.
    #/notifications/email  compose (subject, heading, rich content, image, coupon block, audience, schedule),
                           server preview, test to me, campaigns, suppression list.
-   Text is always set as text; the server preview is shown as text, the HTML is offered as a download. */
+   Text is always set as text; the server preview is shown as text, the HTML is offered as a download.
+   3.57: the Notifications "Offers e-mail" tab opens the E-mail studio (email_studio.js), which reuses the
+   suppression list and the list of these earlier campaigns from here (CR.renderSuppression, CR.renderLegacyOffers). */
 (function () {
   'use strict';
   var CR = window.CR;
@@ -11,6 +13,47 @@
   var h = CR.util.h, clear = CR.util.clear, ui = CR.ui, api = CR.api;
   var PLAN_LABELS = { community: 'Community (free)', group_small: 'Small Group', group_large: 'Large Group' };
   var STATUS = { SCHEDULED: ['Scheduled', 'info'], SENDING: ['Sending', 'warn'], SENT: ['Sent', 'ok'], FAILED: ['Failed', 'bad'], CANCELLED: ['Cancelled', ''] };
+
+  /** 3.57: the 3.56 offers campaigns (also shown in E-mail studio > Settings). */
+  CR.renderLegacyOffers = function (list) {
+    var loadList = function () { CR.renderLegacyOffers(list); };
+    api('GET', '/admin/email/offers/campaigns?limit=50').then(function (r) {
+      var tb = h('tbody');
+      (r.campaigns || []).forEach(function (c) {
+        var s = STATUS[c.status] || [c.status, ''];
+        var s2 = c.stats || {};
+        tb.appendChild(h('tr', h('td', { text: CR.util.date(c.sendAt, true) }), h('td', { text: c.subject }), h('td', { text: c.coupon ? c.coupon.code : '-' }),
+          h('td', ui.chip(s[0], s[1])), h('td.num', { text: String(s2.targeted || 0) }), h('td.num', { text: String(s2.sent || 0) }), h('td.num', { text: String(s2.skipped || 0) }), h('td.num', { text: String(s2.failed || 0) }),
+          h('td', c.status === 'SCHEDULED' ? h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Cancel', onclick: function () {
+            api('POST', '/admin/email/offers/campaigns/' + encodeURIComponent(c.campaignId) + '/cancel', {}).then(loadList).catch(function (e) { ui.toast(e.message, true); });
+          } }) : null)));
+      });
+      if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '9', class: 'muted', text: 'No offers e-mails yet.' })));
+      clear(list).appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['When', 'Subject', 'Coupon', 'Status', 'Riders', 'Sent', 'Skipped', 'Failed', ''].map(function (c) { return h('th', { text: c }); }))), tb)));
+    }).catch(function (e) { clear(list).appendChild(ui.error(e)); });
+  };
+  /** 3.57: the suppression list (also shown in E-mail studio > Settings). */
+  CR.renderSuppression = function (supp) {
+    var loadSupp = function () { CR.renderSuppression(supp); };
+    var email = h('input', { type: 'email', placeholder: 'rider@example.com' });
+    var add = h('button.btn.btn--sm', { type: 'button', text: 'Add to suppression list', onclick: function () {
+      api('POST', '/admin/email/suppression', { email: email.value, reason: 'admin' }).then(function () { ui.toast('Added.'); loadSupp(); }).catch(function (e) { ui.toast(e.message, true); });
+    } });
+    api('GET', '/admin/email/suppression').then(function (r) {
+      var tb = h('tbody');
+      (r.entries || []).forEach(function (x) {
+        tb.appendChild(h('tr', h('td', { text: x.masked || '-' }), h('td', { text: x.reason }), h('td', { text: CR.util.date(x.at, true) }),
+          h('td', h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Remove', onclick: function () {
+            ui.confirm('Remove from suppression list?', 'This address may get offer e-mails again, but only while the rider has offer e-mails turned on.', 'Remove').then(function (ok) {
+              if (ok) api('DELETE', '/admin/email/suppression/' + x.emailHash).then(loadSupp).catch(function (e) { ui.toast(e.message, true); });
+            });
+          } }))));
+      });
+      if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '4', class: 'muted', text: 'Nobody on the list.' })));
+      clear(supp).appendChild(h('div.stack', h('p.small.muted', { text: 'Addresses here never get an offer e-mail (unsubscribed, bounced, complained, or added by an admin). Stored as a hash; shown masked.' }),
+        h('div.row', email, add), h('div.table-wrap', h('table.table', h('thead', h('tr', ['Address', 'Reason', 'Since', ''].map(function (c) { return h('th', { text: c }); }))), tb))));
+    }).catch(function (e) { clear(supp).appendChild(ui.error(e)); });
+  };
 
   CR.renderOfferEmail = function (view) {
     var st = { imageId: null, kind: 'all', when: 'now' };
@@ -98,42 +141,8 @@
       });
     } });
 
-    function loadList() {
-      api('GET', '/admin/email/offers/campaigns?limit=50').then(function (r) {
-        var tb = h('tbody');
-        (r.campaigns || []).forEach(function (c) {
-          var s = STATUS[c.status] || [c.status, ''];
-          var s2 = c.stats || {};
-          tb.appendChild(h('tr', h('td', { text: CR.util.date(c.sendAt, true) }), h('td', { text: c.subject }), h('td', { text: c.coupon ? c.coupon.code : '-' }),
-            h('td', ui.chip(s[0], s[1])), h('td.num', { text: String(s2.targeted || 0) }), h('td.num', { text: String(s2.sent || 0) }), h('td.num', { text: String(s2.skipped || 0) }), h('td.num', { text: String(s2.failed || 0) }),
-            h('td', c.status === 'SCHEDULED' ? h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Cancel', onclick: function () {
-              api('POST', '/admin/email/offers/campaigns/' + encodeURIComponent(c.campaignId) + '/cancel', {}).then(loadList).catch(function (e) { ui.toast(e.message, true); });
-            } }) : null)));
-        });
-        if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '9', class: 'muted', text: 'No offers e-mails yet.' })));
-        clear(list).appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['When', 'Subject', 'Coupon', 'Status', 'Riders', 'Sent', 'Skipped', 'Failed', ''].map(function (c) { return h('th', { text: c }); }))), tb)));
-      }).catch(function (e) { clear(list).appendChild(ui.error(e)); });
-    }
-    function loadSupp() {
-      var email = h('input', { type: 'email', placeholder: 'rider@example.com' });
-      var add = h('button.btn.btn--sm', { type: 'button', text: 'Add to suppression list', onclick: function () {
-        api('POST', '/admin/email/suppression', { email: email.value, reason: 'admin' }).then(function () { ui.toast('Added.'); loadSupp(); }).catch(function (e) { ui.toast(e.message, true); });
-      } });
-      api('GET', '/admin/email/suppression').then(function (r) {
-        var tb = h('tbody');
-        (r.entries || []).forEach(function (x) {
-          tb.appendChild(h('tr', h('td', { text: x.masked || '-' }), h('td', { text: x.reason }), h('td', { text: CR.util.date(x.at, true) }),
-            h('td', h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Remove', onclick: function () {
-              ui.confirm('Remove from suppression list?', 'This address may get offer e-mails again, but only while the rider has offer e-mails turned on.', 'Remove').then(function (ok) {
-                if (ok) api('DELETE', '/admin/email/suppression/' + x.emailHash).then(loadSupp).catch(function (e) { ui.toast(e.message, true); });
-              });
-            } }))));
-        });
-        if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '4', class: 'muted', text: 'Nobody on the list.' })));
-        clear(supp).appendChild(h('div.stack', h('p.small.muted', { text: 'Addresses here never get an offer e-mail (unsubscribed, bounced, complained, or added by an admin). Stored as a hash; shown masked.' }),
-          h('div.row', email, add), h('div.table-wrap', h('table.table', h('thead', h('tr', ['Address', 'Reason', 'Since', ''].map(function (c) { return h('th', { text: c }); }))), tb))));
-      }).catch(function (e) { clear(supp).appendChild(ui.error(e)); });
-    }
+    function loadList() { CR.renderLegacyOffers(list); }
+    function loadSupp() { CR.renderSuppression(supp); }
 
     view.appendChild(banner);
     view.appendChild(h('div.np-grid.section-gap',

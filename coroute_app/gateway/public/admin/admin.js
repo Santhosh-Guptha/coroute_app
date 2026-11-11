@@ -707,6 +707,7 @@
       view.appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['Code', 'Discount', 'Plans', 'Valid', 'Used', 'Status', ''].map(function (c, i) { return h('th', { class: i === 4 ? 'num' : '', text: c }); }))), tbody)));
 
       function load() {
+        api('GET', '/admin/email/studio/unique-codes').then(function (u) { st.unique = u.summary || {}; draw(); }).catch(function () { st.unique = {}; });
         CR.planOptions().then(function () { return Promise.all([api('GET', '/admin/coupons'), api('GET', '/admin/coupons/usage?limit=1')]); }).then(function (r) {
           st.list = (r[0].coupons || []).sort(function (a, b) { return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0); });
           var s = r[1].summary || {};
@@ -736,7 +737,8 @@
           if (s.key !== 'EXPIRED' && s.key !== 'ARCHIVED') actions.appendChild(h('button.btn.btn--sm', { type: 'button', text: 'Expire', onclick: stop(function () { expire(c); }) }));
           actions.appendChild(h('button.btn.btn--sm', { type: 'button', text: 'Edit', onclick: stop(function () { edit(c); }) }));
           tbody.appendChild(h('tr.is-link', { tabindex: '0', dataset: { code: c.code }, onclick: function () { details(c); }, onkeydown: function (e) { if (e.key === 'Enter' && e.target === this) details(c); } },
-            h('td', h('b.mono', { text: c.code }), c.name && c.name !== c.code ? h('div.muted.small', { text: c.name + (c.campaignName ? ' · ' + c.campaignName : '') }) : null),
+            h('td', h('b.mono', { text: c.code }), c.name && c.name !== c.code ? h('div.muted.small', { text: c.name + (c.campaignName ? ' · ' + c.campaignName : '') }) : null,
+              st.unique && st.unique[c.code] ? h('div.small', chip(st.unique[c.code].issued + ' unique e-mail codes', 'info')) : null),
             h('td', { text: discountLabel(c) }), h('td', { text: plansLabel(c.applicableTiers) }),
             h('td.nowrap.small', { text: date(c.validFrom) + ' to ' + date(c.expiresAt) }),
             h('td.num', { text: used + (max ? ' / ' + max : '') }), h('td', s.chip), h('td', actions)));
@@ -771,8 +773,20 @@
           rows.forEach(function (x) { tb.appendChild(h('tr', h('td.nowrap', { text: date(x.redeemedAt || x.reservedAt || x.createdAt, true) }), h('td.mono', { text: x.userId || '-' }), h('td', { text: planLabel(x.category || x.planTier) }), h('td.num', { text: inr(x.discountAmount) }), h('td.num', { text: inr(x.finalAmount) }), h('td', { text: String(x.status || '') }))); });
           box.appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['When', 'Rider', 'Plan', 'Discount', 'Paid', 'Status'].map(function (t, i) { return h('th', { class: i === 3 || i === 4 ? 'num' : '', text: t }); }))), tb)));
         }).catch(function (e) { clear(box).appendChild(errorNode(e)); });
-        dialog({ title: c.code, wide: true, body: [h('div.row', s.chip), kv, box], actions: [
+        // 3.57 e-mail studio: the single-use codes made from this coupon for e-mail campaigns.
+        var uniq = h('div.stack');
+        api('GET', '/admin/email/studio/unique-codes?parent=' + encodeURIComponent(c.code) + '&limit=200').then(function (r) {
+          var codes = r.codes || [];
+          if (!codes.length) return;
+          var tb = h('tbody');
+          codes.slice(0, 200).forEach(function (x) { tb.appendChild(h('tr', h('td.mono', { text: x.code }), h('td.mono.small', { text: x.campaignId }), h('td.nowrap', { text: date(x.createdAt) }), h('td.nowrap', { text: date(x.expiresAt) }), h('td', { text: x.used ? 'Used' : String(x.status || '').toLowerCase().replace(/_/g, ' ') }))); });
+          uniq.appendChild(h('h3', { text: 'Unique codes (' + codes.length + (codes.length >= 200 ? '+' : '') + ', ' + codes.filter(function (x) { return x.used; }).length + ' used)' }));
+          uniq.appendChild(h('p.small.muted', { text: 'Single-use codes made from this coupon for e-mail campaigns: one rider each, one use.' }));
+          uniq.appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['Code', 'Campaign', 'Made', 'Ends', 'State'].map(function (t) { return h('th', { text: t }); }))), tb)));
+        }).catch(function () { /* the studio may be unavailable */ });
+        dialog({ title: c.code, wide: true, body: [h('div.row', s.chip), kv, box, uniq], actions: [
           { label: 'Make marketing image', onClick: function () { CR.go('#/marketing/new?coupon=' + encodeURIComponent(c.code)); return true; } },
+          { label: 'E-mail this coupon', onClick: function () { if (CR.emailCoupon) CR.emailCoupon(c.code); return true; } },
           { label: 'Edit', kind: 'primary', onClick: function () { edit(c); return true; } }] });
       }
       function edit(c) {

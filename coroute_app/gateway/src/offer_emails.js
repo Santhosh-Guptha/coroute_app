@@ -219,11 +219,13 @@ class OfferEmails {
   }
 
   /** The unsubscribe link / one-click POST: consent off + suppression. False for a bad token. */
-  async unsubscribe(userId, token) {
+  async unsubscribe(userId, token, { campaignId = '' } = {}) {
     if (!tokenOk(this.secret, userId, token)) return false;
     await this.setConsent(userId, false, { source: 'unsubscribe' });
     const user = await this.repo.findUserById(userId).catch(() => null);
     if (user && validEmail(user.email)) await this.suppress(user.email, 'unsubscribe', 'rider');
+    // 3.57 e-mail studio: count the unsubscribe against the campaign whose link was used (reporting only).
+    if (campaignId && typeof this.onUnsubscribe === 'function') { try { await this.onUnsubscribe(userId, String(campaignId)); } catch { /* reporting only */ } }
     return true;
   }
 
@@ -542,19 +544,20 @@ function page(title, bodyHtml) {
 function unsubscribeRouter({ offers }) {
   const r = express.Router();
   const limiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: 'Too many requests.' });
-  const params = (req) => ({ u: String(req.query.u || (req.body && req.body.u) || ''), t: String(req.query.t || (req.body && req.body.t) || '') });
+  const params = (req) => ({ u: String(req.query.u || (req.body && req.body.u) || ''), t: String(req.query.t || (req.body && req.body.t) || ''),
+    cid: /^e[ca]_[a-f0-9]{16,20}$/.test(String(req.query.cid || '')) ? String(req.query.cid) : '' });
   r.get('/email/unsubscribe', limiter, (req, res) => {
-    const { u, t } = params(req);
+    const { u, t, cid } = params(req);
     res.set(PAGE_HEADERS);
     if (!tokenOk(offers.secret, u, t)) return res.status(400).type('html').send(page('Link not valid', '<h1 style="font-size:20px;">This link is not valid</h1><p>Turn offer e-mails off on your account page at any time.</p>'));
     return res.type('html').send(page('Unsubscribe', '<h1 style="font-size:20px;">Stop offer e-mails?</h1><p>You will not get CoRoute offer e-mails any more. Receipts and safety messages are not affected.</p>'
-      + `<form method="post" action="/email/unsubscribe?u=${encodeURIComponent(u)}&amp;t=${encodeURIComponent(t)}"><button type="submit" style="background:#5b4bd6;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;">Unsubscribe</button></form>`));
+      + `<form method="post" action="/email/unsubscribe?u=${encodeURIComponent(u)}&amp;t=${encodeURIComponent(t)}${cid ? `&amp;cid=${cid}` : ''}"><button type="submit" style="background:#5b4bd6;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;">Unsubscribe</button></form>`));
   });
   r.post('/email/unsubscribe', limiter, express.urlencoded({ extended: false, limit: '2kb' }), async (req, res, next) => {
     try {
-      const { u, t } = params(req);
+      const { u, t, cid } = params(req);
       res.set(PAGE_HEADERS);
-      const ok = await offers.unsubscribe(u, t);
+      const ok = await offers.unsubscribe(u, t, { campaignId: cid });
       if (!ok) return res.status(400).type('html').send(page('Link not valid', '<h1 style="font-size:20px;">This link is not valid</h1>'));
       return res.type('html').send(page('Unsubscribed', '<h1 style="font-size:20px;">You are unsubscribed</h1><p>You will not get CoRoute offer e-mails any more. You can turn them on again on your account page.</p>'));
     } catch (e) { next(e); }

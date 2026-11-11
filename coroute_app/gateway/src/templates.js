@@ -12,7 +12,9 @@
  *  - Push templates reach the Play app: the policy guard (policy_terms.js) refuses money / buying /
  *    offer words, like admin pushes.
  *  - E-mail templates edit the words (subject, heading, intro, footer). The HTML layout and the
- *    payment lines are built by code (purchase_email.js) with every value escaped.
+ *    payment lines are built by code (purchase_email.js) with every value escaped. 3.57: the welcome and
+ *    ride summary e-mails (lifecycle_emails.js) have more word fields; their preview also returns the
+ *    whole e-mail (mailPreview).
  *  - Stored in collection `message_templates` (one document per template, current fields + the last
  *    20 versions). Reset writes the defaults as a new version. Reads are cached for 30 s per node.
  */
@@ -61,6 +63,61 @@ const DEFINITIONS = Object.freeze({
       heading: 'Your refund is on its way',
       intro: 'Hi {{name}}, we refunded {{amount}} for your {{plan}} plan. Banks usually show it within 5 to 7 working days.',
       footer: 'Order {{orderId}}. Questions? Write to {{supportEmail}}.',
+    },
+  },
+  // 3.57 lifecycle e-mails (lifecycle_emails.js, docs/features_355/lifecycle_emails.md).
+  welcome: {
+    label: 'Welcome e-mail', channel: 'email', lifecycle: true,
+    description: 'Sent once to every new account (password or Google sign-up). The steps, the safety line and the footer always go out. The group rides block is added only while the rider keeps "Tips and news" on: the free line in Free for everyone mode, else the plans line with a "See group plans" button (with the welcome coupon when one is set below).',
+    fields: {
+      subject: { label: 'Subject', max: 150 },
+      heading: { label: 'Heading', max: 120 },
+      intro: { label: 'Intro paragraph', max: 800, multiline: true },
+      step1: { label: 'Step 1', max: 240 },
+      step2: { label: 'Step 2', max: 240 },
+      step3: { label: 'Step 3', max: 240 },
+      safetyLine: { label: 'Safety line', max: 300, multiline: true },
+      guideLine: { label: 'Guide line (above the guide button)', max: 300, multiline: true },
+      plansLine: { label: 'Group rides: Paid / Free up to limits', max: 400, multiline: true },
+      freeLine: { label: 'Group rides: Free for everyone', max: 400, multiline: true },
+      footer: { label: 'Footer', max: 800, multiline: true },
+    },
+    variables: [v('name', 'Asha', 'First name (or "there")'), v('username', 'SwiftFalcon482', 'Username, without the @'),
+      v('guideUrl', 'https://coroute.example/guide', 'Quick start guide link'), v('accountUrl', 'https://coroute.example/account', 'Website account link'),
+      v('supportEmail', 'support@coroute.example', 'Support e-mail (or the website contact form)')],
+    defaults: {
+      subject: 'Welcome to CoRoute, {{name}}',
+      heading: 'Welcome, {{name}}',
+      intro: 'You are @{{username}} on CoRoute. Three quick steps get you ready for your first ride.',
+      step1: 'Add your emergency contact and Medical ID: Profile > Emergency contact & Medical ID.',
+      step2: 'Add your bike: Profile > My bikes > Add bike.',
+      step3: 'Start a ride: tap Start Ride on Home. Crash detection starts once you are moving.',
+      safetyLine: 'Every safety feature is free for every rider: crash detection, SOS alerts to your group and your emergency contact, and a check-in when you have not arrived on time.',
+      guideLine: 'The quick start guide walks through the permissions and your first solo or group ride.',
+      plansLine: 'Joining a group ride is always free. To host one for your friends, pick a group plan on the website.',
+      freeLine: 'Group rides are free right now: host one and share the ride code with your friends.',
+      footer: 'Questions? Write to {{supportEmail}}. Your e-mail choices are on your account page: {{accountUrl}}',
+    },
+  },
+  trip_memory: {
+    label: 'Ride summary e-mail', channel: 'email', lifecycle: true,
+    description: 'Sent once per rider per ride, after the trip report is ready, for rides of at least 2 km and 10 minutes. The facts (date, distance, riding time, stops, riders), the route picture (start and end left off) and the "View trip report" button are added by the server. Riders turn these off with "Ride summaries".',
+    fields: {
+      subject: { label: 'Subject', max: 150 },
+      heading: { label: 'Heading', max: 120 },
+      intro: { label: 'Intro paragraph', max: 800, multiline: true },
+      rateLine: { label: 'Rate your stops line', max: 300, multiline: true },
+      footer: { label: 'Footer', max: 800, multiline: true },
+    },
+    variables: [v('name', 'Asha', 'First name (or "there")'), v('rideName', 'Nandi Hills sunrise ride', 'Ride name'), v('distance', '128 km', 'Distance'),
+      v('ridingTime', '3 h 25 min', 'Riding time'), v('date', '10 Nov 2026', 'Ride date (India)'), v('stops', '3', 'Stops'), v('riders', '5', 'Riders in the group'),
+      v('groupName', 'Weekend Riders', 'Group or crew name (may be empty)'), v('reportUrl', 'https://coroute.example/trip/TRIP-AB12CD-usr_asha', 'Trip report link')],
+    defaults: {
+      subject: 'Your ride: {{rideName}} · {{distance}}',
+      heading: '{{rideName}}',
+      intro: 'Good riding, {{name}}. Here is your ride of {{date}}.',
+      rateLine: 'Stopped somewhere good? Rate the places you stopped in the app, so other riders know what to expect.',
+      footer: 'Only you get this summary of your own ride. The start and the end of your route are left off the picture.',
     },
   },
   sos_sms: {
@@ -224,7 +281,7 @@ class TemplateStore {
       const doc = await this._doc(id);
       const current = await this.fields(id);
       out.push({
-        id, label: def.label, channel: def.channel, description: def.description, dlt: !!def.dlt, playNeutral: !!def.playNeutral,
+        id, label: def.label, channel: def.channel, description: def.description, dlt: !!def.dlt, playNeutral: !!def.playNeutral, lifecycle: !!def.lifecycle,
         fields: def.fields, variables: def.variables, constants: def.constants || [], defaults: def.defaults, current,
         version: (doc && doc.version) || 0, updatedAt: (doc && doc.updatedAt) || null, updatedBy: (doc && doc.updatedBy) || null,
         isDefault: JSON.stringify(current) === JSON.stringify(def.defaults),
@@ -282,7 +339,7 @@ class TemplateStore {
 }
 
 /** /api/admin/templates (mounted behind requireAuth + requireAdmin). */
-function templatesAdminRouter({ templates, constants = () => ({}), audit = null }) {
+function templatesAdminRouter({ templates, constants = () => ({}), audit = null, mailPreview = null }) {
   const express = require('express');
   const r = express.Router();
   r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -294,7 +351,15 @@ function templatesAdminRouter({ templates, constants = () => ({}), audit = null 
   r.get('/', async (req, res, next) => { try { res.json({ templates: await templates.list() }); } catch (e) { fail(res, e, next); } });
   r.get('/:id/history', async (req, res, next) => { try { res.json({ history: await templates.history(req.params.id) }); } catch (e) { fail(res, e, next); } });
   r.post('/:id/preview', async (req, res, next) => {
-    try { res.json(await templates.preview(req.params.id, req.body && req.body.fields ? req.body.fields : null, { constants: constants() })); } catch (e) { fail(res, e, next); }
+    try {
+      const out = await templates.preview(req.params.id, req.body && req.body.fields ? req.body.fields : null, { constants: constants() });
+      // 3.57 lifecycle e-mails: the whole e-mail as sent (layout, sample facts, route picture), when the words are valid.
+      if (mailPreview && !out.errors.length) {
+        const mail = await mailPreview(req.params.id, out.rendered).catch(() => null);
+        if (mail) out.mail = mail;
+      }
+      res.json(out);
+    } catch (e) { fail(res, e, next); }
   });
   r.put('/:id', async (req, res, next) => {
     try {

@@ -1236,8 +1236,12 @@ class Repo {
     return c;
   }
 
-  async listCoupons(limit = 500) {
-    const rows = await this.soda.query(C.coupons, {}, { limit });
+  /**
+   * Coupons for the admin lists, newest first. 3.57: the single-use child codes of e-mail campaigns
+   * (`parentCode` set) are left out unless `includeChildren`; the e-mail studio lists them per parent.
+   */
+  async listCoupons(limit = 500, { includeChildren = false } = {}) {
+    const rows = await this.soda.query(C.coupons, includeChildren ? {} : { parentCode: { $exists: false } }, { limit });
     const now = Date.now();
     return rows.map((r) => {
       const c = { ...r.value, key: r.key };
@@ -1298,6 +1302,8 @@ class Repo {
       updatedAt: now,
       createdBy: coupon.createdBy || 'admin',
       ...(coupon.stackWithOffer === false ? { stackWithOffer: false } : {}),
+      // 3.57 e-mail studio: a single-use child code issued to one rider (src/email_marketing.js).
+      ...(coupon.parentCode ? { parentCode: String(coupon.parentCode).trim().toUpperCase(), emailCampaignId: coupon.emailCampaignId ? String(coupon.emailCampaignId).slice(0, 40) : null } : {}),
     };
     if (Array.isArray(coupon.holds)) doc.holds = coupon.holds;
 

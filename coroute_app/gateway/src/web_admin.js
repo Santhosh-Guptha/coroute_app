@@ -13,7 +13,7 @@
  * requireAuth + requireAdmin (MASTER_ADMIN), so a rider token gets 403 whatever the page does.
  *
  * Headers on every /admin response: a strict CSP of its own (no inline script or style, no third
- * party, frame-ancestors 'none', form-action 'none'), X-Robots-Tag noindex, no-referrer, no-store.
+ * party, frame-ancestors 'none', form-action 'none'; frames only from this site: the e-mail preview), X-Robots-Tag noindex, no-referrer, no-store.
  */
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +26,8 @@ const ADMIN_CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
+  // 3.57 e-mail studio: the preview frame is /email/preview/<token> (same origin, sandboxed, its own CSP).
+  "frame-src 'self'",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",

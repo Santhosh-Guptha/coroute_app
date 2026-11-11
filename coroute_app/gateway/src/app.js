@@ -325,6 +325,12 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       .set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'")
       .type('html').send(site.render('watch.html', pageVars(req)));
   });
+  // 3.57 ride summary e-mail link: /trip/<tripId> shows the signed-in owner's own ride (numbers only; the page
+  // reads GET /api/trips/:tripId, which answers 404 for anyone else). Shop page headers: strict CSP, no-store, noindex.
+  app.get('/trip/:tripId', require('./web_shop').shopPageHeaders('/trip'), (req, res) => {
+    if (!/^[A-Za-z0-9_.:-]{3,120}$/.test(String(req.params.tripId || ''))) return notFoundPage(req, res);
+    res.type('html').send(site.render('trip.html', pageVars(req)));
+  });
   // Join link shared from the app: opens the app via its custom scheme, with the download as fallback.
   app.get('/join/:code', (req, res) => {
     const code = String(req.params.code || '').toUpperCase();
@@ -405,13 +411,23 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // 3.56 notifications (src/notifications.js): admin push campaigns, purchase / refund e-mails, server SOS SMS
   // (emergencyGateway.sosSms) and the editable message templates. Jobs start with retention.start().
   const notifications = require('./notifications').attachNotifications({ app, repo, soda, gate, push, emergencyGateway, lease, config, logger,
-    ...(mailTransport !== undefined ? { mailTransport } : {}), ...(smsProviders ? { smsProviders } : {}), ...(smsFetch ? { smsFetch } : {}), ...(pushImageStore ? { imageStore: pushImageStore } : {}) });
+    accessMode, ...(mailTransport !== undefined ? { mailTransport } : {}), ...(smsProviders ? { smsProviders } : {}), ...(smsFetch ? { smsFetch } : {}), ...(pushImageStore ? { imageStore: pushImageStore } : {}) });
+  // 3.57 ride summary e-mail: TimelineEngine.finishTrip -> convoys.tripMemory.onTripFinished (never awaited).
+  convoys.tripMemory = notifications.lifecycle;
   if (guardianPush) guardianPush.texts = notifications.guardianArrivalText;
   // 3.55b website all-time totals: one shared aggregate, refreshed by one node under the lease (src/public_stats.js).
   const publicStats = new (require('./public_stats').PublicStatsStore)({ repo, logger });
   app.use('/api', require('./leaderboard').riderScoreRouter({ riderScore, leaderboard, gate, flagsOf: () => featureFlags }));
   // 3.55 usernames, friends, profile pictures: auth hooks, username backfill, erase cleanup, /join/friend/:code page.
   require('./social_routes').attachSocial({ app, repo, auth, hub, lease, featureFlags, logger, site, pageVars });
+  // 3.57 welcome e-mail: once per new account (password or Google), after the username exists. Queued in the
+  // background (src/lifecycle_emails.js); never delays or fails the registration.
+  const socialReady = auth.onUserReady;
+  auth.onUserReady = async (user, ctx = {}) => {
+    const u = (socialReady ? await socialReady(user, ctx) : user) || user;
+    if (ctx.created) { try { notifications.lifecycle.queueWelcome(u); } catch { /* never in the way */ } }
+    return u;
+  };
   // 3.55 ratings & reviews engagement (src/engagement.js): app config, in-app feedback, admin templates and stats.
   require('./engagement').attachEngagement({ app, repo, gate, logger });
   // 3.55 diagnostics logs (src/diag_logs.js): rider uploads, admin viewer, erase cascade, leased retention.

@@ -1,4 +1,5 @@
-/* CoRoute web admin: "Templates" (3.56). Edit message templates with {{variables}} and a live preview:
+/* CoRoute web admin: "Templates" (3.56). Edit message templates with {{variables}} and a live preview
+   (3.57: the welcome and ride summary e-mails, with the whole e-mail as preview and the welcome coupon setting):
    purchase receipt / refund e-mails, SOS / safe-now SMS (DLT: variables fixed, re-registration warning),
    plan push notices (Play-neutral) and the guardian arrival message. Saved on the server with versions;
    "Reset to default" stores the defaults as a new version. API: /api/admin/templates (CR.api). */
@@ -51,12 +52,23 @@
         clear(problems);
         r.errors.forEach(function (e) { problems.appendChild(h('div.banner.banner--bad', { role: 'alert', text: e })); });
         r.warnings.forEach(function (w) { problems.appendChild(h('div.banner.banner--info', { text: w })); });
-        drawPreview(r.rendered);
+        drawPreview(r.rendered, r.mail);
         save.disabled = r.errors.length > 0;
       }).catch(function (e) { clear(problems).appendChild(ui.error(e)); });
     }
-    function drawPreview(r) {
+    var lastHtml = '';
+    function drawPreview(r, mail) {
       clear(preview);
+      if (mail) {
+        // 3.57 lifecycle e-mails: the whole e-mail as the server builds it (sample rider, facts, route picture).
+        lastHtml = mail.html || '';
+        preview.appendChild(h('div.row', h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Download HTML preview', onclick: function () {
+          if (lastHtml) CR.download(new Blob([lastHtml], { type: 'text/html' }), t.id + '-email-preview.html');
+        } })));
+        preview.appendChild(h('div.tp-mail', h('div.tp-mail__subject', h('span.muted', { text: 'Subject: ' }), mail.subject),
+          h('pre.tp-mail__text', { text: mail.text })));
+        return;
+      }
       if (t.channel === 'email') {
         preview.appendChild(h('div.tp-mail',
           h('div.tp-mail__subject', h('span.muted', { text: 'Subject: ' }), r.subject),
@@ -112,10 +124,35 @@
     view.appendChild(ui.pageHead(t.label, t.description, h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'All templates', onclick: function () { CR.go('#/templates'); } })));
     if (t.warning) view.appendChild(h('div.banner.banner--info', { text: t.warning }));
     if (t.playNeutral) view.appendChild(h('div.banner.banner--info', { text: 'Reaches the Play app: no prices, buying, renew, upgrade or offer words, no links.' }));
+    if (t.id === 'welcome') view.appendChild(welcomeSettings());
     view.appendChild(h('div.grid2.section-gap',
       h('div.card.stack', form, h('div.field', h('span', 'Variables (click to insert)'), vars), problems, h('div.row.row--end', hist, reset, save)),
       h('div.card', h('div.card__head', h('h3', { text: 'Preview' }), h('p', { text: 'With sample values. Version ' + t.version + (t.isDefault ? ' (default text)' : '') })), preview)));
     refresh();
+  }
+
+  /* 3.57 "Welcome coupon code": optional; must be an active public coupon. The welcome e-mail's
+     "See group plans" button then opens /plans?coupon=CODE (only for riders who keep Tips and news on). */
+  function welcomeSettings() {
+    var input = h('input', { type: 'text', maxlength: '24', placeholder: 'No coupon', autocomplete: 'off' });
+    var info = h('p.small.muted', { text: 'Loading…' });
+    var save = h('button.btn.btn--primary.btn--sm', { type: 'button', text: 'Save coupon setting' });
+    api('GET', '/admin/email/lifecycle/settings').then(function (r) {
+      input.value = r.welcomeCoupon || '';
+      info.textContent = (r.enabled ? 'E-mail is on.' : 'E-mail is off on this server (SMTP_HOST / MAIL_FROM): nothing is sent.')
+        + ' Ride summaries go out ' + r.tripDelayMinutes + ' min after a ride ends, for rides of ' + r.thresholds.minKm + ' km and ' + r.thresholds.minMinutes + ' min or more.';
+    }).catch(function (e) { info.textContent = e.message; });
+    save.addEventListener('click', function () {
+      save.disabled = true;
+      api('PUT', '/admin/email/lifecycle/settings', { welcomeCoupon: input.value.trim() }).then(function (r) {
+        save.disabled = false;
+        input.value = r.welcomeCoupon || '';
+        ui.toast(r.welcomeCoupon ? 'Welcome coupon set to ' + r.welcomeCoupon + '.' : 'Welcome coupon removed.');
+      }).catch(function (e) { save.disabled = false; ui.toast(e.message, true); });
+    });
+    return h('div.card.section-gap.stack', h('div.card__head', h('h3', { text: 'Welcome coupon code' }),
+      h('p', { text: 'Optional. Must be an active public coupon (Coupons). It is added to the "See group plans" button as /plans?coupon=CODE, and left out when it stops being active.' })),
+      CR.ui.field('Coupon code', input, 'letters, digits, - and _'), info, h('div.row.row--end', save));
   }
 
   CR.sections.templates = {

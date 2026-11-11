@@ -24,7 +24,7 @@
 
   function tabs(active) {
     var nav = h('div.row.eng-tabs', { role: 'tablist', 'aria-label': 'Notifications' });
-    [['', 'Compose push'], ['email', 'Offers e-mail'], ['history', 'History'], ['sms', 'SMS']].forEach(function (t) {
+    [['', 'Compose push'], ['email', 'E-mail studio'], ['history', 'History'], ['sms', 'SMS']].forEach(function (t) {
       nav.appendChild(h('button.btn.btn--sm', { type: 'button', 'aria-pressed': String(active === t[0]), text: t[1], onclick: function () { CR.go('#/notifications' + (t[0] ? '/' + t[0] : '')); } }));
     });
     return nav;
@@ -58,7 +58,7 @@
   // ==================================================================== compose
   function renderCompose(view) {
     var st = { title: '', body: '', target: 'home', imageId: null, imageBlobUrl: null, kind: 'all', days: 30, plans: ['community'], usernames: '', when: 'now', at: '', pushKind: 'update', partnerName: '' };
-    var channel = CR.ui.select([['push', 'Push notification'], ['email', 'E-mail (Offers)']], 'push');
+    var channel = CR.ui.select([['push', 'Push notification'], ['email', 'E-mail (Offers, E-mail studio)']], 'push');
     channel.addEventListener('change', function () { if (channel.value === 'email') CR.go('#/notifications/email'); });
     var pushKind = CR.ui.select(Object.keys(KIND_LABELS).map(function (k) { return [k, KIND_LABELS[k]]; }), 'update');
     var kindHint = h('div.small.muted', { text: KIND_HINTS.update });
@@ -307,9 +307,11 @@
     render: function (view, arg) {
       if (arg === 'history') return renderHistory(view);
       if (arg === 'sms') return renderSms(view);
-      if (arg === 'email') {
-        view.appendChild(ui.pageHead('Notifications', 'Offers e-mail: plan offers and coupon codes, sent only to riders who turned on offer e-mails on the website.'));
+      if (arg === 'email' || arg.indexOf('email/') === 0) {
+        view.appendChild(ui.pageHead('Notifications', 'E-mail studio: marketing e-mails with coupons, built from templates. Sent only to riders who turned on offer e-mails on the website (account notices about a rider\'s own plan excepted).'));
         view.appendChild(tabs('email'));
+        // 3.57: the E-mail studio (email_studio.js) extends the 3.56 Offers composer (offers.js, kept as the fallback).
+        if (CR.renderEmailStudio) return CR.renderEmailStudio(view, arg.slice(6));
         if (CR.renderOfferEmail) return CR.renderOfferEmail(view);
         return view.appendChild(h('div.banner.banner--bad', { text: 'The e-mail composer did not load. Reload the page.' }));
       }
