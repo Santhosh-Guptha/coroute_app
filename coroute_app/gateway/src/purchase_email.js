@@ -209,7 +209,8 @@ class PurchaseEmail {
   async retryDue() {
     if (!this.mailer || !this.mailer.enabled) return 0;
     await this._ensure();
-    const rows = await this.soda.query(COLLECTION, { status: 'RETRY', nextAttemptAt: { $lte: this.clock() } }, { limit: 50 });
+    // Receipts and refunds only: the lifecycle e-mails in the same log have their own job (lifecycle_emails.js).
+    const rows = await this.soda.query(COLLECTION, { status: 'RETRY', kind: { $in: ['receipt', 'refund'] }, nextAttemptAt: { $lte: this.clock() } }, { limit: 50 });
     let n = 0;
     for (const row of rows) {
       const order = await this.repo.findRazorpayOrder(row.value.orderId);

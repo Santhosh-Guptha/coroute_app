@@ -3,6 +3,7 @@
  *   GET /api/membership/my       plan, end date, a plan change waiting to start
  *   GET /api/membership/payments every order, newest first -> receipts (/receipt?order=<id>, paid orders)
  *   GET /api/membership/catalog  plan names for the payment list
+ *   GET / PUT /api/web/email-preferences  e-mail categories (3.57; #emails is the e-mails' "Manage e-mails" link)
  * Plans never renew on their own, so there is nothing to cancel. Text is written with textContent only. */
 (function () {
   'use strict';
@@ -157,25 +158,42 @@
     loadConsent();
   });
 
-  /* 3.56 "Offer e-mails" consent (GET / PUT /api/web/marketing-consent): off by default, the rider's choice. */
+  /* 3.56 "Offer e-mails" consent and 3.57 e-mail categories (GET / PUT /api/web/email-preferences):
+   * account and receipts always; ride summaries and tips and news on until turned off; offers off until turned on. */
   function loadConsent() {
-    var box = S.$('ac-offers');
     var note = S.$('ac-offers-note');
-    if (!box || !note) return;
-    S.api('GET', '/web/marketing-consent').then(function (r) {
+    var boxes = { rideSummaries: S.$('ac-rides'), tipsNews: S.$('ac-tips'), offers: S.$('ac-offers') };
+    if (!note || !boxes.offers) return;
+    var hasEmail = false;
+    function say(cats, suppressed) {
+      if (!hasEmail) { note.textContent = 'Add an e-mail address to your account to get e-mails from CoRoute.'; return; }
+      if (suppressed) { note.textContent = 'E-mails to your address bounced or were reported, so we paused them. Write to us to turn them on again.'; return; }
+      note.textContent = cats.offers ? 'Offer e-mails are on. You can turn any of these off here or with the link in the e-mail.'
+        : 'Offer e-mails are off. We never send offers unless you turn this on.';
+    }
+    function apply(j) {
+      hasEmail = !!j.hasEmail;
+      var c = j.categories || {};
+      Object.keys(boxes).forEach(function (k) { if (!boxes[k]) return; boxes[k].checked = c[k] === true; boxes[k].disabled = !hasEmail; });
+      say(c, j.suppressed);
+    }
+    S.api('GET', '/web/email-preferences').then(function (r) {
       if (!r.ok) { note.textContent = 'Your e-mail choices could not load. Refresh to try again.'; return; }
-      box.checked = r.json.offersEmail === true;
-      box.disabled = !r.json.hasEmail;
-      note.textContent = !r.json.hasEmail ? 'Add an e-mail address to your account to get offer e-mails.'
-        : (r.json.offersEmail ? 'On. You can turn this off here or with the link in any offer e-mail.' : 'Off. We never send offers unless you turn this on.');
+      apply(r.json);
     });
-    box.addEventListener('change', function () {
-      var want = box.checked;
-      box.disabled = true;
-      S.api('PUT', '/web/marketing-consent', { offersEmail: want }).then(function (r) {
-        box.disabled = false;
-        if (!r.ok) { box.checked = !want; note.textContent = (r.json && r.json.error) || 'Could not save. Try again.'; return; }
-        note.textContent = r.json.offersEmail ? 'On. You can turn this off here or with the link in any offer e-mail.' : 'Off. We never send offers unless you turn this on.';
+    Object.keys(boxes).forEach(function (k) {
+      var box = boxes[k];
+      if (!box) return;
+      box.addEventListener('change', function () {
+        var want = box.checked;
+        var body = {};
+        body[k] = want;
+        box.disabled = true;
+        S.api('PUT', '/web/email-preferences', body).then(function (r) {
+          box.disabled = false;
+          if (!r.ok) { box.checked = !want; note.textContent = (r.json && r.json.error) || 'Could not save. Try again.'; return; }
+          apply(r.json);
+        });
       });
     });
   }

@@ -214,3 +214,8 @@
 
 /* Account greeting: a username can be long. */
 .sh-acc-head h1 { font-size: var(--fs-h2); overflow-wrap: anywhere; }
+
+/* 3.57 e-mail categories on /account (one row per category). */
+.sh-check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; font-size: var(--fs-small); line-height: 1.45; }
+.sh-check input { margin-top: 3px; flex: none; }
+.sh-check input:disabled + span { color: var(--c-text-2); }

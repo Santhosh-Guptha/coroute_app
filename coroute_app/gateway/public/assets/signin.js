@@ -2,7 +2,7 @@
  * POST /api/auth/login { identifier, password } (rate limited per IP and per account on the server), or
  * Google Identity Services -> POST /api/auth/google { idToken } when GET /api/web/config names a web client id.
  * The token goes to sessionStorage (CoShop.setToken), never into the URL. A temporary password (admin reset)
- * asks for a new one first (POST /api/me/password). Then back to ?next= (only /plans, /account, /receipt). */
+ * asks for a new one first (POST /api/me/password). Then back to ?next= (only /plans, /account, /receipt, /trip/<id> and the operator pages). */
 (function () {
   'use strict';
   var S = window.CoShop;

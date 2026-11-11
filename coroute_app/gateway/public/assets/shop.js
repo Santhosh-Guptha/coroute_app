@@ -91,7 +91,8 @@
   function safeNext(raw) {
     var s = String(raw || '');
     // 3.56 operator console pages: /operators/apply, /clubs, /rides/<slug> (src/operator_routes.js).
-    var m = /^\/(plans|account|receipt|operators\/apply|clubs|rides\/[a-z0-9-]{3,70})(?:\?([A-Za-z0-9_=&%.-]{0,200}))?$/.exec(s);
+    // 3.57 /trip/<tripId>: the ride summary e-mail's "View trip report" link.
+    var m = /^\/(plans|account|receipt|operators\/apply|clubs|rides\/[a-z0-9-]{3,70}|trip\/[A-Za-z0-9_.:-]{3,120})(?:\?([A-Za-z0-9_=&%.-]{0,200}))?$/.exec(s);
     return m ? s : '/account';
   }
   function query(name) {

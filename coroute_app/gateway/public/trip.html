@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your ride | Coroute</title>
+<meta name="description" content="The summary of one of your CoRoute rides.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<link rel="stylesheet" href="/assets/shop.css">
+<!-- 3.57 /trip/<tripId>: the "View trip report" link of the ride summary e-mail. The signed-in owner only
+     (GET /api/trips/:tripId answers 404 for anyone else). Strict CSP, no inline script (src/web_shop.js). -->
+<script src="/assets/theme-init.js"></script>
+<script src="/assets/site.js" defer></script>
+<script src="/assets/shop.js" defer></script>
+<script src="/assets/trip.js" defer></script>
+</head>
+<body data-page="trip">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+  <section class="section section--tight">
+    <div class="container">
+      <p class="sh-back"><a class="link-arrow sh-back__link" href="/account"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg><span>Your account</span></a></p>
+      <article class="sh-card" id="tr" aria-busy="true" aria-labelledby="tr-title">
+        <p class="eyebrow">Your ride</p>
+        <h1 class="sh-card__title" id="tr-title">Loading your ride&hellip;</h1>
+        <p class="sh-status" id="tr-status" role="alert"></p>
+        <dl class="sh-facts" id="tr-facts" hidden></dl>
+        <p class="t-small t-muted" id="tr-note" hidden>The full report, with the map, the timeline and your stops, is in the CoRoute app: open <b>Trips</b> and pick this ride. Only you can see this page.</p>
+        <div class="sh-actions">
+          <a class="btn btn--secondary" href="/account#emails">E-mail choices</a>
+        </div>
+      </article>
+    </div>
+  </section>
+</main>
+<!--#include footer-->
+</body>
+</html>

@@ -1473,6 +1473,8 @@ class TimelineEngine {
     }
     // 3.55 rider score: one ride per analysed member (numbers only; never blocks the report).
     if (this.convoys.riderScore) await this.convoys.riderScore.onTripFinished({ meta: fresh || meta, perMember, events }).catch(() => {});
+    // 3.57 ride summary e-mail (lifecycle_emails.js): queued once per rider, sent after a delay; never awaited.
+    if (this.convoys.tripMemory) { try { this.convoys.tripMemory.onTripFinished({ meta: fresh || meta, perMember }); } catch { /* never blocks the report */ } }
     this.convoys._emit(gid, 'REPORT_READY', { groupId: gid });
     return report;
   }

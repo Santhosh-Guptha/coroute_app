@@ -18,7 +18,8 @@ const { PurchaseEmail } = require('../src/purchase_email');
 
 const mails = [];
 let failNext = 0;
-const mailTransport = { async sendMail(m) { if (failNext > 0) { failNext--; throw Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' }); } mails.push(m); return { messageId: `<m${mails.length}@test>` }; } };
+// 3.57: the welcome e-mail of each new account (lifecycle_emails.js) is not part of these tests.
+const mailTransport = { async sendMail(m) { if (m.headers && m.headers['X-CoRoute-Mail'] === 'welcome') return { messageId: '<welcome@test>' }; if (failNext > 0) { failNext--; throw Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' }); } mails.push(m); return { messageId: `<m${mails.length}@test>` }; } };
 
 let t, admin, rider, other;
 before(async () => {

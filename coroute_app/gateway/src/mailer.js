@@ -1,7 +1,8 @@
 'use strict';
 /**
  * Outgoing e-mail over SMTP (nodemailer). Used for purchase receipts and refunds
- * (docs/features_355/purchase_email.md).
+ * (docs/features_355/purchase_email.md), offer e-mails, and the 3.57 welcome and ride summary e-mails
+ * (docs/features_355/lifecycle_emails.md).
  *
  * Configuration (env, never in code):
  *   SMTP_HOST, SMTP_PORT (587 STARTTLS default; 465 = implicit TLS), SMTP_USER, SMTP_PASS,
@@ -53,20 +54,25 @@ class Mailer {
 
   get enabled() { return !!this.transport; }
 
-  /** { to, subject, text, html } -> { sent, messageId?, disabled?, error? }. Never throws. */
-  async send({ to, subject, text, html, headers }) {
+  /**
+   * { to, subject, text, html, headers?, attachments? } -> { sent, messageId?, disabled?, error? }. Never throws.
+   * `attachments`: nodemailer attachments; used for the inline route picture of the ride summary (cid:).
+   */
+  async send({ to, subject, text, html, headers, attachments }) {
     if (!this.transport) {
       if (!this.warned) { this.warned = true; this.logger.info?.('[mail] SMTP is not configured (SMTP_HOST / MAIL_FROM): e-mails are off'); }
       return { sent: false, disabled: true };
     }
     if (!validEmail(to)) return { sent: false, error: 'BAD_ADDRESS' };
     try {
-      const info = await this.transport.sendMail({ from: this.from, to: to.trim(), replyTo: this.replyTo, subject: String(subject || '').slice(0, 200), text, html, headers });
+      const info = await this.transport.sendMail({ from: this.from, to: to.trim(), replyTo: this.replyTo, subject: String(subject || '').slice(0, 200), text, html, headers, ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}) });
       return { sent: true, messageId: (info && info.messageId) || null };
     } catch (e) {
       const code = String((e && (e.code || e.responseCode)) || 'SEND_FAILED').slice(0, 40);
       this.logger.warn?.(`[mail] send failed: ${code}`);
-      return { sent: false, error: code };
+      // 3.57: the SMTP reply code (550 = mailbox does not exist ...) so callers can suppress hard bounces.
+      const responseCode = Number(e && e.responseCode) || null;
+      return { sent: false, error: code, ...(responseCode ? { responseCode } : {}) };
     }
   }
 }

@@ -83,14 +83,18 @@
     </div>
   </section>
 
-  <!-- 3.56 marketing consent (src/offer_emails.js): offer e-mails are off until the rider turns them on. -->
-  <section class="section section--tight" aria-labelledby="ac-mail-title">
+  <!-- 3.56 marketing consent (src/offer_emails.js) and 3.57 e-mail categories (src/lifecycle_emails.js,
+       GET / PUT /api/web/email-preferences). Offer e-mails are off until the rider turns them on. -->
+  <section class="section section--tight" id="emails" aria-labelledby="ac-mail-title">
     <div class="container">
       <div class="sh-sec-head">
         <h2 class="t-h3" id="ac-mail-title">E-mails from CoRoute</h2>
-        <p class="t-small t-muted">Receipts and account messages always arrive. Offer e-mails only when you turn them on, and every one has an unsubscribe link.</p>
+        <p class="t-small t-muted">Choose what we send you. Every e-mail you can turn off has an unsubscribe link at the bottom that works with one click.</p>
       </div>
       <div class="sh-card" id="ac-consent" aria-live="polite">
+        <label class="sh-check"><input type="checkbox" id="ac-account" checked disabled> <span>Account and receipts: your welcome e-mail, payment receipts and refund notices (always sent)</span></label>
+        <label class="sh-check"><input type="checkbox" id="ac-rides" disabled> <span>Ride summaries: a short summary of your own ride after it ends</span></label>
+        <label class="sh-check"><input type="checkbox" id="ac-tips" disabled> <span>Tips and news: riding tips, product news and group ride news</span></label>
         <label class="sh-check"><input type="checkbox" id="ac-offers" disabled> <span>Send me offer e-mails (plan offers and coupon codes)</span></label>
         <p class="t-small t-muted" id="ac-offers-note"></p>
       </div>
