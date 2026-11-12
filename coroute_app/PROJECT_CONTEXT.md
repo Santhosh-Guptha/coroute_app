@@ -75,8 +75,9 @@ Sources: [docs/V3_55_RELEASE.md](docs/V3_55_RELEASE.md) (§1, 1b–1g), [docs/SE
 
 | Area | State |
 |---|---|
-| Versions | pubspec `3.55.0+10022`; gateway `3.55.0`; next Play upload uses the next unused build (MASTER_AGENT_PROMPT plans `+10023`) |
-| Gateway tests | **1,091 / 1,091 pass** (`npm test`, run 11 Nov 2026) |
+| Versions | pubspec `3.55.0+10025` (12 Nov 2026: sessions & security app change); gateway `3.55.0` |
+| Gateway tests | **1,170 / 1,170 pass** (`npm test`, run 12 Nov 2026) |
+| Security (12 Nov) | Server sessions, refresh rotation, sign-out everywhere, idle sign-out, 2-step for admins, field encryption, never signed out mid-ride: [docs/security/SECURITY_AUDIT_v3.55.md](docs/security/SECURITY_AUDIT_v3.55.md), [docs/features_355/sessions_and_security.md](docs/features_355/sessions_and_security.md). Needs `DATA_ENC_KEY` + `BLIND_INDEX_KEY` in OCI Vault before deploy. |
 | Play policy scan | **0 hits** (11 Nov 2026) |
 | Flutter tests | ~2,176 cases in 238 files; last recorded full run 2,142 / 2,146 (Nov 10; 4 device-only `ui_audit` tests) |
 | Production | Nov 10 record: v3.55 deployed (VM2 then VM1), APK/AAB build 10019 artifacts, domain migrated with DuckDNS compatibility. The 3.56 work below (web shop, access modes, operators, push kinds, minimal profile ...) is **in the working tree, not yet deployed** per MASTER_AGENT_PROMPT. |

@@ -101,9 +101,48 @@ either console render the same (same JSON schema v1, relative geometry, units at
   left out of the main list.
   * See [notifications_admin.md](notifications_admin.md).
 
+## 3.57 round 3: navigation, Riders, E-mail wizard, Overview, Settings, Audit log
+
+Owner request: "Enhance the admin console and the user console on the website."
+
+**Menu** (grouped; `public/admin/index.html`): Overview · Riders · *Plans & coupons*: Payments, Plans & pricing, Coupons,
+Revenue · *Messages*: E-mail, Push notifications · *Website & community*: Board, Marketing studio, Operators, Ratings &
+feedback · *Admin*: Settings, Audit log. The console opens on **Overview**. Old links redirect (`#/notifications/email/*`
+to `#/email/*`, `#/notifications` to `#/push`, `#/notifications/sms` to `#/settings/sms`, `#/templates` to
+`#/settings/templates`).
+
+| Section | File | What |
+|---|---|---|
+| **Overview** | `console.js` | tiles (riders + active today, rides, new riders, net revenue, paid plans, live rides + open SOS; each links to its section), "Needs attention" (open SOS, riders on hold, reports, reviews waiting), charts (active riders, new riders, net revenue, group rides per day; 7 / 30 / 90 days), quick actions. Existing endpoints only: `/api/admin/analytics/overview`, `/analytics/trends`, `/api/admin/web/revenue` |
+| **Riders** | `riders.js` | list, rider page and the Assign plan / Give a coupon / Send e-mail actions: [web_riders_admin.md](web_riders_admin.md) |
+| **E-mail** | `email_wizard.js`, `email_studio.js` | the 3-step wizard + History / Automations / Templates / Settings: [email_marketing.md](email_marketing.md) |
+| **Push notifications** | `notify.js` | compose + history (e-mail and SMS moved out; "Prices, coupons? Send an e-mail instead" link) |
+| **Settings** | `console.js` | tabs: Access mode, Pricing & payments (the Plans & pricing page), Templates (message words, incl. the new "Plan assigned" and "Coupon for you" e-mails), SMS, E-mail (studio settings, suppression list) |
+| **Audit log** | `console.js` | `GET /api/admin/audit` (300 newest), filter by kind (rider actions, plans, coupons, payments, pricing, e-mail, templates, access mode, operators, rider access, board, diagnostics), text filter; rider targets link to the rider page |
+
+**Global search** (top bar; `/` focuses it, arrows + Enter, Escape closes): riders by username / e-mail / name, an
+order or payment id, coupon codes (personal codes open their rider): `GET /api/admin/search?q=`.
+
+**Consistency**: one table style, empty states with a next step, toasts, confirm dialogs for every send / change,
+`?` tooltips (keyboard focusable) instead of long paragraphs. **Responsive**: desktop; under 1100 px the menu is a
+drawer (Menu button, scrim, Escape). **Light / dark** (Auto / Light / Dark), keyboard friendly (focus rings, tabs with
+`role=tab`, menus close on Escape). **CSP unchanged**: no inline script or style (progress widths are set with CSSOM).
+
+**Rider web console (`/account`)**: profile header (avatar, @username, name, e-mail) with "On this page" links; Your
+plan (plan, ends on, what's included, Change plan / See plans); **Your coupons** (`GET /api/me/coupons`: code, discount,
+valid until, Copy code, Use on plans); Payments and receipts; Recent rides (links to `/trip/<id>`); Clubs (`GET
+/api/clubs`, link to `/clubs`); E-mails from CoRoute (unchanged switches); Security (sign out, delete account).
+Responsive and light / dark; no tracking; text set with `textContent` only.
+
+Tests: `gateway/test/web_admin_riders_357.test.js`; smoke + screenshots `node tool/web_console_smoke.js <dir>` (Overview,
+search, Riders, rider page, dialogs, wizard for one rider and an audience, status, Push, Settings, Audit log, `/account`;
+desktop and tablet, light and dark). `tool/web_admin_smoke.js` opens sections by hash (the tablet menu is a drawer).
+
 ## New endpoints
 
 - 3.56: `GET/PUT /api/admin/pricing-rules` (minimum price), `GET /api/admin/membership/catalog` now also returns `effective` (price now per plan) and `rules`; `PUT /api/admin/membership/catalog` accepts `listPriceInr` and `offer` (audited as `pricing.plan_price`). Board endpoints: see [marketing_board.md](marketing_board.md).
+
+- 3.57 round 3: `/api/admin/riders*`, `/api/admin/search`, `/api/admin/email-wizard/templates`, rider `GET /api/me/coupons`: see [web_riders_admin.md](web_riders_admin.md).
 
 - 3.57: `/api/admin/email/studio/*` (E-mail studio), public `GET /r/:token` and `GET /email/preview/:token`: see [email_marketing.md](email_marketing.md).
 

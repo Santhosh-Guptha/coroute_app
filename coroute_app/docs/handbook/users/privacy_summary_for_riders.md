@@ -69,6 +69,8 @@ The app keeps a technical log on your phone (7 days, 20 MB at most) to help fix 
 - **Always on, for your safety:** crash detection, SOS, emergency texts, Medical ID for responders, help nearby riders, ask nearby riders to help me.
 - **Guardian links:** stop any link at any time.
 - **Delete trips** from your trip history.
+- **Your phone during a ride:** to recognise your own phone when you sign in again during a ride (for example after a reinstall), the app sends a one-way hash of an app-specific device ID and a random installation ID. Our server keeps only a further keyed hash, uses it for nothing else and deletes it with the session. While you are on a ride, other devices can only sign in with a one-time code we e-mail you.
+- **App lock (optional):** your fingerprint or screen lock is checked by your phone; nothing about it is sent to us.
 - **Delete your account:** **Profile › Account › Delete account**. It is removed at once: your profile, trips, routes, contacts, safety log entries, chat messages and logs. Rides you shared stay in other riders' history with your name replaced by "Former rider". If you cannot sign in, use the account deletion page on the CoRoute website.
 - **Ask for a copy** of your data, or a correction, through the contact address in the privacy policy.
 

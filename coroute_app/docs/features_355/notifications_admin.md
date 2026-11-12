@@ -11,6 +11,14 @@ Related: [push_notifications.md](push_notifications.md) (the FCM pipeline),
 [purchase_email.md](purchase_email.md), [sos_sms.md](sos_sms.md),
 [play_payments_policy.md](play_payments_policy.md).
 
+## 3.57 round 3: one "E-mail" and one "Push notifications" menu item
+
+E-mail left the Notifications page: the web admin menu has **E-mail** (`#/email`, the 3-step wizard with History,
+Automations, Templates and Settings; [email_marketing.md](email_marketing.md)) and **Push notifications** (`#/push`:
+compose + history, no e-mail channel). The SOS SMS settings moved to **Settings > SMS**, the message templates to
+**Settings > Templates** (with the new "Plan assigned" and "Coupon for you" e-mails used on the rider page,
+[web_riders_admin.md](web_riders_admin.md)). Old `#/notifications/...` links redirect.
+
 ## 3.57 E-mail studio (extends the Offers e-mail)
 
 The Notifications tab **Offers e-mail** is now **E-mail studio** (`public/admin/email_studio.js`,

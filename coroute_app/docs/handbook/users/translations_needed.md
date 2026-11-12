@@ -43,6 +43,7 @@ Priority: **P1** = safety, needed before a language is offered; **P2** = importa
 - Ride chat quick replies: Fuel, Break, Wait for me, I'm OK, Slow down, Regroup here, On my way, Arrived; spoken "Kiran: fuel stop", "Kiran says: …", "Kiran sent a message"; "Riding: one-tap replies only. Stop to type."
 - Off-route: "You left the group's route", "Route to group", "Ask group to wait", "Keep my own route", "You're off the route. Stop when safe to route to your group."
 - Guardian sheet: Basic / Live / Emergency only descriptions, "Share it now. The link cannot be shown again later."
+- Lock-screen cockpit + Ride AOD (docs/features_355/lock_screen_cockpit.md): "Show cockpit on lock screen while riding" + hint, "Locked: unlock to open more", "Unlock to open this", "Private things need your fingerprint or PIN. Your ride keeps running.", "Back to ride", "New message from {name}", "When idle" (Ride AOD / Dim / Let the screen sleep), "Keep screen on" (Only while moving / Always during a ride), "Hold SOS", the screen notices ("Screen can sleep while you are stopped. Press power to see your ride.", "Phone is hot: …", "Phone is too hot: …"). The old key `settings.lock` ("Show ride on lock screen") is no longer shown.
 
 ### P3: rest of the app
 

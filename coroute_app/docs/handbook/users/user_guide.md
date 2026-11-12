@@ -58,6 +58,8 @@ While you ride, the map shows your group, the route, your speed and the speed li
 
 *Ride map (illustration) and the night map.*
 
+See **Riding with the phone locked** (below) for what happens when you press the power button during a ride.
+
 **Speak while moving, act when stopped.** Cards that need a choice (off the route, a bike swap request, a historic place, a place review) only show their buttons once you have stopped for a few seconds. While you move, CoRoute says one short line and shows a small chip. Safety cards (SOS, crash countdown, "Bike down?", sirens, "Are you OK?") are never held back. A pillion can always tap.
 
 ---
@@ -164,6 +166,32 @@ The alert comes about 3 seconds after the siren starts, so short chirps, horns a
 ### Safety health
 
 **Settings › Safety health** (also a tile on the ride map) checks your phone: location, notifications, microphone, Bluetooth, battery limits, full-screen alerts and sound. Each problem has a button that opens the right system page: **Allow**, **Battery settings**, **Sound settings**, **Show steps** or **Open settings**.
+
+### Riding with the phone locked
+
+**Your ride screen comes back when you wake the phone, without unlocking.** During a ride (solo or group), press the power button or let the phone lock by itself: when you wake the screen, the ride map is there straight away, over the lock screen. It never turns the screen on by itself; only a crash alarm or an SOS does that.
+
+While the phone is locked you see a small padlock at the top: **"Locked: unlock to open more"**. Tap it for **Unlock**, **Call 112** and **Medical ID**.
+
+| Works without unlocking | Asks for your fingerprint or PIN first |
+|---|---|
+| The live map: your speed, the next turn, ETA, your group and their distances, alerts (sirens, crash countdown, another rider's SOS) | Chat messages (you only see "New message from Arjun", never the text) |
+| **SOS** (hold), **I'm OK**, **Call 112**, **Medical ID** | Profile, settings, trips, crews, account |
+| **Mute** / **Unmute** and **Talk** | Searching or changing the route, **End ride** / **Leave**, sharing a link, calling a contact |
+
+When something needs the unlock, your phone's fingerprint or PIN sheet opens; once you unlock, what you tapped opens. If you cancel, you stay on the ride map. The **Back** button does nothing while locked.
+
+- The ride map shows on the lock screen **only during a ride** and only while it is the screen in front. After the ride ends, or after you sign out, the normal lock screen is back. If you unlocked and opened, say, the chat, locking the phone there shows the normal lock screen.
+- **Lock CoRoute with fingerprint** (if you use it) never covers the ride map during a ride, and works again after the ride.
+- Turn it off in **Settings › Ride screen › Show cockpit on lock screen while riding** (on by default). The ride notification with its **SOS** button stays on the lock screen either way.
+
+**Ride AOD (resting screen).** After 30 seconds without a touch, the ride screen switches to a black "Ride AOD": big speed, the next turn and its distance, how far the leader is (or how many riders are moving), the time, your battery and **Hold SOS**. Tap anywhere for the full map. Everything moves a few pixels once a minute so nothing burns into the screen. Alerts (another rider's SOS, a crash countdown, a siren, leaving the route, regroup) bring the full map back at once.
+
+- **Settings › Ride screen › When idle**: **Ride AOD** (default), **Dim** or **Let the screen sleep**.
+- **Settings › Ride screen › Keep screen on**: **Only while moving** (default: the screen may sleep after 2 minutes stopped; press power to see your ride) or **Always during a ride**.
+- Battery: about 6–10 % per hour with the screen on; the Ride AOD costs about 2–4 % per hour on OLED screens. Below 15 % battery (not charging), after 5 minutes parked, or when the phone gets too hot, the screen may sleep and a line says why; the ride keeps running. When the phone is hot, the Ride AOD comes sooner to cool it down.
+
+**Android 16:** the ride also shows as a **Live Update**: the next turn or your group in the status bar chip and at the top of the lock screen (and on the always-on display on phones that show it). You can turn Live Updates off for CoRoute in Android settings; the ride notification then looks as before.
 
 ---
 
@@ -382,6 +410,9 @@ Open **Profile ›** gear. Settings are short on purpose: safety features have n
 | | **Language** | System, English, Hindi or Telugu (safety screens and spoken alerts) |
 | | **Battery saver** | "Turns on by itself when low" (at 20 %). Never reduces SOS or crash detection. |
 | | **Data saver** | Uses less mobile data |
+| Ride screen | **Show cockpit on lock screen while riding** | On by default. "Your ride screen comes back when you wake the phone, without unlocking. Private things need your fingerprint or PIN." |
+| | **When idle** | Ride AOD (default), Dim or Let the screen sleep, with a battery estimate |
+| | **Keep screen on** | Only while moving (default) or Always during a ride |
 | App & privacy | **Appearance** | Light, dark or automatic |
 | | **Push notifications** | Plus a switch for each kind of message |
 | | **Show me on leaderboards** | Your username on public boards |
@@ -404,9 +435,25 @@ Open **Profile ›** gear. Settings are short on purpose: safety features have n
 - **Medical info** goes to responders only while your alert is open. Staff never see it.
 - **Diagnostics:** the app keeps a technical log on your phone (7 days at most) with no messages, names, phone numbers or exact places. It is sent only when you choose.
 - **Privacy & terms** (Profile › Help) opens the privacy policy, the terms of use and **Your data**.
+- **Lock CoRoute** (optional): Settings › App & privacy › **Lock CoRoute with fingerprint or screen lock**. CoRoute then asks for your fingerprint or screen lock when it starts and after 5 minutes away (you can change the time). It never locks during a ride or an SOS, and **SOS**, **Call 112** and your **Medical ID** work on the lock screen without unlocking.
 - **Delete account:** Profile › Account › **Delete account**. "Your account, profile and ride history will be deleted. This cannot be undone." If you can no longer sign in, use the account deletion page on the CoRoute website.
 
 The *Privacy summary for riders* explains this in more detail.
+
+### Signing in on another phone during a ride
+
+While your phone is on a ride (solo or group), or has an SOS open, CoRoute does not let your account sign in on another phone, tablet or the website. This stops someone who knows your password from taking over your account in the middle of a ride. You see: *"You're on a ride on Pixel 7. End the ride on that phone to sign in here."*
+
+- **Normal case:** end the ride on your phone, then sign in on the other device.
+- **Same phone:** if the app crashed, was closed or you reinstalled it, just sign in again on the same phone. That always works.
+- **Phone lost, broken or flat:** tap **Send code to my e-mail**. Enter the 6-digit code from the e-mail (it works once, for 10 minutes; you can ask for a new one after a minute). The new phone is signed in, the old one is signed out, and your group sees *"<your name> switched phones"*. An SOS you raised stays open for your group and your contacts. We also e-mail you a short notice.
+- **No access to your e-mail:** contact CoRoute support; an administrator can end the lock after checking it is you.
+- The lock ends by itself when the ride ends, or when the riding phone has not been online for 10 minutes.
+- **Emergency?** The **Call 112** button is on every sign-in screen.
+
+### Creating an account
+
+After **Create account** we e-mail you a link. Open it (it works once, for 24 hours), then sign in with your e-mail and password. Nothing arrived? Check spam, or tap **Send a new link**. With **Continue with Google** there is no e-mail step.
 
 ---
 

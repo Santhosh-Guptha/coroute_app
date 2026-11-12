@@ -34,15 +34,19 @@ Key design answers:
 
 | Control | Detail | Where |
 |---|---|---|
-| Password hashing | **scrypt** `scrypt$N$r$p$salt$hash`, N = 2^15, r = 8, p = 1 (about 100 ms, 32 MiB), on the libuv threadpool with bounded concurrency; legacy bcrypt verified in a worker thread and re-hashed at next sign-in | `password_hash.js`, `password_hash_worker.js` |
-| Tokens | JWT (HS256) with claims `sub`, `name`, `role`, `email`, `pv` (password version), TTL `JWT_TTL_DAYS` (30); sliding refresh in `X-CoRoute-Token` after 24 h; a password change invalidates old tokens (`pv`) | `auth.js` |
-| Account gate | every request and socket re-checks status/role/password version (cached 30 s); hold/block closes sockets with 4403 | `UserGate` |
+| Password hashing | **scrypt** `scrypt$N$r$p$salt$hash`, N = 2^15, r = 8, p = 3 (OWASP scrypt equivalent, about 300 ms, 32 MiB), on the libuv threadpool with bounded concurrency; older hashes (p = 1, legacy bcrypt) re-hashed at next sign-in. 3.57 password rules: 8–200 characters, bundled common / breached list, not the e-mail or callsign | `password_hash.js`, `password_policy.js` |
+| Sessions (3.57) | server-side session records (`auth_sessions`: device, platform, created, last seen, keyed IP hash, hashed refresh token); every token carries `sid` and every request / socket message checks it. App ≥ 10025, website and consoles: 15-min access token + rotating refresh token with reuse detection (reuse revokes the whole session, audited); website refresh token in an httpOnly `__Host-` cookie. Older builds: the long sliding token, bound to a session. Idle / absolute: app 30 / 60 days (never ended mid-ride), web 60 min / 7 days, admin and operator 30 min / 12 h. Details: [sessions_and_security.md](../../features_355/sessions_and_security.md) | `sessions.js`, `security_routes.js` |
+| Tokens | JWT (HS256) with claims `sub`, `name`, `role`, `email`, `pv` (password version), `sid` (session), `typ: at` (short); a password change invalidates old tokens (`pv`) and revokes the other sessions | `auth.js` |
+| Account gate | every request and socket re-checks status/role/password version and the session (cached 30 s, dropped at once on revoke, on the peer node via the mirror); hold/block closes sockets with 4403, a revoked session with 4401 `SIGNED_OUT` | `UserGate`, `ws.js` |
+| Sign-out | `/auth/logout` (this session), `/auth/logout-all`, `/me/sessions` list and revoke; hold / block / delete / password change or reset / e-mail change / losing the admin role revoke every session | `security_routes.js` |
+| 2-step verification | TOTP + 10 single-use recovery codes; required for `MASTER_ADMIN` at the web admin sign-in (forced enrolment), optional for operators; break-glass `scripts/admin_mfa_reset.js` (runbook) | `totp.js`, `auth.js` |
+| Recovery and re-auth | e-mail reset links (single use, 30 min, hash stored, every session ends); re-authentication (password or Google) for deletion, e-mail change and 2-step changes; new-device sign-in e-mails | `auth.js`, `security_routes.js` |
 | Rotation | `JWT_SECRET_PREVIOUS` accepted for verification only during a grace period | `config.js`, `app.js` |
-| Brute force | sign-in 30 / 15 min per IP and 10 failed / 15 min per account; join by code 10 failures per rider / 30 per IP per 15 min; same 401 message and hashing work for unknown accounts | `routes.js` |
-| Google sign-in | ID token verified server-side against `GOOGLE_CLIENT_IDS` / `GOOGLE_WEB_CLIENT_ID` | `auth.js` |
+| Brute force | sign-in 30 / 15 min per IP and 10 failed / 15 min per account; 3.57 account lock after 10 wrong passwords (15 min, doubling to 24 h, e-mail notice) and a progressive delay; join by code 10 failures per rider / 30 per IP per 15 min; same 401 message and hashing work for unknown accounts | `routes.js`, `auth.js` |
+| Google sign-in | ID token verified server-side (signature, audience `GOOGLE_CLIENT_IDS` / `GOOGLE_WEB_CLIENT_ID`, expiry, issuer, verified e-mail; a linked Google id must match) | `auth.js` |
 | Guest mode | removed (`/auth/guest` → 410) | `auth.js` |
 | Admin roles | `MASTER_ADMIN` in the `users` collection; first admin from `BOOTSTRAP_ADMIN_EMAILS`, then `PATCH /api/admin/users/:id/role` | `routes.js` |
-| App storage | tokens in `flutter_secure_storage`; SMS roster encrypted on the phone and deleted at ride end | app |
+| App storage | access and refresh tokens, phone, emergency contact and e-mail in `flutter_secure_storage` (Android Keystore, moved from SharedPreferences silently); SMS roster encrypted on the phone and deleted at ride end; no Android backup or device transfer | app |
 
 ## 3. Transport
 
@@ -67,15 +71,17 @@ Key design answers:
 | `/watch` (guardian) | `default-src 'none'; script-src 'self'`, OSM tiles only |
 | Offer e-mail pages, push images, board images | `default-src 'none'` (+ `sandbox` for images) |
 | CSP on marketing and legal pages (every `SITE_PAGES` route except the shop pages) | `pages.MARKETING_CSP` (set in `app.js`): `script-src 'self'` (no inline script: the theme line is `/assets/theme-init.js`), `img-src 'self' data: https:` (approved story photos), `connect-src 'self'`, `frame-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, `object-src 'none'`. JSON-LD blocks are data and are not executed. Test: `website_legal_356.test.js` |
-| Default site CSP (helmet, `app.js`) | Still allows `'unsafe-inline'` scripts and the Razorpay hosts for responses that set no CSP of their own (join, live link and 404 pages, static files). Their inline theme line was also moved to `theme-init.js`, so this can be tightened next. |
+| Default site CSP (helmet, `app.js`) | 3.57: `script-src 'self'`, `script-src-attr 'none'`, `connect-src 'self'`, `frame-src 'none'` for every response without its own policy (join, live link and 404 pages, static files, API answers). Style attributes still need `'unsafe-inline'`. |
 | `/.well-known/security.txt` | RFC 9116, built per request (`app.js` `securityTxt()`): Contact `mailto:` `SECURITY_CONTACT`, else `SUPPORT_EMAIL`, else the `/security` page; Expires one year ahead; Policy `/security` |
-| Tokens in browsers | `sessionStorage` + `Authorization: Bearer`, never in a URL or cookie, so CSRF does not apply. The only cookie is the guardian pilot's httpOnly session. |
+| Tokens in browsers | 3.57: the 15-min access token in `sessionStorage` + `Authorization: Bearer`, never in a URL; the refresh token in an httpOnly, Secure, `__Host-` cookie (SameSite=Lax for the site, Strict for `/admin` and `/operator`) used only by `/auth/refresh` and `/auth/logout`, which need the `X-CoRoute-CSRF` header and an allowed Origin. Idle sign-out: site 60 min, consoles 30 min with a warning; sign-out goes to the home page; Back is re-checked (`pageshow`), APIs and private pages are `no-store`. |
 | Output encoding | server values inserted with `textContent`, never `innerHTML` (shop, admin, board) |
 | CORS | off by default (`origin: false`); `CORS_ORIGINS` adds explicit origins plus the site origins |
 | Other headers | `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(self Razorpay)`, `X-Content-Type-Options: nosniff`, `frameguard: deny` |
 | Request ids | `X-Request-Id` on every response; logs carry it instead of bodies |
 | Body limits | JSON 2 MB; webhooks raw 1 MB; socket frames 256 KiB |
-| Logging | 5xx logged as method + route template + request id + first error line; payment paths log no bodies, tokens, signatures or e-mails (tested) |
+| Logging | 5xx logged as method + route template + request id + first error line; 3.57: every gateway log line passes the redacting logger (tokens, passwords, OTPs, e-mails, phone numbers) (`redact.js`, tested) |
+| Route inventory | `route_policy.js` declares every route's policy; a test fails for an undeclared or unenforced route |
+| WebSocket | browser Origin must be this site; tokens checked against the session on connect and on every message |
 
 ## 5. Mobile app
 
@@ -128,6 +134,22 @@ Full table of 21 threats and tests: [web_payments_security.md](../../features_35
 - Pushes are data-only with usernames; private on the lock screen.
 - Account deletion is immediate and cascades; shared rides show "Former rider".
 - Backups are encrypted (`BACKUP_ENCRYPTION_KEY`) before leaving the VM.
+- 3.57 field encryption at rest: phone numbers, emergency contact, Medical ID fields and 2-step secrets are
+  AES-256-GCM encrypted in the database (`DATA_ENC_KEY`, rotation with key ids, lazy migration); refresh tokens,
+  reset links and recovery codes are stored as hashes only; session IPs as keyed hashes.
+
+## 8b. Round 4: ride lock, sign-up verification, app lock
+
+* **Ride lock.** While a rider's phone is on a live ride (or has an SOS / crash open) and was seen in the last
+  `RIDE_LOCK_STALE_MIN` (10) minutes, a sign-in on any other device answers `423 RIDE_ACTIVE_ELSEWHERE` after the
+  password check, naming only the device. Same device (hashed device key / install id) is allowed. Override: a 6-digit
+  e-mailed code (10 min, 5 tries, rate limited) hands the ride over ("<rider> switched phones", SOS untouched) and
+  revokes the old session; MASTER_ADMIN can "End ride lock" with a reason. All audited. State on the shared session
+  records, so both nodes agree. Details: `docs/features_355/sessions_and_security.md` §9.
+* **Revoked sessions in a ride** keep only a safety-only socket (own SOS / crash / position) until the ride ends.
+* **Sign-up** verifies the e-mail first: the same 202 for new and registered addresses (no enumeration).
+* **App:** optional fingerprint / screen-lock app lock (never during a ride or SOS), FLAG_SECURE on sign-in, code and
+  Medical ID screens, socket token as the first message instead of the URL, CA-root pins for the gateway hosts.
 
 ## 9. Known limits and pending items
 
@@ -137,8 +159,11 @@ Full table of 21 threats and tests: [web_payments_security.md](../../features_35
 | 2 | **DB password rotation** | DB access with an old leaked value | Rotate `ORACLE_PASSWORD` (runbook 6.2). **Pending.** |
 | 3 | **DuckDNS token in git history** (`gateway/deploy/setup_new_vm.sh`) | DNS hijack / certificate mis-issuance for the legacy host | Owner regenerates the token, Vault + Caddy env only, remove from the script. **Pending.** |
 | 4 | **SSH key `vm_provision_ssh.key` on VM1** | lateral movement if VM1 is compromised | Move to Vault / admin machine. **Pending.** |
-| 5 | Default site CSP allows `'unsafe-inline'` scripts | XSS impact on marketing pages | **Fixed for marketing and legal pages** (11 Nov 2026, `MARKETING_CSP`). The helmet default for the remaining pages (join, live link, 404) can drop `'unsafe-inline'` next. |
-| 6 | HSTS on the new domain still `max-age=300` | downgrade window | Raise after a stable week (owner decision). |
+| 5 | Default site CSP allows `'unsafe-inline'` scripts | XSS impact on marketing pages | **Fixed** (marketing / legal pages 11 Nov 2026; helmet default 12 Nov 2026). |
+| 5b | Field encryption needs `DATA_ENC_KEY` / `BLIND_INDEX_KEY` in Vault | without them phones / medical fields stay plaintext in the DB | Owner creates both (same on both VMs) before deploying 3.57. |
+| 5c | `ADMIN_MFA_ENFORCE` | an admin password worked through the app / API without a code | **Fixed** (round 4): default `all` (app ≥ 10025 asks for the code; builds < 10025 keep `web`); `strict` after `MIN_APP_BUILD=10025`. |
+| 6 | HSTS on the new domain still `max-age=300` | downgrade window | Gateway header configurable (`HSTS_MAX_AGE`, `HSTS_PRELOAD`); ramp-up steps in the RUNBOOK; raise dates: owner. |
+| 6b | Certificate pins (round 4) | a CA root change outside the pin-set cuts that app build off the gateway until 2027-11-01 | Rotation checklist each release (RUNBOOK "Certificate pins"). |
 | 7 | Coupon brake is per node | doubled attempts across two nodes | Accepted (caps are DB-atomic). |
 | 8 | No external uptime monitoring / paging | slow detection | Owner to choose a monitor. |
 | 9 | Kotlin added in 3.55/3.56 never compiled in the authoring environment | build / runtime defects in safety UI | First compile + device gate (MASTER_AGENT_PROMPT §3, §6). |

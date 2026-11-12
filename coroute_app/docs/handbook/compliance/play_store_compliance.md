@@ -66,6 +66,16 @@ No ads; no data sale; no third-party analytics SDKs.
 | `RECORD_AUDIO` | Intercom and siren detection; nothing recorded or uploaded. | Settings subtitle "Listens on your phone during rides. Nothing is recorded." |
 | `SEND_SMS` (3.57) | Permissions Declaration Form, section 3a below. | In-app prominent disclosure (`EmergencyTextsDisclosure`) + video 2 (section 3b) |
 
+Lock-screen cockpit round (docs/features_355/lock_screen_cockpit.md):
+- **Added** `POST_PROMOTED_NOTIFICATIONS` (normal permission, no declaration form, nothing asked at run time):
+  Android 16+ shows the ride notification as a Live Update (status bar chip, lock screen, always-on display)
+  with the next turn or the group status. Riders can turn Live Updates off for CoRoute in Android settings; the
+  ride notification then looks as before. Data Safety: no change (nothing new leaves the phone).
+- The cockpit over the lock screen during a ride uses `setShowWhenLocked` on the app's own window only (no
+  permission). It never turns the screen on; **no** `USE_FULL_SCREEN_INTENT` for the cockpit or the Live Update.
+  The full-screen intent stays limited to the crash alarm and another rider's SOS (alarm / safety category,
+  unchanged declaration above).
+
 Not declared: `READ_SMS`, `RECEIVE_SMS`, `READ_PHONE_STATE`, `READ_CALL_LOG`, `READ_CONTACTS`,
 `BLUETOOTH_SCAN`, `HIGH_SAMPLING_RATE_SENSORS`, `FOREGROUND_SERVICE_HEALTH`.
 `<uses-feature android:name="android.hardware.telephony" android:required="false"/>` keeps tablets

@@ -54,10 +54,22 @@ diagnosticsUpload, riderScore, leaderboard ...).
 | POST | `/api/auth/login` | Public | E-mail or callsign + password. 30 / 15 min per IP and 10 failed / 15 min per account (`loginIdLimiter`). Same 401 text for unknown account and wrong password. Used by the app, `/signin`, `/admin`, `/operator`. |
 | POST | `/api/auth/google` | Public | Google ID token (audiences `GOOGLE_CLIENT_IDS` + `GOOGLE_WEB_CLIENT_ID`). |
 | POST | `/api/auth/guest` | Public | Retired: **410 `GUEST_RETIRED`**. |
+| | | | **3.57 sessions** ([sessions_and_security.md](../../features_355/sessions_and_security.md)): sign-in answers add `sessionId`, `sessionKind`, and for clients that send `X-CoRoute-Session: 2` (app ≥ 10025) `refreshToken` + `accessExpiresAt` (website kinds `X-CoRoute-Client: web / admin / operator` get the refresh token as an httpOnly `__Host-` cookie instead), or `{ mfa: 'verify' \| 'enroll', mfaToken }` for 2-step accounts. Short tokens answer 401 **`TOKEN_EXPIRED`** when they run out (refresh, never a sign-out). Locked accounts: 429 `RATE_LIMITED`. Weak passwords: 422 `WEAK_PASSWORD`. |
+| POST | `/api/auth/refresh` | Refresh token (body, or cookie + `X-CoRoute-CSRF: 1`) | Rotates the refresh token; reuse of an old one revokes the session. 204 when no token at all. |
+| POST | `/api/auth/logout` | Bearer and/or refresh token | Revokes that session (sockets close 4401 `SIGNED_OUT`, except a live ride's socket until the ride ends); clears the cookie. |
+| POST | `/api/auth/logout-all` | Bearer | Revokes every session and pre-3.57 token of the account. |
+| POST | `/api/auth/reauth` | Bearer | `{password}` or `{idToken}`: marks the session re-authenticated for `REAUTH_WINDOW_MIN` (403 `REAUTH_FAILED` when wrong). |
+| POST | `/api/auth/password/forgot` / `/reset` | Public | Reset link by e-mail (always 202) / `{token, newPassword}` (single use, 30 min; ends every session). |
+| POST | `/api/auth/email/confirm` | Public (link token) | Confirms a change of e-mail. |
+| POST | `/api/auth/mfa/verify`, `/mfa/enroll/start`, `/mfa/enroll/confirm` | Public (`mfaToken`) | Second sign-in step; enrolment returns ten recovery codes once. |
+| GET / DELETE | `/api/me/sessions`, `/api/me/sessions/:sessionId` | Bearer | "Where you're signed in"; sign one out (another rider's: 404). |
+| GET | `/api/me/security` | Bearer | 2-step status / eligibility, password set, session count. |
+| POST | `/api/me/email` | Bearer + re-auth | Change of e-mail (link to the new address, notice to the old). |
+| POST / DELETE | `/api/me/mfa/setup`, `/confirm`, `/recovery-codes`, `/api/me/mfa` | Bearer + re-auth | 2-step for admins and operators. |
 | GET | `/api/me` | Bearer | Own profile (also sends `PATCH /me {assistHelp, assistAsk:true}` from the app when off; see SETTINGS_MINIMAL). |
 | PATCH | `/api/me` | Bearer | Update profile (name, phone, vehicle, emergency contact, medical info, bike summary, network prefs). |
 | POST | `/api/me/password` | Bearer | Change password. |
-| DELETE | `/api/me` | Bearer | **Delete account** at once: erase cascade (memberships, usernames, friends, crews, push tokens, ride invites, diag logs, hosted-ride counts, marketing consent, score ...); shared rides keep "Former rider". |
+| DELETE | `/api/me` | Bearer (+ re-auth for 3.57 clients: 403 `REAUTH_REQUIRED`) | **Delete account** at once: erase cascade (memberships, usernames, friends, crews, push tokens, ride invites, diag logs, hosted-ride counts, marketing consent, score ...); shared rides keep "Former rider". |
 | GET | `/api/me/capabilities` | Bearer | Access-mode result for this rider: `{gated, canHostGroup, maxRiders, groupFeatures, hostedRidesLeft, hostedRidesLimit, reason, version}`. Never a price, plan name or mode. |
 | GET | `/api/me/warnings` | Bearer | Admin warnings for the rider. |
 | POST | `/api/me/warnings/:id/ack` | Bearer | Acknowledge a warning. |
@@ -194,6 +206,7 @@ The app calls only `/api/membership/my` and `/api/me/capabilities`; buying happe
 | POST | `/api/subscription/webhook` | Signature | Razorpay webhook, the default active URL (`RAZORPAY_WEBHOOK_URL=subscription`). |
 | GET | `/api/membership/my` | Bearer | My membership + `capabilities`. |
 | GET | `/api/membership/payments` | Bearer | My payment history. |
+| GET | `/api/me/coupons` | Bearer | 3.57 round 3: personal single-use codes given to me (`code, discount, validUntil, state ACTIVE/USED/EXPIRED/..., plans, plansPath`); never another rider's. 30/min. |
 | POST | `/api/membership/members/invite` · `/respond` · DELETE `/members/:targetUserId` | Bearer | Plan seat sharing (legacy group membership). |
 | GET | `/api/subscription/config`, `/status`, `/history`, `/orders` | Bearer | Legacy subscription views (older apps). |
 | POST | `/api/subscription/create-order`, `/verify-payment`, `/validate-coupon` and `/api/verify-payment`, `/api/validate-coupon` | Bearer / Public | Legacy app checkout paths (same settle path and security). |
@@ -257,6 +270,8 @@ The app calls only `/api/membership/my` and `/api/me/capabilities`; buying happe
 | Notifications | `/api/admin/push`: GET `/`, `/config`, `/campaigns[/:id]`; POST `/check`, `/test`, `/images`, `/audience-count`, `/campaigns`, `/campaigns/:id/cancel`; PUT `/` · `/api/admin/email`: GET `/config`, `/offers/campaigns[/:id]`, `/suppression`; POST `/offers/check`, `/preview`, `/test`, `/audience-count`, `/campaigns`, `/campaigns/:id/cancel`, `/suppression`; DELETE `/suppression/:hash` · `/api/admin/sms`: GET/PUT `/settings`, GET `/log`, POST `/test` · `/api/admin/templates`: GET `/`, PUT `/:id`, POST `/:id/preview`, `/:id/reset`, GET `/:id/history` · GET `/media/push/:file` (public push image) |
 | Marketing | `/api/admin/marketing/templates` (GET/POST/PUT/DELETE, `/duplicate`, `/status`), `/images`, `/coupons`; board GET/POST/PATCH/DELETE `/api/admin/board[/:postId]`, `/board/images`, `/board/coupons` |
 | Crews | GET `/api/admin/crews[/:crewId]`; DELETE `/admin/crews/:crewId`, `/admin/crews/:crewId/polls/:pollId` |
+| Riders (3.57 round 3, web admin) | GET `/api/admin/riders` (search, filters, sort, pages; no phone / medical data), GET `/riders/:userId` (rider page), POST `/riders/:userId/preview`, `/riders/:userId/email/check`, `/riders/:userId/assign-plan` (existing admin grant + optional "Plan assigned" e-mail), `/riders/:userId/coupon` (single-use code bound to the rider; consent rule for the e-mail), `/riders/:userId/email` (1:1, transactional vs marketing); GET `/api/admin/search?q=` (riders, orders, coupons); GET `/api/admin/email-wizard/templates`. Reads 120/min, writes 30/min per admin. See docs/features_355/web_riders_admin.md |
+| E-mail studio | `/api/admin/email/studio/*` (templates, check, preview, audience-count, test, campaigns, rules, unique-codes, images); account notices may go to up to 50 named riders (`audience.kind = usernames`). See docs/features_355/email_marketing.md |
 | Operators | see 1.10 |
 | Web console pages | GET `/admin`, `/admin/:file` (strict CSP, noindex) |
 
@@ -287,6 +302,8 @@ The app calls only `/api/membership/my` and `/api/me/capabilities`; buying happe
 | Diagnostics upload | 24 h | 5 | rider |
 | Push tokens | 1 min | 10 | rider |
 | Admin emergency contact | 1 min | 10 | admin |
+| Web admin riders: reads / writes / search | 1 min | 120 / 30 / 120 | admin |
+| `/api/me/coupons` | 1 min | 30 | rider |
 | Socket actions | 1 s | `WS_ACTIONS_PER_SEC` (10) | socket |
 | Socket alarms (`WAIT`, `SOS`, `CHECK_IN`, `REPORT_DOWN`) | 10 s | `WS_ALARMS_PER_10S` (3) per type | socket |
 
@@ -340,3 +357,26 @@ or a join code.
 | 4403 | Account on hold or blocked | do not retry |
 | 1011 | Account check failed (DB) | retry |
 | 503 at upgrade (`SERVER_BUSY`) | `LIVE_RIDER_CAP` reached for a new live rider | retry later; riders already riding are never refused |
+
+## Round 4 security endpoints (12 Nov 2026)
+
+Details: `docs/features_355/sessions_and_security.md` §9-§12.
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `POST /api/auth/ride-lock/code` | lock token | E-mails the 6-digit ride sign-in code after a `423 RIDE_ACTIVE_ELSEWHERE` |
+| `POST /api/auth/ride-lock/verify` | lock token + code | Signs the new device in; hands the ride over; revokes the riding session |
+| `POST /api/auth/email/verify` | link token | Confirms a sign-up (single use, 24 h) |
+| `POST /api/auth/register/resend` | public | New sign-up link (always 202, rate limited) |
+| `POST /api/auth/mfa/email-code` | 2-step token | E-mailed 2-step code (operators; never MASTER_ADMIN) |
+| `POST /api/auth/delete/confirm` | link token | Account deletion confirmed from the e-mail (builds < 10025) |
+| `POST /api/auth/mfa/step-up` | signed in | 2-step step-up of the session (app admin tools on `403 MFA_REQUIRED`) |
+| `POST /api/auth/mfa/step-up/email-code` | signed in | E-mailed code for the step-up (operators) |
+| `POST /api/me/mfa/email` | signed in + re-auth | Turn e-mailed 2-step codes on / off (not for admins) |
+| `GET /api/admin/riders/:userId/ride-lock` | admin | "On a ride (device)" |
+| `POST /api/admin/riders/:userId/ride-lock/end` | admin | End ride lock (reason required, audited) |
+
+Changed: `POST /api/auth/register` answers `202 { pending, message }` (builds < 10025: `400 EMAIL_VERIFICATION_SENT` unless
+`REGISTER_VERIFY_LEGACY=allow`); every sign-in may answer `423 RIDE_ACTIVE_ELSEWHERE { error, device, lockToken }`;
+`POST /convoys` and `/convoys/join` may answer `409 RIDE_ACTIVE_ELSEWHERE`; `DELETE /api/me` from builds < 10025 without the
+password answers `202 DELETE_CONFIRM_SENT`; `/ws` accepts `{ type: "AUTH", token }` as the first message.

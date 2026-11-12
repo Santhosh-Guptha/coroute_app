@@ -1,16 +1,47 @@
 # E-mail marketing studio (3.57)
 
-Customised marketing e-mails with coupons, built from templates, in the web admin:
-**Notifications > E-mail studio** (`#/notifications/email`). It extends the 3.56 Offers e-mail
-([notifications_admin.md](notifications_admin.md)): the same consent switch, suppression list, signed
-unsubscribe link and leased sending job. The 3.56 composer's campaigns and the suppression list are now
-under **E-mail studio > Settings**.
+Customised marketing e-mails with coupons, built from templates, in the web admin. **3.57 round 3:** one menu item
+**E-mail** (`#/email`) with a 3-step wizard used for one rider, several riders or an audience, and the tabs
+**History**, **Automations**, **Templates** and **Settings** (see "The wizard" below). The old entry points
+(Notifications > E-mail studio, the 3.56 Offers e-mail tab, the push composer's e-mail channel) are gone; their links
+(`#/notifications/email/...`) redirect to the new tabs. It extends the 3.56 Offers e-mail
+([notifications_admin.md](notifications_admin.md)): the same consent switch, suppression list, signed unsubscribe link
+and leased sending job.
 
-E-mail only. Nothing here reaches the Play app (no push, socket event or in-app text), so the Play
-payments policy ([play_payments_policy.md](play_payments_policy.md)) is not affected.
+E-mail only. Nothing here reaches the Play app (no push, socket event or in-app text), so the Play payments policy
+([play_payments_policy.md](play_payments_policy.md)) is not affected.
 
-Code: `gateway/src/email_marketing.js` (server), `gateway/public/admin/email_studio.js` and
-`email_studio.css` (admin page). Tests: `gateway/test/email_marketing_357.test.js`.
+Code: `gateway/src/email_marketing.js` (server), `gateway/public/admin/email_wizard.js` (the wizard, tabs, status),
+`email_studio.js` (block editor, preview, History / Automations / Templates / Settings) and `email_studio.css`.
+Tests: `gateway/test/email_marketing_357.test.js`, `gateway/test/web_admin_riders_357.test.js`.
+
+## The wizard (3.57 round 3)
+
+Owner request: "Sending mail in the website is very confusing: make it simple." One flow, three steps, plain words,
+details in `?` tooltips.
+
+| Step | What the admin does |
+|---|---|
+| **1 Who** | **One rider** (search by username / name / e-mail; shows "Agreed to offers" or "No offer consent" and a blocked address), **Several riders** (paste usernames), or **An audience** (a segment, N days; a live count "N riders agreed to offers", plus how many can get an account message for the plan segments) |
+| **2 What** | Template cards with sketch thumbnails: **Write a quick message**, **Welcome**, **Plan assigned**, **Coupon for you** (system templates built from the words in Settings > Templates), the ready-made starters (Festive offer, Launch offer, ...) and saved templates. Edit in the block editor: Heading, Text, Button, Coupon first; Image, Header image, Price and Divider behind **More blocks**; variables under "Personalise". Kind: **About their account** (transactional) or **Offer or news** (marketing); a coupon or price forces "Offer". Coupon picker inline; "a personal single-use code" (one rider) or "every rider their own code" (several / audience). Save template / Save as new. |
+| **3 Check & send** | Preview (desktop / mobile, light / dark, plain text; for one rider exactly as that rider gets it). Checklist: subject set; links and content OK (the server's own check); consent ("Account message: no offer consent needed", "The rider agreed to offer e-mails", or "N riders will get it"); postal address set (needed for offers and campaigns); e-mail server set up. One rider without consent: "Service message: the rider asked for it" + a note. Send test to me. **Send now** (one rider: at once) or **Send now / Schedule** (several / audience: a campaign) |
+
+After sending: one rider: a result card ("Sent to a***@x · Account message"), "Back to @rider", "Send another";
+several / audience: the status page `#/email/status/<campaignId>` (progress bar, riders, sent, left out, failed,
+clicks, coupon uses, cancel while scheduled, full report), refreshed every 3 s while sending.
+
+How the wizard sends:
+
+| Who | Request | Rules |
+|---|---|---|
+| One rider | `POST /api/admin/riders/:userId/email` ([web_riders_admin.md](web_riders_admin.md)) | 1:1 message: no quiet hours or weekly cap; transactional skips only hard-suppressed addresses; marketing needs the Offers consent or a noted service message; idempotent per request id; audited |
+| Several riders | `POST /campaigns` with `audience: { kind: 'usernames' }` | marketing: consent per rider; **account notices to named riders are now allowed (at most 50)**, with the footer "the CoRoute team wrote to you about your account" |
+| An audience | `POST /campaigns` with the segment | as before (consent, cap, quiet hours, schedule) |
+
+Tabs: **History** (campaigns with results; one-to-one e-mails are on each rider's page), **Automations** (rules),
+**Templates** (ready-made and saved; "Use" opens the wizard; "Words of automatic e-mails" links to Settings >
+Templates), **Settings** (weekly limit, quiet hours, click tracking, sender identity, suppression list, earlier 3.56
+offers e-mails). The Coupons page's "E-mail this coupon" opens the wizard with the Festive offer and the coupon filled in.
 
 ## What the admin can do
 
@@ -236,13 +267,13 @@ Account erase removes the rider's marketing `mail_log` rows, click / unsubscribe
 
 ## QA checklist
 
-1. Set `MAIL_POSTAL_ADDRESS` and SMTP; open /admin > Notifications > E-mail studio.
-2. Templates > Festive offer > Use; choose an active coupon, upload a header image; check the preview in
+1. Set `MAIL_POSTAL_ADDRESS` and SMTP; open /admin > E-mail.
+2. Step 1 An audience > Next > Festive offer with coupon; choose an active coupon, upload a header image; check the preview in
    Mobile / Dark and the Plain text view; Save template.
 3. Tick unique codes (prefix e.g. `QA`), **Send test to me**: the e-mail has your own `QA-XXXXXXXX` code.
 4. Sign in on the website as yourself, open the e-mail's coupon button (`/plans?coupon=QA-...`) and
    redeem it (Razorpay test mode); a second use is refused.
-5. With a test rider who turned on offer e-mails: send a campaign to "Usernames" = that rider; the
+5. With a test rider who turned on offer e-mails: wizard > Several riders = that rider; the
    report shows sent 1; click a link (clicks 1); press Unsubscribe in the e-mail -> the account page
    shows offer e-mails off, the report shows unsubscribed 1, a new campaign skips the rider.
 6. Plan ending: a test rider with a plan ending in 2 days, an automation rule "Plan ends in 3 days" with
