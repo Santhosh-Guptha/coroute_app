@@ -22,8 +22,10 @@
 const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
 const config = require('./config');
-const { verifyToken, ROLE_ADMIN, AuthError, identityOf } = require('./auth');
+const { verifyTokenDetailed, ROLE_ADMIN, AuthError, identityOf } = require('./auth');
 const { ConvoyError, publicRider, publicAlert } = require('./convoys');
+/** Trip statuses of a ride that is still on (a revoked session keeps its ride socket during these). */
+const ACTIVE_RIDE = new Set(['PLANNING', 'STARTED', 'PAUSED']);
 const { clientIdOf } = require('./validate');
 const { validateChunk, TrackError, uploadPermission } = require('./tracks');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
@@ -102,6 +104,17 @@ const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN', 'REPORT_DOWN']);
 /** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
 const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET', 'REGROUP_SET', 'REGROUP_CLEAR', 'ROLE_SWAP', 'ROLE_AUTO', 'SWAP_REQUEST', 'SWAP_ANSWER', 'BUDDY_ASSIGN', 'BUDDY_PING', 'PILLION_SEAT', 'PILLION_UNSEAT']);
 const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
+/**
+ * Round 4 safety-only mode: a socket whose session was revoked during a live ride stays open until the ride ends but
+ * may only send its own SOS / crash alert, position and keep-alives, and only receives control messages and its own
+ * alerts: no other rider's position, chat, voice or member data.
+ */
+const SAFETY_ONLY_IN = new Set(['PING', 'SOS', 'TELEMETRY', 'BYE', 'LAST_GASP_BEACON', 'JOIN', 'LEAVE', 'AUTH']);
+const SAFETY_ONLY_OUT = new Set(['ACK', 'ERROR', 'PONG', 'HELLO', 'RECONNECT', 'SAFETY_ONLY', 'TRIP_STATUS', 'DISSOLVED', 'LEFT']);
+const SAFETY_ONLY_MESSAGE = 'This phone was signed out of CoRoute. Until the ride ends it only sends your SOS, crash alerts and position.';
+/** Round 4: the subprotocol new clients may offer (the token then travels as "coroute.bearer.<token>", never in the URL). */
+const WS_PROTOCOL = 'coroute.v1';
+const WS_BEARER_PREFIX = 'coroute.bearer.';
 /** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
 const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 /** 3.15: safety network and discovery, appended when switched on. */
@@ -155,7 +168,13 @@ class Hub {
     this.outTimer = null;
     /** Two-node live mirror (src/mirror.js), set by app.js; null on a single node. */
     this.mirror = null;
-    this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024 });
+    // 3.57: a browser (it always sends Origin) may only open a socket from this site; the app sends no Origin.
+    this.allowedOrigins = null; // Set of origins, filled by app.js (site origins + CORS_ORIGINS)
+    /** Round 4 ride lock (src/ride_lock.js), set by app.js; null in unit tests. */
+    this.rideLock = null;
+    this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024, verifyClient: (info) => this._originAllowed(info.req),
+      // Round 4: echo only the plain protocol name (never the bearer entry, which carries the token).
+      handleProtocols: (protocols) => (protocols && protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false) });
     this.wss.on('connection', (ws, req) => this._onConnection(ws, req));
 
     convoys.on('event', (groupId, payload, opts) => this.broadcast(groupId, payload, opts));
@@ -174,6 +193,8 @@ class Hub {
     this.heartbeat = setInterval(() => {
       for (const ws of this.wss.clients) {
         if (ws.isAlive === false) { ws.terminate(); continue; }
+        // 3.57: a signed-out session's socket that is no longer in a live ride (left it) closes now.
+        if (ws.revokedPending && !this._rideKeepsSocket(ws)) { this._kick(ws, 4401, 'SIGNED_OUT'); continue; }
         ws.isAlive = false; ws.ping();
       }
     }, 30000);
@@ -261,6 +282,7 @@ class Hub {
   _sendPosition(set, msg, fromUid, exceptWs, posUid = fromUid) {
     for (const peer of set) {
       if (peer === exceptWs || peer.readyState !== WebSocket.OPEN) continue;
+      if (peer.safetyOnly) continue; // round 4: no other rider's position for a revoked session
       if (fromUid && peer.user && peer.user.userId === fromUid) continue;
       if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
       if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped++; continue; }
@@ -324,7 +346,32 @@ class Hub {
   }
 
   // ------------------------------------------------------------- helpers
-  send(ws, obj) { if (ws.readyState === WebSocket.OPEN) this._out(ws, JSON.stringify(obj), Hub.prioOf(obj)); }
+  /** Round 4 safety-only mode: may this socket receive this message? (Every other socket: always.) */
+  static safetyOk(ws, payload) {
+    if (!ws.safetyOnly) return true;
+    const type = payload && payload.type;
+    if (SAFETY_ONLY_OUT.has(type)) return true;
+    const uid = ws.user && ws.user.userId;
+    if (type === 'ALERT' || type === 'EMERGENCY_UPDATE') {
+      const a = payload.alert || payload;
+      if (a && a.userId === uid) { (ws.ownAlerts || (ws.ownAlerts = new Set())).add(String(a.alertId || '')); return true; }
+      return false;
+    }
+    if (type === 'ALERT_RESOLVED' || type === 'SOS_RESPONSE') return !!(ws.ownAlerts && ws.ownAlerts.has(String(payload.alertId || '')));
+    return false;
+  }
+
+  /** Round 4: puts a socket of a revoked session into safety-only mode (kept for its live ride only). */
+  _safetyOnly(ws) {
+    ws.revokedPending = true;
+    if (ws.safetyOnly) return;
+    ws.safetyOnly = true;
+    this.admins.delete(ws);
+    this._endVoiceStreamsOf(ws);
+    this.send(ws, { type: 'SAFETY_ONLY', message: SAFETY_ONLY_MESSAGE, ts: Date.now() });
+  }
+
+  send(ws, obj) { if (ws.readyState === WebSocket.OPEN && Hub.safetyOk(ws, obj)) this._out(ws, JSON.stringify(obj), Hub.prioOf(obj)); }
   sendError(ws, code, message, reason, clientId) {
     this.send(ws, { type: 'ERROR', code, message, ...(reason ? { reason } : {}), ...(clientId ? { clientId } : {}) });
   }
@@ -343,6 +390,7 @@ class Hub {
       const uid = ws.user && ws.user.userId;
       if (exceptUser && uid === exceptUser) continue;
       if (onlyUser && uid !== onlyUser) continue;
+      if (ws.safetyOnly && !Hub.safetyOk(ws, payload)) continue;
       this._out(ws, msg, prio);
     }
   }
@@ -379,7 +427,7 @@ class Hub {
     const msg = JSON.stringify({ ts: Date.now(), ...payload });
     const prio = Hub.prioOf(payload);
     let n = 0;
-    for (const ws of set) if (ws.caps && ws.caps.has(cap) && ws.readyState === WebSocket.OPEN) { this._out(ws, msg, prio); n++; }
+    for (const ws of set) if (ws.caps && ws.caps.has(cap) && ws.readyState === WebSocket.OPEN && Hub.safetyOk(ws, payload)) { this._out(ws, msg, prio); n++; }
     return n;
   }
   /** Personal message to every open socket of a user that announced `cap`. Returns how many got it. */
@@ -390,7 +438,7 @@ class Hub {
     const msg = JSON.stringify({ ts: Date.now(), ...payload });
     const prio = Hub.prioOf(payload);
     let n = 0;
-    for (const ws of set) if ((!cap || (ws.caps && ws.caps.has(cap))) && ws.allowed && ws.readyState === WebSocket.OPEN) { this._out(ws, msg, prio); n++; }
+    for (const ws of set) if ((!cap || (ws.caps && ws.caps.has(cap))) && ws.allowed && ws.readyState === WebSocket.OPEN && Hub.safetyOk(ws, payload)) { this._out(ws, msg, prio); n++; }
     if (!n && !local && this.mirror) this.mirror.user(userId, payload, cap);
     return n;
   }
@@ -425,7 +473,7 @@ class Hub {
 
   broadcastAll(payload) {
     const msg = JSON.stringify(payload);
-    for (const ws of this.wss.clients) if (ws.readyState === WebSocket.OPEN) this._out(ws, msg, 1);
+    for (const ws of this.wss.clients) if (ws.readyState === WebSocket.OPEN && !ws.safetyOnly) this._out(ws, msg, 1);
   }
 
   _bind(ws, groupId) {
@@ -454,24 +502,76 @@ class Hub {
     if (this.admins.size === 0) return;
     const fleet = await this.convoys.fleet();
     const msg = JSON.stringify({ type: 'FLEET', convoys: fleet, featureAnalytics: this.convoys.featureAnalytics?.snapshot(), ts: Date.now() });
-    for (const ws of this.admins) if (ws.readyState === WebSocket.OPEN && ws.allowed && ws.user.role === ROLE_ADMIN) ws.send(msg);
+    for (const ws of this.admins) if (ws.readyState === WebSocket.OPEN && ws.allowed && !ws.safetyOnly && ws.user.role === ROLE_ADMIN) ws.send(msg);
+  }
+
+  /** Same-origin, an allowed site origin, or no Origin header at all (native app, server clients). */
+  _originAllowed(req) {
+    const origin = req && req.headers ? req.headers.origin : undefined;
+    if (origin === undefined || origin === '') return true;
+    if (this.allowedOrigins && this.allowedOrigins.has(String(origin).toLowerCase())) return true;
+    try {
+      const o = new URL(String(origin));
+      return o.host.toLowerCase() === String(req.headers.host || '').toLowerCase();
+    } catch { return false; }
   }
 
   // ---------------------------------------------------------- connection
-  _onConnection(ws, req) {
-    let token = null;
+  /**
+   * The token of an upgrade request: Authorization: Bearer, the subprotocol entry "coroute.bearer.<token>" (round 4),
+   * or ?token= (builds before 10025). Null when none: the first message must then be { type: 'AUTH', token }.
+   */
+  static upgradeToken(req) {
+    const h = (req && req.headers && req.headers.authorization) || '';
+    if (h.startsWith('Bearer ')) return { token: h.slice(7), via: 'header' };
+    const proto = String((req && req.headers && req.headers['sec-websocket-protocol']) || '');
+    if (proto) {
+      for (const p of proto.split(',')) {
+        const v = p.trim();
+        if (v.startsWith(WS_BEARER_PREFIX) && v.length > WS_BEARER_PREFIX.length) return { token: v.slice(WS_BEARER_PREFIX.length), via: 'protocol' };
+      }
+    }
     try {
       const url = new URL(req.url, 'http://localhost');
-      token = url.searchParams.get('token');
+      const q = url.searchParams.get('token');
+      if (q) return { token: q, via: 'query' };
     } catch { /* ignore */ }
-    if (!token) {
-      const h = req.headers['authorization'] || '';
-      if (h.startsWith('Bearer ')) token = h.slice(7);
-    }
-    const claims = token && verifyToken(token);
-    if (!claims) { ws.close(4401, 'Unauthorized'); return; }
+    return null;
+  }
+
+  _onConnection(ws, req) {
+    const found = Hub.upgradeToken(req);
+    if (found) return this._startSession(ws, found.token);
+    // Round 4: no token in the request: the first message authenticates, within WS_AUTH_TIMEOUT_MS (5 s).
+    ws.on('error', () => { /* close handler runs */ });
+    ws.authPending = true;
+    const timer = setTimeout(() => {
+      if (!ws.authPending) return;
+      ws.authPending = false;
+      try { ws.close(4401, 'AUTH_TIMEOUT'); } catch { /* gone */ }
+    }, config.wsAuthTimeoutMs);
+    if (timer.unref) timer.unref();
+    ws.once('message', (data, isBinary) => {
+      clearTimeout(timer);
+      if (!ws.authPending) return;
+      ws.authPending = false;
+      let m = null;
+      if (!isBinary) { try { m = JSON.parse(data.toString()); } catch { m = null; } }
+      if (!m || m.type !== 'AUTH' || typeof m.token !== 'string' || m.token.length > 4096) { try { ws.close(4401, 'Unauthorized'); } catch { /* gone */ } return; }
+      this._startSession(ws, m.token);
+    });
+    ws.once('close', () => clearTimeout(timer));
+  }
+
+  _startSession(ws, token) {
+    const verified = token && verifyTokenDetailed(token, { allowExpired: true });
+    if (!verified) { ws.close(4401, 'Unauthorized'); return; }
+    // 3.57: a short access token that ran out: the app refreshes and reconnects at once (no sign-out).
+    if (verified.expired) { ws.close(4401, verified.claims.typ === 'at' ? 'TOKEN_EXPIRED' : 'Unauthorized'); return; }
+    const claims = verified.claims;
 
     ws.claims = claims;
+    ws.sid = claims.sid || null;
     ws.user = { userId: claims.sub, name: claims.name, role: claims.role, email: claims.email };
     ws.isAlive = true;
     ws.groupId = null;
@@ -489,6 +589,7 @@ class Hub {
           this._onBinaryTelemetry(ws, buf).catch((e) => this._handleError(ws, e));
           return;
         }
+        if (ws.safetyOnly) return; // round 4: no voice from a revoked session
         this._onVoice(ws, data);
         return;
       }
@@ -506,9 +607,10 @@ class Hub {
     ws.ready = this._gateCheck(ws).then((ok) => {
       if (ok && ws.readyState === WebSocket.OPEN) this._index(ws);
       if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30, protocol: 2, features: FEATURES });
+      if (ok && ws.safetyOnly) this.send(ws, { type: 'SAFETY_ONLY', message: SAFETY_ONLY_MESSAGE, ts: Date.now() });
       // 3.55: an app that missed a switch change while offline catches up on (re)connect.
       const ff = this.convoys.featureFlags;
-      if (ok && ff && ff.anyOff()) this.send(ws, { type: 'FEATURE_FLAGS', ...ff.snapshot() });
+      if (ok && ff && ff.anyOff() && !ws.safetyOnly) this.send(ws, { type: 'FEATURE_FLAGS', ...ff.snapshot() });
       return ok;
     });
   }
@@ -522,12 +624,20 @@ class Hub {
   async _gateCheck(ws) {
     if (!this.gate) { ws.allowed = true; return true; }
     try {
-      const user = await this.gate.check(ws.claims);
+      // 3.57: the session too (signed out, revoked, idle): checkDetailed also keeps an app session's last-seen fresh.
+      const { user } = typeof this.gate.checkDetailed === 'function' ? await this.gate.checkDetailed(ws.claims) : { user: await this.gate.check(ws.claims) };
       ws.user = identityOf(user);
       if (ws.user.role !== ROLE_ADMIN) this.admins.delete(ws);
       ws.allowed = true;
       return true;
     } catch (e) {
+      // 3.57: a signed-out / revoked session never cuts a rider out of a live ride (SOS, crash alerts, positions): the
+      // socket stays until the ride ends or the rider leaves it, then closes 4401. REST calls are refused at once.
+      if (e instanceof AuthError && e.revoked && this._rideKeepsSocket(ws)) {
+        ws.allowed = true;
+        this._safetyOnly(ws); // round 4: SOS, crash alerts and own position only, until the ride ends
+        return true;
+      }
       ws.allowed = false;
       if (e instanceof AuthError) {
         this._kick(ws, Hub.closeCodeFor(e), e.code || 'Unauthorized');
@@ -550,13 +660,50 @@ class Hub {
     if (t.unref) t.unref();
   }
 
-  /** Ends every socket of one account at once (hold, block, delete). */
-  disconnectUser(userId, code = 4401, reason = 'ACCOUNT_GONE') {
+  /**
+   * Ends every socket of one account at once (hold, block, delete, sign out everywhere); `exceptSid` keeps one session's;
+   * `spareRiding` (sign-outs only, never hold / block / delete) keeps a socket in a live ride until the ride ends.
+   */
+  disconnectUser(userId, code = 4401, reason = 'ACCOUNT_GONE', { exceptSid = null, spareRiding = false } = {}) {
     let n = 0;
     for (const ws of this.wss.clients) {
-      if (ws.user && ws.user.userId === userId) { this._kick(ws, code, reason); n++; }
+      if (!ws.user || ws.user.userId !== userId || (exceptSid && ws.sid === exceptSid)) continue;
+      if (spareRiding && this._rideKeepsSocket(ws)) { this._safetyOnly(ws); continue; }
+      this._kick(ws, code, reason); n++;
     }
     return n;
+  }
+
+  /** 3.57: ends the sockets of one signed-out / revoked session (close 4401 SIGNED_OUT). spareRiding: see _rideKeepsSocket. */
+  disconnectSession(sid, code = 4401, reason = 'SIGNED_OUT', { spareRiding = false } = {}) {
+    if (!sid) return 0;
+    let n = 0;
+    for (const ws of this.wss.clients) {
+      if (ws.sid !== sid) continue;
+      if (spareRiding && this._rideKeepsSocket(ws)) { this._safetyOnly(ws); continue; }
+      this._kick(ws, code, reason); n++;
+    }
+    return n;
+  }
+
+  /**
+   * 3.57: true while this socket's rider is in a live ride on this node (bound to an active room, or a member of one
+   * loaded here when reconnecting). Such a socket of a revoked session stays open until the ride is over.
+   */
+  _rideKeepsSocket(ws) {
+    const uid = ws && ws.user && ws.user.userId;
+    if (!uid || !this.convoys || !this.convoys.rooms) return false;
+    const live = (room) => !!room && room.riders && room.riders.has(uid) && ACTIVE_RIDE.has(room.meta && room.meta.tripStatus);
+    if (ws.groupId) return live(this.convoys.rooms.get(ws.groupId));
+    for (const room of this.convoys.rooms.values()) if (live(room)) return true;
+    return false;
+  }
+
+  /** 3.57: a ride ended: sockets kept open only for it (revoked sessions) close now. */
+  closeRevokedOf(groupId) {
+    for (const ws of this.wss.clients) {
+      if (ws.revokedPending && (!ws.groupId || ws.groupId === groupId) && !this._rideKeepsSocket(ws)) this._kick(ws, 4401, 'SIGNED_OUT');
+    }
   }
 
   _handleError(ws, e) {
@@ -627,6 +774,7 @@ class Hub {
     if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
     const room = await this._liveRoom(ws, gid);
     if (!room) return;
+    if (this.rideLock && ws.sid && !ws.safetyOnly) this.rideLock.noteRide(ws.sid, ws.user.userId, gid).catch(() => {});
     const tsOffset = buf.readUInt32BE(1);
     const lat = buf.readInt32BE(5) / 1e6;
     const lng = buf.readInt32BE(9) / 1e6;
@@ -709,8 +857,14 @@ class Hub {
     if (ws.groupId && typeof this.convoys.rideFeatureOff === 'function' && this.convoys.rideFeatureOff(ws.groupId, wsFeaturesFor(msg))) {
       throw new ConvoyError("This isn't included in this ride.", 403, 'GROUP_FEATURE_LOCKED');
     }
+    // Round 4 safety-only mode (a session revoked during the ride): only its own SOS / crash alert and position.
+    if (ws.safetyOnly && !SAFETY_ONLY_IN.has(msg.type)) throw new ConvoyError(SAFETY_ONLY_MESSAGE, 403, 'SAFETY_ONLY');
     switch (msg.type) {
-      case 'PING': return this.send(ws, { type: 'PONG', ts: Date.now() });
+      case 'AUTH': return; // already authenticated (a repeated first message)
+      case 'PING': {
+        if (ws.groupId && this.rideLock && !ws.safetyOnly && ws.sid) this.rideLock.noteRide(ws.sid, u.userId, ws.groupId).catch(() => {});
+        return this.send(ws, { type: 'PONG', ts: Date.now() });
+      }
 
       case 'JOIN': {
         const groupId = String(msg.groupId || '');
@@ -719,11 +873,28 @@ class Hub {
         if (this.mirror && this.mirror.capReached(u.userId) && !this._rejoining(groupId, u.userId)) {
           throw new ConvoyError('Server busy, try in a few minutes', 503, 'SERVER_BUSY');
         }
+        // Round 4 ride lock: another device of this account is on a ride: this session cannot join one.
+        if (this.rideLock && ws.sid && !ws.safetyOnly) {
+          try { await this.rideLock.assertCanRide(u.userId, ws.sid, { reason: 'join' }); } catch (e) {
+            if (e instanceof AuthError) throw new ConvoyError(e.message, 409, e.code);
+            throw e;
+          }
+        }
         this._bind(ws, groupId);
         ws.byeReason = null;
         // 3.15 client capabilities, on every JOIN (array of at most 8 short words, unknown ones ignored).
         ws.caps = new Set(Array.isArray(msg.caps) ? msg.caps.slice(0, 8).filter((c) => typeof c === 'string' && CAP.test(c)) : []);
         const room = await this.convoys.getRoom(groupId);
+        if (ws.safetyOnly) {
+          // Round 4: no snapshot (other riders' details) for a revoked session; it may still raise its SOS here.
+          this.send(ws, { type: 'SAFETY_ONLY', groupId, message: SAFETY_ONLY_MESSAGE, ts: Date.now() });
+          return;
+        }
+        if (this.rideLock && ws.sid) {
+          const force = ws.notedGroup !== groupId;
+          ws.notedGroup = groupId;
+          this.rideLock.noteRide(ws.sid, u.userId, groupId, { force }).catch(() => {});
+        }
         this.send(ws, { type: 'SNAPSHOT', convoy: this.convoys.snapshot(room), ts: Date.now() });
         if (ws.caps.has('net1') && this.network) {
           try { this.network.resend(u.userId); } catch (e) { this.log.warn('[ws] resend failed', e.message); }
@@ -755,6 +926,7 @@ class Hub {
         if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
         const room = await this._liveRoom(ws, gid);
         if (!room) return;
+        if (this.rideLock && ws.sid && !ws.safetyOnly) this.rideLock.noteRide(ws.sid, u.userId, gid).catch(() => {});
         // Only telemetry fields are applied (never role or profile); see ConvoyManager.patchRider.
         const rider = this.convoys.patchRider(room, u.userId, msg, { emit: false });
         this._fanoutPosition(gid, ws, rider);
@@ -1265,7 +1437,7 @@ class Hub {
     const frame = encodeVoice(kind, header, payload);
     const room = this.convoys.rooms.get(gid);
     for (const client of set) {
-      if (client === stream.ws || client.readyState !== WebSocket.OPEN) continue;
+      if (client === stream.ws || client.readyState !== WebSocket.OPEN || client.safetyOnly) continue;
       if (stream.to && client.user.userId !== stream.to) continue; // 1:1 — only the chosen rider hears it
       if (stream.channel === 'LEAD_ONLY') {
         const rider = room && room.riders ? room.riders.get(client.user.userId) : null;

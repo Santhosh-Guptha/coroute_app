@@ -841,6 +841,26 @@ class ConvoyManager extends EventEmitter {
   }
 
   /**
+   * Round 4 ride lock (src/ride_lock.js): the rider signed in on another phone with an e-mail code during this ride.
+   * The rider stays in the ride (the new phone joins it); the group is told "<rider> switched phones" (system card +
+   * RIDER_HANDOVER). Alerts are never touched: an open SOS stays open and visible to the group and contacts.
+   * Returns true when the room was found and told.
+   */
+  async noteHandover(groupId, userId, name = '') {
+    const room = await this.getRoom(groupId, { required: false });
+    if (!room) return false;
+    const rider = room.riders.get(userId);
+    const who = String((rider && rider.name) || name || 'A rider').slice(0, 60);
+    if (rider) { rider.handedOverAt = now(); room.dirty.add(userId); }
+    this._emit(groupId, 'RIDER_HANDOVER', { userId, name: who });
+    await this._postMessage(room, {
+      messageId: `MSG-${shortId(4)}`, senderId: 'SYSTEM', senderName: who, requestedBy: userId,
+      text: `${who} switched phones`, timestamp: now(), isQuickCard: true, cardType: 'PHONE_SWITCH',
+    }).catch(() => null);
+    return true;
+  }
+
+  /**
    * Raises an SOS. Idempotent per (rider, clientId): a phone that retries an SOS after a
    * dead zone (it never saw the echo) gets the existing alert back instead of a second one.
    * 3.14 extras (all optional, old apps send none): auto (raised by crash detection),
