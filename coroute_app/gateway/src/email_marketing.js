@@ -77,6 +77,8 @@ const MAX_BLOCKS = 30;
 const PAID_PLANS = Object.freeze(['group_small', 'group_large']);
 const POSTAL_PLACEHOLDER = '[OWNER TO FILL in config: MAIL_POSTAL_ADDRESS]';
 const HARD_SUPPRESSION = Object.freeze(['bounce', 'complaint', 'admin']);
+/** Footer line of an account notice written to named riders (3.57 round 3: wizard "several riders" / rider page). */
+const SERVICE_WHY = 'You get this e-mail because the CoRoute team wrote to you about your account.';
 
 /** Personalisation variables: name -> { label, fallback }. Anything else in { } is refused. */
 const VARIABLES = Object.freeze({
@@ -110,7 +112,7 @@ const SEGMENTS = Object.freeze({
   plan_expired_within: { label: 'Website plan ended in the last N days', days: true, account: true },
   crew_admins: { label: 'Crew admins' },
   operators: { label: 'Operators and club owners' },
-  usernames: { label: 'Usernames' },
+  usernames: { label: 'Usernames', account: true },
   active: { label: 'Active in the last N days', days: true },
   plan: { label: 'By plan type' },
 });
@@ -446,14 +448,16 @@ function renderDesign(design, ctx) {
   // Footer: always last, always there.
   const foot = design.blocks.find((b) => b.type === 'footer') || { note: '' };
   const marketing = ctx.category !== 'account';
-  const address = ctx.postalAddress || POSTAL_PLACEHOLDER;
-  const why = marketing ? 'You get this e-mail because you turned on offer e-mails in your CoRoute account.' : 'You get this e-mail about your CoRoute plan on the website.';
+  // 3.57 round 3: a transactional 1:1 e-mail from the rider page leaves the address line out when it is not set
+  // (never the placeholder in a real e-mail); marketing e-mails always need it (checked before sending).
+  const address = ctx.postalAddress || (ctx.omitMissingAddress ? '' : POSTAL_PLACEHOLDER);
+  const why = ctx.why ? String(ctx.why) : marketing ? 'You get this e-mail because you turned on offer e-mails in your CoRoute account.' : 'You get this e-mail about your CoRoute plan on the website.';
   const footHtml = (foot.note ? `${vh(foot.note).replace(/\n/g, '<br>')}<br><br>` : '')
     + `${esc(why)} ` + (marketing ? `<a class="cr-muted" href="${esc(ctx.unsubscribeUrl)}" style="color:${COLORS.muted};text-decoration:underline;">Unsubscribe</a> · ` : '')
     + `<a class="cr-muted" href="${esc(ctx.accountUrl)}" style="color:${COLORS.muted};text-decoration:underline;">Manage e-mails</a>`
-    + `<br><br>Sent by CoRoute · ${esc(address)}${ctx.supportEmail ? ` · ${esc(ctx.supportEmail)}` : ''}`;
+    + `<br><br>Sent by CoRoute${address ? ` · ${esc(address)}` : ''}${ctx.supportEmail ? ` · ${esc(ctx.supportEmail)}` : ''}`;
   rows.push(`<tr><td class="cr-muted cr-rule" style="font-size:12px;line-height:1.6;color:${COLORS.muted};padding-top:16px;border-top:1px solid ${COLORS.rule};">${footHtml}</td></tr>`);
-  text.push([...(foot.note ? [v(foot.note), ''] : []), why, ...(marketing ? [`Unsubscribe: ${ctx.unsubscribeUrl}`] : []), `Manage e-mails: ${ctx.accountUrl}`, '', `Sent by CoRoute · ${address}${ctx.supportEmail ? ` · ${ctx.supportEmail}` : ''}`].join('\n'));
+  text.push([...(foot.note ? [v(foot.note), ''] : []), why, ...(marketing ? [`Unsubscribe: ${ctx.unsubscribeUrl}`] : []), `Manage e-mails: ${ctx.accountUrl}`, '', `Sent by CoRoute${address ? ` · ${address}` : ''}${ctx.supportEmail ? ` · ${ctx.supportEmail}` : ''}`].join('\n'));
 
   const subject = v(design.subject);
   const preheader = v(design.preheader || '');
@@ -701,9 +705,13 @@ class EmailStudio {
    * Everything a send needs, checked: design (mode send), category, coupon, unique codes, images.
    * Throws StudioError with all problems.
    */
-  async prepare(input, { forSend = true } = {}) {
+  async prepare(input, { forSend = true, couponDoc = null } = {}) {
     const b = input && typeof input === 'object' ? input : {};
     if (!/^https?:\/\//.test(this.origin())) throw new StudioError('Marketing e-mails need the site address (PUBLIC_ORIGIN) for their links.', 'NO_ORIGIN', 503);
+    // 3.57 round 3: a personal single-use code made for one rider (rider page) fills the coupon block as it is.
+    if (couponDoc && b.design && Array.isArray(b.design.blocks)) {
+      b.design = { ...b.design, blocks: b.design.blocks.map((x) => (x && x.type === 'coupon' ? { ...x, code: couponDoc.code } : x)) };
+    }
     const v = validateDesign(b.design, { category: b.category, mode: forSend ? 'send' : 'template', origin: this.origin() });
     const errors = v.errors.slice(); const warnings = v.warnings.slice();
     let unique = null;
@@ -711,7 +719,9 @@ class EmailStudio {
     const couponBlock = v.design.blocks.find((x) => x.type === 'coupon');
     let coupon = null;
     if (unique && !couponBlock) errors.push('Unique codes need a coupon block (its coupon is the parent).');
-    if (couponBlock && couponBlock.code) {
+    if (couponDoc && !couponBlock) errors.push('This e-mail needs a coupon block for the code.');
+    if (couponBlock && couponDoc) coupon = couponDoc;
+    else if (couponBlock && couponBlock.code) {
       const r = await this.couponProblem(couponBlock.code, { unique: !!unique });
       if (r.problem) errors.push(r.problem); else coupon = r.coupon;
     }
@@ -748,6 +758,8 @@ class EmailStudio {
       const names = [...new Set(raw.map((s) => String(s).trim().replace(/^@/, '').toLowerCase()).filter(Boolean))];
       if (!names.length) throw new StudioError('Enter at least one username.', 'BAD_AUDIENCE');
       if (names.length > 500) throw new StudioError('At most 500 usernames at once.', 'BAD_AUDIENCE');
+      // 3.57 round 3: an account notice to named riders (e.g. "about your account") is for a handful of people.
+      if (category === 'account' && names.length > 50) throw new StudioError('An account notice goes to at most 50 named riders. Send a marketing e-mail for more.', 'BAD_AUDIENCE');
       if (names.some((n) => !/^[a-z0-9_.]{3,30}$/.test(n))) throw new StudioError('A username can only have letters, digits, _ and .', 'BAD_AUDIENCE');
       out.usernames = names;
     }
@@ -788,9 +800,7 @@ class EmailStudio {
     const kind = aud.kind;
     const needMemberships = ['plan_ends_within', 'plan_expired_within', 'plan'].includes(kind);
     const mems = needMemberships ? await this._memberships() : null;
-    let ids;
-    if (category === 'account') ids = [...mems.keys()];
-    else ids = await this._consenting();
+    let ids = null;
     let only = null;
     if (kind === 'crew_admins') {
       const rows = await this.soda.query('crew_members', { role: { $in: ['ADMIN', 'CO_ADMIN'] } }, { limit: 100000 }).catch(() => []);
@@ -809,6 +819,9 @@ class EmailStudio {
       only = new Set();
       for (const n of aud.usernames) { const u = await findUserByUsername(this.repo, n).catch(() => null); if (u && u.userId) only.add(u.userId); }
     }
+    // Account notices: the plan segments (riders holding a plan), or named riders (3.57 round 3); marketing: consent.
+    if (category === 'account') ids = kind === 'usernames' ? [...only] : [...mems.keys()];
+    else ids = await this._consenting();
     const out = [];
     for (const uid of [...new Set(ids)]) {
       if (only && !only.has(uid)) continue;
@@ -847,17 +860,17 @@ class EmailStudio {
 
   // ------------------------------------------------------------ unique codes
   /** The single-use child code of `parent` for (campaign, rider); the same code on a retry. */
-  async issueUniqueCode(parent, { campaignId, userId, prefix, validDays, campaignName = '' }) {
+  async issueUniqueCode(parent, { campaignId, userId, prefix, validDays, campaignName = '', createdBy = 'email-studio', notes = '' }) {
     await this.ensureStore();
     const key = `${campaignId}:${userId}`;
     const now = this.clock();
     const expiresAt = Math.min(Number(parent.expiresAt) || Infinity, now + validDays * DAY);
     const child = (code) => ({
       code, name: `${parent.name || parent.code} (single-use)`, campaignName: campaignName || parent.campaignName || '', description: parent.description || '',
-      internalNotes: `Single-use code from e-mail campaign ${campaignId} (parent ${parent.code}).`, status: 'ACTIVE',
+      internalNotes: notes ? String(notes).slice(0, 500) : `Single-use code from e-mail campaign ${campaignId} (parent ${parent.code}).`, status: 'ACTIVE',
       discountType: parent.discountType, discountValue: parent.discountValue, maxDiscountCap: parent.maxDiscountCap, minOrderAmount: parent.minOrderAmount,
       validFrom: now - 60000, expiresAt, maxUsageTotal: 1, maxUsagePerUser: 1, applicableTiers: parent.applicableTiers, newMembersOnly: !!parent.newMembersOnly,
-      firstPaymentOnly: !!parent.firstPaymentOnly, allowedUserIds: [userId], stackWithOffer: parent.stackWithOffer, createdBy: 'email-studio',
+      firstPaymentOnly: !!parent.firstPaymentOnly, allowedUserIds: [userId], stackWithOffer: parent.stackWithOffer, createdBy: String(createdBy || 'email-studio').slice(0, 120),
       parentCode: parent.code, emailCampaignId: campaignId,
     });
     const ensureCoupon = async (code) => { if (!(await this.repo.findCoupon(code).catch(() => null))) await this.repo.saveCoupon(child(code)); return code; };
@@ -996,6 +1009,8 @@ class EmailStudio {
       listPrice: price ? inr(price.listPriceInr) : '', offerPrice: price ? inr(price.priceInr) : '',
       link: `${o}${linkPath}`,
     };
+    // 3.57 round 3: the rider page preview fills values the e-mail will have once the action is done (plan, end date).
+    if (opts.vars && typeof opts.vars === 'object') for (const k of Object.keys(VARIABLES)) if (opts.vars[k]) raw[k] = opts.vars[k];
     const vars = {};
     for (const [k, spec] of Object.entries(VARIABLES)) vars[k] = raw[k] ? String(raw[k]).replace(/\s+/g, ' ').trim().slice(0, 120) : spec.fallback;
     const track = !!opts.track && opts.campaignId;
@@ -1005,8 +1020,9 @@ class EmailStudio {
     const mail = renderDesign(prep.design, {
       origin: o, vars, coupon, prices, images, link, category: prep.category, unsubscribeUrl: unsub, accountUrl: `${o}/account#emails`,
       postalAddress: this.postalAddress(), supportEmail: String(this.config.supportEmail || '').trim(), forceDark: !!opts.forceDark, sample,
+      why: opts.why || null, omitMissingAddress: !!opts.omitMissingAddress,
     });
-    const headers = { 'X-CoRoute-Mail': 'marketing', 'X-CoRoute-Category': prep.category === 'account' ? 'account' : 'offers', ...(opts.campaignId ? { 'X-CoRoute-Campaign': opts.campaignId } : {}) };
+    const headers = { 'X-CoRoute-Mail': opts.mailKind || 'marketing', 'X-CoRoute-Category': prep.category === 'account' ? 'account' : 'offers', ...(opts.campaignId ? { 'X-CoRoute-Campaign': opts.campaignId } : {}) };
     if (prep.category !== 'account' && user) { headers['List-Unsubscribe'] = `<${unsub}>`; headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'; }
     return { ...mail, headers, vars };
   }
@@ -1232,7 +1248,7 @@ class EmailStudio {
         const cc = await this.repo.findCoupon(code).catch(() => null);
         expiresAt = cc ? cc.expiresAt : null;
       }
-      const m = await this.build(ctx.prep, u, { campaignId: ctx.id, track: ctx.track, couponCode: code, couponExpiresAt: expiresAt, prices: ctx.prices });
+      const m = await this.build(ctx.prep, u, { campaignId: ctx.id, track: ctx.track, couponCode: code, couponExpiresAt: expiresAt, prices: ctx.prices, why: ctx.why || null });
       result = await this.mailer.send({ to: u.email.trim(), subject: m.subject, html: m.html, text: m.text, headers: m.headers });
     } catch (e) {
       result = { sent: false, error: String((e && e.code) || 'BUILD_FAILED').slice(0, 40) };
@@ -1311,7 +1327,8 @@ class EmailStudio {
       const stats = { ...state.doc.stats };
       let mailed = 0;
       for (const uid of slice) {
-        const r = await this._sendOne(uid, { id: state.doc.campaignId, name: state.doc.name, prep, key: `mkt:${state.doc.campaignId}:${uid}`, settings, prices, track: state.doc.trackClicks });
+        const r = await this._sendOne(uid, { id: state.doc.campaignId, name: state.doc.name, prep, key: `mkt:${state.doc.campaignId}:${uid}`, settings, prices, track: state.doc.trackClicks,
+          why: state.doc.category === 'account' && state.doc.audience && state.doc.audience.kind === 'usernames' ? SERVICE_WHY : null });
         if (r === 'sent') { stats.sent++; mailed++; } else if (r === 'failed') { stats.failed++; mailed++; } else if (r === 'capped') stats.capped = (stats.capped || 0) + 1; else stats.skipped++;
       }
       if (!(await this._save(state, { cursor: state.doc.cursor + slice.length, stats }))) return;
@@ -1376,6 +1393,87 @@ class EmailStudio {
     return sent;
   }
 
+  // ------------------------------------------------------------ 3.57 round 3: one e-mail to one rider (web admin)
+  /**
+   * May this rider get a direct e-mail of `category` now? Transactional ('account'): yes unless the address is
+   * hard-suppressed (bounce, complaint, admin). Marketing: only with the Offers consent and no suppression, or
+   * when the admin marks it a service message the rider asked for (`service` + a note); a bounce / complaint /
+   * admin suppression still blocks it.
+   */
+  async directCheck(user, category, { service = false, serviceNote = '' } = {}) {
+    await this.offers.ensureStore();
+    const hasEmail = !!(user && validEmail(user.email));
+    const consent = user ? await this.offers.consentOf(user.userId) : { offersEmail: false };
+    const row = hasEmail ? await this.soda.findOne('email_suppression', { emailHash: emailHash(user.email) }) : null;
+    const suppressed = row ? row.value.reason : null;
+    const hard = !!(suppressed && HARD_SUPPRESSION.includes(suppressed));
+    const out = { classification: category === 'account' ? 'transactional' : (service ? 'service' : 'marketing'), hasEmail, offersConsent: !!consent.offersEmail, suppressed, allowed: false, code: null, reason: '' };
+    if (!hasEmail) return { ...out, code: 'NO_ADDRESS', reason: 'This rider has no valid e-mail address.' };
+    if (hard) return { ...out, code: 'SUPPRESSED', reason: `E-mails to this address are stopped (${suppressed}).` };
+    if (category === 'account') return { ...out, allowed: true };
+    if (service) {
+      if (oneLine(serviceNote).length < 3) return { ...out, code: 'NOTE_REQUIRED', reason: 'Write a short note: why the rider asked for this.' };
+      return { ...out, allowed: true };
+    }
+    if (suppressed) return { ...out, code: 'SUPPRESSED', reason: 'This rider unsubscribed from offer e-mails.' };
+    if (!consent.offersEmail) return { ...out, code: 'NO_CONSENT', reason: 'This rider has not agreed to offer e-mails. Tick "service message" with a note if they asked for it, or share the code yourself.' };
+    return { ...out, allowed: true };
+  }
+
+  /**
+   * Sends one e-mail to one rider at once (no quiet hours or weekly cap: a 1:1 message, not a campaign).
+   * input: { design, category, uniqueCoupon, couponDoc, service, serviceNote, key (idempotency), why, meta }.
+   * The mail_log row `direct:<key>` is written before sending: a retry with the same key never sends twice.
+   */
+  async sendDirect(userId, input = {}, { by = 'admin' } = {}) {
+    await this.ensureStore();
+    if (!this.enabled) throw new StudioError('E-mail is not configured on this server (SMTP_HOST / MAIL_FROM).', 'MAIL_OFF', 503);
+    const u = await this.repo.findUserById(String(userId)).catch(() => null);
+    if (!u || u.deletedAt) throw new StudioError('Rider not found.', 'NOT_FOUND', 404);
+    const category = input.category === 'account' ? 'account' : 'marketing';
+    const prep = await this.prepare({ design: input.design, category, uniqueCoupon: input.uniqueCoupon }, { couponDoc: input.couponDoc || null });
+    const check = await this.directCheck(u, prep.category, { service: !!input.service, serviceNote: input.serviceNote });
+    if (!check.allowed) throw new StudioError(check.reason, check.code, 409, { check });
+    if (prep.category === 'marketing' && !this.postalAddress()) throw new StudioError('Set the postal address for the e-mail footer first (MAIL_POSTAL_ADDRESS). Offer e-mails need it.', 'NO_POSTAL_ADDRESS', 409);
+    const key = `direct:${String(input.key || `${u.userId}:${hex(8)}`).slice(0, 120)}`;
+    const now = this.clock();
+    try {
+      await this.soda.insert(LOG, { key, kind: 'direct', category: prep.category, classification: check.classification, userId: u.userId, to: maskEmail(u.email), status: 'SENDING',
+        by: String(by).slice(0, 120), subject: oneLine(prep.design.subject).slice(0, 150), createdAt: now, updatedAt: now, ...(input.meta || {}) });
+    } catch (e) {
+      if (e && (e.status === 409 || /unique/i.test(e.message || ''))) return { sent: false, duplicate: true, to: maskEmail(u.email), classification: check.classification };
+      throw e;
+    }
+    const row = await this.soda.findOne(LOG, { key });
+    let code = null; let expiresAt = null; let result;
+    try {
+      if (prep.unique && prep.coupon) {
+        const cid = `dm_${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
+        code = await this.issueUniqueCode(prep.coupon, { campaignId: cid, userId: u.userId, prefix: prep.unique.prefix, validDays: prep.unique.validDays, campaignName: 'Direct e-mail' });
+        const cc = await this.repo.findCoupon(code).catch(() => null);
+        expiresAt = cc ? cc.expiresAt : null;
+      } else if (input.couponDoc) {
+        code = input.couponDoc.code; expiresAt = input.couponDoc.expiresAt;
+      }
+      const why = input.why || (prep.category === 'account' ? SERVICE_WHY : check.classification === 'service' ? 'You get this e-mail because you asked the CoRoute team for it.' : null);
+      const m = await this.build(prep, u, { couponCode: code, couponExpiresAt: expiresAt, why, omitMissingAddress: prep.category === 'account', mailKind: 'direct' });
+      result = await this.mailer.send({ to: u.email.trim(), subject: m.subject, html: m.html, text: m.text, headers: m.headers });
+    } catch (e) {
+      result = { sent: false, error: String((e && e.code) || 'BUILD_FAILED').slice(0, 40) };
+    }
+    if (!result.sent && Number(result.responseCode) >= 500 && Number(result.responseCode) < 600) await this.offers.suppress(u.email, 'bounce', 'smtp').catch(() => {});
+    await this.soda.compareAndReplace(LOG, row.key, row.value, { ...row.value, status: result.sent ? 'SENT' : 'FAILED', sentAt: result.sent ? this.clock() : null,
+      error: result.sent ? null : String(result.error || 'SEND_FAILED').slice(0, 40), messageId: result.messageId || null, couponCode: code || null, updatedAt: this.clock() });
+    return { sent: !!result.sent, error: result.sent ? null : (result.error || 'SEND_FAILED'), to: maskEmail(u.email), classification: check.classification, category: prep.category, couponCode: code, key };
+  }
+
+  /** The direct e-mails a rider got (newest first), for the rider page. */
+  async directLog(userId, { limit = 30 } = {}) {
+    await this.ensureStore();
+    const rows = await this.soda.query(LOG, { userId: String(userId), kind: 'direct' }, { limit: Math.min(100, limit), orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }] }).catch(() => []);
+    return rows.map((r) => ({ at: r.value.createdAt, subject: r.value.subject || '', category: r.value.category, classification: r.value.classification || null, status: r.value.status, by: r.value.by || null, couponCode: r.value.couponCode || null, template: r.value.template || null }));
+  }
+
   // ------------------------------------------------------------ images (library)
   _photos() {
     if (!this.photoStore) this.photoStore = require('./review_photos').createPhotoStore(require('./config').reviewPhotoDir);
@@ -1421,6 +1519,7 @@ class EmailStudio {
   async forgetUser(userId) {
     await this.ensureStore();
     await this.soda.removeWhere(LOG, { userId, kind: 'marketing' }).catch(() => {});
+    await this.soda.removeWhere(LOG, { userId, kind: 'direct' }).catch(() => {});
     await this.soda.removeWhere(C.events, { uh: this.userHash(userId) }).catch(() => {});
     await this.soda.removeWhere(C.codes, { userId }).catch(() => {});
   }
@@ -1544,5 +1643,5 @@ function publicStudioRouter({ studio }) {
 
 module.exports = {
   EmailStudio, StudioError, adminStudioRouter, publicStudioRouter, validateDesign, renderDesign, discountText, cleanButtonPath, cleanSitePath,
-  STARTERS, VARIABLES, BUTTON_PATHS, BLOCK_TYPES, SEGMENTS, RULE_TRIGGERS, DEFAULT_SETTINGS, POSTAL_PLACEHOLDER, C,
+  STARTERS, VARIABLES, BUTTON_PATHS, BLOCK_TYPES, SEGMENTS, RULE_TRIGGERS, DEFAULT_SETTINGS, POSTAL_PLACEHOLDER, C, SERVICE_WHY, HARD_SUPPRESSION, emailHash, maskEmail,
 };

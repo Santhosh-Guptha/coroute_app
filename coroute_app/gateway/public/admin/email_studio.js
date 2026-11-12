@@ -1,10 +1,8 @@
-/* CoRoute web admin: Notifications > "E-mail studio" (3.57, src/email_marketing.js, docs/features_355/email_marketing.md).
-   Extends the 3.56 Offers e-mail composer: customised marketing e-mails with coupons, built from templates.
-   #/notifications/email              compose: block editor + live preview (mobile / desktop, light / dark) + audience and sending
-   #/notifications/email/templates    starters and saved templates (use, edit, duplicate, archive, versions)
-   #/notifications/email/campaigns    campaigns with their report (sent, failed, unsubscribed, clicks, coupon redemptions)
-   #/notifications/email/automation   automation rules (segment -> template, once per rider per N days)
-   #/notifications/email/settings     frequency cap, quiet hours, click tracking, suppression list, earlier offers e-mails
+/* CoRoute web admin: e-mail building blocks (3.57, src/email_marketing.js, docs/features_355/email_marketing.md).
+   3.57 round 3: the sending flow is the 3-step wizard in email_wizard.js ("E-mail" in the menu). This file gives it:
+     CR.emailStudio.editor(draft, opts)   the block editor (basic blocks first, "More blocks" for images, price, divider)
+     CR.emailStudio.preview()             the sandboxed preview frame (mobile / desktop, light / dark, plain text)
+     CR.emailStudio.renderHistory / renderAutomations / renderTemplates / renderSettings   the other E-mail tabs
    Text is always set as text. The preview is the server's HTML in a sandboxed same-origin frame (/email/preview/<token>,
    its own CSP, no scripts); the console's CSP allows frames from this site only. Every rule (consent, links, variables,
    categories, caps) is enforced by the server; this page only helps. */
@@ -25,14 +23,6 @@
   var seq = 0;
   var uid = function () { seq++; return 'b' + seq; };
 
-  function tabs(active) {
-    var nav = h('div.row.eng-tabs.es-tabs', { role: 'tablist', 'aria-label': 'E-mail studio' });
-    [['', 'Compose'], ['templates', 'Templates'], ['campaigns', 'Campaigns'], ['automation', 'Automation'], ['settings', 'Settings']].forEach(function (t) {
-      nav.appendChild(h('button.btn.btn--sm', { type: 'button', role: 'tab', 'aria-selected': String(active === t[0]), 'aria-pressed': String(active === t[0]), text: t[1],
-        onclick: function () { CR.go('#/notifications/email' + (t[0] ? '/' + t[0] : '')); } }));
-    });
-    return nav;
-  }
   function loadConfig() {
     if (cfg) return Promise.resolve(cfg);
     return api('GET', BASE + '/config').then(function (c) { cfg = c; return c; });
@@ -73,64 +63,45 @@
     return label;
   }
 
-  // ==================================================================== compose
-  /** Shared compose state (kept while switching tabs in this page load). */
-  var draft = null;
+  // ==================================================================== editor + preview (shared by the wizard)
+  /** A compose state: a design (blocks carry _id), category, unique-code options, the template it came from. */
   function freshDraft() {
     return { templateId: null, version: 0, name: '', category: 'marketing', design: withIds({ subject: '', preheader: '', blocks: [newBlock('heading'), newBlock('text')] }),
-      unique: { enabled: false, prefix: '', validDays: 14 }, audience: { kind: 'all', days: 30, usernames: '' }, when: 'now', at: '', track: null, dirty: false };
+      unique: { enabled: false, prefix: '', validDays: 14 }, dirty: false };
   }
-  function loadIntoDraft(t, opts) {
-    draft = freshDraft();
-    draft.templateId = t.starter ? null : t.templateId;
-    draft.version = t.version || 0;
-    draft.name = t.starter ? t.name : t.name;
-    draft.category = t.category || 'marketing';
-    draft.design = withIds(t.design);
-    draft.fromStarter = t.starter ? t.id : null;
-    if (opts && opts.coupon) draft.design.blocks.forEach(function (b) { if (b.type === 'coupon') b.code = opts.coupon; });
+  function draftFrom(t, opts) {
+    var d = freshDraft();
+    d.templateId = t.starter || t.system ? null : (t.templateId || null);
+    d.version = t.version || 0;
+    d.name = t.name || '';
+    d.category = t.category || 'marketing';
+    d.design = withIds(t.design);
+    d.fromStarter = t.starter ? t.id : null;
+    d.system = t.system ? t.id : null;
+    if (opts && opts.coupon) d.design.blocks.forEach(function (b) { if (b.type === 'coupon') b.code = opts.coupon; });
+    return d;
   }
+  /** Blocks most e-mails need; the rest sit behind "More blocks". */
+  var BASIC_BLOCKS = ['heading', 'text', 'button', 'coupon'];
 
-  function renderCompose(view) {
-    if (!draft) draft = freshDraft();
-    var pre = CR.state.studioPrefill; CR.state.studioPrefill = null;
-    if (pre && pre.coupon) {
-      var hasCoupon = draft.design.blocks.some(function (b) { return b.type === 'coupon'; });
-      if (!hasCoupon) draft.design.blocks.splice(Math.max(0, draft.design.blocks.length - 1), 0, newBlock('coupon'));
-      draft.design.blocks.forEach(function (b) { if (b.type === 'coupon') b.code = pre.coupon; });
-    }
-    var d = draft;
+  /**
+   * The block editor (subject, preheader, variables, blocks). opts: { onChange(), compact, coupons (Promise) }.
+   * Returns { node, refreshCoupons(list) }.
+   */
+  function emailEditor(d, opts) {
+    opts = opts || {};
     var coupons = [];
     var lastField = null;
-    var problems = h('div.es-problems');
-    var frame = h('iframe.es-frame', { title: 'E-mail preview', sandbox: 'allow-popups', referrerpolicy: 'no-referrer', loading: 'lazy' });
-    var frameWrap = h('div.es-frame-wrap.es-frame-wrap--desktop', frame);
-    var textOut = h('pre.es-textout', { text: '' });
-    var subjOut = h('div.es-inbox', h('b', { text: 'Subject' }), h('span', { text: '' }), h('b', { text: 'Preheader' }), h('span', { text: '' }));
-    var pv = { device: 'desktop', scheme: 'light', urls: null, view: 'html' };
     var blockList = h('div.es-blocks');
-    var nameIn = h('input', { type: 'text', maxlength: '80', value: d.name, placeholder: 'Template name', 'aria-label': 'Template name' });
-    var catSel = ui.select([['marketing', 'Marketing (Offers consent only)'], ['account', 'Account notice (plan ending, no coupon)']], d.category, { 'aria-label': 'Category' });
-    var subject = h('input', { type: 'text', maxlength: '150', value: d.design.subject, placeholder: '{firstName}, a festive ride offer for your crew' });
-    var preheader = h('input', { type: 'text', maxlength: '200', value: d.design.preheader || '', placeholder: 'The line mail apps show after the subject' });
-    var verChip = h('span');
-    var dirtyChip = h('span');
-
-    function touched() { d.dirty = true; dirtyChip.textContent = ''; dirtyChip.appendChild(ui.chip('Unsaved changes', 'warn')); schedulePreview(); }
+    var showMore = d.design.blocks.some(function (b) { return BASIC_BLOCKS.indexOf(b.type) < 0 && b.type !== 'footer'; });
+    var subject = h('input', { type: 'text', maxlength: '150', value: d.design.subject, placeholder: '{firstName}, a festive ride offer for your crew', 'aria-label': 'Subject' });
+    var preheader = h('input', { type: 'text', maxlength: '200', value: d.design.preheader || '', placeholder: 'The short line mail apps show after the subject', 'aria-label': 'Preheader' });
+    function touched() { d.dirty = true; if (opts.onChange) opts.onChange(); }
     function trackFocus(el) { el.addEventListener('focus', function () { lastField = el; }); return el; }
     trackFocus(subject); trackFocus(preheader);
     subject.addEventListener('input', function () { d.design.subject = subject.value; touched(); });
     preheader.addEventListener('input', function () { d.design.preheader = preheader.value; touched(); });
-    nameIn.addEventListener('input', function () { d.name = nameIn.value; d.dirty = true; });
-    catSel.addEventListener('change', function () { d.category = catSel.value; syncAudience(); touched(); });
-    function drawVersion() {
-      clear(verChip);
-      if (d.templateId) verChip.appendChild(ui.chip('Template v' + d.version, 'info'));
-      else if (d.fromStarter) verChip.appendChild(ui.chip('From a starter (not saved yet)', ''));
-      else verChip.appendChild(ui.chip('New e-mail', ''));
-    }
 
-    // ---------- variables bar
     var varBar = h('div.es-vars', { 'aria-label': 'Insert a variable' });
     function insertVar(name) {
       var el = lastField;
@@ -141,8 +112,8 @@
       el.focus(); el.setSelectionRange(s + token.length, s + token.length);
       el.dispatchEvent(new Event('input'));
     }
+    cfg.variables.forEach(function (v) { varBar.appendChild(h('button.btn.btn--sm.es-var', { type: 'button', title: v.label, text: '{' + v.name + '}', onclick: function () { insertVar(v.name); } })); });
 
-    // ---------- blocks
     function move(i, delta) {
       var j = i + delta; var bl = d.design.blocks;
       if (j < 0 || j >= bl.length - 1 || bl[i].type === 'footer') return;
@@ -156,13 +127,16 @@
       blockList.appendChild(addBar());
     }
     function addBar() {
-      var sel = ui.select([['', 'Add a block…']].concat((cfg.blockTypes || []).filter(function (t) { return t.type !== 'footer'; }).map(function (t) { return [t.type, t.label]; })), '', { 'aria-label': 'Add a block' });
-      sel.addEventListener('change', function () {
-        if (!sel.value) return;
-        if (sel.value === 'coupon' && d.design.blocks.some(function (b) { return b.type === 'coupon'; })) { ui.toast('One coupon block per e-mail.', true); sel.value = ''; return; }
-        d.design.blocks.splice(d.design.blocks.length - 1, 0, newBlock(sel.value)); drawBlocks(); touched();
+      var bar = h('div.es-addbar.row');
+      (cfg.blockTypes || []).filter(function (t) { return t.type !== 'footer' && (showMore || BASIC_BLOCKS.indexOf(t.type) >= 0); }).forEach(function (t) {
+        bar.appendChild(h('button.btn.btn--sm', { type: 'button', text: '+ ' + t.label, title: BLOCK_HINTS[t.type] || '', onclick: function () {
+          if (t.type === 'coupon' && d.design.blocks.some(function (b) { return b.type === 'coupon'; })) { ui.toast('One coupon block per e-mail.', true); return; }
+          d.design.blocks.splice(d.design.blocks.length - 1, 0, newBlock(t.type)); drawBlocks(); touched();
+        } }));
       });
-      return h('div.es-addbar', sel);
+      bar.appendChild(h('button.btn.btn--sm.btn--ghost', { type: 'button', 'aria-expanded': String(showMore), text: showMore ? 'Fewer blocks' : 'More blocks…', title: 'Images, price, divider',
+        onclick: function () { showMore = !showMore; drawBlocks(); } }));
+      return bar;
     }
     function input(b, key, attrs) {
       attrs = attrs || {};
@@ -191,14 +165,14 @@
         lv.addEventListener('change', function () { b.level = Number(lv.value); touched(); });
         body.appendChild(h('div.es-row2', ui.field('Heading', input(b, 'text', { maxlength: '150' })), ui.field('Size', lv)));
       } else if (b.type === 'text') {
-        var ta = input(b, 'text', { multiline: true, rows: '6', maxlength: '3000' });
+        var ta = input(b, 'text', { multiline: true, rows: '5', maxlength: '3000', 'aria-label': 'Text' });
         var wrap = function (before, after, ph) {
           var s = ta.selectionStart, e = ta.selectionEnd; var sel = ta.value.slice(s, e) || ph;
           ta.value = ta.value.slice(0, s) + before + sel + after + ta.value.slice(e); ta.focus(); ta.setSelectionRange(s + before.length, s + before.length + sel.length); ta.dispatchEvent(new Event('input'));
         };
         var fmt = h('div.es-fmt', h('button.btn.btn--sm', { type: 'button', title: 'Bold', 'aria-label': 'Bold', onclick: function () { wrap('**', '**', 'bold'); } }, h('b', { text: 'B' })),
           h('button.btn.btn--sm', { type: 'button', title: 'Italic', 'aria-label': 'Italic', onclick: function () { wrap('*', '*', 'italic'); } }, h('i', { text: 'I' })),
-          h('button.btn.btn--sm', { type: 'button', text: 'Link', onclick: function () {
+          h('button.btn.btn--sm', { type: 'button', text: 'Link', title: 'Links may only open pages of this site', onclick: function () {
             var path = h('select'); ['/plans', '/updates', '/guide', '/operators/apply', '/account', '/features', '/safety', '/clubs'].forEach(function (p) { path.appendChild(h('option', { value: p, text: p })); });
             ui.dialog({ title: 'Link to a page of this site', body: [ui.field('Page', path), h('p.small.muted', { text: 'Links may only point to this site. Other sites are refused.' })], actions: [{ label: 'Cancel', value: null }, { label: 'Insert', kind: 'primary', value: true }] })
               .then(function (ok) { if (ok) wrap('[', '](' + path.value + ')', 'label'); });
@@ -214,7 +188,9 @@
         var csel = h('select', { 'aria-label': 'Coupon' });
         var info = h('div.small.muted');
         var fill = function () {
-          clear(csel); csel.appendChild(h('option', { value: '', text: coupons.length ? 'Choose an active coupon…' : 'No active coupons: create one in Coupons' }));
+          clear(csel);
+          if (opts.couponLocked) { csel.appendChild(h('option', { value: '', text: 'The personal code made for this rider' })); csel.disabled = true; info.textContent = ''; return; }
+          csel.appendChild(h('option', { value: '', text: coupons.length ? 'Choose an active coupon…' : 'No active coupons: create one in Plans & coupons' }));
           coupons.forEach(function (c) { csel.appendChild(h('option', { value: c.code, text: c.code + ' · ' + couponLabel(c), selected: c.code === b.code })); });
           if (b.code && !coupons.some(function (c) { return c.code === b.code; })) csel.appendChild(h('option', { value: b.code, text: b.code + ' (not active)', selected: true }));
           var c = coupons.filter(function (x) { return x.code === b.code; })[0];
@@ -230,217 +206,113 @@
         var plan = ui.select(cfg.plans.map(function (p) { return [p, PLAN_NAMES[p] || p]; }), b.planId || 'group_large', { 'aria-label': 'Plan' });
         plan.addEventListener('change', function () { b.planId = plan.value; touched(); });
         body.appendChild(h('div.grid3', ui.field('Plan', plan), ui.field('Button text', input(b, 'buttonLabel', { maxlength: '40', placeholder: 'See plans' })), ui.field('Note', input(b, 'note', { maxlength: '160' }), 'optional')));
-        body.appendChild(h('p.small.muted', { text: 'The prices come from Plans & pricing at send time: a running offer shows the list price struck through.' }));
+        body.appendChild(h('p.small.muted', { text: 'Prices come from Plans & pricing when the e-mail is sent.' }));
       } else if (b.type === 'header_image' || b.type === 'image') {
-        body.appendChild(imagePicker(b));
+        body.appendChild(imagePicker(b, touched, input));
       } else if (b.type === 'footer') {
         body.appendChild(ui.field('Extra footer note', input(b, 'note', { multiline: true, rows: '2', maxlength: '500', placeholder: 'Optional, e.g. "Ride safe."' }), 'optional'));
-        body.appendChild(h('p.small.muted', { text: 'Always added: why the rider gets this e-mail, ' + (d.category === 'account' ? '' : 'Unsubscribe (Offers), ') + 'Manage e-mails, "Sent by CoRoute", the postal address' + (cfg.postalAddressSet ? '' : ' (not set yet: MAIL_POSTAL_ADDRESS)') + ' and the support address.' }));
       }
       return h('section.es-block' + (isFoot ? '.es-block--locked' : ''), { 'aria-label': label },
-        h('div.es-block__head', h('span.es-block__type', { text: label }), h('span.es-block__hint.small.muted', { text: BLOCK_HINTS[b.type] || '' }), h('span.spacer'), tools), body);
+        h('div.es-block__head', h('span.es-block__type', { text: label }), h('span.es-block__hint.small.muted', { text: isFoot ? 'Always last: why they get it, unsubscribe, sender, address.' : '', title: BLOCK_HINTS[b.type] || '' }), h('span.spacer'), tools), body);
     }
-    function couponLabel(c) {
-      var v = Number(c.discountValue) || 0;
-      if (c.discountType === 'percentage') return v + '% off';
-      if (c.discountType === 'fixed') return '₹' + v + ' off';
-      if (c.discountType === 'free') return 'free period';
-      return 'discount';
+    drawBlocks();
+    var node = h('div.stack',
+      ui.field('Subject', subject, 'variables allowed'), ui.field('Preheader', preheader, 'optional'),
+      h('details.es-more', h('summary', { text: 'Personalise: insert a variable' }), h('p.small.muted', { text: 'Click a text field, then a variable. Missing values get a safe fallback ("there", "rider").' }), varBar),
+      h('div.stack', h('div.panel-title', { text: 'Blocks' }), blockList));
+    return {
+      node: node,
+      redraw: drawBlocks,
+      setCoupons: function (list) { coupons = list || []; couponFills.forEach(function (f) { f(); }); },
+    };
+  }
+  function couponLabel(c) {
+    var v = Number(c.discountValue) || 0;
+    if (c.discountType === 'percentage') return v + '% off';
+    if (c.discountType === 'fixed') return '₹' + v + ' off';
+    if (c.discountType === 'free') return 'free period';
+    return 'discount';
+  }
+  /** Active public coupons for the coupon block. */
+  function activeCoupons() {
+    return api('GET', '/admin/coupons').then(function (r) {
+      return ((r && r.coupons) || []).filter(function (c) { return (c.status === 'ACTIVE' || c.status === 'SCHEDULED') && !c.parentCode && !(c.allowedUserIds && c.allowedUserIds.length); });
+    }).catch(function () { return []; });
+  }
+  function imagePicker(b, touched, input) {
+    var thumb = h('div.es-thumb', b._url ? h('img', { src: b._url, alt: '' }) : h('span.small.muted', { text: b.imageId ? 'Image chosen' : 'No image yet' }));
+    var file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', 'aria-label': 'Upload an image' });
+    var status = h('span.small.muted');
+    var set = function (img) { b.imageId = img.imageId; b._url = img.url ? img.url.replace(/^https?:\/\/[^/]+/, '') : ''; clear(thumb).appendChild(b._url ? h('img', { src: b._url, alt: '' }) : h('span.small', { text: 'Image chosen' })); touched(); };
+    file.addEventListener('change', function () {
+      var f = file.files && file.files[0]; if (!f) return;
+      if (f.size > 1024 * 1024) { ui.toast('The image is larger than 1 MB.', true); file.value = ''; return; }
+      status.textContent = 'Uploading…';
+      api('POST', '/admin/push/images', f, { type: f.type || 'application/octet-stream' }).then(function (r) { status.textContent = ''; set(r.image); })
+        .catch(function (e) { status.textContent = e.message; file.value = ''; });
+    });
+    var lib = h('button.btn.btn--sm', { type: 'button', text: 'From the image library', onclick: function () { pickFromLibrary().then(function (img) { if (img) set(img); }); } });
+    var link = null;
+    if (b.type === 'image') {
+      link = ui.select([['', 'No link']].concat(cfg.buttonPaths.map(function (p) { return [p, 'Links to ' + p]; })), b.path || '', { 'aria-label': 'Image link' });
+      link.addEventListener('change', function () { b.path = link.value || undefined; if (!link.value) delete b.path; touched(); });
     }
-    function imagePicker(b) {
-      var thumb = h('div.es-thumb', b._url ? h('img', { src: b._url, alt: '' }) : h('span.small.muted', { text: b.imageId ? 'Image chosen' : 'No image yet' }));
-      var file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', 'aria-label': 'Upload an image' });
-      var status = h('span.small.muted');
-      var set = function (img) { b.imageId = img.imageId; b._url = img.url ? img.url.replace(/^https?:\/\/[^/]+/, '') : ''; clear(thumb).appendChild(b._url ? h('img', { src: b._url, alt: '' }) : h('span.small', { text: 'Image chosen' })); touched(); };
-      file.addEventListener('change', function () {
-        var f = file.files && file.files[0]; if (!f) return;
-        if (f.size > 1024 * 1024) { ui.toast('The image is larger than 1 MB.', true); file.value = ''; return; }
-        status.textContent = 'Uploading…';
-        api('POST', '/admin/push/images', f, { type: f.type || 'application/octet-stream' }).then(function (r) { status.textContent = ''; set(r.image); })
-          .catch(function (e) { status.textContent = e.message; file.value = ''; });
-      });
-      var lib = h('button.btn.btn--sm', { type: 'button', text: 'From the image library', onclick: function () { pickFromLibrary().then(function (img) { if (img) set(img); }); } });
-      var link = null;
-      if (b.type === 'image') {
-        link = ui.select([['', 'No link']].concat(cfg.buttonPaths.map(function (p) { return [p, 'Links to ' + p]; })), b.path || '', { 'aria-label': 'Image link' });
-        link.addEventListener('change', function () { b.path = link.value || undefined; if (!link.value) delete b.path; touched(); });
-      }
-      return h('div.es-img', thumb, h('div.stack', h('div.row', h('label.btn.btn--sm.es-upload', 'Upload', file), lib, status),
-        ui.field('Alt text', input(b, 'alt', { maxlength: '120', placeholder: 'Describe the picture' })), link ? ui.field('Link', link) : null));
-    }
-
-    // ---------- preview
-    var pvTimer = null; var pvGen = 0;
-    function schedulePreview() { clearTimeout(pvTimer); pvTimer = setTimeout(refreshPreview, 600); }
-    function payload(forSend) {
-      var u = d.unique.enabled ? { enabled: true, prefix: d.unique.prefix, validDays: Number(d.unique.validDays) || 14 } : undefined;
-      return { design: strip(d.design), category: d.category, uniqueCoupon: u, forSend: forSend };
-    }
-    function refreshPreview() {
-      var gen = ++pvGen;
-      if (!d.design.subject.trim()) { clear(problems).appendChild(h('div.banner', { text: 'Write a subject to see the preview.' })); return; }
-      api('POST', BASE + '/preview', payload(false)).then(function (r) {
-        if (gen !== pvGen) return;
-        clear(problems);
-        (r.warnings || []).forEach(function (w) { problems.appendChild(h('div.banner', { text: w })); });
-        if (!r.postalAddressSet) problems.appendChild(h('div.banner', { text: 'The postal address is not set (MAIL_POSTAL_ADDRESS): the footer shows a placeholder and only test sends work.' }));
-        var newThumbs = false;
-        d.design.blocks.forEach(function (b) { if (b.imageId && !b._url && r.images && r.images[b.imageId]) { b._url = r.images[b.imageId]; newThumbs = true; } });
-        if (newThumbs && !blockList.contains(document.activeElement)) drawBlocks();
-        pv.urls = { light: r.previewUrl, dark: r.darkPreviewUrl };
-        frame.src = pv.scheme === 'dark' && pv.urls.dark ? pv.urls.dark : pv.urls.light;
-        textOut.textContent = r.text;
-        subjOut.children[1].textContent = r.subject; subjOut.children[3].textContent = r.preheader || '-';
-      }).catch(function (e) { if (gen === pvGen) clear(problems).appendChild(errorList(e)); });
-    }
-    function seg(opts, value, onPick, label) {
-      var g = h('div.es-seg', { role: 'group', 'aria-label': label });
-      opts.forEach(function (o) {
-        g.appendChild(h('button.btn.btn--sm', { type: 'button', 'aria-pressed': String(o[0] === value), text: o[1], onclick: function () {
-          Array.prototype.forEach.call(g.children, function (c) { c.setAttribute('aria-pressed', 'false'); }); this.setAttribute('aria-pressed', 'true'); onPick(o[0]);
-        } }));
-      });
-      return g;
-    }
+    return h('div.es-img', thumb, h('div.stack', h('div.row', h('label.btn.btn--sm.es-upload', 'Upload', file), lib, status),
+      ui.field('Alt text', input(b, 'alt', { maxlength: '120', placeholder: 'Describe the picture' })), link ? ui.field('Link', link) : null));
+  }
+  function seg(opts, value, onPick, label) {
+    var g = h('div.es-seg', { role: 'group', 'aria-label': label });
+    opts.forEach(function (o) {
+      g.appendChild(h('button.btn.btn--sm', { type: 'button', 'aria-pressed': String(o[0] === value), text: o[1], title: o[2] || '', onclick: function () {
+        Array.prototype.forEach.call(g.children, function (c) { c.setAttribute('aria-pressed', 'false'); }); this.setAttribute('aria-pressed', 'true'); onPick(o[0]);
+      } }));
+    });
+    return g;
+  }
+  /**
+   * The preview: the server's HTML in a sandboxed same-origin frame (desktop / mobile, light / dark, plain text).
+   * show(r) takes a preview answer { subject, preheader, text, previewUrl, darkPreviewUrl }.
+   */
+  function emailPreview() {
+    var frame = h('iframe.es-frame', { title: 'E-mail preview', sandbox: 'allow-popups', referrerpolicy: 'no-referrer', loading: 'lazy' });
+    var frameWrap = h('div.es-frame-wrap.es-frame-wrap--desktop', frame);
+    var textOut = h('pre.es-textout', { text: '' });
+    var subjOut = h('div.es-inbox', h('b', { text: 'Subject' }), h('span', { text: '' }), h('b', { text: 'Preheader' }), h('span', { text: '' }));
+    var pv = { device: 'desktop', scheme: 'light', urls: null };
     var deviceSeg = seg([['desktop', 'Desktop'], ['mobile', 'Mobile']], pv.device, function (v) { pv.device = v; frameWrap.className = 'es-frame-wrap es-frame-wrap--' + v; }, 'Device');
     var schemeSeg = seg([['light', 'Light'], ['dark', 'Dark']], pv.scheme, function (v) { pv.scheme = v; if (pv.urls) frame.src = v === 'dark' && pv.urls.dark ? pv.urls.dark : pv.urls.light; }, 'Colour scheme');
     var viewSeg = seg([['html', 'E-mail'], ['text', 'Plain text']], 'html', function (v) { frameWrap.hidden = v !== 'html'; textOut.hidden = v !== 'text'; }, 'View');
     textOut.hidden = true;
-
-    // ---------- template actions
-    function saveTemplate(asNew) {
-      var name = (d.name || '').trim();
-      var go = function (n) {
-        var body = { name: n, category: d.category, design: strip(d.design) };
-        var req = d.templateId && !asNew ? api('PUT', BASE + '/templates/' + d.templateId, Object.assign(body, { baseVersion: d.version })) : api('POST', BASE + '/templates', body);
-        return req.then(function (r) {
-          d.templateId = r.template.templateId; d.version = r.template.version; d.name = r.template.name; d.fromStarter = null; d.dirty = false; nameIn.value = d.name;
-          clear(dirtyChip); drawVersion(); ui.toast((asNew || !body.baseVersion ? 'Saved as a new template: ' : 'Saved version ' + r.template.version + ' of ') + r.template.name + '.');
-        }).catch(function (e) { clear(problems).appendChild(errorList(e)); ui.toast(e.message, true); });
-      };
-      if (name && !(asNew && d.templateId)) return go(name);
-      var n = h('input', { type: 'text', maxlength: '80', value: asNew && name ? name + ' (copy)' : name });
-      ui.dialog({ title: asNew ? 'Save as a new template' : 'Save template', body: [ui.field('Name', n)], actions: [{ label: 'Cancel', value: null }, { label: 'Save', kind: 'primary', onClick: function () {
-        if (!n.value.trim()) throw new Error('Name the template.');
-        return go(n.value.trim()).then(function () { return true; });
-      } }] });
-    }
-
-    // ---------- audience & sending
-    var segSel = h('select', { 'aria-label': 'Audience' });
-    var days = h('input', { type: 'number', min: '1', max: '365', value: String(d.audience.days || 30) });
-    var daysField = ui.field('N days', days);
-    var users = h('textarea', { rows: '2', placeholder: 'SwiftFalcon482, @RoadRunner77', value: d.audience.usernames || '' });
-    var usersField = ui.field('Usernames', users, 'comma or space separated');
-    var reach = h('span.small.muted');
-    function syncAudience() {
-      clear(segSel);
-      cfg.segments.filter(function (s) { return d.category === 'account' ? s.account : true; }).forEach(function (s) { segSel.appendChild(h('option', { value: s.kind, text: s.label, selected: s.kind === d.audience.kind })); });
-      if (!segSel.value || segSel.selectedIndex < 0) segSel.selectedIndex = 0;
-      d.audience.kind = segSel.value;
-      var s = cfg.segments.filter(function (x) { return x.kind === segSel.value; })[0] || {};
-      daysField.hidden = !s.days; usersField.hidden = segSel.value !== 'usernames';
-      reach.textContent = '';
-    }
-    segSel.addEventListener('change', function () { d.audience.kind = segSel.value; syncAudience(); });
-    days.addEventListener('input', function () { d.audience.days = Number(days.value); reach.textContent = ''; });
-    users.addEventListener('input', function () { d.audience.usernames = users.value; reach.textContent = ''; });
-    function audience() {
-      var a = { kind: d.audience.kind };
-      var s = cfg.segments.filter(function (x) { return x.kind === a.kind; })[0] || {};
-      if (s.days) a.days = Number(days.value);
-      if (a.kind === 'usernames') a.usernames = users.value;
-      if (a.kind === 'plan') a.plans = ['community', 'group_small', 'group_large'];
-      return a;
-    }
-    var uniqOn = h('input', { type: 'checkbox', checked: d.unique.enabled });
-    var uniqPrefix = h('input', { type: 'text', maxlength: '10', value: d.unique.prefix, placeholder: 'XMAS', autocapitalize: 'characters' });
-    var uniqDays = h('input', { type: 'number', min: '1', max: '90', value: String(d.unique.validDays || 14) });
-    var uniqFields = h('div.grid2', ui.field('Code prefix', uniqPrefix, '2 to 10 letters or digits'), ui.field('Valid for (days)', uniqDays, 'or until the parent ends'));
-    function syncUnique() { uniqFields.hidden = !uniqOn.checked; }
-    uniqOn.addEventListener('change', function () { d.unique.enabled = uniqOn.checked; syncUnique(); touched(); });
-    uniqPrefix.addEventListener('input', function () { d.unique.prefix = uniqPrefix.value.toUpperCase(); touched(); });
-    uniqDays.addEventListener('input', function () { d.unique.validDays = Number(uniqDays.value); touched(); });
-    var when = ui.select([['now', 'Send now'], ['later', 'Schedule (India time)']], d.when, { 'aria-label': 'When' });
-    var at = h('input', { type: 'datetime-local', value: d.at });
-    var atField = ui.field('Date and time (IST)', at);
-    var track = h('input', { type: 'checkbox', checked: d.track === null ? !!cfg.settings.clickTracking : d.track });
-    var campName = h('input', { type: 'text', maxlength: '80', placeholder: 'Diwali 2026 offer' });
-    var sendBtn = h('button.btn.btn--primary', { type: 'button', text: 'Send now' });
-    function syncWhen() { atField.hidden = when.value !== 'later'; sendBtn.textContent = when.value === 'later' ? 'Schedule' : 'Send now'; }
-    when.addEventListener('change', function () { d.when = when.value; syncWhen(); });
-    at.addEventListener('input', function () { d.at = at.value; });
-    track.addEventListener('change', function () { d.track = track.checked; });
-    var countBtn = h('button.btn.btn--sm', { type: 'button', text: 'Count riders', onclick: function () {
-      reach.textContent = 'Counting…';
-      api('POST', BASE + '/audience-count', { audience: audience(), category: d.category }).then(function (r) {
-        reach.textContent = r.riders + ' rider(s) ' + (r.category === 'account' ? 'with a valid, not bounced e-mail' : 'opted in to offers, with a valid, unsuppressed e-mail') + '.';
-      }).catch(function (e) { reach.textContent = e.message; });
-    } });
-    var testBtn = h('button.btn', { type: 'button', text: 'Send test to me', onclick: function () {
-      testBtn.disabled = true;
-      api('POST', BASE + '/test', payload(true)).then(function (r) {
-        ui.toast(r.sent ? 'Test sent to ' + r.to + (r.uniqueCode ? ' with your own code ' + r.uniqueCode : '') + '.' : 'Not sent: ' + (r.error || 'unknown error'), !r.sent);
-      }).catch(function (e) { clear(problems).appendChild(errorList(e)); ui.toast(e.message, true); }).then(function () { testBtn.disabled = false; });
-    } });
-    sendBtn.addEventListener('click', function () {
-      var p = payload(true);
-      p.audience = audience(); p.name = campName.value || d.name; p.templateId = d.templateId || undefined; p.trackClicks = track.checked;
-      p.sendAt = when.value === 'later' ? CR.util.fromLocalInput(at.value) : 0;
-      if (when.value === 'later' && !p.sendAt) { ui.toast('Choose the date and time.', true); return; }
-      var what = when.value === 'later' ? 'Schedule this e-mail for ' + CR.util.date(p.sendAt, true) + ' (IST)?' : 'Send this e-mail now?';
-      var who = d.category === 'account' ? ' It goes to riders whose plan ends soon or ended recently (account notice).' : ' Only riders who turned on offer e-mails get it, at most ' + cfg.settings.maxPerWeek + ' marketing e-mails per rider per week.';
-      ui.confirm(when.value === 'later' ? 'Schedule e-mail' : 'Send e-mail', what + who + ' Audience: ' + audienceText(p.audience) + '.', when.value === 'later' ? 'Schedule' : 'Send').then(function (ok) {
-        if (!ok) return;
-        sendBtn.disabled = true;
-        api('POST', BASE + '/campaigns', p).then(function (r) {
-          ui.toast((when.value === 'later' ? 'Scheduled.' : r.quietNow ? 'Queued: quiet hours now, it goes out when they end.' : 'Sending.'));
-          CR.go('#/notifications/email/campaigns');
-        }).catch(function (e) { clear(problems).appendChild(errorList(e)); ui.toast(e.message, true); }).then(function () { sendBtn.disabled = false; });
+    var node = h('div.stack.es-pv', h('div.row', deviceSeg, schemeSeg, h('span.spacer'), viewSeg), subjOut, frameWrap, textOut);
+    return {
+      node: node,
+      show: function (r) {
+        pv.urls = { light: r.previewUrl, dark: r.darkPreviewUrl };
+        frame.src = pv.scheme === 'dark' && pv.urls.dark ? pv.urls.dark : pv.urls.light;
+        textOut.textContent = r.text || '';
+        subjOut.children[1].textContent = r.subject || ''; subjOut.children[3].textContent = r.preheader || '-';
+      },
+    };
+  }
+  /** Saves a draft as a template (new, or a new version of the one it came from). */
+  function saveTemplate(d, asNew) {
+    var name = (d.name || '').trim();
+    var go = function (n) {
+      var body = { name: n, category: d.category, design: strip(d.design) };
+      var update = d.templateId && !asNew;
+      var req = update ? api('PUT', BASE + '/templates/' + d.templateId, Object.assign(body, { baseVersion: d.version })) : api('POST', BASE + '/templates', body);
+      return req.then(function (r) {
+        d.templateId = r.template.templateId; d.version = r.template.version; d.name = r.template.name; d.fromStarter = null; d.system = null; d.dirty = false;
+        ui.toast((update ? 'Saved version ' + r.template.version + ' of ' : 'Saved as a new template: ') + r.template.name + '.');
+        return r.template;
       });
-    });
-
-    // ---------- layout
-    view.appendChild(h('div.es-compose',
-      h('div.es-editor.stack',
-        h('div.card.stack',
-          h('div.row', h('h3', { text: 'E-mail' }), verChip, dirtyChip, h('span.spacer'),
-            h('button.btn.btn--sm', { type: 'button', text: 'Templates…', onclick: function () { CR.go('#/notifications/email/templates'); } }),
-            h('button.btn.btn--sm', { type: 'button', text: 'New blank', onclick: function () {
-              var go = function () { draft = freshDraft(); CR.go('#/notifications/email'); };
-              if (!d.dirty) return go();
-              ui.confirm('Discard changes?', 'The unsaved changes of this e-mail are lost.', 'Discard', true).then(function (ok) { if (ok) go(); });
-            } })),
-          h('div.es-row2', ui.field('Template name', nameIn), ui.field('Category', catSel)),
-          ui.field('Subject', subject, 'variables allowed'), ui.field('Preheader', preheader, 'optional'),
-          h('div', h('div.panel-title.small.muted', { text: 'Variables: click to insert at the cursor. Unknown names are refused; missing values get a safe fallback.' }), varBar),
-          h('div.row', h('button.btn.btn--sm', { type: 'button', text: 'Save template', onclick: function () { saveTemplate(false); } }),
-            h('button.btn.btn--sm', { type: 'button', text: 'Save as new', onclick: function () { saveTemplate(true); } }))),
-        h('div.card.stack', h('div.card__head', h('h3', { text: 'Blocks' }), h('p', { text: 'Reorder with the arrows. The footer always stays last.' })), blockList),
-        h('div.card.stack', h('div.card__head', h('h3', { text: 'Audience and sending' }),
-          h('p', { text: d.category === 'account' ? 'Account notices go to the plan segments only.' : 'Marketing e-mails go only to riders who turned on offer e-mails on the website, never to a suppressed address.' })),
-          h('div.es-row2', ui.field('Audience', segSel), daysField), usersField, h('div.row', countBtn, reach),
-          h('fieldset.stack.es-fieldset', h('legend', { text: 'Unique coupon codes' }), h('label.check', uniqOn, 'A single-use code per rider, made from the coupon block\'s coupon'), uniqFields),
-          h('div.es-row2', ui.field('Campaign name', campName, 'for the report'), ui.field('When', when)), atField,
-          h('label.check', track, 'Count clicks (signed redirect links, no open pixels)'),
-          h('div.row.row--end', testBtn, sendBtn))),
-      h('aside.es-preview.card',
-        h('div.row', h('h3', { text: 'Preview' }), h('span.spacer'), viewSeg),
-        h('div.row', deviceSeg, schemeSeg, h('span.spacer'), h('button.btn.btn--sm.btn--ghost', { type: 'button', text: 'Refresh', onclick: refreshPreview })),
-        problems, subjOut, frameWrap, textOut,
-        h('p.small.muted', { text: 'Sample rider "Asha". Prices are today\'s; each rider gets their own name, code and unsubscribe link.' }))));
-
-    loadConfig().then(function () {
-      cfg.variables.forEach(function (v) { varBar.appendChild(h('button.btn.btn--sm.es-var', { type: 'button', title: v.label, text: '{' + v.name + '}', onclick: function () { insertVar(v.name); } })); });
-      drawVersion(); drawBlocks(); syncAudience(); syncUnique(); syncWhen();
-      track.checked = d.track === null ? !!cfg.settings.clickTracking : d.track;
-      refreshPreview();
-      if (!cfg.enabled) problems.appendChild(h('div.banner.banner--bad', { text: 'E-mail is not configured on this server (SMTP_HOST / MAIL_FROM).' }));
-      return api('GET', '/admin/coupons');
-    }).then(function (r) {
-      coupons = ((r && r.coupons) || []).filter(function (c) { return (c.status === 'ACTIVE' || c.status === 'SCHEDULED') && !c.parentCode && !(c.allowedUserIds && c.allowedUserIds.length); });
-      couponFills.forEach(function (f) { f(); });
-    }).catch(function (e) { view.appendChild(ui.error(e)); });
+    };
+    if (name && !(asNew && d.templateId)) return go(name).catch(function (e) { ui.toast(e.message, true); });
+    var n = h('input', { type: 'text', maxlength: '80', value: asNew && name ? name + ' (copy)' : name });
+    return ui.dialog({ title: asNew ? 'Save as a new template' : 'Save template', body: [ui.field('Name', n)], actions: [{ label: 'Cancel', value: null }, { label: 'Save', kind: 'primary', onClick: function () {
+      if (!n.value.trim()) throw new Error('Name the template.');
+      return go(n.value.trim()).then(function () { return true; });
+    } }] });
   }
 
   /** The marketing studio and board images; resolves with an imported { imageId, url } or null. */
@@ -473,7 +345,8 @@
     var showArchived = false;
     var box = h('div', ui.loading());
     var toggle = h('label.check', h('input', { type: 'checkbox', onchange: function () { showArchived = this.checked; load(); } }), 'Show archived');
-    view.appendChild(h('div.row.section-gap', h('h2', { text: 'Starters' }), h('span.small.muted', { text: 'Read-only. "Use" opens a copy in the editor; save it to make it yours.' })));
+    view.appendChild(h('div.row.section-gap', h('h2', { text: 'Ready-made' }), h('span.small.muted', { text: '"Use" opens a copy in the wizard. Save it there to make it yours.' }),
+      h('span.spacer'), h('a.btn.btn--sm.btn--ghost', { href: '#/settings/templates', text: 'Words of automatic e-mails…', title: 'Welcome, receipts, plan assigned, coupon for you' })));
     var starters = h('div.es-cards');
     view.appendChild(starters);
     view.appendChild(h('div.row.section-gap', h('h2', { text: 'Your templates' }), h('span.spacer'), toggle));
@@ -485,8 +358,10 @@
         h('div.row.row--end', actions));
     }
     function useIt(t) {
-      var go = function () { api('GET', BASE + '/templates/' + encodeURIComponent(t.templateId || t.id)).then(function (r) { loadIntoDraft(r.template); CR.go('#/notifications/email'); }).catch(function (e) { ui.toast(e.message, true); }); };
-      if (draft && draft.dirty) ui.confirm('Replace the e-mail in the editor?', 'It has unsaved changes.', 'Replace', true).then(function (ok) { if (ok) go(); }); else go();
+      api('GET', BASE + '/templates/' + encodeURIComponent(t.templateId || t.id)).then(function (r) {
+        CR.state.wizardPrefill = { template: r.template };
+        CR.go('#/email');
+      }).catch(function (e) { ui.toast(e.message, true); });
     }
     function history(t) {
       api('GET', BASE + '/templates/' + t.templateId).then(function (r) {
@@ -496,9 +371,9 @@
             h('td', h('button.btn.btn--sm', { type: 'button', text: 'Open', onclick: function () {
               api('GET', BASE + '/templates/' + t.templateId + '/versions/' + v.version).then(function (x) {
                 document.querySelectorAll('.scrim').forEach(function (s) { s.remove(); });
-                loadIntoDraft({ templateId: t.templateId, version: r.template.version, name: r.template.name, category: x.version.category, design: x.version.design });
-                draft.dirty = true; ui.toast('Version ' + v.version + ' is in the editor. Save it to make it the current version.');
-                CR.go('#/notifications/email');
+                CR.state.wizardPrefill = { template: { templateId: t.templateId, version: r.template.version, name: r.template.name, category: x.version.category, design: x.version.design }, dirty: true };
+                ui.toast('Version ' + v.version + ' is open. Save it as a template to make it the current version.');
+                CR.go('#/email');
               }).catch(function (e) { ui.toast(e.message, true); });
             } }))));
         });
@@ -510,7 +385,7 @@
         clear(starters);
         r.starters.forEach(function (s) { starters.appendChild(card(s, [h('button.btn.btn--sm.btn--primary', { type: 'button', text: 'Use', onclick: function () { useIt(s); } })])); });
         clear(box);
-        if (!r.templates.length) { box.appendChild(h('p.empty', { text: 'No saved templates yet. Use a starter and save it.' })); return; }
+        if (!r.templates.length) { box.appendChild(h('div.card.empty', { text: 'No saved templates yet. Use a ready-made one and save it.' })); return; }
         var grid = h('div.es-cards');
         r.templates.forEach(function (t) {
           var arch = t.status === 'archived';
@@ -569,10 +444,10 @@
           h('td.num', { text: String(st.targeted || 0) }), h('td.num', { text: String(st.sent || 0) }), h('td.num', { text: String((st.skipped || 0) + (st.capped || 0)) }), h('td.num', { text: String(st.failed || 0) }),
           h('td', c.status === 'SCHEDULED' ? h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Cancel', onclick: function (e) {
             e.stopPropagation();
-            api('POST', BASE + '/campaigns/' + c.campaignId + '/cancel', {}).then(function () { CR.go('#/notifications/email/campaigns'); }).catch(function (er) { ui.toast(er.message, true); });
+            api('POST', BASE + '/campaigns/' + c.campaignId + '/cancel', {}).then(function () { CR.go('#/email/history'); }).catch(function (er) { ui.toast(er.message, true); });
           } }) : null)));
       });
-      if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '10', class: 'empty', text: 'No campaigns yet. Compose one.' })));
+      if (!tb.firstChild) tb.appendChild(h('tr', h('td', { colspan: '10', class: 'empty', text: 'Nothing sent yet. Start with Send.' })));
       clear(box).appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', ['When (IST)', 'Campaign', 'Audience', 'Coupon', 'Status', 'Riders', 'Sent', 'Skipped', 'Failed', ''].map(function (c, i) { return h('th', { class: i >= 5 && i <= 8 ? 'num' : '', text: c }); }))), tb)));
     }).catch(function (e) { clear(box).appendChild(ui.error(e)); });
   }
@@ -663,18 +538,15 @@
     if (CR.renderLegacyOffers) CR.renderLegacyOffers(legacy);
   }
 
-  CR.renderEmailStudio = function (view, sub) {
-    view.appendChild(tabs(sub || ''));
-    var inner = h('div.es-view');
-    view.appendChild(inner);
-    loadConfig().then(function () {
-      if (sub === 'templates') return renderTemplates(inner);
-      if (sub === 'campaigns') return renderCampaigns(inner);
-      if (sub === 'automation') return renderAutomation(inner);
-      if (sub === 'settings') return renderSettings(inner);
-      return renderCompose(inner);
-    }).catch(function (e) { inner.appendChild(ui.error(e)); });
+  CR.emailStudio = {
+    BASE: BASE, loadConfig: loadConfig, config: function () { return cfg; }, editor: emailEditor, preview: emailPreview, freshDraft: freshDraft, draftFrom: draftFrom,
+    strip: strip, withIds: withIds, newBlock: newBlock, errorList: errorList, activeCoupons: activeCoupons, saveTemplate: saveTemplate, audienceText: audienceText, couponLabel: couponLabel,
+    reportDialog: reportDialog, STATUS: STATUS,
+    renderHistory: function (v) { return loadConfig().then(function () { renderCampaigns(v); }); },
+    renderAutomations: function (v) { return loadConfig().then(function () { renderAutomation(v); }); },
+    renderTemplates: function (v) { return loadConfig().then(function () { renderTemplates(v); }); },
+    renderSettings: function (v) { return loadConfig().then(function () { renderSettings(v); }); },
   };
-  /** Coupons page: "E-mail this coupon" opens the composer with the coupon block filled in. */
-  CR.emailCoupon = function (code) { CR.state.studioPrefill = { coupon: code }; CR.go('#/notifications/email'); };
+  /** Coupons page: "E-mail this coupon" opens the wizard with a coupon e-mail ready (the coupon filled in). */
+  CR.emailCoupon = function (code) { CR.state.wizardPrefill = { starter: 'festive_coupon', coupon: code }; CR.go('#/email'); };
 })();

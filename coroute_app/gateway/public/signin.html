@@ -38,7 +38,7 @@
           <p class="t-lead">Use the same account as the app. Here you choose a plan, pay, and keep your receipts.</p>
           <ul class="sh-ticks" role="list">
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your plan reaches the app on its own, in seconds.</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>Signed in for this browser tab only. Closing it signs you out.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>You are signed out after 60 minutes without activity, and after 7 days at most.</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>No ride data here: only your plan and payments.</li>
           </ul>
         </div>
@@ -63,12 +63,112 @@
             <div class="sh-google" id="si-google" hidden></div>
             <p class="sh-form__links">
               <button class="sh-linkbtn" type="button" id="si-forgot" aria-expanded="false" aria-controls="si-forgot-box">Forgot password?</button>
-              <a class="link" href="/get">New to CoRoute? Get the app</a>
+              <button class="sh-linkbtn" type="button" id="si-to-register">Create an account</button>
             </p>
             <div class="sh-help" id="si-forgot-box" hidden>
               <p>If you signed up with Google, use <b>Sign in with Google</b>.</p>
-              <p>Otherwise e-mail <a class="link" id="si-support" href="/#feedback">the CoRoute team</a> from the address you registered with. We send you a temporary password, and you choose a new one when you sign in.</p>
+              <p>Otherwise enter the e-mail address of your account. If it has one, we send a link to choose a new password. The link works once, for 30 minutes.</p>
+              <div class="form-group">
+                <label class="form-label" for="si-forgot-email">E-mail address</label>
+                <input class="form-input" id="si-forgot-email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254">
+              </div>
+              <button class="btn btn--secondary" type="button" id="si-forgot-send">Send the link</button>
+              <p class="sh-status" id="si-forgot-status" role="status" aria-live="polite"></p>
+              <p class="t-small t-muted">No e-mail? Write to <a class="link" id="si-support" href="/#feedback">the CoRoute team</a> from the address you registered with.</p>
             </div>
+          </form>
+
+          <!-- 2-step verification code (accounts that turned it on) -->
+          <form id="si-mfa" class="sh-form" novalidate hidden>
+            <h2 class="sh-card__title">Enter your code</h2>
+            <p class="t-small t-muted">Open your authenticator app and type the 6-digit code for CoRoute.</p>
+            <div class="form-group">
+              <label class="form-label" for="si-mfa-code">6-digit code</label>
+              <input class="form-input" id="si-mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" required>
+            </div>
+            <p class="t-small"><button class="sh-linkbtn" type="button" id="si-mfa-rc">Use a recovery code instead</button></p>
+            <p class="t-small" id="si-mfa-email-wrap" hidden><button class="sh-linkbtn" type="button" id="si-mfa-email">E-mail me a code instead</button></p>
+            <p class="sh-status" id="si-mfa-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="submit">Continue</button>
+          </form>
+
+          <!-- Round 4 ride lock: another phone of this account is on a ride (423 RIDE_ACTIVE_ELSEWHERE) -->
+          <form id="si-lock" class="sh-form" novalidate hidden>
+            <h2 class="sh-card__title" id="si-lock-title">You're on a ride</h2>
+            <p id="si-lock-msg"></p>
+            <p class="t-small t-muted">Phone lost, broken or out of battery? We can e-mail you a 6-digit code. Using it signs the other phone out; your group sees that you switched phones and an open SOS stays open.</p>
+            <div id="si-lock-codebox" hidden>
+              <p class="t-small" id="si-lock-sent" role="status"></p>
+              <div class="form-group">
+                <label class="form-label" for="si-lock-code">6-digit code</label>
+                <input class="form-input" id="si-lock-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7">
+              </div>
+              <p class="t-small"><button class="sh-linkbtn" type="button" id="si-lock-resend" disabled>Send code again</button></p>
+            </div>
+            <p class="sh-status" id="si-lock-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="button" id="si-lock-send">Send code to my e-mail</button>
+            <button class="btn btn--primary btn--lg btn--block" type="submit" id="si-lock-verify" hidden>Sign in</button>
+            <p class="sh-form__links">
+              <button class="sh-linkbtn" type="button" id="si-lock-back">Back to sign in</button>
+              <a class="link sh-call" href="tel:112" id="si-lock-call">Emergency? Call 112</a>
+            </p>
+          </form>
+
+          <!-- Round 4: create an account (the e-mail link makes it usable) -->
+          <form id="si-register" class="sh-form" novalidate hidden>
+            <h2 class="sh-card__title">Create your account</h2>
+            <p class="t-small t-muted">The same account as the app. Your group sees your name, phone and bike; your emergency contact is used only in an emergency.</p>
+            <div class="form-group"><label class="form-label" for="rg-name">Name or callsign</label>
+              <input class="form-input" id="rg-name" type="text" autocomplete="nickname" maxlength="40" required></div>
+            <div class="form-group"><label class="form-label" for="rg-email">E-mail</label>
+              <input class="form-input" id="rg-email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required></div>
+            <div class="form-group"><label class="form-label" for="rg-phone">Mobile phone</label>
+              <input class="form-input" id="rg-phone" type="tel" autocomplete="tel" maxlength="20" required></div>
+            <div class="form-group"><label class="form-label" for="rg-pw">Password</label>
+              <input class="form-input" id="rg-pw" type="password" autocomplete="new-password" minlength="8" maxlength="200" required>
+              <span class="t-xs t-faint">At least 8 characters. Not a common password.</span></div>
+            <div class="form-group"><label class="form-label" for="rg-pw2">Password again</label>
+              <input class="form-input" id="rg-pw2" type="password" autocomplete="new-password" minlength="8" maxlength="200" required></div>
+            <div class="form-group"><label class="form-label" for="rg-bike">Bike number</label>
+              <input class="form-input" id="rg-bike" type="text" autocapitalize="characters" maxlength="16" placeholder="KA 01 AB 1234">
+              <label class="t-small"><input type="checkbox" id="rg-pillion"> I ride pillion (no bike number)</label></div>
+            <div class="form-group"><label class="form-label" for="rg-ice-name">Emergency contact name</label>
+              <input class="form-input" id="rg-ice-name" type="text" autocomplete="off" maxlength="60" required></div>
+            <div class="form-group"><label class="form-label" for="rg-ice-phone">Emergency contact phone</label>
+              <input class="form-input" id="rg-ice-phone" type="tel" autocomplete="off" maxlength="20" required></div>
+            <label class="t-small"><input type="checkbox" id="rg-terms"> I accept the <a class="link" href="/terms" target="_blank" rel="noopener">Terms</a> and <a class="link" href="/privacy" target="_blank" rel="noopener">Privacy Policy</a></label>
+            <p class="sh-status" id="rg-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="submit" id="rg-submit">Create account</button>
+            <p class="sh-form__links"><button class="sh-linkbtn" type="button" id="rg-back">I have an account: sign in</button></p>
+          </form>
+
+          <!-- Round 4: after creating an account -->
+          <div id="si-inbox" hidden>
+            <h2 class="sh-card__title">Check your inbox</h2>
+            <p id="si-inbox-msg">Check your e-mail to finish creating your account.</p>
+            <p class="t-small t-muted">The link works once, for 24 hours. Then sign in here or in the app with your e-mail and password. Nothing arrived? Look in spam, or send a new link.</p>
+            <p class="sh-status sh-status--ok" id="si-inbox-status" role="status" aria-live="polite"></p>
+            <div class="sh-actions">
+              <button class="btn btn--secondary" type="button" id="si-inbox-resend" disabled>Send a new link</button>
+              <button class="btn btn--ghost" type="button" id="si-inbox-back">Back to sign in</button>
+            </div>
+          </div>
+
+          <!-- Reset link from the e-mail (#reset=<token>): choose a new password -->
+          <form id="si-reset" class="sh-form" novalidate hidden>
+            <h2 class="sh-card__title">Choose a new password</h2>
+            <p class="t-small t-muted">Every device signed in to your account is signed out after the change.</p>
+            <div class="form-group">
+              <label class="form-label" for="si-reset-pw">New password</label>
+              <input class="form-input" id="si-reset-pw" type="password" autocomplete="new-password" minlength="8" maxlength="200" required>
+              <span class="t-xs t-faint">At least 8 characters. Not a common password.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="si-reset-pw2">New password again</label>
+              <input class="form-input" id="si-reset-pw2" type="password" autocomplete="new-password" minlength="8" maxlength="200" required>
+            </div>
+            <p class="sh-status" id="si-reset-status" role="alert" aria-live="assertive"></p>
+            <button class="btn btn--primary btn--lg btn--block" type="submit">Save new password</button>
           </form>
 
           <!-- Temporary password: choose a new one (POST /api/me/password) -->

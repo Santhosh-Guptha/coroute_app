@@ -904,4 +904,5 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
 
 module.exports = {
   registerAdminAnalyticsRoutes, registerPublicUsageRoutes, overview, trends, bucketDays, riderDetail, groupDetail, publicUsage, publicImpact, communityTotals, maxTripsFor, scan, median,
+  riderTotals, ownedMembershipMap, riderRow, ridingMap,
 };

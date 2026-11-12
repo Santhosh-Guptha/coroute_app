@@ -23,6 +23,9 @@
 <script defer src="/admin/access.js"></script>
 <script defer src="/admin/offers.js"></script>
 <script defer src="/admin/email_studio.js"></script>
+<script defer src="/admin/email_wizard.js"></script>
+<script defer src="/admin/riders.js"></script>
+<script defer src="/admin/console.js"></script>
 </head>
 <body>
 <noscript><p class="noscript">The CoRoute admin console needs JavaScript.</p></noscript>
@@ -31,29 +34,59 @@
   <form id="signin-form" class="signin__card" novalidate>
     <div class="brandline"><img src="/favicon.svg" alt="" width="36" height="36"><span>CoRoute <b>Admin</b></span></div>
     <h1>Sign in</h1>
-    <p class="muted">Payments, plans, coupons, revenue and the marketing studio. For CoRoute administrators only.</p>
+    <p class="muted">Riders, plans, coupons, e-mail and the website. For CoRoute administrators only.</p>
     <label class="field"><span>Email</span><input id="signin-id" name="identifier" type="email" autocomplete="username" required></label>
     <label class="field"><span>Password</span><input id="signin-pw" name="password" type="password" autocomplete="current-password" required></label>
     <p id="signin-error" class="form-error" role="alert" hidden></p>
     <button id="signin-btn" class="btn btn--primary btn--block" type="submit">Sign in</button>
     <p class="muted small">You are signed out after 30 minutes without activity. Everything else stays in the admin console of the app.</p>
   </form>
+  <!-- 3.57 2-step verification: set-up at the first sign-in, then a code every time -->
+  <form id="mfa-form" class="signin__card" novalidate hidden>
+    <div class="brandline"><img src="/favicon.svg" alt="" width="36" height="36"><span>CoRoute <b>Admin</b></span></div>
+    <h1 id="mfa-title">2-step verification</h1>
+    <div id="mfa-setup" hidden>
+      <p class="muted">Administrators sign in with a code from an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Aegis&hellip;). Scan this code, or type the key, then enter the 6-digit code it shows.</p>
+      <div id="mfa-qr" class="mfa-qr" aria-hidden="true"></div>
+      <p class="small">Key: <code id="mfa-secret"></code></p>
+    </div>
+    <p id="mfa-intro" class="muted">Enter the 6-digit code from your authenticator app.</p>
+    <label class="field"><span id="mfa-label">6-digit code</span><input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="11" required></label>
+    <p class="small"><button class="btn btn--ghost btn--sm" type="button" id="mfa-rc">Use a recovery code instead</button></p>
+    <p id="mfa-error" class="form-error" role="alert" hidden></p>
+    <button id="mfa-btn" class="btn btn--primary btn--block" type="submit">Continue</button>
+  </form>
+  <!-- Recovery codes, shown once after the set-up -->
+  <div id="mfa-codes" class="signin__card" hidden>
+    <h1>Save your recovery codes</h1>
+    <p class="muted">Each code signs you in once if you lose your phone. Keep them somewhere safe, offline. They are not shown again.</p>
+    <ol id="mfa-codes-list" class="mfa-codes"></ol>
+    <button id="mfa-codes-done" class="btn btn--primary btn--block" type="button">Done, I stored them</button>
+  </div>
 </main>
 
 <div id="shell" class="shell" hidden>
-  <aside class="side">
+  <aside class="side" id="side" aria-label="Menu">
     <div class="brandline"><img src="/favicon.svg" alt="" width="28" height="28"><span>CoRoute <b>Admin</b></span></div>
     <nav id="nav" class="nav" aria-label="Sections">
+      <a href="#/overview" data-section="overview">Overview</a>
+      <a href="#/riders" data-section="riders">Riders</a>
+      <p class="nav__group">Plans &amp; coupons</p>
       <a href="#/payments" data-section="payments">Payments</a>
       <a href="#/plans" data-section="plans">Plans &amp; pricing</a>
       <a href="#/coupons" data-section="coupons">Coupons</a>
-      <a href="#/marketing" data-section="marketing">Marketing studio</a>
-      <a href="#/board" data-section="board">Board</a>
       <a href="#/revenue" data-section="revenue">Revenue</a>
-      <a href="#/notifications" data-section="notifications">Notifications</a>
-      <a href="#/templates" data-section="templates">Templates</a>
-      <a href="#/engagement" data-section="engagement">Engagement</a>
+      <p class="nav__group">Messages</p>
+      <a href="#/email" data-section="email">E-mail</a>
+      <a href="#/push" data-section="push">Push notifications</a>
+      <p class="nav__group">Website &amp; community</p>
+      <a href="#/board" data-section="board">Board</a>
+      <a href="#/marketing" data-section="marketing">Marketing studio</a>
       <a href="#/operators" data-section="operators">Operators</a>
+      <a href="#/engagement" data-section="engagement">Ratings &amp; feedback</a>
+      <p class="nav__group">Admin</p>
+      <a href="#/settings" data-section="settings">Settings</a>
+      <a href="#/audit" data-section="audit">Audit log</a>
     </nav>
     <div class="side__foot">
       <div id="whoami" class="whoami"></div>
@@ -67,7 +100,18 @@
       </div>
     </div>
   </aside>
-  <main id="view" class="view" tabindex="-1"></main>
+  <div class="side-scrim" id="side-scrim" hidden></div>
+  <div class="maincol">
+    <header class="topbar">
+      <button id="menu-btn" class="btn btn--ghost btn--icon menu-btn" type="button" aria-label="Open menu" aria-controls="side" aria-expanded="false">&#9776;</button>
+      <div class="gsearch" role="search">
+        <input id="gsearch" type="search" placeholder="Search riders, order ids, coupon codes" aria-label="Search riders, order ids and coupon codes" autocomplete="off" aria-controls="gsearch-list" aria-expanded="false">
+        <kbd class="gsearch__kbd" aria-hidden="true">/</kbd>
+        <div id="gsearch-list" class="gsearch__list" role="listbox" aria-label="Search results" hidden></div>
+      </div>
+    </header>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
 </div>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>

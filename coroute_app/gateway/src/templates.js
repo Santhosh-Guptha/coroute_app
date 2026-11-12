@@ -120,6 +120,48 @@ const DEFINITIONS = Object.freeze({
       footer: 'Only you get this summary of your own ride. The start and the end of your route are left off the picture.',
     },
   },
+  // 3.57 round 3: e-mails an admin sends to one rider from the web admin rider page (src/admin_riders.js,
+  // docs/features_355/web_riders_admin.md). Laid out by the e-mail studio renderer (footer, dark mode, escaping).
+  plan_assigned: {
+    label: 'Plan assigned e-mail', channel: 'email', riderAction: true,
+    description: 'Sent when an admin assigns a plan to a rider (Riders > Assign plan, "Send e-mail to rider" ticked). An account e-mail: no offer consent needed; a bounced or reported address is skipped. A "See your account" button opens /account.',
+    fields: {
+      subject: { label: 'Subject', max: 150 },
+      heading: { label: 'Heading', max: 120 },
+      intro: { label: 'Message', max: 1500, multiline: true },
+      buttonLabel: { label: 'Button text (opens /account)', max: 40 },
+      footer: { label: 'Footer note', max: 500, multiline: true },
+    },
+    variables: [v('name', 'Asha', 'First name (or "there")'), v('username', 'SwiftFalcon482', 'Username, without the @'),
+      v('plan', 'Small Group', 'Plan name'), v('validUntil', '14 Dec 2026', 'Plan end date (India)')],
+    defaults: {
+      subject: 'Your {{plan}} plan is active',
+      heading: 'You now have {{plan}}',
+      intro: 'Hi {{name}}, the CoRoute team gave your account the **{{plan}}** plan. It is active now and runs until **{{validUntil}}**.\n\nYour app shows it on its own. Nothing to pay and nothing renews.',
+      buttonLabel: 'See your account',
+      footer: 'Questions? Reply to the CoRoute team through the website.',
+    },
+  },
+  coupon_gift: {
+    label: 'Coupon for you e-mail', channel: 'email', riderAction: true,
+    description: 'Sent with a personal single-use coupon an admin gives to one rider (Riders > Give a coupon). An offer e-mail: only to riders who agreed to offer e-mails, unless the admin marks it a service message the rider asked for (with a note). The coupon block (code, discount, valid until, "Use on plans" button) is added by the server.',
+    fields: {
+      subject: { label: 'Subject', max: 150 },
+      heading: { label: 'Heading', max: 120 },
+      intro: { label: 'Message', max: 1500, multiline: true },
+      buttonLabel: { label: 'Coupon button text', max: 40 },
+      footer: { label: 'Footer note', max: 500, multiline: true },
+    },
+    variables: [v('name', 'Asha', 'First name (or "there")'), v('username', 'SwiftFalcon482', 'Username, without the @'),
+      v('code', 'GIFT-QHR95Q2X', 'The personal code'), v('discount', '40% off', 'The discount'), v('validUntil', '30 Nov 2026', 'Coupon valid until (India)')],
+    defaults: {
+      subject: '{{name}}, a coupon just for you',
+      heading: 'A coupon for your next group plan',
+      intro: 'Hi {{name}}, here is a personal code for **{{discount}}** on a CoRoute group plan. It works once, only on your account, until {{validUntil}}.',
+      buttonLabel: 'Use on plans',
+      footer: 'Every safety feature stays free for every rider.',
+    },
+  },
   sos_sms: {
     label: 'SOS SMS (DLT)', channel: 'sms', dlt: true,
     description: 'Sent by the server to the rider\'s emergency contacts when an SOS reaches it and the phone could not text them. {{origin}} is this site\'s address (fixed text in the DLT registration).',

@@ -260,11 +260,18 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
     assert.equal(block.json.config.status, 'BLOCKED');
     assert.equal((await api('GET', '/me', null, r2.token)).status, 403);
     assert.equal((await api('PATCH', `/admin/users/${u2}/config`, { status: 'ACTIVE' }, A)).json.config.status, 'ACTIVE');
+    // 3.57: a block ends every session; after re-activation the rider signs in again.
+    assert.equal((await api('GET', '/me', null, r2.token)).status, 401);
+    r2.token = (await api('POST', '/auth/login', { identifier: 'meera@coroute.test', password: 'Password#123' })).json.token;
 
     const role = await api('PATCH', `/admin/users/${u1}/config`, { role: 'MASTER_ADMIN' }, A);
     assert.equal(role.json.config.role, 'MASTER_ADMIN');
     assert.deepEqual(role.json.changed, ['role']);
     await api('PATCH', `/admin/users/${u1}/config`, { role: 'RIDER' }, A);
+    // 3.57: losing the admin role ends every session of the account; the rider signs in again.
+    const relogin = await api('POST', '/auth/login', { identifier: 'ravi@coroute.test', password: 'Password#123' });
+    assert.equal(relogin.status, 200, JSON.stringify(relogin.json));
+    r1.token = relogin.json.token;
 
     const audit = await api('GET', '/admin/audit?limit=100', null, A);
     const actions = audit.json.entries.filter((e) => e.target === u2).map((e) => e.action);

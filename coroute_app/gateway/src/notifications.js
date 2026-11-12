@@ -73,12 +73,23 @@ function attachNotifications({ app, repo, soda, gate, push = null, emergencyGate
   const guardianArrivalText = () => (cache.guardian_arrival ? { title: cache.guardian_arrival.title, body: cache.guardian_arrival.body } : null);
 
   const audit = typeof repo.addAuditEntry === 'function' ? (e) => repo.addAuditEntry(e).catch(() => {}) : null;
+  // 3.57 round 3: Settings > Templates preview of "Plan assigned" / "Coupon for you" (laid out by the studio renderer).
+  async function riderActionPreview(id, rendered) {
+    const { systemDesign } = require('./admin_riders');
+    const words = { fields: async () => rendered };
+    const sys = await systemDesign(words, id, { origin: studio.origin(), supportEmail: String(config.supportEmail || '') });
+    const couponDoc = id === 'coupon_gift' ? { code: 'GIFT-SAMPLE01', discountType: 'percentage', discountValue: 40, expiresAt: Date.now() + 14 * 86400000 } : null;
+    const prep = await studio.prepare({ design: sys.design, category: sys.category }, { forSend: false, couponDoc });
+    const m = await studio.build(prep, null, { couponCode: couponDoc ? couponDoc.code : null, couponExpiresAt: couponDoc ? couponDoc.expiresAt : null, omitMissingAddress: true,
+      why: id === 'plan_assigned' ? 'You get this e-mail because the CoRoute team changed your plan.' : null });
+    return { subject: m.subject, html: m.html, text: m.text };
+  }
   if (app) {
     app.use(pushMediaRouter({ campaigns }));
     app.use('/api/admin/push', requireAuth(gate), requireAdmin, adminPushRouter({ campaigns, push }));
     app.use('/api/admin/sms', requireAuth(gate), requireAdmin, adminSmsRouter({ sosSms }));
     app.use('/api/admin/templates', requireAuth(gate), requireAdmin, templatesAdminRouter({ templates, constants: () => ({ origin: config.publicOrigin || config.linkOrigin || '' }), audit,
-      mailPreview: (id, rendered) => lifecycle.previewMail(id, rendered) }));
+      mailPreview: async (id, rendered) => (['plan_assigned', 'coupon_gift'].includes(id) ? riderActionPreview(id, rendered) : lifecycle.previewMail(id, rendered)) }));
     app.use('/api/sms', smsReceiptsRouter({ sosSms, env }));
     app.use('/api/me/push-prefs', requireAuth(gate), pushPrefsRouter({ campaigns }));
     app.use('/api/web', receiptEmailRouter({ repo, gate, service: purchaseEmail }));

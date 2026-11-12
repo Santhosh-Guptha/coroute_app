@@ -11,6 +11,8 @@
  *   node tool/operators_smoke.js [screenshot dir]
  */
 process.env.NODE_ENV = 'test';
+// 3.57: these smoke runs check the console sections, not 2-step sign-in (tool/security_smoke.js does).
+process.env.ADMIN_MFA_ENFORCE = 'off';
 process.env.PAYMENTS_ENABLED = 'true';
 process.env.TIMELINE_TICK_MS = '3600000';
 process.env.BOOTSTRAP_ADMIN_EMAILS = 'ops.admin@coroute.test';

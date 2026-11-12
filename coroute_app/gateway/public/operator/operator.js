@@ -1,6 +1,8 @@
 /* CoRoute operator console (3.56, docs/features_355/operators.md): sign in with the CoRoute account, then Overview,
    Roster, Rides, Live map, Attendance & reports and Broadcasts for one operator (owner or co-organiser).
-   The token lives in sessionStorage only; every call goes to /api/operator/:id/* which checks the role server side.
+   3.57: a 15-minute access token in sessionStorage, the refresh token in the httpOnly __Host-cr_op cookie (never seen
+   here); 401 TOKEN_EXPIRED is refreshed once; 30 minutes idle signs out (warning 2 minutes before); Sign out -> home.
+   Every call goes to /api/operator/:id/* which checks the role server side.
    Text from the server is always set as text, never as HTML. */
 (function () {
   'use strict';
@@ -8,7 +10,9 @@
   var TOKEN_KEY = 'cr.op.token';
   var OP_KEY = 'cr.op.current';
   var ACTIVE_KEY = 'cr.op.lastActive';
-  var IDLE_MS = 60 * 60 * 1000;
+  var IDLE_MS = 30 * 60 * 1000;
+  try { var qIdle = Number(sessionStorage.getItem('cr.idleMs')); if (qIdle > 0 && qIdle < IDLE_MS) IDLE_MS = qIdle; } catch (e) { /* default */ }
+  var WARN_MS = Math.min(2 * 60 * 1000, Math.floor(IDLE_MS / 3));
   var RIDE_COLORS = ['#2B7A8C', '#94600F', '#6A4FB3', '#357A50', '#B4527A', '#3D7BC8'];
 
   // ------------------------------------------------------------------ DOM helpers (as in the web admin)
@@ -117,18 +121,41 @@
   // ------------------------------------------------------------------ session & API
   function store(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* private mode */ } }
   function read(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
-  function token() { return read(TOKEN_KEY) || read('coroute_session'); }
+  function token() { return read(TOKEN_KEY); }
   function ApiError(status, body) { var e = new Error((body && body.error) || ('Request failed (' + status + ')')); e.status = status; e.body = body || {}; e.code = body && body.code; return e; }
+  var refreshing = null;
+  function refresh() {
+    if (refreshing) return refreshing;
+    refreshing = fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'operator', 'X-CoRoute-CSRF': '1' }, body: JSON.stringify({ client: 'operator' }) })
+      .then(function (r) { if (r.status === 204) return null; return r.json().catch(function () { return {}; }).then(function (j) { return r.ok && j.token ? j : null; }); })
+      .catch(function () { return null; })
+      .then(function (j) { refreshing = null; if (j) store(TOKEN_KEY, j.token); return j; });
+    return refreshing;
+  }
   function api(method, path, body, opts) {
     opts = opts || {};
-    var headers = { Authorization: 'Bearer ' + token() };
-    var init = { method: method, headers: headers, credentials: 'omit', cache: 'no-store' };
-    if (body !== undefined && body !== null) { init.body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
-    touch();
-    return fetch('/api' + path, init).then(function (res) {
+    function send() {
+      var headers = { Authorization: 'Bearer ' + token(), 'X-CoRoute-Client': 'operator' };
+      var init = { method: method, headers: headers, credentials: 'same-origin', cache: 'no-store' };
+      if (body !== undefined && body !== null) { init.body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
+      return fetch('/api' + path, init);
+    }
+    function handle(res, retried) {
       var fresh = res.headers.get('X-CoRoute-Token');
       if (fresh) store(TOKEN_KEY, fresh);
-      if (res.status === 401) { signOut('Your session has ended. Please sign in again.'); throw new ApiError(401, { error: 'Signed out' }); }
+      if (res.status === 401) {
+        return res.clone().json().catch(function () { return {}; }).then(function (j) {
+          if (j.code === 'TOKEN_EXPIRED' && !retried) {
+            return refresh().then(function (ok) {
+              if (!ok) { signOut('You were signed out. Please sign in again.'); throw new ApiError(401, { error: 'Signed out' }); }
+              return send().then(function (r2) { return handle(r2, true); });
+            });
+          }
+          if (!j.code || j.code === 'SESSION_INVALID' || j.code === 'TOKEN_EXPIRED') { signOut('You were signed out. Please sign in again.'); throw new ApiError(401, { error: 'Signed out' }); }
+          throw new ApiError(401, j);
+        });
+      }
       if (opts.raw && res.ok) return res;
       return res.json().catch(function () { return {}; }).then(function (j) {
         if (!res.ok) {
@@ -137,20 +164,46 @@
         }
         return j;
       });
-    });
+    }
+    return send().then(function (res) { return handle(res, false); });
   }
-  function touch() { store(ACTIVE_KEY, String(Date.now())); }
+  function lastActive() { try { return Number(localStorage.getItem(ACTIVE_KEY)) || 0; } catch (e) { return Number(read(ACTIVE_KEY)) || 0; } }
+  function touch() { var n = String(Date.now()); try { localStorage.setItem(ACTIVE_KEY, n); } catch (e) { store(ACTIVE_KEY, n); } }
+  var warnBox = null;
+  function hideWarn() { if (warnBox) { warnBox.remove(); warnBox = null; } }
   setInterval(function () {
     if (!token()) return;
-    if (Date.now() - (Number(read(ACTIVE_KEY)) || 0) > IDLE_MS) signOut('You were signed out after 60 minutes without activity.');
-  }, 15000);
-  ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, function () { if (token()) touch(); }, { passive: true }); });
+    var left = IDLE_MS - (Date.now() - lastActive());
+    if (left <= 0) { hideWarn(); signOut('You were signed out after 30 minutes without activity.', { server: true }); return; }
+    if (left > WARN_MS) { hideWarn(); return; }
+    var secs = Math.ceil(left / 1000);
+    var text = 'For your security you will be signed out in ' + Math.floor(secs / 60) + ':' + ('0' + (secs % 60)).slice(-2) + ' because there was no activity.';
+    if (warnBox) { warnBox.querySelector('p').textContent = text; return; }
+    var stay = h('button.btn.btn--primary', { type: 'button', text: 'Stay signed in' });
+    var out = h('button.btn', { type: 'button', text: 'Sign out now' });
+    warnBox = h('div.scrim', h('div.dialog', { role: 'alertdialog', 'aria-modal': 'true' }, h('div.dialog__head', h('h2', { text: 'Still there?' })), h('div.dialog__body', h('p', { text: text })), h('div.dialog__foot', out, stay)));
+    stay.addEventListener('click', function () { touch(); hideWarn(); refresh(); });
+    out.addEventListener('click', function () { hideWarn(); signOut('', { server: true, home: true }); });
+    document.body.appendChild(warnBox);
+    stay.focus();
+  }, 1000);
+  ['pointerdown', 'keydown'].forEach(function (ev) { document.addEventListener(ev, function () { if (token() && !warnBox) touch(); }, { passive: true }); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { if (!token()) signOut(''); else window.location.reload(); } });
 
   var S = { me: null, ops: [], opId: null, op: null };
   function base() { return '/operator/' + S.opId; }
 
-  function signOut(message) {
-    store(TOKEN_KEY, null); store(ACTIVE_KEY, null); store(OP_KEY, null);
+  function signOut(message, opts) {
+    opts = opts || {};
+    if (opts.server || opts.home) {
+      var t = token();
+      var headers = { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'operator', 'X-CoRoute-CSRF': '1' };
+      if (t) headers.Authorization = 'Bearer ' + t;
+      var done = fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: true, headers: headers, body: JSON.stringify({ client: 'operator' }) }).catch(function () { /* ends on the server after 30 minutes anyway */ });
+      if (opts.home) { store(TOKEN_KEY, null); store(OP_KEY, null); done.then(function () { window.location.replace('/'); }); return; }
+    }
+    hideWarn();
+    store(TOKEN_KEY, null); store(OP_KEY, null);
     teardown();
     document.querySelectorAll('.scrim').forEach(function (s) { s.remove(); });
     clear($('view'));
@@ -173,20 +226,58 @@
     var err = $('signin-error'); var btn = $('signin-btn');
     if (!id || !pw) { err.hidden = false; err.textContent = 'Enter your email or callsign and password.'; return; }
     btn.disabled = true; btn.textContent = 'Signing in…'; err.hidden = true;
-    fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ identifier: id, password: pw }) })
+    fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'operator' }, credentials: 'same-origin', body: JSON.stringify({ identifier: id, password: pw, client: 'operator' }) })
       .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { return { res: res, j: j }; }); })
       .then(function (r) {
         if (r.res.status === 429) throw new Error('Too many attempts. Wait a few minutes and try again.');
+        if (r.res.ok && r.j.mfa === 'verify' && r.j.mfaToken) {
+          mfaToken = r.j.mfaToken; mfaByEmail = false;
+          $('mfa-email-wrap').hidden = !(Array.isArray(r.j.methods) && r.j.methods.indexOf('email') >= 0);
+          $('signin-form').hidden = true; $('mfa-form').hidden = false; $('mfa-code').focus(); return null;
+        }
+        // Round 4 ride lock: the operator's phone is on a ride (the website /signin offers the e-mail code).
+        if (r.res.status === 423) throw new Error((r.j.error || 'You are on a ride on another phone.') + ' To sign in here anyway, use "Use e-mail code" on ' + location.origin + '/signin.');
         if (!r.res.ok || !r.j.token) throw new Error(r.j.error || 'Sign in failed.');
         store(TOKEN_KEY, r.j.token);
+        touch();
         $('signin-pw').value = '';
         return start();
       })
       .catch(function (e2) { err.hidden = false; err.textContent = e2.message || 'Sign in failed.'; })
       .then(function () { btn.disabled = false; btn.textContent = 'Sign in'; });
   });
-  $('signout').addEventListener('click', function () { signOut(''); });
-  $('noop-out').addEventListener('click', function () { signOut(''); });
+  var mfaToken = null;
+  var mfaByEmail = false;
+  // Round 4: an e-mailed code for operators without an authenticator app.
+  $('mfa-email').addEventListener('click', function () {
+    var b = this; b.disabled = true;
+    fetch('/api/auth/mfa/email-code', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'operator' }, body: JSON.stringify({ mfaToken: mfaToken }) })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { return { res: res, j: j }; }); })
+      .then(function (r) {
+        b.disabled = false;
+        $('mfa-error').hidden = r.res.ok;
+        if (!r.res.ok) { $('mfa-error').textContent = r.j.error || 'Could not send the code.'; return; }
+        mfaByEmail = true; b.textContent = 'Send another e-mail code'; $('mfa-code').focus();
+      });
+  });
+  $('mfa-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var v = $('mfa-code').value.trim();
+    var digits = /^\d[\d\s]{5,6}$/.test(v);
+    var body = digits ? (mfaByEmail ? { emailCode: v.replace(/\s+/g, '') } : { code: v.replace(/\s+/g, '') }) : { recoveryCode: v };
+    body.mfaToken = mfaToken; body.client = 'operator';
+    fetch('/api/auth/mfa/verify', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'operator' }, body: JSON.stringify(body) })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { return { res: res, j: j }; }); })
+      .then(function (r) {
+        if (!r.res.ok || !r.j.token) { $('mfa-error').hidden = false; $('mfa-error').textContent = r.j.error || 'That code is not right.'; if (r.j.code === 'MFA_EXPIRED') signOut('That took too long. Sign in again.'); return; }
+        store(TOKEN_KEY, r.j.token); touch();
+        $('mfa-form').hidden = true; $('signin-form').hidden = false;
+        start();
+      });
+  });
+  // Sign out: the server session ends and the cookie is cleared, then the home page (Back cannot return).
+  $('signout').addEventListener('click', function () { signOut('', { server: true, home: true }); });
+  $('noop-out').addEventListener('click', function () { signOut('', { server: true, home: true }); });
 
   function start() {
     return api('GET', '/operator/me').then(function (r) {
@@ -686,5 +777,8 @@
   };
 
   // ------------------------------------------------------------------ boot
-  if (token()) start(); else $('signin').hidden = false;
+  // A reload or a new tab: the session continues through the httpOnly cookie while it is valid.
+  if (lastActive() && Date.now() - lastActive() > IDLE_MS) signOut('You were signed out after 30 minutes without activity.', { server: true });
+  // No console cookie but a token in this tab (an older sign-in): start() asks the server, which decides.
+  else refresh().then(function (j) { if (j || token()) start(); else signOut(''); });
 })();

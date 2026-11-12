@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Your account | Coroute</title>
-<meta name="description" content="Your CoRoute plan, its end date, your payments and receipts.">
+<meta name="description" content="Your CoRoute plan, coupons, payments and receipts, recent rides and e-mail choices.">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <link rel="canonical" href="__ORIGIN__/account">
@@ -25,32 +25,40 @@
 <script src="/assets/shop.js" defer></script>
 <script src="/assets/account.js" defer></script>
 </head>
-<body data-page="account">
+<body data-page="account" data-private>
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
+  <!-- 3.57 round 3: a tidy rider console. Profile, plan, coupons, payments, rides, clubs, e-mails, security.
+       No tracking; every value is written with textContent (assets/account.js). -->
   <section class="page-hero topo sh-hero">
     <div class="container">
       <div class="sh-acc-head">
-        <div class="page-hero__inner">
-          <p class="eyebrow">Your account</p>
-          <h1 id="ac-title">Your plan and payments.</h1>
-          <p class="t-lead" id="ac-who">Loading your account&hellip;</p>
+        <div class="ac-profile">
+          <span class="ac-avatar" id="ac-avatar" aria-hidden="true"></span>
+          <div class="page-hero__inner">
+            <p class="eyebrow">Your account</p>
+            <h1 id="ac-title">Your account.</h1>
+            <p class="t-lead" id="ac-who">Loading your account&hellip;</p>
+          </div>
         </div>
         <div class="sh-acc-head__actions">
           <a class="btn btn--secondary" href="/plans">See plans</a>
           <button class="btn btn--ghost" type="button" data-signout>Sign out</button>
         </div>
       </div>
+      <nav class="ac-jump" aria-label="On this page">
+        <a href="#plan">Plan</a><a href="#coupons">Coupons</a><a href="#payments">Payments</a><a href="#rides">Rides</a><a href="#clubs">Clubs</a><a href="#emails">E-mails</a><a href="#security">Security</a>
+      </nav>
     </div>
   </section>
 
-  <section class="section section--tight" aria-labelledby="ac-plan-title">
+  <section class="section section--tight" id="plan" aria-labelledby="ac-plan-title">
     <div class="container">
-      <div id="ac-admin-banner" hidden></div>
+      <div id="ac-admin-banner" class="sh-notice sh-notice--ok ac-admin" hidden></div>
       <div class="sh-acc">
         <div class="sh-card sh-plancard" id="ac-plan" aria-busy="true">
-          <p class="sh-plancard__label" id="ac-plan-title">Current plan</p>
+          <p class="sh-plancard__label" id="ac-plan-title">Your plan</p>
           <h2 class="sh-plancard__name" id="ac-plan-name">&nbsp;</h2>
           <p class="sh-badge" id="ac-plan-status" hidden></p>
           <dl class="sh-facts" id="ac-facts"></dl>
@@ -59,11 +67,11 @@
         </div>
 
         <div class="sh-card sh-acc__side">
-          <h2 class="sh-card__title">Good to know</h2>
-          <ul class="sh-ticks" role="list">
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Plans run for their period and do not renew on their own. Nothing to cancel.</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Moving to a bigger plan is possible anytime; the unused days of your plan are credited.</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your app shows the same plan. It updates on its own after a payment.</li>
+          <h2 class="sh-card__title">What's included</h2>
+          <ul class="sh-ticks" role="list" id="ac-included">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Every safety feature, free for every rider: crash detection, SOS, check-ins.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Joining any group ride is always free.</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Plans run for their period and never renew on their own. Nothing to cancel.</li>
           </ul>
           <p class="t-small t-muted">Questions about a payment? <a class="link" href="/#feedback">Write to us</a> with the receipt number. Refunds follow our <a class="link" href="/refunds">Refund and Cancellation Policy</a>.</p>
         </div>
@@ -71,7 +79,19 @@
     </div>
   </section>
 
-  <section class="section section--surface section--tight" aria-labelledby="ac-pay-title">
+  <section class="section section--tight" id="coupons" aria-labelledby="ac-coupons-title">
+    <div class="container">
+      <div class="sh-sec-head">
+        <h2 class="t-h3" id="ac-coupons-title">Your coupons</h2>
+        <p class="t-small t-muted">Personal codes from CoRoute. Each works once, only on your account.</p>
+      </div>
+      <div id="ac-coupons" class="ac-coupons" aria-live="polite" aria-busy="true">
+        <p class="t-small t-muted">Loading&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--surface section--tight" id="payments" aria-labelledby="ac-pay-title">
     <div class="container">
       <div class="sh-sec-head">
         <h2 class="t-h3" id="ac-pay-title">Payments and receipts</h2>
@@ -83,13 +103,28 @@
     </div>
   </section>
 
+  <section class="section section--tight" aria-label="Rides and clubs">
+    <div class="container">
+      <div class="ac-two">
+        <div id="rides" class="sh-card" aria-labelledby="ac-rides-title">
+          <h2 class="sh-card__title" id="ac-rides-title">Recent rides</h2>
+          <div id="ac-rides" aria-live="polite" aria-busy="true"><p class="t-small t-muted">Loading&hellip;</p></div>
+        </div>
+        <div id="clubs" class="sh-card" aria-labelledby="ac-clubs-title">
+          <h2 class="sh-card__title" id="ac-clubs-title">Clubs</h2>
+          <div id="ac-clubs" aria-live="polite" aria-busy="true"><p class="t-small t-muted">Loading&hellip;</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- 3.56 marketing consent (src/offer_emails.js) and 3.57 e-mail categories (src/lifecycle_emails.js,
        GET / PUT /api/web/email-preferences). Offer e-mails are off until the rider turns them on. -->
-  <section class="section section--tight" id="emails" aria-labelledby="ac-mail-title">
+  <section class="section section--surface section--tight" id="emails" aria-labelledby="ac-mail-title">
     <div class="container">
       <div class="sh-sec-head">
         <h2 class="t-h3" id="ac-mail-title">E-mails from CoRoute</h2>
-        <p class="t-small t-muted">Choose what we send you. Every e-mail you can turn off has an unsubscribe link at the bottom that works with one click.</p>
+        <p class="t-small t-muted">Choose what we send you. Every e-mail you can turn off has a one-click unsubscribe link.</p>
       </div>
       <div class="sh-card" id="ac-consent" aria-live="polite">
         <label class="sh-check"><input type="checkbox" id="ac-account" checked disabled> <span>Account and receipts: your welcome e-mail, payment receipts and refund notices (always sent)</span></label>
@@ -97,6 +132,44 @@
         <label class="sh-check"><input type="checkbox" id="ac-tips" disabled> <span>Tips and news: riding tips, product news and group ride news</span></label>
         <label class="sh-check"><input type="checkbox" id="ac-offers" disabled> <span>Send me offer e-mails (plan offers and coupon codes)</span></label>
         <p class="t-small t-muted" id="ac-offers-note"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" id="security" aria-labelledby="ac-sec-title">
+    <div class="container">
+      <div class="sh-card ac-security">
+        <div>
+          <h2 class="sh-card__title" id="ac-sec-title">Security</h2>
+          <p class="t-small t-muted">This browser signs you out after 60 minutes without activity. Signing out ends your session on our server too. Deleting your account erases your profile, rides and e-mail choices.</p>
+        </div>
+        <div class="sh-acc-head__actions">
+          <button class="btn btn--secondary" type="button" data-signout>Sign out</button>
+          <button class="btn btn--secondary" type="button" data-signout="all">Sign out of all devices</button>
+          <a class="btn btn--ghost ac-danger" href="/delete-account">Delete account&hellip;</a>
+        </div>
+      </div>
+      <div class="sh-card" id="ac-sessions-card" aria-labelledby="ac-sessions-title">
+        <h2 class="sh-card__title" id="ac-sessions-title">Where you&rsquo;re signed in</h2>
+        <p class="t-small t-muted">Phones and browsers signed in to your CoRoute account. Sign out any you do not recognise, then change your password.</p>
+        <div id="ac-sessions" aria-live="polite" aria-busy="true"><p class="t-small t-muted">Loading&hellip;</p></div>
+      </div>
+      <div class="sh-card" id="ac-email-card" aria-labelledby="ac-email-title">
+        <h2 class="sh-card__title" id="ac-email-title">Change e-mail address</h2>
+        <p class="t-small t-muted">We send a link to the new address and tell the current one. Nothing changes until you open the link. Every device is signed out afterwards.</p>
+        <div class="sh-notice" id="ac-email-notice" role="status" hidden></div>
+        <form id="ac-email-form" class="sh-form" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="ac-email-new">New e-mail address</label>
+            <input class="form-input" id="ac-email-new" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ac-email-pw">Your password</label>
+            <input class="form-input" id="ac-email-pw" type="password" autocomplete="current-password" maxlength="200" required>
+          </div>
+          <p class="sh-status" id="ac-email-status" role="alert" aria-live="assertive"></p>
+          <button class="btn btn--secondary" type="submit">Send the confirmation link</button>
+        </form>
       </div>
     </div>
   </section>

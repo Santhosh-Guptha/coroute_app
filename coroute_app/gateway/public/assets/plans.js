@@ -477,7 +477,8 @@
   /* ---------- load ---------- */
   function loadMine() {
     if (!S.token()) { st.me = null; st.my = null; return Promise.resolve(); }
-    return Promise.all([S.api('GET', '/me'), S.api('GET', '/membership/my')]).then(function (rs) {
+    // A public page: an ended session just shows the plans signed out (no redirect).
+    return Promise.all([S.api('GET', '/me', undefined, { noRedirect: true }), S.api('GET', '/membership/my', undefined, { noRedirect: true })]).then(function (rs) {
       st.me = rs[0].ok ? rs[0].json : null;
       st.my = rs[0].ok && rs[1].ok ? rs[1].json : null;
     });

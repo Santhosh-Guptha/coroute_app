@@ -1,7 +1,8 @@
-/* CoRoute web admin: "Notifications" (3.56, docs/features_355/notifications_admin.md).
-   #/notifications          compose a push (title, body, image, screen, audience, schedule) with an Android preview
-   #/notifications/history  campaigns with delivery counts (cancel a scheduled one)
-   #/notifications/sms      SOS SMS provider settings (secrets shown as Set / Not set), test SMS, SMS log per SOS
+/* CoRoute web admin: "Push notifications" (3.56, docs/features_355/notifications_admin.md; 3.57 round 3: e-mail moved to
+   its own "E-mail" menu item (email_wizard.js) and the SMS settings to Settings > SMS).
+   #/push                   compose a push (title, body, image, screen, audience, schedule) with an Android preview
+   #/push/history           campaigns with delivery counts (cancel a scheduled one)
+   CR.renderSms(view)       SOS SMS provider settings (secrets shown as Set / Not set), test SMS, SMS log per SOS (Settings > SMS)
    Every call goes to /api/admin/push/* or /api/admin/sms/* with the admin's token (CR.api). Text is always set
    as text (never HTML). Pushes reach the Play app: the server refuses money / buying / offer words. */
 (function () {
@@ -23,9 +24,9 @@
   var STATUS = { SCHEDULED: ['Scheduled', 'info'], SENDING: ['Sending', 'warn'], SENT: ['Sent', 'ok'], FAILED: ['Failed', 'bad'], CANCELLED: ['Cancelled', ''] };
 
   function tabs(active) {
-    var nav = h('div.row.eng-tabs', { role: 'tablist', 'aria-label': 'Notifications' });
-    [['', 'Compose push'], ['email', 'E-mail studio'], ['history', 'History'], ['sms', 'SMS']].forEach(function (t) {
-      nav.appendChild(h('button.btn.btn--sm', { type: 'button', 'aria-pressed': String(active === t[0]), text: t[1], onclick: function () { CR.go('#/notifications' + (t[0] ? '/' + t[0] : '')); } }));
+    var nav = h('div.row.eng-tabs', { role: 'tablist', 'aria-label': 'Push notifications' });
+    [['', 'Send'], ['history', 'History']].forEach(function (t) {
+      nav.appendChild(h('button.btn.btn--sm', { type: 'button', role: 'tab', 'aria-selected': String(active === t[0]), 'aria-pressed': String(active === t[0]), text: t[1], onclick: function () { CR.go('#/push' + (t[0] ? '/' + t[0] : '')); } }));
     });
     return nav;
   }
@@ -58,8 +59,7 @@
   // ==================================================================== compose
   function renderCompose(view) {
     var st = { title: '', body: '', target: 'home', imageId: null, imageBlobUrl: null, kind: 'all', days: 30, plans: ['community'], usernames: '', when: 'now', at: '', pushKind: 'update', partnerName: '' };
-    var channel = CR.ui.select([['push', 'Push notification'], ['email', 'E-mail (Offers, E-mail studio)']], 'push');
-    channel.addEventListener('change', function () { if (channel.value === 'email') CR.go('#/notifications/email'); });
+
     var pushKind = CR.ui.select(Object.keys(KIND_LABELS).map(function (k) { return [k, KIND_LABELS[k]]; }), 'update');
     var kindHint = h('div.small.muted', { text: KIND_HINTS.update });
     var partner = h('input', { type: 'text', maxlength: '60', placeholder: 'Speed Garage, Indiranagar' });
@@ -167,18 +167,18 @@
         sendBtn.disabled = true;
         api('POST', '/admin/push/campaigns', p).then(function () {
           ui.toast(st.when === 'later' ? 'Scheduled.' : 'Sending. See History for the counts.');
-          CR.go('#/notifications/history');
+          CR.go('#/push/history');
         }).catch(function (e) { ui.toast(e.message, true); }).then(function () { sendBtn.disabled = false; });
       });
     });
 
     var banner = h('div');
-    view.appendChild(ui.pageHead('Notifications', 'Push "News and updates" to riders. Riders can turn this category off in the app; safety and ride alerts are separate.'));
+    view.appendChild(ui.pageHead('Push notifications', 'A short message on riders\' phones. No prices or coupons here (Play policy): those go by e-mail.'));
     view.appendChild(tabs(''));
     view.appendChild(banner);
     view.appendChild(h('div.np-grid.section-gap',
       h('div.card.stack',
-        CR.ui.field('Channel', channel, 'prices, coupons and plan offers: e-mail only'),
+        h('p.small.muted', 'Prices, coupons and plan offers? ', h('a', { href: '#/email', text: 'Send an e-mail instead.' })),
         CR.ui.field('Kind', pushKind, 'own Android channel and in-app switch'), kindHint, partnerField,
         CR.ui.field('Title', title, null), h('div.row.row--end', counter(title, 65)),
         CR.ui.field('Message', body), h('div.row.row--end', counter(body, 240)),
@@ -203,7 +203,7 @@
   function renderHistory(view) {
     var tbody = h('tbody');
     var refresh = h('button.btn.btn--ghost.btn--sm', { type: 'button', text: 'Refresh' });
-    view.appendChild(ui.pageHead('Notifications', 'Campaign history with delivery counts.', refresh));
+    view.appendChild(ui.pageHead('Push notifications', 'What was sent, with delivery counts.', refresh));
     view.appendChild(tabs('history'));
     var wrap = h('div.card.section-gap', h('div.table-wrap', h('table.table',
       h('thead', h('tr', ['Created', 'Push', 'Audience', 'Status', 'Send time', 'Riders', 'Reached', 'Sent', 'Failed', 'Invalid tokens', 'News off', 'Capped', ''].map(function (t, i) { return h('th', { class: i >= 5 && i <= 11 ? 'num' : '', text: t }); }))),
@@ -240,8 +240,7 @@
   // ==================================================================== SMS
   function renderSms(view) {
     var body = h('div', ui.loading());
-    view.appendChild(ui.pageHead('Notifications', 'Server SMS to emergency contacts during an SOS, and the "safe now" follow-up.'));
-    view.appendChild(tabs('sms'));
+    view.appendChild(h('p.muted.section-gap', { text: 'Server SMS to emergency contacts during an SOS, and the "safe now" follow-up.' }));
     view.appendChild(body);
     api('GET', '/admin/sms/settings').then(function (r) { draw(r); }).catch(function (e) { clear(body).appendChild(ui.error(e)); });
 
@@ -302,20 +301,13 @@
     }
   }
 
-  CR.sections.notifications = {
-    title: 'Notifications',
+  var pushSection = {
+    title: 'Push notifications',
     render: function (view, arg) {
       if (arg === 'history') return renderHistory(view);
-      if (arg === 'sms') return renderSms(view);
-      if (arg === 'email' || arg.indexOf('email/') === 0) {
-        view.appendChild(ui.pageHead('Notifications', 'E-mail studio: marketing e-mails with coupons, built from templates. Sent only to riders who turned on offer e-mails on the website (account notices about a rider\'s own plan excepted).'));
-        view.appendChild(tabs('email'));
-        // 3.57: the E-mail studio (email_studio.js) extends the 3.56 Offers composer (offers.js, kept as the fallback).
-        if (CR.renderEmailStudio) return CR.renderEmailStudio(view, arg.slice(6));
-        if (CR.renderOfferEmail) return CR.renderOfferEmail(view);
-        return view.appendChild(h('div.banner.banner--bad', { text: 'The e-mail composer did not load. Reload the page.' }));
-      }
       return renderCompose(view);
     },
   };
+  CR.sections.push = pushSection;
+  CR.renderSms = function (view) { renderSms(view); };
 })();

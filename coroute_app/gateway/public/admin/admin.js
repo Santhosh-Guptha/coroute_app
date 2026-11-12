@@ -7,7 +7,7 @@
   var TOKEN_KEY = 'cr.admin.token';
   var USER_KEY = 'cr.admin.user';
   var ACTIVE_KEY = 'cr.admin.lastActive';
-  var IDLE_MS = 30 * 60 * 1000;
+  var IDLE_MS = 30 * 60 * 1000; // 3.57: shortened (never lengthened) for QA by sessionStorage cr.idleMs
   var ADMIN_ROLES = ['MASTER_ADMIN'];
 
   var CR = window.CR = { sections: {}, state: { config: null, planOptions: null } };
@@ -129,38 +129,68 @@
   CR.ui = { toast: toast, dialog: dialog, confirm: confirmDialog };
 
   // ------------------------------------------------------------------ session & API
+  /* 3.57 sessions (docs/features_355/sessions_and_security.md): a 15-minute access token in sessionStorage, the
+     refresh token in the httpOnly __Host-cr_adm cookie (SameSite=Strict; this script never sees it). A 401
+     TOKEN_EXPIRED is refreshed once and the call repeated once; any other session end shows the sign-in with a
+     message. 30 minutes without activity signs out, with a warning 2 minutes before. Sign out -> home page. */
   function store(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* private mode */ } }
   function read(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
-  function token() { return read(TOKEN_KEY) || read('coroute_session'); }
-  function tokenExpired(t) {
-    try {
-      var p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      return p.exp && p.exp * 1000 < Date.now();
-    } catch (e) { return true; }
-  }
+  function token() { return read(TOKEN_KEY); }
+  // QA only: a shorter idle time for this tab (never longer than the real one).
+  (function () { var q = Number(read('cr.idleMs')); if (q > 0 && q < IDLE_MS) IDLE_MS = q; })();
+  var WARN_MS = Math.min(2 * 60 * 1000, Math.floor(IDLE_MS / 3));
 
   function ApiError(status, body) { var e = new Error((body && body.error) || ('Request failed (' + status + ')')); e.status = status; e.body = body || {}; e.code = body && body.code; return e; }
 
-  /** fetch /api + path with the admin's token. opts: { raw: true } returns the Response. 401 signs out. */
+  var CONSOLE = { 'X-CoRoute-Client': 'admin', 'X-CoRoute-CSRF': '1' };
+  var refreshing = null;
+  /** One refresh at a time; resolves the refresh answer ({token, user}) or null. */
+  function refresh() {
+    if (refreshing) return refreshing;
+    refreshing = fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'admin', 'X-CoRoute-CSRF': '1' }, body: JSON.stringify({ client: 'admin' }) })
+      .then(function (r) { if (r.status === 204) return null; return r.json().catch(function () { return {}; }).then(function (j) { return r.ok && j.token ? j : null; }); })
+      .catch(function () { return null; })
+      .then(function (j) { refreshing = null; if (j) store(TOKEN_KEY, j.token); return j; });
+    return refreshing;
+  }
+
+  /** fetch /api + path with the admin's token. opts: { raw: true } returns the Response. A 401 refreshes once, then signs out. */
   function api(method, path, body, opts) {
     opts = opts || {};
-    var headers = { Authorization: 'Bearer ' + token() };
-    var init = { method: method, headers: headers, credentials: 'omit', cache: 'no-store' };
-    if (body instanceof Blob || body instanceof ArrayBuffer) { init.body = body; headers['Content-Type'] = opts.type || 'application/octet-stream'; }
-    else if (body !== undefined && body !== null) { init.body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
-    touch();
-    return fetch('/api' + path, init).then(function (res) {
+    function send() {
+      var headers = { Authorization: 'Bearer ' + token(), 'X-CoRoute-Client': 'admin' };
+      var init = { method: method, headers: headers, credentials: 'same-origin', cache: 'no-store' };
+      if (body instanceof Blob || body instanceof ArrayBuffer) { init.body = body; headers['Content-Type'] = opts.type || 'application/octet-stream'; }
+      else if (body !== undefined && body !== null) { init.body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
+      return fetch('/api' + path, init);
+    }
+    function handle(res, retried) {
       var fresh = res.headers.get('X-CoRoute-Token');
       if (fresh) store(TOKEN_KEY, fresh);
-      if (res.status === 401) { signOut('Your session has ended. Please sign in again.'); throw new ApiError(401, { error: 'Signed out' }); }
+      if (res.status === 401) {
+        return res.clone().json().catch(function () { return {}; }).then(function (j) {
+          if (j.code === 'TOKEN_EXPIRED' && !retried) {
+            return refresh().then(function (ok) {
+              if (!ok) { signOut('You were signed out. Please sign in again.'); throw new ApiError(401, { error: 'Signed out' }); }
+              return send().then(function (r2) { return handle(r2, true); });
+            });
+          }
+          if (!j.code || j.code === 'SESSION_INVALID' || j.code === 'TOKEN_EXPIRED') { signOut('You were signed out. Please sign in again.'); throw new ApiError(401, { error: 'Signed out' }); }
+          throw new ApiError(401, j);
+        });
+      }
       if (opts.raw && res.ok) return res;
       return res.json().catch(function () { return {}; }).then(function (j) {
         if (!res.ok) throw new ApiError(res.status, j);
         return j;
       });
-    });
+    }
+    // (No touch() here: background polls must not keep an unattended console signed in.)
+    return send().then(function (res) { return handle(res, false); });
   }
   CR.api = api;
+  CR.token = token;
   CR.download = function (blob, name) {
     var url = URL.createObjectURL(blob);
     var a = h('a', { href: url, download: name });
@@ -168,33 +198,77 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
   };
 
-  function touch() { store(ACTIVE_KEY, String(Date.now())); }
+  // ---- idle: warning 2 minutes before, sign-out at 30 minutes (shared by every admin tab of this browser) ----
+  function lastActive() { var v = 0; try { v = Number(localStorage.getItem(ACTIVE_KEY)) || 0; } catch (e) { v = Number(read(ACTIVE_KEY)) || 0; } return v; }
+  function touch() { var n = String(Date.now()); try { localStorage.setItem(ACTIVE_KEY, n); } catch (e) { store(ACTIVE_KEY, n); } }
   var idleTimer = null;
+  var warnBox = null;
   function startIdleWatch() {
     touch();
     ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, touchThrottled, { passive: true }); });
     clearInterval(idleTimer);
-    idleTimer = setInterval(checkIdle, 15000);
+    idleTimer = setInterval(checkIdle, 1000);
   }
   var lastTouch = 0;
-  function touchThrottled() { var n = Date.now(); if (n - lastTouch > 5000) { lastTouch = n; touch(); } }
+  function touchThrottled() { if (warnBox) return; var n = Date.now(); if (n - lastTouch > 5000) { lastTouch = n; touch(); } }
   function checkIdle() {
     if (!token()) return;
-    var last = Number(read(ACTIVE_KEY)) || 0;
-    if (Date.now() - last > IDLE_MS) signOut('You were signed out after 30 minutes without activity.');
-    else if (tokenExpired(token())) signOut('Your session has ended. Please sign in again.');
+    var left = IDLE_MS - (Date.now() - lastActive());
+    if (left <= 0) { hideWarn(); signOut('You were signed out after 30 minutes without activity.', { server: true }); return; }
+    if (left <= WARN_MS) showWarn(left); else hideWarn();
   }
+  function showWarn(left) {
+    var secs = Math.ceil(left / 1000);
+    var text = 'For your security you will be signed out in ' + Math.floor(secs / 60) + ':' + ('0' + (secs % 60)).slice(-2) + ' because there was no activity.';
+    if (warnBox) { warnBox.querySelector('[data-idle-text]').textContent = text; return; }
+    var stay = h('button.btn.btn--primary', { type: 'button', text: 'Stay signed in', id: 'idle-stay' });
+    var out = h('button.btn', { type: 'button', text: 'Sign out now' });
+    var box = h('div.dialog', { role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'idle-title', 'aria-describedby': 'idle-text' },
+      h('div.dialog__head', h('h2', { id: 'idle-title', text: 'Still there?' })),
+      h('div.dialog__body', h('p', { id: 'idle-text', 'data-idle-text': '', text: text })),
+      h('div.dialog__foot', out, stay));
+    warnBox = h('div.scrim.scrim--idle', box);
+    stay.addEventListener('click', function () { touch(); hideWarn(); refresh(); });
+    out.addEventListener('click', function () { hideWarn(); signOut('', { server: true, home: true }); });
+    document.body.appendChild(warnBox);
+    stay.focus();
+  }
+  function hideWarn() { if (warnBox) { warnBox.remove(); warnBox = null; } }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) checkIdle(); });
+  // Signed out in another admin tab: this one follows.
+  window.addEventListener('storage', function (e) { if (e.key === 'cr.admin.signedOut' && e.newValue && token()) signOut('You signed out in another tab.'); });
+  // Back / forward cache: never show a restored console without checking the session again.
+  window.addEventListener('pageshow', function (e) { if (e.persisted) { if (!token()) signOut(''); else window.location.reload(); } });
 
-  function signOut(message) {
-    store(TOKEN_KEY, null); store(USER_KEY, null); store(ACTIVE_KEY, null);
+  /**
+   * Ends the admin session. opts.server: also end it on the server (logout + cookie cleared); opts.home: then go
+   * to the home page (the Sign out button). Without them (the server already ended it) the sign-in shows `message`.
+   */
+  function signOut(message, opts) {
+    opts = opts || {};
+    var t = token();
+    if (opts.server || opts.home) {
+      var headers = { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'admin', 'X-CoRoute-CSRF': '1' };
+      if (t) headers.Authorization = 'Bearer ' + t;
+      var done = fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: true, headers: headers, body: JSON.stringify({ client: 'admin' }) })
+        .catch(function () { /* the session also ends on the server after 30 minutes */ });
+      try { localStorage.setItem('cr.admin.signedOut', String(Date.now())); } catch (e) { /* ignore */ }
+      if (opts.home) {
+        store(TOKEN_KEY, null); store(USER_KEY, null);
+        done.then(function () { window.location.replace('/'); });
+        return;
+      }
+    }
+    store(TOKEN_KEY, null); store(USER_KEY, null);
     clearInterval(idleTimer);
+    hideWarn();
     CR.state.config = null; CR.state.planOptions = null;
     document.querySelectorAll('.scrim').forEach(function (s) { s.remove(); });
     if (CR.sections.marketing && CR.sections.marketing.teardown) CR.sections.marketing.teardown();
     clear($('view'));
     $('shell').hidden = true;
     $('signin').hidden = false;
+    $('mfa-form').hidden = true; $('mfa-codes').hidden = true; $('signin-form').hidden = false;
     var err = $('signin-error');
     err.hidden = !message; err.textContent = message || '';
     err.classList.toggle('form-error', true);
@@ -203,6 +277,68 @@
   }
   CR.signOut = signOut;
 
+  /** A session answer ({token, user}) -> the console; a 2-step answer ({mfa, mfaToken}) -> the code form. */
+  var mfaToken = null; var mfaMode = 'verify'; var useRc = false;
+  function sessionReady(j) {
+    if (j.mfa && j.mfaToken) return startMfa(j);
+    var role = j.user && j.user.role;
+    if (ADMIN_ROLES.indexOf(role) < 0) throw new Error('This account is not a CoRoute administrator.');
+    store(TOKEN_KEY, j.token);
+    store(USER_KEY, JSON.stringify({ name: j.user.name || '', email: j.user.email || '', role: role }));
+    $('signin-pw').value = '';
+    if (j.recoveryCodes && j.recoveryCodes.length) return showRecoveryCodes(j.recoveryCodes);
+    enterShell();
+  }
+  function post(path, body) {
+    return fetch('/api' + path, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'admin' }, body: JSON.stringify(body) })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { return { res: res, j: j }; }); });
+  }
+  function startMfa(j) {
+    mfaToken = j.mfaToken; mfaMode = j.mfa; useRc = false;
+    $('signin-form').hidden = true; $('mfa-form').hidden = false;
+    $('mfa-error').hidden = true; $('mfa-code').value = '';
+    $('mfa-setup').hidden = mfaMode !== 'enroll';
+    $('mfa-rc').hidden = mfaMode === 'enroll';
+    $('mfa-title').textContent = mfaMode === 'enroll' ? 'Set up 2-step verification' : '2-step verification';
+    $('mfa-intro').textContent = mfaMode === 'enroll' ? 'Required for administrators. It takes a minute.' : 'Enter the 6-digit code from your authenticator app.';
+    if (mfaMode === 'enroll') {
+      post('/auth/mfa/enroll/start', { mfaToken: mfaToken }).then(function (r) {
+        if (!r.res.ok) { mfaFail(r.j); return; }
+        $('mfa-secret').textContent = String(r.j.secret || '').replace(/(.{4})/g, '$1 ').trim();
+        drawQr($('mfa-qr'), r.j.otpauthUrl);
+      });
+    }
+    $('mfa-code').focus();
+  }
+  function drawQr(box, text) {
+    clear(box);
+    var q = null;
+    try { q = window.CRQR && window.CRQR.encode(text); } catch (e) { q = null; }
+    if (!q) return;
+    var ns = 'http://www.w3.org/2000/svg'; var n = q.size + 8;
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + n + ' ' + n); svg.setAttribute('width', '200'); svg.setAttribute('height', '200');
+    var bg = document.createElementNS(ns, 'rect'); bg.setAttribute('width', n); bg.setAttribute('height', n); bg.setAttribute('fill', '#fff'); svg.appendChild(bg);
+    for (var y = 0; y < q.size; y++) for (var x = 0; x < q.size; x++) {
+      if (!q.isDark(x, y)) continue;
+      var r = document.createElementNS(ns, 'rect');
+      r.setAttribute('x', x + 4); r.setAttribute('y', y + 4); r.setAttribute('width', 1); r.setAttribute('height', 1); r.setAttribute('fill', '#000');
+      svg.appendChild(r);
+    }
+    box.appendChild(svg);
+  }
+  function mfaFail(j) {
+    var err = $('mfa-error');
+    if (j && j.code === 'MFA_EXPIRED') { signOut('That took too long. Sign in again.'); return; }
+    err.hidden = false; err.textContent = (j && j.error) || 'That code is not right.';
+  }
+  function showRecoveryCodes(codes) {
+    $('mfa-form').hidden = true; $('mfa-codes').hidden = false;
+    var ol = clear($('mfa-codes-list'));
+    codes.forEach(function (c) { ol.appendChild(h('li', h('code', { text: c }))); });
+    $('mfa-codes-done').focus();
+  }
+
   function initSignIn() {
     $('signin-form').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -210,21 +346,39 @@
       var err = $('signin-error'); var btn = $('signin-btn');
       if (!id || !pw) { err.hidden = false; err.textContent = 'Enter your email and password.'; return; }
       btn.disabled = true; btn.textContent = 'Signing in…'; err.hidden = true;
-      fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ identifier: id, password: pw }) })
-        .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { return { res: res, j: j }; }); })
+      post('/auth/login', { identifier: id, password: pw, client: 'admin' })
         .then(function (r) {
           if (r.res.status === 429) throw new Error('Too many attempts. Wait a few minutes and try again.');
+          // Round 4 ride lock: the admin's phone is on a ride; the website /signin offers the e-mail code override.
+          if (r.res.status === 423) throw new Error((r.j.error || 'You are on a ride on another phone.') + ' To sign in here anyway, use "Send code to my e-mail" on ' + location.origin + '/signin.');
           if (!r.res.ok) throw new Error(r.j.error || 'Sign in failed.');
-          var role = r.j.user && r.j.user.role;
-          if (ADMIN_ROLES.indexOf(role) < 0) throw new Error('This account is not a CoRoute administrator.');
-          store(TOKEN_KEY, r.j.token);
-          store(USER_KEY, JSON.stringify({ name: r.j.user.name || '', email: r.j.user.email || '', role: role }));
-          $('signin-pw').value = '';
-          enterShell();
+          sessionReady(r.j);
         })
         .catch(function (e2) { err.hidden = false; err.textContent = e2.message || 'Sign in failed.'; })
         .then(function () { btn.disabled = false; btn.textContent = 'Sign in'; });
     });
+    $('mfa-rc').addEventListener('click', function () {
+      useRc = !useRc;
+      $('mfa-label').textContent = useRc ? 'Recovery code' : '6-digit code';
+      this.textContent = useRc ? 'Use the 6-digit code instead' : 'Use a recovery code instead';
+      $('mfa-code').setAttribute('inputmode', useRc ? 'text' : 'numeric');
+      $('mfa-code').value = ''; $('mfa-code').focus();
+    });
+    $('mfa-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var v = $('mfa-code').value.trim();
+      if (!v) { mfaFail({ error: 'Enter the code.' }); return; }
+      var btn = $('mfa-btn'); btn.disabled = true;
+      var path = mfaMode === 'enroll' ? '/auth/mfa/enroll/confirm' : '/auth/mfa/verify';
+      var body = { mfaToken: mfaToken, client: 'admin' };
+      if (useRc) body.recoveryCode = v; else body.code = v.replace(/\s+/g, '');
+      post(path, body).then(function (r) {
+        btn.disabled = false;
+        if (!r.res.ok) { mfaFail(r.j); return; }
+        try { sessionReady(r.j); } catch (e2) { mfaFail({ error: e2.message }); }
+      });
+    });
+    $('mfa-codes-done').addEventListener('click', function () { $('mfa-codes').hidden = true; enterShell(); });
   }
 
   function enterShell() {
@@ -251,12 +405,28 @@
 
   // ------------------------------------------------------------------ navigation
   var current = null;
+  /** Old links (bookmarks, other pages) to sections that moved in 3.57 round 3. */
+  var MOVED = [
+    [/^#\/notifications\/email\/campaigns/, '#/email/history'], [/^#\/notifications\/email\/automation/, '#/email/automations'],
+    [/^#\/notifications\/email\/(templates|settings)/, '#/email/$1'], [/^#\/notifications\/email/, '#/email'],
+    [/^#\/notifications\/sms/, '#/settings/sms'], [/^#\/notifications\/history/, '#/push/history'], [/^#\/notifications$/, '#/push'],
+    [/^#\/templates$/, '#/settings/templates'],
+  ];
+  /** Which menu item a section belongs to (sub-pages light up their parent). */
+  var NAV_OF = { templates: 'settings' };
   function route() {
     if (!token()) return;
+    for (var i = 0; i < MOVED.length; i++) {
+      if (MOVED[i][0].test(location.hash)) { location.replace(location.hash.replace(MOVED[i][0], MOVED[i][1])); return; }
+    }
     var m = /^#\/([a-z]+)(?:\/(.*))?$/.exec(location.hash || '');
-    var name = m && CR.sections[m[1]] ? m[1] : 'payments';
+    var name = m && CR.sections[m[1]] ? m[1] : (CR.sections.overview ? 'overview' : 'payments');
     var arg = m && m[2] ? decodeURIComponent(m[2]) : '';
-    document.querySelectorAll('#nav a').forEach(function (a) { if (a.dataset.section === name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    var navName = NAV_OF[name] || name;
+    document.querySelectorAll('#nav a').forEach(function (a) { if (a.dataset.section === navName) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    document.body.classList.remove('nav-open');
+    var mb = $('menu-btn'); if (mb) mb.setAttribute('aria-expanded', 'false');
+    var sc = $('side-scrim'); if (sc) sc.hidden = true;
     if (current && current !== name && CR.sections[current].teardown) CR.sections[current].teardown();
     current = name;
     var view = clear($('view'));
@@ -1012,27 +1182,26 @@
   document.addEventListener('DOMContentLoaded', function () {
     initTheme();
     initSignIn();
-    $('signout').addEventListener('click', function () { signOut(''); });
-    var t = token();
-    if (t && !tokenExpired(t)) {
-      if (!read(USER_KEY)) {
-        fetch('/api/me', { headers: { Authorization: 'Bearer ' + t } })
-          .then(function (r) { return r.json(); })
-          .then(function (u) {
-            if (ADMIN_ROLES.indexOf(u && u.role) >= 0) {
-              store(USER_KEY, JSON.stringify(u));
-              store(TOKEN_KEY, t);
-              touch();
-              enterShell();
-            } else {
-              signOut('This account is not a CoRoute administrator.');
-            }
-          }).catch(function () { enterShell(); });
-      } else {
+    // Sign out: the server session ends and the cookie is cleared, then the home page (Back cannot return).
+    $('signout').addEventListener('click', function () { signOut('', { server: true, home: true }); });
+    var idle = lastActive() && Date.now() - lastActive() > IDLE_MS;
+    if (idle) { signOut('You were signed out after 30 minutes without activity.', { server: true }); return; }
+    // A reload or a new tab: the session continues through the httpOnly cookie (refresh), if it is still valid.
+    refresh().then(function (j) {
+      if (j && j.user && ADMIN_ROLES.indexOf(j.user.role) >= 0) {
+        store(USER_KEY, JSON.stringify({ name: j.user.name || '', email: j.user.email || '', role: j.user.role }));
         enterShell();
+        return;
       }
-    } else {
-      signOut(t ? 'You were signed out after 30 minutes without activity.' : '');
-    }
+      // No console cookie, but this tab still holds a token (an older sign-in): the server checks it.
+      var t = token();
+      if (!t) { signOut(''); return; }
+      fetch('/api/me', { headers: { Authorization: 'Bearer ' + t }, credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (u) {
+          if (u && ADMIN_ROLES.indexOf(u.role) >= 0) { store(USER_KEY, JSON.stringify({ name: u.name || '', email: u.email || '', role: u.role })); enterShell(); }
+          else signOut(u ? 'This account is not a CoRoute administrator.' : 'You were signed out. Please sign in again.');
+        }, function () { signOut('Could not reach CoRoute. Check your connection.'); });
+    });
   });
 })();

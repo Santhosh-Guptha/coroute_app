@@ -12,6 +12,8 @@
  * Playwright is resolved from the gateway's node_modules, then the global npm root (never installed here).
  */
 process.env.NODE_ENV = 'test';
+// 3.57: these smoke runs check the console sections, not 2-step sign-in (tool/security_smoke.js does).
+process.env.ADMIN_MFA_ENFORCE = 'off';
 process.env.BOOTSTRAP_ADMIN_EMAILS = 'smoke.admin@coroute.test';
 process.env.PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN || 'https://coroute.example';
 
@@ -106,6 +108,8 @@ function pngSize(buf) {
     page.on('pageerror', (e) => problems.push(`[${theme}] page error: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error' && !/status of 40[134]/.test(m.text())) problems.push(`[${theme}] console: ${m.text()}`); });
     const tag = `${theme}${viewport.width < 1200 ? '-tablet' : ''}`;
+    // 3.57 round 3: sections are opened by their hash (on tablets the menu is a drawer).
+    const nav = async (section) => { await page.evaluate((s) => { location.hash = '#/' + s; }, section); };
     const shot = async (name) => { const f = path.join(OUT, `${name}-${tag}.png`); await page.waitForTimeout(250); await page.screenshot({ path: f, fullPage: false }); shots.push(f); };
 
     await page.goto(`${origin}/admin`);
@@ -121,7 +125,9 @@ function pngSize(buf) {
     await page.fill('#signin-id', 'smoke.admin@coroute.test'); await page.fill('#signin-pw', PASSWORD); await page.click('#signin-btn');
     await page.waitForSelector('#shell:not([hidden])');
 
-    // Payments
+    // Payments (3.57 round 3: the console opens on Overview)
+    await page.waitForSelector('#view .tile__value');
+    await nav('payments');
     await page.waitForSelector('#view tbody tr.is-link');
     await page.waitForSelector('#view .tile__value');
     await shot('01-payments');
@@ -137,13 +143,13 @@ function pngSize(buf) {
     }
 
     // Plans & pricing
-    await page.click('#nav a[data-section="plans"]');
+    await nav('plans');
     await page.waitForSelector('text=Payment gateway');
     await page.waitForSelector('text=Audit log');
     await shot('02-plans');
 
     // Coupons
-    await page.click('#nav a[data-section="coupons"]');
+    await nav('coupons');
     await page.waitForSelector('#view tbody tr[data-code="DIWALI40"]');
     if (full) {
       await page.click('text=New coupon');
@@ -160,7 +166,7 @@ function pngSize(buf) {
     await shot('03-coupons');
 
     // Revenue
-    await page.click('#nav a[data-section="revenue"]');
+    await nav('revenue');
     await page.waitForSelector('#view .chart svg');
     await shot('04-revenue');
     if (full) {
@@ -171,7 +177,7 @@ function pngSize(buf) {
     }
 
     // Marketing studio
-    await page.click('#nav a[data-section="marketing"]');
+    await nav('marketing');
     if (full) {
       await page.goto(`${origin}/admin#/marketing/new?coupon=SMOKE25`);
       await page.waitForSelector('.starter[data-starter="festive"] canvas');
@@ -211,9 +217,10 @@ function pngSize(buf) {
       await page.waitForTimeout(500);
       await shot('05c-marketing-editor');
     }
-    // Sign out returns to the sign-in card.
+    // 3.57: Sign out ends the server session and goes to the home page.
+    if (await page.isVisible('#menu-btn')) await page.click('#menu-btn');
     await page.click('#signout');
-    await page.waitForSelector('#signin:not([hidden])');
+    await page.waitForURL((u) => new URL(u).pathname === '/');
     await ctx.close();
   }
 
