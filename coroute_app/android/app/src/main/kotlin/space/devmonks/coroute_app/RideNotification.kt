@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -78,6 +79,15 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         private const val RC_TALK_TOGGLE = 7114
         private const val RC_MUTE_TOGGLE = 7115
         private const val RC_URGENT_FULL = 7200
+
+        /**
+         * Notification.EXTRA_REQUEST_PROMOTED_ONGOING (API 36), written as its value so the request is the same
+         * whatever the compile SDK. Android 16 promotes the notification to a Live Update when it qualifies.
+         */
+        private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
+
+        /** The status bar chip of a Live Update shows about this many characters. */
+        private const val LIVE_CHIP_MAX = 7
 
         private const val DEFAULT_ID = 1001
         private const val DEFAULT_CHANNEL = "coroute_convoy"
@@ -194,16 +204,9 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         return true
     }
 
-    @Suppress("DEPRECATION")
+    /** Over the lock screen and screen on for this SOS launch ([LockWindow] alarm; the hold screen clears it). */
     private fun showOverLockScreen() {
-        if (Build.VERSION.SDK_INT >= 27) {
-            activity.setShowWhenLocked(true)
-            activity.setTurnScreenOn(true)
-        } else {
-            activity.window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
-        }
+        LockWindow.setAlarm(activity, true, keepScreenOn = false)
     }
 
     /** Sends the press to Dart; if nobody answers, keeps it (activity) or opens the app (broadcast). */
@@ -564,6 +567,19 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         }
         if (toneColor != null) publicVersion.setColor(toneColor) else publicVersion.setColor(color(R.color.ride_notif_accent))
 
+        // Android 16 (API 36): a Live Update (promoted ongoing notification, standard template) for a normal ride
+        // when Dart sent its content and the rider allows Live Updates for CoRoute; everything else as before.
+        if (Build.VERSION.SDK_INT >= 36 && mode == "RIDE") {
+            val live = args["live"] as? Map<*, *>
+            if (live != null) {
+                val promoted = buildLiveUpdate(
+                    live, channelId, content, publicVersion.build(), lockScreenPublic, sosLabel,
+                    talkToggle && showTalk, talkLabel, showMute, muteLabel,
+                )
+                if (promoted != null) return promoted
+            }
+        }
+
         val extras = Bundle()
         extras.putBoolean(EXTRA_RICH, true)
         val b = builder(channelId)
@@ -587,6 +603,109 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         if (Build.VERSION.SDK_INT >= 26) b.setColorized(false)
         if (Build.VERSION.SDK_INT >= 31) b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         return b.build()
+    }
+
+    /**
+     * Android 16 Live Update (docs/features_355/lock_screen_cockpit.md §2b): the ride as a promoted ongoing
+     * notification: next turn and distance (or the group status) as the title, a short status bar chip, route
+     * progress (Notification.ProgressStyle) and SOS / Talk / Mute / Map actions. Promotion needs: ongoing, a
+     * title, no custom views, not colorized, a channel above IMPORTANCE_MIN, POST_PROMOTED_NOTIFICATIONS in the
+     * manifest, and NotificationManager.canPostPromotedNotifications() (the rider can turn Live Updates off for
+     * CoRoute). The API 36 calls that are new in Android 16 go through reflection, so this compiles with any
+     * compile SDK and falls back to BigTextStyle when a call is missing. Null: post the full notification instead.
+     */
+    @TargetApi(36)
+    private fun buildLiveUpdate(
+        live: Map<*, *>,
+        channelId: String,
+        content: PendingIntent,
+        publicVersion: Notification,
+        lockScreenPublic: Boolean,
+        sosLabel: String,
+        talk: Boolean,
+        talkLabel: String,
+        mute: Boolean,
+        muteLabel: String,
+    ): Notification? {
+        val nm = manager() ?: return null
+        return try {
+            if (!canPostPromoted(nm)) return null
+            val ch = nm.getNotificationChannel(channelId) ?: return null
+            if (ch.importance <= NotificationManager.IMPORTANCE_MIN) return null
+            val title = str(live, "title")
+            if (title.isEmpty()) return null
+            val text = str(live, "text")
+            val chip = str(live, "chip").take(LIVE_CHIP_MAX)
+            val progress = (live["progress"] as? Number)?.toInt() ?: -1
+            val extras = Bundle()
+            extras.putBoolean(EXTRA_RICH, true)
+            extras.putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
+            val icon = Icon.createWithResource(app, app.applicationInfo.icon)
+            val b = Notification.Builder(app, channelId)
+                .setSmallIcon(app.applicationInfo.icon)
+                .setContentTitle(title)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setLocalOnly(true)
+                .setCategory(Notification.CATEGORY_NAVIGATION)
+                .setColor(color(R.color.ride_notif_accent))
+                .setColorized(false)
+                .setContentIntent(content)
+                .setVisibility(if (lockScreenPublic) Notification.VISIBILITY_PUBLIC else Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicVersion)
+                .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+                .addExtras(extras)
+            if (text.isNotEmpty()) b.setContentText(text)
+            // At most three actions in the standard template: SOS first, always.
+            val actions = mutableListOf(Notification.Action.Builder(icon, sosLabel, sosIntent()).build())
+            if (talk) actions.add(Notification.Action.Builder(icon, talkLabel, broadcastIntent(TALK_TOGGLE, "", RC_TALK_TOGGLE)).build())
+            if (mute) actions.add(Notification.Action.Builder(icon, muteLabel, broadcastIntent(MUTE_TOGGLE, "", RC_MUTE_TOGGLE)).build())
+            if (actions.size < 3) actions.add(Notification.Action.Builder(icon, "Map", activityIntent(MAP, "", RC_MAP)).build())
+            for (a in actions.take(3)) b.addAction(a)
+            val style = if (progress in 0..100) progressStyle(progress) else null
+            b.setStyle(style ?: Notification.BigTextStyle().bigText(text.ifEmpty { title }))
+            if (chip.isNotEmpty()) setShortCriticalText(b, chip)
+            b.build()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** NotificationManager.canPostPromotedNotifications() (API 36); false when missing. */
+    private fun canPostPromoted(nm: NotificationManager): Boolean = try {
+        NotificationManager::class.java.getMethod("canPostPromotedNotifications").invoke(nm) as? Boolean ?: false
+    } catch (e: Throwable) {
+        false
+    }
+
+    /** Notification.Builder.setShortCriticalText (API 36): the status bar chip text. */
+    private fun setShortCriticalText(b: Notification.Builder, text: String) {
+        val cls = Notification.Builder::class.java
+        try {
+            cls.getMethod("setShortCriticalText", String::class.java).invoke(b, text)
+        } catch (e: Throwable) {
+            try {
+                cls.getMethod("setShortCriticalText", CharSequence::class.java).invoke(b, text)
+            } catch (e2: Throwable) {
+                // no chip: the title still says it
+            }
+        }
+    }
+
+    /** Notification.ProgressStyle (API 36): one segment in the app colour, filled to [percent]. Null when missing. */
+    private fun progressStyle(percent: Int): Notification.Style? = try {
+        val styleClass = Class.forName("android.app.Notification\$ProgressStyle")
+        val segmentClass = Class.forName("android.app.Notification\$ProgressStyle\$Segment")
+        val style = styleClass.getConstructor().newInstance()
+        val segment = segmentClass.getConstructor(Int::class.javaPrimitiveType).newInstance(100)
+        segmentClass.getMethod("setColor", Int::class.javaPrimitiveType).invoke(segment, color(R.color.ride_notif_accent))
+        styleClass.getMethod("setProgressSegments", List::class.java).invoke(style, listOf(segment))
+        styleClass.getMethod("setStyledByProgress", Boolean::class.javaPrimitiveType).invoke(style, true)
+        styleClass.getMethod("setProgress", Int::class.javaPrimitiveType).invoke(style, percent)
+        style as? Notification.Style
+    } catch (e: Throwable) {
+        null
     }
 
     /** Android 14+ can deny full-screen alerts (Settings > Apps > Special access). */

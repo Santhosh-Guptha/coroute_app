@@ -67,6 +67,18 @@ class SafetyNative {
   static bool get _supported =>
       !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
 
+  /// Round 4 ride lock: a stable key for this phone and app (SHA-256 of Android's app-scoped device id, made on the
+  /// phone), so the rider's own phone may sign in again during its ride after a reinstall. '' when unavailable.
+  static Future<String> deviceKey() async {
+    if (!_supported) return '';
+    try {
+      final v = await _channel.invokeMethod<String>('deviceKey');
+      return v != null && RegExp(r'^[A-Za-z0-9_-]{16,128}$').hasMatch(v) ? v : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   static Future<DeviceSafetyInfo> deviceInfo() async {
     final cached = _info;
     if (cached != null) return cached;

@@ -47,6 +47,9 @@ class EmergencySosSheet extends StatelessWidget {
 
   static bool _isShowing = false;
 
+  /// True while the SOS sheet is open (its dialogs and calls work over the locked cockpit).
+  static bool get isShowing => _isShowing;
+
   static Future<void> show(
     BuildContext context, {
     required double lat,

@@ -1,28 +1,70 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show PaintingBinding;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
+import '../../domain/auth/session_policy.dart';
 import '../../domain/garage/bike_sync.dart';
+import '../local/sensitive_prefs.dart';
 import 'api_client.dart';
+import 'ride_chat_store.dart';
+import 'safety_native.dart';
+import 'session_guard.dart';
 import 'feature_flags_service.dart' show FeatureFlagsService;
 import 'friends_service.dart' show FriendsService;
 
 /// Account state. Registration (email + password, or Google) is mandatory;
 /// there is no guest mode. Roles come from the database, not from the app.
+///
+/// 3.57 sessions (docs/features_355/sessions_and_security.md): a sign-out (the rider's, or the gateway ending the
+/// session) never happens during a ride, an SOS, a crash countdown, a convoy or while emergency texts wait
+/// ([SessionGuard]); it runs when the ride is over. Signing out ends the session on the gateway, removes the push
+/// token, wipes the tokens and the cached personal data, and asks whether to keep the emergency info (contact and
+/// Medical ID on the lock screen) on this phone (default: keep, because safety works without an account).
 class AuthService extends ChangeNotifier {
-  AuthService(this._api) {
+  AuthService(this._api, {SessionGuard? guard}) : _guard = guard ?? SessionGuard.instance {
     _api.addListener(_onApiChanged);
     _loadSavedSession();
   }
 
+  final SessionGuard _guard;
+  final SensitivePrefs _secure = SensitivePrefs();
+
+  /// The guard that holds a sign-out back during a ride (the UI shows its notice).
+  SessionGuard get sessionGuard => _guard;
+
+  /// Run before the session is revoked on the gateway (the push token is removed while the token still works).
+  final List<Future<void> Function()> beforeSignOut = [];
+
+  /// Run after a sign-out wiped the session (cached personal data, background services that need an account).
+  final List<Future<void> Function()> afterSignOut = [];
+
+  /// True while the gateway already ended the session but a ride keeps this phone signed in locally.
+  bool _endedDuringRide = false;
+  bool get sessionEndedDuringRide => _endedDuringRide;
+
   /// The API client dropped the token because the gateway ended the session.
   void _onApiChanged() {
-    if (!_api.hasToken && _userId != null && !_isLoading) {
-      _lastSignOutReason = _api.lastSessionEndMessage ?? _lastSignOutReason;
-      _clearSession().ignore();
+    if (!_api.hasToken && _userId != null && !_isLoading) _sessionEndedByGateway();
+  }
+
+  /// The gateway ended the session: sign out now, or when the ride is over (idempotent).
+  void _sessionEndedByGateway() {
+    if (_userId == null) return;
+    _lastSignOutReason = _api.lastSessionEndMessage ?? _lastSignOutReason;
+    if (_guard.busy && !_endedDuringRide) {
+      // Never mid-ride: keep the profile (SOS texts, Medical ID) and the screen until the ride is over.
+      _endedDuringRide = true;
+      notifyListeners();
     }
+    // A sign-out already waits for the ride to end (the rider's own, or an earlier session end): it runs then.
+    if (_guard.pending) return;
+    _guard.runWhenSafe(SignOutCause.sessionEnded, () => _wipe(keepEmergencyInfo: true)).ignore();
   }
 
   String? _lastSignOutReason;
@@ -147,7 +189,8 @@ class AuthService extends ChangeNotifier {
   /// Until then the form only sends the medical fields the rider actually changed.
   bool get medicalLoaded => _medicalLoaded;
   bool get isLoading => _isLoading;
-  bool get isAuthenticated => _api.hasToken && _userId != null && !isGuest;
+  /// Signed in. Also true while a sign-out waits for the ride to end (the session already ended on the gateway).
+  bool get isAuthenticated => (_api.hasToken || _endedDuringRide) && _userId != null && !isGuest;
   bool get isMasterAdmin => roleIsAdmin(_role);
 
   /// True if the user is registered or designated as a pillion passenger.
@@ -186,10 +229,12 @@ class AuthService extends ChangeNotifier {
     _role = prefs.getString(AppConstants.keyUserRole);
     _name = prefs.getString(AppConstants.keyUserName);
     _vehicleType = prefs.getString(AppConstants.keyVehicleType) ?? 'Motorcycle';
-    _phone = prefs.getString(AppConstants.keyPhone) ?? '';
-    _emergencyContact = prefs.getString(AppConstants.keyEmergencyContact) ?? '';
-    _emergencyContactName =
-        prefs.getString(AppConstants.keyEmergencyName) ?? '';
+    // 3.57: phone, emergency contact and e-mail live in the keystore (moved from SharedPreferences once).
+    _email = await _secure.read(prefs, AppConstants.keyUserEmail) ?? _email;
+    _phone = await _secure.read(prefs, AppConstants.keyPhone) ?? '';
+    _emergencyContact = await _secure.read(prefs, AppConstants.keyEmergencyContact) ?? '';
+    _emergencyContactName = await _secure.read(prefs, AppConstants.keyEmergencyName) ?? '';
+    _keepEmergencyInfo = prefs.getBool(keyKeepEmergencyInfo) ?? true;
     _vehicleNo = prefs.getString(AppConstants.keyVehicleNo) ?? '';
     // Guest mode was retired in 3.55: a saved guest session is cleared once, with a clear message.
     if (isGuest) {
@@ -206,9 +251,10 @@ class AuthService extends ChangeNotifier {
         if (me is Map) await _applyUser(Map<String, dynamic>.from(me));
       } on ApiException catch (e) {
         if (e.endsSession) {
-          // Revoked token, deleted, held or blocked account, as stated by the gateway.
+          // Revoked token, deleted, held or blocked account, as stated by the gateway. 3.57: through the guard
+          // (never mid-ride; a crash countdown restored at start-up keeps the rider signed in until it is over).
           _lastSignOutReason = e.message;
-          await _clearSession();
+          _sessionEndedByGateway();
         }
       } catch (_) {}
     }
@@ -224,7 +270,7 @@ class AuthService extends ChangeNotifier {
     } on ApiException catch (e) {
       if (e.endsSession) {
         _lastSignOutReason = e.message;
-        await _clearSession();
+        _sessionEndedByGateway();
       }
     } catch (_) {}
   }
@@ -240,6 +286,7 @@ class AuthService extends ChangeNotifier {
     _emergencyContact = u['emergencyContact']?.toString() ?? '';
     _emergencyContactName = u['emergencyContactName']?.toString() ?? '';
     _mustChangePassword = u['mustChangePassword'] == true;
+    _provider = u['provider']?.toString() ?? _provider;
     if (u.containsKey('username')) _username = u['username']?.toString() ?? '';
     // Older gateways do not send these: keep what is known instead of clearing it.
     if (u.containsKey('bloodGroup')) {
@@ -275,19 +322,13 @@ class AuthService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keyUserId, _userId ?? '');
     await prefs.setString(AppConstants.keyUserRole, _role ?? '');
-    await prefs.setString(AppConstants.keyUserEmail, _email ?? '');
+    await _secure.write(prefs, AppConstants.keyUserEmail, _email ?? '');
     await prefs.setString(AppConstants.keyUserName, _name ?? '');
     await prefs.setString(AppConstants.keyVehicleType, _vehicleType ?? '');
-    await prefs.setString(AppConstants.keyPhone, _phone ?? '');
+    await _secure.write(prefs, AppConstants.keyPhone, _phone ?? '');
     await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo ?? '');
-    await prefs.setString(
-      AppConstants.keyEmergencyContact,
-      _emergencyContact ?? '',
-    );
-    await prefs.setString(
-      AppConstants.keyEmergencyName,
-      _emergencyContactName ?? '',
-    );
+    await _secure.write(prefs, AppConstants.keyEmergencyContact, _emergencyContact ?? '');
+    await _secure.write(prefs, AppConstants.keyEmergencyName, _emergencyContactName ?? '');
     notifyListeners();
     _keepAssistOn();
   }
@@ -318,6 +359,10 @@ class AuthService extends ChangeNotifier {
     'error': e is ApiException
         ? e.message
         : 'Something went wrong. Please try again.',
+    // Round 4: the gateway's code and body (ride lock 423, EMAIL_NOT_VERIFIED, wrong-code tries left ...).
+    if (e is ApiException && e.code != null) 'code': e.code,
+    if (e is ApiException) 'statusCode': e.statusCode,
+    if (e is ApiException && e.body != null) 'body': e.body,
   };
 
   Future<Map<String, dynamic>> _consume(dynamic res) async {
@@ -325,7 +370,10 @@ class AuthService extends ChangeNotifier {
       return {'success': false, 'error': 'Unexpected server response.'};
     }
     clearSignOutReason();
-    await _api.setToken(res['token'].toString());
+    _guard.cancel();
+    _endedDuringRide = false;
+    // 3.57: the short access token and its refresh token (older gateways send only `token`).
+    await _api.setSession(res['token'].toString(), refreshToken: res['refreshToken']?.toString());
     await _applyUser(Map<String, dynamic>.from(res['user'] as Map));
     // Login replies may carry the plan beside the user rather than inside it.
     if ((res['user'] as Map)['subscriptionStatus'] is! Map) {
@@ -361,12 +409,71 @@ class AuthService extends ChangeNotifier {
           'emergencyContact': emergencyContact.trim(),
           'emergencyContactName': emergencyContactName.trim(),
           'inviteCode': ?invite,
+          'device': await _device(),
         },
         const Duration(seconds: 15),
         false,
       );
       if (invite != null) await FriendsService.clearPendingInvite();
+      // Round 4: the account waits for its e-mail link (no token yet): the app shows "Check your inbox".
+      if (res is Map && res['pending'] == true && res['token'] == null) {
+        return {'success': false, 'pending': true, 'email': email.trim(), 'message': res['message']?.toString() ?? 'Check your e-mail to finish creating your account', 'resendAfterSec': res['resendAfterSec']};
+      }
       return await _consume(res);
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  // ---- Round 4: e-mail verification, ride lock override, admin 2-step ----
+
+  /// "Send a new link" on the Check your inbox screen (always the same answer from the gateway).
+  Future<Map<String, dynamic>> resendVerification(String email) async {
+    try {
+      final res = await _api.post('/auth/register/resend', {'email': email.trim()}, const Duration(seconds: 15), false);
+      return {'success': true, 'message': res is Map ? res['message']?.toString() : null, 'resendAfterSec': res is Map ? res['resendAfterSec'] : null};
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  /// Sends the ride sign-in code to the account address (after a 423 RIDE_ACTIVE_ELSEWHERE).
+  Future<Map<String, dynamic>> sendRideLockCode(String lockToken) async {
+    try {
+      final res = await _api.post('/auth/ride-lock/code', {'lockToken': lockToken}, const Duration(seconds: 15), false);
+      final m = res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+      return {'success': true, 'resendAfterSec': m['resendAfterSec'], 'sentTo': m['sentTo']};
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  /// The e-mailed code: signs this phone in; the other phone's ride is handed over and it is signed out.
+  Future<Map<String, dynamic>> verifyRideLockCode(String lockToken, String code) async {
+    try {
+      final res = await _api.post('/auth/ride-lock/verify', {'lockToken': lockToken, 'code': code.replaceAll(RegExp(r'[\s-]'), ''), 'device': await _device()},
+          const Duration(seconds: 15), false);
+      return await _consume(res);
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  /// Admin 2-step step-up of this session (TOTP, recovery or e-mailed code), after a 403 MFA_REQUIRED.
+  Future<Map<String, dynamic>> mfaStepUp({String? code, String? recoveryCode, String? emailCode}) async {
+    try {
+      await _api.post('/auth/mfa/step-up', {'code': ?code, 'recoveryCode': ?recoveryCode, 'emailCode': ?emailCode});
+      return {'success': true};
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  /// E-mails a 2-step code (operators without an authenticator app; never administrators).
+  Future<Map<String, dynamic>> mfaSendEmailCode() async {
+    try {
+      final res = await _api.post('/auth/mfa/step-up/email-code', const {});
+      return {'success': true, 'resendAfterSec': res is Map ? res['resendAfterSec'] : null};
     } catch (e) {
       return _fail(e);
     }
@@ -380,7 +487,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await _api.post(
         '/auth/login',
-        {'identifier': identifier.trim(), 'password': password},
+        {'identifier': identifier.trim(), 'password': password, 'device': await _device()},
         const Duration(seconds: 15),
         false,
       );
@@ -410,7 +517,7 @@ class AuthService extends ChangeNotifier {
       }
       final res = await _api.post(
         '/auth/google',
-        {'idToken': idToken},
+        {'idToken': idToken, 'device': await _device()},
         const Duration(seconds: 15),
         false,
       );
@@ -593,7 +700,7 @@ class AuthService extends ChangeNotifier {
       });
       // The server ends every other session and hands this phone a fresh token.
       final fresh = res is Map ? res['token']?.toString() : null;
-      if (fresh != null && fresh.isNotEmpty) await _api.setToken(fresh);
+      if (fresh != null && fresh.isNotEmpty) await _api.setSession(fresh);
       _mustChangePassword = false;
       notifyListeners();
       return {'success': true};
@@ -603,21 +710,150 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Permanently deletes the account and all data tied to it, then signs out.
+  /// 3.57: the gateway asks a 3.57+ build to confirm it is the rider first: the result then has
+  /// `code: REAUTH_REQUIRED`; call [reauthenticate] (password or Google) and try again.
   Future<Map<String, dynamic>> deleteAccount() async {
     try {
       await _api.delete('/me');
-      await _clearSession();
+      await _wipe(keepEmergencyInfo: false);
+      return {'success': true};
+    } on ApiException catch (e) {
+      return {..._fail(e), 'code': e.code};
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  /// 3.57: confirms it is the rider (password, or Google for Google accounts) for a sensitive action.
+  Future<Map<String, dynamic>> reauthenticate({String? password, bool withGoogle = false}) async {
+    try {
+      String? idToken;
+      if (withGoogle) {
+        final account = await _googleSignIn.signIn();
+        idToken = (await account?.authentication)?.idToken;
+        if (idToken == null || idToken.isEmpty) return {'success': false, 'error': 'Google did not confirm. Try again.'};
+      }
+      await _api.post('/auth/reauth', {'password': ?password, 'idToken': ?idToken});
       return {'success': true};
     } catch (e) {
       return _fail(e);
     }
   }
 
+  /// The rider uses Google to sign in (no CoRoute password to confirm with).
+  bool get signsInWithGoogle => _provider == 'google';
+  String _provider = 'password';
+
+  // ---- 3.57 sign out ----
+  static const String keyKeepEmergencyInfo = 'coroute_keep_emergency_info';
+  bool _keepEmergencyInfo = true;
+
+  /// The rider's last answer to "Keep emergency info on this phone?" (default yes). While signed out and true,
+  /// the lock-screen Medical ID and emergency contact stay on the phone (safety works without an account).
+  bool get keepEmergencyInfo => _keepEmergencyInfo;
+
+  /// Signs out. Never during a ride, an SOS, a crash countdown, a convoy or pending emergency texts: then it waits
+  /// and the result says `deferred: true` with the message to show. [everywhere]: every device of the account.
+  /// [keepEmergencyInfo]: keep the emergency contact and Medical ID on this phone (default yes).
+  Future<Map<String, dynamic>> signOut({bool everywhere = false, bool keepEmergencyInfo = true}) async {
+    final cause = everywhere ? SignOutCause.userEverywhere : SignOutCause.user;
+    if (everywhere) {
+      // The gateway must hear it (otherwise nothing changes on the other devices): fail loudly when offline.
+      try {
+        await _api.revokeAllSessions();
+      } catch (e) {
+        return _fail(e);
+      }
+    }
+    final state = _guard.state;
+    final now = await _guard.runWhenSafe(cause, () => _signOutNow(keepEmergencyInfo: keepEmergencyInfo, revoke: !everywhere));
+    if (!now) return {'success': false, 'deferred': true, 'error': SignOutPolicy.deferredMessage(state, cause)};
+    return {'success': true};
+  }
+
+  /// Older callers: a sign-out that keeps the emergency info on this phone.
   Future<void> logout() async {
+    await signOut();
+  }
+
+  Future<void> _signOutNow({required bool keepEmergencyInfo, required bool revoke}) async {
+    for (final f in List.of(beforeSignOut)) {
+      try {
+        await f();
+      } catch (_) {}
+    }
+    if (revoke) await _api.revokeSession();
     try {
       await _googleSignIn.signOut();
     } catch (_) {}
+    await _wipe(keepEmergencyInfo: keepEmergencyInfo);
+  }
+
+  /// Forgets the session and the cached personal data on this phone.
+  Future<void> _wipe({required bool keepEmergencyInfo}) async {
+    _endedDuringRide = false;
+    _keepEmergencyInfo = keepEmergencyInfo;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(keyKeepEmergencyInfo, keepEmergencyInfo);
+    } catch (_) {}
     await _clearSession();
+    await RideChatStore.clearPersonal();
+    // Profile pictures and other images of riders shown in this session.
+    try {
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {}
+    for (final f in List.of(afterSignOut)) {
+      try {
+        await f();
+      } catch (_) {}
+    }
+  }
+
+  /// "Galaxy S24" style label for "Where you're signed in" (manufacturer + model; nothing that identifies the phone).
+  static String? _deviceLabel;
+  Future<Map<String, String>> _device() async {
+    if (_deviceLabel == null) {
+      try {
+        final info = await SafetyNative.deviceInfo().timeout(const Duration(seconds: 2));
+        final m = info.manufacturer.trim();
+        final model = info.model.trim();
+        final brand = m.isEmpty ? '' : '${m[0].toUpperCase()}${m.substring(1)}';
+        _deviceLabel = model.toLowerCase().startsWith(m.toLowerCase()) ? model : '$brand $model'.trim();
+      } catch (_) {
+        _deviceLabel = '';
+      }
+    }
+    // Round 4 ride lock: the same phone may sign in again during its own ride (after a crash, an app kill or a
+    // reinstall). The device key is a hash made on the phone (the gateway stores only a keyed hash of it); the
+    // install id is random per installation. Neither identifies the phone outside CoRoute.
+    _deviceKey ??= await SafetyNative.deviceKey().timeout(const Duration(seconds: 2), onTimeout: () => '');
+    _installId ??= await _loadInstallId();
+    return {
+      'label': _deviceLabel ?? '',
+      'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
+      if ((_deviceKey ?? '').isNotEmpty) 'id': _deviceKey!,
+      if ((_installId ?? '').isNotEmpty) 'installId': _installId!,
+    };
+  }
+
+  static String? _deviceKey;
+  static String? _installId;
+  static const String _installIdKey = 'coroute_install_id';
+
+  static Future<String> _loadInstallId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final have = prefs.getString(_installIdKey);
+      if (have != null && have.length >= 16) return have;
+      final rnd = Random.secure();
+      final id = base64Url.encode(List<int>.generate(24, (_) => rnd.nextInt(256))).replaceAll('=', '');
+      await prefs.setString(_installIdKey, id);
+      return id;
+    } catch (_) {
+      return '';
+    }
   }
 
   bool _clearing = false;
@@ -654,17 +890,16 @@ class AuthService extends ChangeNotifier {
     for (final k in [
       AppConstants.keyUserId,
       AppConstants.keyUserRole,
-      AppConstants.keyUserEmail,
       AppConstants.keyUserName,
       AppConstants.keyVehicleType,
       AppConstants.keyActiveGroupId,
       AppConstants.keyPendingLeaves,
-      AppConstants.keyPhone,
       AppConstants.keyVehicleNo,
-      AppConstants.keyEmergencyContact,
-      AppConstants.keyEmergencyName,
     ]) {
       await prefs.remove(k);
+    }
+    for (final k in [AppConstants.keyUserEmail, AppConstants.keyPhone, AppConstants.keyEmergencyContact, AppConstants.keyEmergencyName]) {
+      await _secure.remove(prefs, k);
     }
     _clearing = false;
     notifyListeners();

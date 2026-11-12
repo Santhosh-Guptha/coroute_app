@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/constants/safety_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/auth_service.dart';
@@ -11,7 +12,11 @@ import '../../data/services/meta_service.dart';
 import '../account/change_password_screen.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../rider/rider_home_screen.dart';
+import '../../domain/auth/account_flows.dart';
+import '../security/secure_screen.dart';
+import 'check_inbox_screen.dart';
 import 'complete_profile_screen.dart';
+import 'ride_lock_dialog.dart';
 
 /// Sign in and create account: one calm screen, one primary button.
 ///
@@ -170,11 +175,83 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (res['success'] == true) {
       _enter(res['isAdmin'] == true);
+    } else if (await _handleRideLock(res)) {
+      return;
     } else {
       setState(() {
         _errorMessage = res['error']?.toString() ?? 'Invalid credentials.';
       });
+      if (needsEmailVerification(res)) _offerNewLink(identifier.contains('@') ? identifier : (res['body'] is Map ? (res['body'] as Map)['email']?.toString() ?? '' : ''));
     }
+  }
+
+  /// Round 4 ride lock: another phone of this account is on a ride (423 RIDE_ACTIVE_ELSEWHERE). Shows the dialog
+  /// with "Send code to my e-mail"; true when the result was such a refusal (signed in or not).
+  Future<bool> _handleRideLock(Map<String, dynamic> res) async {
+    final challenge = RideLockChallenge.fromResult(res);
+    if (challenge == null) return false;
+    final auth = context.read<AuthService>();
+    final ok = await RideLockDialog.show(
+      context,
+      challenge: challenge,
+      sendCode: () async {
+        final r = await auth.sendRideLockCode(challenge.lockToken);
+        final wait = r['resendAfterSec'];
+        final body = r['body'];
+        final retry = body is Map ? body['retryAfterSec'] : null;
+        return (
+          error: r['success'] == true ? null : (r['error']?.toString() ?? 'Could not send the code.'),
+          resendAfterSec: wait is num ? wait.toInt() : (retry is num ? retry.toInt() : null),
+          sentTo: r['sentTo']?.toString(),
+        );
+      },
+      verifyCode: (code) async {
+        final r = await auth.verifyRideLockCode(challenge.lockToken, code);
+        return r['success'] == true ? null : (r['error']?.toString() ?? 'That code did not work.');
+      },
+    );
+    if (!mounted) return true;
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signed in. Your other phone was signed out; your group sees you switched phones.')));
+      _enter(auth.isMasterAdmin);
+    } else {
+      setState(() => _errorMessage = challenge.message);
+    }
+    return true;
+  }
+
+  /// Round 4: the address is not confirmed yet: offer a new link.
+  void _offerNewLink(String email) {
+    if (email.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 10),
+      content: const Text('Confirm your e-mail first. Need a new link?'),
+      action: SnackBarAction(label: 'Send link', onPressed: () => context.read<AuthService>().resendVerification(email).ignore()),
+    ));
+  }
+
+  /// Round 4: "Check your inbox" after creating an account (the link makes it usable).
+  Future<void> _showCheckInbox(String email, int? resendAfterSec) async {
+    final auth = context.read<AuthService>();
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CheckInboxScreen(
+          email: email,
+          resendAfterSec: resendAfterSec,
+          resend: () async {
+            final r = await auth.resendVerification(email);
+            return r['success'] == true ? null : r['error']?.toString();
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _register = false;
+      _loginIdentifierController.text = email;
+      _errorMessage = null;
+    });
   }
 
   // --- REGISTRATION ACTION ---
@@ -246,7 +323,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     setState(() => _isLoading = false);
 
-    if (res['success'] == true) {
+    final outcome = signUpOutcomeOf(res);
+    if (outcome == SignUpOutcome.checkInbox) {
+      final wait = res['resendAfterSec'];
+      await _showCheckInbox(email, wait is num ? wait.toInt() : null);
+    } else if (outcome == SignUpOutcome.signedIn) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Welcome to CoRoute, $name.')),
@@ -284,6 +365,8 @@ class _LoginScreenState extends State<LoginScreen> {
         if (completed != true || !mounted) return;
       }
       _enter(isAdmin);
+    } else if (await _handleRideLock(res)) {
+      return;
     } else {
       setState(() {
         _errorMessage = res['error']?.toString();
@@ -303,6 +386,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Round 4: FLAG_SECURE on the sign-in screen (passwords; no screenshots or Recents preview).
+    return SecureScreen(child: _scaffold(context));
+  }
+
+  Widget _scaffold(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: AppTheme.bg,
@@ -348,6 +436,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
 
                   if (!_register) _buildLegalFooter(),
+                  // 3.57: help is one tap away even when signed out (the lock-screen Medical ID works without
+                  // the app open; SOS in a ride never waits for a sign-in).
+                  const SizedBox(height: Space.s16),
+                  Center(
+                    child: TextButton.icon(
+                      key: const Key('login_call_112'),
+                      onPressed: () => launchUrl(Uri(scheme: 'tel', path: SafetyConstants.emergencyNumber)),
+                      icon: Icon(Icons.emergency_outlined, color: AppTheme.sos),
+                      label: Text('Emergency? Call ${SafetyConstants.emergencyNumber}', style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
                 ],
               ),
             ),

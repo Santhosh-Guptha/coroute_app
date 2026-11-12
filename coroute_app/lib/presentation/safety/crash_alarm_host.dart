@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/services/safety_service.dart';
+import '../../domain/security/lock_screen_cockpit_policy.dart';
 import 'crash_alarm_screen.dart';
 
 /// Wraps the app (MaterialApp.builder, above the navigator). When a crash
@@ -51,7 +52,12 @@ class _CrashAlarmHostState extends State<CrashAlarmHost> {
         return;
       }
       _isPushing = true;
-      final r = MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const CrashAlarmScreen());
+      // Named: opens over the locked cockpit without unlocking (lock_screen_cockpit_policy.dart).
+      final r = MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        settings: const RouteSettings(name: LockScreenCockpitPolicy.routeCrashAlarm),
+        builder: (_) => const CrashAlarmScreen(),
+      );
       _route = r;
       nav.push(r).whenComplete(() {
         _isPushing = false;

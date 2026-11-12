@@ -26,6 +26,7 @@ CLUSTER_CREDENTIALS.md
 *.credentials*
 tmp/
 *.xml
+!coroute_app/android/app/src/main/res/xml/*.xml
 qa_screenshots/
 *.png
 !coroute_app/gateway/public/**/*.png

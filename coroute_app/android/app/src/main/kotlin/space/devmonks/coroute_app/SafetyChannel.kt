@@ -43,6 +43,7 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "deviceInfo" -> result.success(deviceInfo())
+            "deviceKey" -> result.success(deviceKey())
             "canUseFullScreenIntent" -> result.success(canUseFullScreenIntent())
             "openFullScreenIntentSettings" -> result.success(openFullScreenIntentSettings())
             "openOemBatterySettings" -> result.success(openOemBatterySettings())
@@ -178,6 +179,22 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
             out["canDial"] = Intent(Intent.ACTION_DIAL, Uri.parse("tel:")).resolveActivity(pm) != null
         } catch (_: Exception) {}
         return out
+    }
+
+    /**
+     * Round 4 ride lock: SHA-256 (hex) of "coroute-device|" + Settings.Secure.ANDROID_ID. On Android 8+ ANDROID_ID is
+     * already scoped to this app's signing key and user, and it survives a reinstall, so the rider's own phone can sign
+     * in again during its ride. Only this hash leaves the phone (the gateway stores a keyed hash of it). "" if unknown.
+     */
+    private fun deviceKey(): String {
+        return try {
+            val id = android.provider.Settings.Secure.getString(activity.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: ""
+            if (id.isEmpty()) return ""
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            md.digest("coroute-device|$id".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun deviceInfo(): Map<String, Any> {
@@ -351,22 +368,11 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
         }
     }
 
-    /** Only while a crash alarm is open: show over the lock screen, turn the screen on, keep it on. */
-    @Suppress("DEPRECATION")
+    /**
+     * Only while a crash alarm is open: show over the lock screen, turn the screen on, keep it on. Through
+     * [LockWindow], so closing the alarm keeps a ride's lock-screen cockpit (which never turns the screen on).
+     */
     private fun alarmWindow(on: Boolean) {
-        if (Build.VERSION.SDK_INT >= 27) {
-            activity.setShowWhenLocked(on)
-            activity.setTurnScreenOn(on)
-            if (on) {
-                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            } else {
-                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        } else {
-            val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-            if (on) activity.window.addFlags(flags) else activity.window.clearFlags(flags)
-        }
+        LockWindow.setAlarm(activity, on, keepScreenOn = true)
     }
 }

@@ -28,6 +28,8 @@ import '../engagement/ride_wrapup_sheet.dart';
 import '../review/app_review_prompt.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/engagement_service.dart';
+import '../../domain/security/lock_screen_cockpit_policy.dart';
+import '../security/locked_cockpit_gate.dart';
 
 /// The tabs of the app, in bottom navigation order. 3.55: People (friends, crews, requests) is
 /// one tap away from anywhere.
@@ -318,6 +320,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       canPop: _tab == HomeTab.ride && groupId == null,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        // Locked cockpit (shown over the keyguard): Back never navigates; the ride screen stays.
+        if (!LockScreenCockpitPolicy.backNavigates(locked: LockedCockpit.isLocked(context, listen: false))) return;
         if (_tab != HomeTab.ride) {
           _select(HomeTab.ride);
         } else {

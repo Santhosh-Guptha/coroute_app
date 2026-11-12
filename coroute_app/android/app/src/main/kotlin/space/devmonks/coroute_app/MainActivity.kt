@@ -19,6 +19,8 @@ class MainActivity : FlutterActivity() {
     private var ttsChannel: TtsChannel? = null
     private var phoneCallChannel: PhoneCallChannel? = null
     private var pushChannel: PushChannel? = null
+    private var appSecurity: AppSecurityChannel? = null
+    private var rideWindow: RideWindowChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -74,6 +76,24 @@ class MainActivity : FlutterActivity() {
 
         // 3.55 "Navigate in Google Maps / Mappls": installed check and package-targeted links.
         MethodChannel(messenger, "coroute/nav_handoff").setMethodCallHandler(NavHandoffChannel(this))
+
+        // Round 4: FLAG_SECURE on sensitive screens, fingerprint / screen-lock app lock, Medical ID (AppSecurityChannel.kt).
+        val security = AppSecurityChannel(this)
+        appSecurity = security
+        MethodChannel(messenger, "coroute/app_security").setMethodCallHandler(security)
+
+        // Cockpit on the lock screen while riding + the ride screen's heat check (RideWindowChannel.kt).
+        val rideWindowMethods = MethodChannel(messenger, "coroute/ride_window")
+        val rideWin = RideWindowChannel(this, rideWindowMethods)
+        rideWin.register()
+        rideWindow = rideWin
+        rideWindowMethods.setMethodCallHandler(rideWin)
+    }
+
+    // The screen-lock confirmation of the app lock on Android 6-8 (AppSecurityChannel); everything else as before.
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (appSecurity?.onActivityResult(requestCode, resultCode) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,6 +112,12 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         PushChannel.foreground = true
         CrashLog.startStallWatch() // 3.55: main-thread stalls of 5 s+ while in front (ANR-like)
+        rideWindow?.checkKeyguard() // locked cockpit: the keyguard may have changed while away
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        rideWindow?.checkKeyguard() // the system unlock sheet comes and goes over the window
     }
 
     override fun onPause() {
@@ -135,6 +161,12 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, "coroute/nav_handoff").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/install_referrer").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/in_app_review").setMethodCallHandler(null)
+        appSecurity?.dispose()
+        appSecurity = null
+        MethodChannel(messenger, "coroute/app_security").setMethodCallHandler(null)
+        rideWindow?.dispose() // also takes the window off the keyguard
+        rideWindow = null
+        MethodChannel(messenger, "coroute/ride_window").setMethodCallHandler(null)
         ShareIn.channel?.let { ShareIn.dispose(it) }
         super.cleanUpFlutterEngine(flutterEngine)
     }

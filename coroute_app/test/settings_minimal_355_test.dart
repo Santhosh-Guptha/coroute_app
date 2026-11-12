@@ -70,7 +70,6 @@ void main() {
       await s.setEtaCheckIn(false);
       await s.setNoSignalAhead(false);
       await s.setHazardAlerts(false);
-      await s.setRideOnLockScreen(false);
       await s.setAutoReroute(false);
       await s.setVoiceCleanup(false);
       expect(_allOn(s), isTrue);
@@ -213,7 +212,9 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byKey(const ValueKey('settings_always_on')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings_speed_warning')), findsOneWidget);
-      expect(find.byType(Switch), findsNWidgets(4), reason: 'voice alerts, siren alerts, battery saver, data saver');
+      expect(find.byType(Switch), findsNWidgets(5),
+          reason: 'voice alerts, siren alerts, battery saver, data saver, show cockpit on lock screen while riding');
+      expect(find.byKey(const ValueKey('settings_lock_screen_cockpit')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings_siren_alerts')), findsOneWidget);
       for (final gone in ['settings_crash', 'settings_sms', 'settings_auto_reroute', 'settings_voice_cleanup']) {
         expect(find.byKey(ValueKey(gone)), findsNothing, reason: gone);

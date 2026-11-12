@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
 import '../../domain/notify/notification_snapshot.dart';
+import '../../domain/notify/live_update.dart';
+import '../../domain/route/next_turn.dart';
 import '../models/convoy_model.dart';
 import '../models/network_models.dart';
 import '../models/network_wire.dart';
@@ -487,6 +489,30 @@ class RideNotificationService {
     }
   }
 
+  NextTurn? _nextTurn() {
+    try {
+      final guide = essentials?.guide;
+      final line = guide?.active;
+      final along = line?.matched?.alongM;
+      if (guide == null || line == null || along == null) return null;
+      return NextTurn.compute(steps: guide.activeRoute?.steps ?? const [], line: line, alongM: along);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  double? _routeProgress() {
+    try {
+      final guide = essentials?.guide;
+      final line = guide?.active;
+      final along = line?.matched?.alongM;
+      if (guide == null || !guide.started || line == null || along == null || line.lengthM <= 0) return null;
+      return along / line.lengthM;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _pushInner() async {
     _dirty = false;
     final force = _forceNext;
@@ -510,7 +536,9 @@ class RideNotificationService {
       assists: _port.assistRequests,
       hazards: _port.hazards,
       nowMs: now,
-      lockScreenPublic: _settings.rideOnLockScreen,
+      // Always public (3.55): the ride and its SOS button stay on the lock screen. The rider's setting
+      // "Show cockpit on lock screen while riding" is about the app's own screen (LockScreenCockpitService).
+      lockScreenPublic: true,
       clockText: _clockText,
       medicalId: _medicalId(),
       talkAllowed: _talkAllowed?.call(),
@@ -537,6 +565,9 @@ class RideNotificationService {
       }
     }
     _addRideAudioArgs(args, snap.mode == NotifMode.ride);
+    // Android 16 Live Update (promoted ongoing notification): next turn or group status. Ignored before API 36.
+    final live = LiveUpdateContent.build(mode: snap.mode, turn: _nextTurn(), ahead: snap.ahead, behind: snap.behind, progress01: _routeProgress());
+    if (live != null) args['live'] = live;
     final key = jsonEncode(args);
     if (!force && key == _lastKey && _richActive) {
       _lastQuick = quick;

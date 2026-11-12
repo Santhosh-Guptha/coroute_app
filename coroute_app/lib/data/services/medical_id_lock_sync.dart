@@ -7,7 +7,9 @@ import 'settings_service.dart';
 /// lock screen) in step with the rider's profile.
 ///
 /// Medical ID has no on/off switch: it is always available. The rider controls it by editing
-/// or clearing their medical info in the profile; signing out clears it. Only what the rider
+/// or clearing their medical info in the profile. 3.57: signing out asks "Keep emergency info on this phone?"
+/// (default yes): kept, the lock-screen card stays until the rider removes it or another account signs in;
+/// removed, it is cleared. Only what the rider
 /// entered for emergencies is copied (name, blood group, allergies, notes, emergency contact);
 /// never a position or location history.
 class MedicalIdLockSync {
@@ -23,6 +25,9 @@ class MedicalIdLockSync {
 
   void _sync() {
     if (_disposed) return;
+    // Signed out with "Keep emergency info on this phone": the lock-screen card is left as it is. While the saved
+    // session is still loading at start-up nothing is written either (the card is never blanked by a cold start).
+    if (!_auth.isAuthenticated && (_auth.isLoading || _auth.keepEmergencyInfo)) return;
     final name = (_auth.currentUserName ?? '').trim();
     final blood = _auth.bloodGroup.trim();
     final allergies = _auth.allergies.trim();

@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
+import '../../domain/tracking/screen_awake_policy.dart';
 import 'rider_score_service.dart';
 
 /// Rider settings kept on the phone: only the choices a rider really makes.
@@ -54,6 +55,8 @@ class SettingsService extends ChangeNotifier {
   bool _pauseOtherAudio = false;
   bool _hazardAlerts = true;
   bool _rideOnLockScreen = true;
+  RideIdleMode _rideIdleMode = RideIdleMode.aod;
+  KeepScreenOnMode _keepScreenOnMode = KeepScreenOnMode.whileMoving;
   bool _netConsentSeen = false;
   int _netConsentPrompts = 0;
 
@@ -178,8 +181,16 @@ class SettingsService extends ChangeNotifier {
   /// Accident warnings on my route (always on, 3.55).
   bool get hazardAlerts => _hazardAlerts;
 
-  /// Show the ride and the SOS button on the lock screen (always on, 3.55).
+  /// "Show cockpit on lock screen while riding" (default on; the rider's choice, docs/features_355/lock_screen_cockpit.md).
+  /// The stored key is the one of 3.54's "Show ride on lock screen", so a choice made then stays. The ride
+  /// notification and its SOS button stay on the lock screen either way (always, since 3.55).
   bool get rideOnLockScreen => _rideOnLockScreen;
+
+  /// Settings › Ride screen › When idle (Ride AOD by default).
+  RideIdleMode get rideIdleMode => _rideIdleMode;
+
+  /// Settings › Ride screen › Keep screen on (only while moving by default).
+  KeepScreenOnMode get keepScreenOnMode => _keepScreenOnMode;
 
   /// The nearby riders consent sheet was answered with Continue.
   bool get netConsentSeen => _netConsentSeen;
@@ -223,7 +234,9 @@ class SettingsService extends ChangeNotifier {
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
       _pauseOtherAudio = prefs.getBool(NetworkConstants.keyPauseOtherAudio) ?? false;
       _hazardAlerts = true;
-      _rideOnLockScreen = true;
+      _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
+      _rideIdleMode = RideIdleMode.fromId(prefs.getString(keyRideIdleMode));
+      _keepScreenOnMode = KeepScreenOnMode.fromId(prefs.getString(keyKeepScreenOnMode));
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
@@ -287,6 +300,9 @@ class SettingsService extends ChangeNotifier {
   // ---- 3.55 minimal settings: always-on safety settings and their one-time migration.
 
   /// Stored keys of the settings that are always on (no switch in the app).
+  /// [NetworkConstants.keyRideOnLockScreen] left this list with the lock-screen cockpit: it is the rider's choice
+  /// again ("Show cockpit on lock screen while riding", default on) and no migration ever rewrites it, so the value a
+  /// rider chose in 3.54 stays (3.55 is not released, so the v1 step never forced it on a rider's phone).
   static const List<String> alwaysOnKeys = [
     SafetyConstants.keyCrashDetection,
     SafetyConstants.keySmsFallback,
@@ -295,7 +311,6 @@ class SettingsService extends ChangeNotifier {
     keyEtaCheckIn,
     keyNoSignalAhead,
     NetworkConstants.keyHazardAlerts,
-    NetworkConstants.keyRideOnLockScreen,
     keyAutoReroute,
     keyVoiceCleanup,
   ];
@@ -388,12 +403,39 @@ class SettingsService extends ChangeNotifier {
     await _save(NetworkConstants.keyHazardAlerts, true);
   }
 
-  /// Always on (3.55): "off" is ignored.
+  /// "Show cockpit on lock screen while riding". Off turns the over-keyguard window off at once
+  /// (LockScreenCockpitService listens). Same key as 3.54, so earlier choices stay.
   Future<void> setRideOnLockScreen(bool value) async {
-    if (!value || _rideOnLockScreen) return;
-    _rideOnLockScreen = true;
+    if (value == _rideOnLockScreen) return;
+    _rideOnLockScreen = value;
     notifyListeners();
-    await _save(NetworkConstants.keyRideOnLockScreen, true);
+    await _save(NetworkConstants.keyRideOnLockScreen, value);
+  }
+
+  static const String keyRideIdleMode = 'ride_idle_mode_v1';
+  static const String keyKeepScreenOnMode = 'ride_keep_screen_on_v1';
+
+  Future<void> setRideIdleMode(RideIdleMode value) async {
+    if (value == _rideIdleMode) return;
+    _rideIdleMode = value;
+    notifyListeners();
+    await _saveString(keyRideIdleMode, value.id);
+  }
+
+  Future<void> setKeepScreenOnMode(KeepScreenOnMode value) async {
+    if (value == _keepScreenOnMode) return;
+    _keepScreenOnMode = value;
+    notifyListeners();
+    await _saveString(keyKeepScreenOnMode, value.id);
+  }
+
+  Future<void> _saveString(String key, String value) async {
+    try {
+      final prefs = await _p();
+      await prefs.setString(key, value);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
   }
 
   Future<void> markNetConsentSeen() async {

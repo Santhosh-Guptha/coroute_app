@@ -667,6 +667,12 @@ class SafetyService extends ChangeNotifier {
   PendingSos? get _pendingSos => _port.pendingSos ?? _soloSos;
 
   // ------------------------------------------------------------------ offline solo ride
+  /// 3.57: a convoy ride or an offline solo ride runs (the session guard never signs out then).
+  bool get rideOn => _rideOn;
+
+  /// 3.57: an SOS still waits to be delivered (emergency texts pending): no sign-out until it is done.
+  bool get emergencyTextsPending => _pendingSos != null;
+
   /// An offline solo ride is running (3.54): no convoy and no internet needed. Crash detection
   /// runs on the phone's own GPS and accelerometer; an SOS opens the messages app with the text
   /// for the emergency contact, and the alarm screen offers a call to the contact or 112.

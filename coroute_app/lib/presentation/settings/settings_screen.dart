@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/services/app_lock_service.dart';
+import '../../domain/security/app_lock_policy.dart';
+import '../../domain/security/lock_screen_cockpit_policy.dart';
+import '../../domain/tracking/screen_awake_policy.dart';
+
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
@@ -32,6 +37,8 @@ import 'push_notifications_tile.dart';
 ///  * Safety: safety health (the phone check), emergency contact & Medical ID (data, not a
 ///    setting) and my speed warning.
 ///  * Ride: voice alerts, siren alerts (on by default), language, battery saver, data saver.
+///  * Ride screen: "Show cockpit on lock screen while riding" (default on), when idle (Ride AOD / Dim / Let the
+///    screen sleep) and keep screen on (only while moving / always during a ride), with battery estimates.
 ///  * App & privacy: appearance, push notifications, my username on leaderboards.
 ///  * More (collapsed): audio fine-tuning, fuel, navigation app, quick replies, permissions and
 ///    the features guide.
@@ -67,11 +74,21 @@ class SettingsScreen extends StatefulWidget {
   static const String leaderboardTitle = 'Show me on leaderboards';
   static const String speedTitle = 'Speed warning';
   static const String emergencyTitle = 'Emergency contact & Medical ID';
+  // Round 4 app lock.
+  static const String appLockTitle = 'Lock CoRoute with fingerprint or screen lock';
+  static const String appLockSubtitle = 'Never during a ride or SOS. SOS, Call 112 and Medical ID work while locked.';
+  static String appLockDelayLabel(int minutes) => minutes <= 0 ? 'Every time I leave the app' : 'After $minutes min in the background';
   static const String moreTitle = 'More settings';
   static const String pauseMusicTitle = 'Pause music for alerts';
   static const String lowerMusicTitle = 'Lower music when speeding';
   static const String safetyHealthTitle = 'Safety health';
   static const String safetyHealthSubtitle = 'Check your phone is ready';
+  // Ride screen (lock-screen cockpit and Ride AOD, docs/features_355/lock_screen_cockpit.md).
+  static const String rideScreenSection = 'Ride screen';
+  static const String lockScreenCockpitTitle = LockScreenCockpitPolicy.settingTitle;
+  static const String lockScreenCockpitSubtitle = LockScreenCockpitPolicy.settingHint;
+  static const String idleTitle = 'When idle';
+  static const String keepOnTitle = 'Keep screen on';
 
   /// Rows removed on Nov 11 (owner decision); tests check none of them is shown.
   static const List<String> removedRowKeys = [
@@ -119,6 +136,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _push(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
 
+  void _pickLockDelay(AppLockService lock) {
+    showAppSheet<void>(
+      context,
+      title: 'Lock after',
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final m in AppLockPolicy.delayChoices)
+            ListTile(
+              title: Text(SettingsScreen.appLockDelayLabel(m)),
+              trailing: m == lock.delayMinutes ? Icon(Icons.check_rounded, color: AppTheme.accentText) : null,
+              onTap: () {
+                lock.setDelayMinutes(m).ignore();
+                Navigator.of(ctx).pop();
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _pickIdle(SettingsService s) {
+    showAppSheet<void>(
+      context,
+      title: SettingsScreen.idleTitle,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final m in RideIdleMode.values)
+            ListTile(
+              key: ValueKey('settings_ride_idle_${m.id}'),
+              title: Text(m == RideIdleMode.aod ? '${m.label} (default)' : m.label),
+              subtitle: Text(RideScreenBattery.forIdle(m)),
+              trailing: m == s.rideIdleMode ? Icon(Icons.check_rounded, color: AppTheme.accentText) : null,
+              onTap: () {
+                s.setRideIdleMode(m).ignore();
+                Navigator.of(ctx).pop();
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _pickKeepOn(SettingsService s) {
+    showAppSheet<void>(
+      context,
+      title: SettingsScreen.keepOnTitle,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final m in KeepScreenOnMode.values)
+            ListTile(
+              key: ValueKey('settings_keep_screen_on_${m.id}'),
+              title: Text(m == KeepScreenOnMode.whileMoving ? '${m.label} (default)' : m.label),
+              subtitle: Text(RideScreenBattery.keepOnHint(m)),
+              trailing: m == s.keepScreenOnMode ? Icon(Icons.check_rounded, color: AppTheme.accentText) : null,
+              onTap: () {
+                s.setKeepScreenOnMode(m).ignore();
+                Navigator.of(ctx).pop();
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   void _showAlwaysOn() {
     showAppSheet<void>(
       context,
@@ -158,6 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final friends = context.watch<FriendsService?>();
     final profile = friends?.profile;
     final push = context.watch<PushService?>();
+    final appLock = context.watch<AppLockService?>();
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -230,7 +315,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onChanged: s.setLowData,
                       ),
                     ]),
+                    _Section(SettingsScreen.rideScreenSection, [
+                      // Default on; the same stored key as 3.54's "Show ride on lock screen".
+                      _Row(
+                        key: const ValueKey('settings_lock_screen_cockpit'),
+                        icon: Icons.screen_lock_portrait_rounded,
+                        title: SettingsScreen.lockScreenCockpitTitle,
+                        subtitle: SettingsScreen.lockScreenCockpitSubtitle,
+                        value: s.rideOnLockScreen,
+                        onChanged: s.setRideOnLockScreen,
+                      ),
+                      _Row(
+                        key: const ValueKey('settings_ride_idle'),
+                        icon: Icons.nightlight_round,
+                        title: SettingsScreen.idleTitle,
+                        subtitle: RideScreenBattery.idleHint(s.rideIdleMode),
+                        onTap: () => _pickIdle(s),
+                      ),
+                      _Row(
+                        key: const ValueKey('settings_keep_screen_on'),
+                        icon: Icons.stay_current_portrait_rounded,
+                        title: SettingsScreen.keepOnTitle,
+                        subtitle: '${s.keepScreenOnMode.label}. ${RideScreenBattery.keepOnHint(s.keepScreenOnMode)}',
+                        onTap: () => _pickKeepOn(s),
+                      ),
+                    ]),
                     _Section('App & privacy', [
+                      // Round 4: off by default; never locks during a ride, convoy, SOS or crash countdown.
+                      if (appLock != null)
+                        _Row(
+                          key: const ValueKey('settings_app_lock'),
+                          icon: Icons.fingerprint_rounded,
+                          title: SettingsScreen.appLockTitle,
+                          subtitle: SettingsScreen.appLockSubtitle,
+                          value: appLock.enabled,
+                          onChanged: (on) async {
+                            final err = await appLock.setEnabled(on);
+                            if (err != null) _say(err);
+                          },
+                        ),
+                      if (appLock != null && appLock.enabled)
+                        _Row(
+                          key: const ValueKey('settings_app_lock_delay'),
+                          icon: Icons.timer_outlined,
+                          title: 'Lock after',
+                          subtitle: SettingsScreen.appLockDelayLabel(appLock.delayMinutes),
+                          onTap: () => _pickLockDelay(appLock),
+                        ),
                       if (theme != null)
                         _Row(
                           key: const ValueKey('settings_appearance'),

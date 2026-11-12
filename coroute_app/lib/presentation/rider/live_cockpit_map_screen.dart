@@ -9,6 +9,7 @@ import 'package:coroute_app/data/services/solo_guardian_service.dart';
 import 'dart:async';
 import '../ride/navigate_to.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -103,6 +104,11 @@ import 'package:flutter/gestures.dart' show GestureBinding, PointerDownEvent, Po
 import '../../core/theme/theme_controller.dart';
 import '../../data/services/safety_native.dart';
 import '../../domain/tracking/screen_awake_policy.dart';
+import '../../domain/security/lock_screen_cockpit_policy.dart';
+import '../../domain/route/next_turn.dart';
+import '../../data/services/lock_screen_cockpit_service.dart';
+import '../security/locked_cockpit_gate.dart';
+import 'widgets/ride_aod_view.dart';
 import '../timeline/member_colors.dart';
 import '../trip/trip_feedback_sheet.dart';
 import '../review/app_review_prompt.dart';
@@ -264,6 +270,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   ScreenAwakeDecision? _awake;
   Timer? _awakeTimer;
   bool _dimmed = false;
+  double? _brightness;
+
+  // Cockpit on the lock screen + Ride AOD (docs/features_355/lock_screen_cockpit.md).
+  LockScreenCockpitService? _lockCockpit;
+  SettingsService? _settingsRef;
+  Route<dynamic>? _reportedRoute;
+  bool _aodOn = false;
+  int _lastAlertMs = 0;
+  String? _lastAlertKey;
   bool _pointerRouted = false;
   bool _rideDarkWanted = false;
   ThemeController? _theme;
@@ -605,6 +620,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       }
       GestureBinding.instance.pointerRouter.addGlobalRoute(_onAnyPointer);
       _pointerRouted = true;
+      _settingsRef = context.read<SettingsService?>();
+      _settingsRef?.addListener(_onScreenSettings);
+      _lockCockpit = context.read<LockScreenCockpitService?>();
+      _lockCockpit?.addListener(_onLockCockpit);
       _syncWakelock();
       _onFocusRequest();
       _syncEssentials(category: 'FUEL', force: true);
@@ -664,7 +683,46 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   }
 
   void _onSirenAlert() {
+    _noteAlert();
     if (mounted) setState(() {});
+  }
+
+  /// An alert came (siren, a new important / critical card): the full cockpit at normal brightness at once.
+  void _noteAlert() {
+    _lastAlertMs = DateTime.now().millisecondsSinceEpoch;
+    if ((_dimmed || _aodOn) && mounted) scheduleMicrotask(() { if (mounted) _syncWakelock(); });
+  }
+
+  /// Locked mode, keyguard or heat changed.
+  void _onLockCockpit() {
+    if (!mounted) return;
+    setState(() {});
+    _syncWakelock();
+  }
+
+  /// Settings › Ride screen changed (idle display, keep screen on).
+  void _onScreenSettings() {
+    if (mounted) _syncWakelock();
+  }
+
+  /// Tells the lock-screen cockpit service whether this ride screen is the one in front.
+  void _reportCockpit() {
+    final svc = _lockCockpit;
+    if (svc == null || !mounted) return;
+    final route = ModalRoute.of(context);
+    var active = false;
+    try {
+      final s = _convoys;
+      final convoy = s == null ? null : (s.allConvoys[widget.convoyId] ?? s.activeConvoy);
+      active = s != null &&
+          convoy != null &&
+          !_isTerminalTripStatus(convoy.tripStatus) &&
+          (s.activeGroupId == null || s.activeGroupId == widget.convoyId);
+    } catch (_) {
+      active = false;
+    }
+    _reportedRoute = route;
+    svc.setCockpit(route: route, visible: widget.isVisible && active);
   }
 
   @override
@@ -887,6 +945,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       _pointerRouted = false;
     }
     if (_dimmed) SafetyNative.windowBrightness(null).ignore();
+    _settingsRef?.removeListener(_onScreenSettings);
+    _lockCockpit?.removeListener(_onLockCockpit);
+    if (_aodOn) _lockCockpit?.aodShowing = false;
+    _lockCockpit?.clearCockpit(_reportedRoute);
     final theme = _theme;
     if (_rideDarkWanted && theme != null) scheduleMicrotask(() => theme.setRideDarkOverride(false));
     _navCam.removeListener(_onNavCamChanged);
@@ -960,6 +1022,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   /// Any touch anywhere in the app wakes the dimmed ride screen and restarts the 30 s.
   void _onAnyPointer(PointerEvent event) {
     if (event is! PointerDownEvent) return;
+    // The Ride AOD's "Hold SOS" hint can be held without waking the full cockpit first.
+    if (_aodOn && RideAodView.sosPointerDown) return;
     _lastTouchMs = DateTime.now().millisecondsSinceEpoch;
     if (_dimmed && mounted) _syncWakelock();
   }
@@ -984,6 +1048,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       _parkedSinceMs = now;
     }
     final emergency = SosHoldScreen.isOpen || convoy.activeAlerts.any((a) => !a.resolved);
+    final settings = _settingsRef;
     final d = ScreenAwakePolicy.decide(
       riding: true,
       foreground: true,
@@ -994,6 +1059,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       batteryPercent: battery,
       charging: charging,
       emergencyOpen: emergency,
+      idleMode: settings?.rideIdleMode ?? RideIdleMode.aod,
+      keepOnMode: settings?.keepScreenOnMode ?? KeepScreenOnMode.whileMoving,
+      lastAlertMs: _lastAlertMs,
+      thermalStatus: _lockCockpit?.thermalStatus ?? 0,
     );
     final before = _awake;
     _awake = d;
@@ -1012,7 +1081,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void _armAwakeTimer(ScreenAwakeDecision d, int now) {
     _awakeTimer?.cancel();
     _awakeTimer = null;
-    final at = ScreenAwakePolicy.nextChangeAt(current: d, nowMs: now, lastTouchMs: _lastTouchMs, parkedSinceMs: _parkedSinceMs);
+    final at = ScreenAwakePolicy.nextChangeAt(
+      current: d,
+      nowMs: now,
+      lastTouchMs: _lastTouchMs,
+      parkedSinceMs: _parkedSinceMs,
+      lastAlertMs: _lastAlertMs,
+      keepOnMode: _settingsRef?.keepScreenOnMode ?? KeepScreenOnMode.whileMoving,
+    );
     if (at == null) return;
     _awakeTimer = Timer(Duration(milliseconds: at - now), () {
       _awakeTimer = null;
@@ -1020,11 +1096,28 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     });
   }
 
-  /// Lowers only CoRoute's window brightness (the system setting is never changed).
-  void _syncDim(bool dim) {
-    if (dim == _dimmed) return;
-    _dimmed = dim;
-    SafetyNative.windowBrightness(dim ? ScreenAwakePolicy.dimBrightness : null).ignore();
+  /// Lowers only CoRoute's window brightness (the system setting is never changed): dimmed cockpit or Ride AOD.
+  void _syncBrightness(double? value) {
+    if (value == _brightness) return;
+    _brightness = value;
+    _dimmed = value != null;
+    SafetyNative.windowBrightness(value).ignore();
+  }
+
+  /// The black Ride AOD over the cockpit (idle with the screen kept on).
+  void _syncAod(bool on) {
+    if (on == _aodOn) return;
+    _aodOn = on;
+    _lockCockpit?.aodShowing = on;
+    if (!mounted) return;
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
   }
 
   /// Battery saver during an active ride: the dark ride theme and dark map.
@@ -1066,8 +1159,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       _awakeTimer?.cancel();
       _awakeTimer = null;
     }
-    _syncDim(shouldKeepOn && (_awake?.dim ?? false));
+    _syncBrightness(shouldKeepOn ? _awake?.brightness : null);
+    _syncAod(shouldKeepOn && _awake?.display == RideDisplay.aod);
     _syncRideDark();
+    _reportCockpit();
     if (shouldKeepOn == _wakelockActive) return;
     _wakelockActive = shouldKeepOn;
     try {
@@ -1215,7 +1310,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       remainingM: remainingM,
       arrival: eta == null ? null : _eta(eta),
     );
-    SharePlus.instance.share(ShareParams(text: text));
+    LockedCockpit.run(context, CockpitAction.shareLiveLink, () => SharePlus.instance.share(ShareParams(text: text))).ignore();
   }
 
   void _focus(double lat, double lng) {
@@ -1621,19 +1716,25 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void _shareInvite(ConvoyModel convoy) {
     if (_rideFull(convoy)) return;
     final link = '${AppConfig.apiBaseUrl}/join/${convoy.joinCode}';
-    SharePlus.instance.share(ShareParams(
-      text: 'Join my CoRoute ride "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
-      subject: 'CoRoute ride: ${convoy.name}',
-    ));
+    LockedCockpit.run(
+      context,
+      CockpitAction.shareInvite,
+      () => SharePlus.instance.share(ShareParams(
+        text: 'Join my CoRoute ride "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
+        subject: 'CoRoute ride: ${convoy.name}',
+      )),
+    ).ignore();
   }
 
   void _copyCode(ConvoyModel convoy) {
     if (_rideFull(convoy)) return;
-    Clipboard.setData(ClipboardData(text: convoy.joinCode));
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Code ${convoy.joinCode} copied')));
-    }
+    LockedCockpit.run(context, CockpitAction.shareInvite, () {
+      Clipboard.setData(ClipboardData(text: convoy.joinCode));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Code ${convoy.joinCode} copied')));
+      }
+    }).ignore();
   }
 
   Future<void> _endRide(ConvoyService service) async {
@@ -2239,14 +2340,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       ));
     }
     // 3.55 ride chat: a text from another rider (8 s). Reply opens the chat (typing only when stopped).
+    // Locked cockpit: "New message from <name>", never the text (same rule as the lock-screen notification).
     final chat = service.chatBanner;
     if (chat != null) {
+      final line = LockScreenCockpitPolicy.chatBanner(locked: _lockCockpit?.locked ?? false, senderName: chat.senderName, text: chat.text);
       out.add(_Slot(
         key: 'CHAT:${chat.messageId}',
         tier: AlertTier.normal,
         priority: AlertPriority.social,
-        title: chat.senderName.isEmpty ? 'Message' : chat.senderName,
-        message: chat.text,
+        title: line.title,
+        message: line.message,
         actionLabel: 'Open chat',
         onAction: () {
           service.dismissChatBanner();
@@ -2759,6 +2862,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       guidance: guidance,
     );
     final topSlot = slots.isEmpty ? null : slots.first;
+    // A new important / critical card (off-route, regroup, hazard...) brings the full cockpit back from the AOD.
+    if (topSlot?.key != _lastAlertKey) {
+      _lastAlertKey = topSlot?.key;
+      if (topSlot != null && topSlot.tier != AlertTier.normal) _noteAlert();
+    }
     final extra = slots.length - 1;
     const dismissSec = NetworkConstants.mapAlertDismissSeconds;
 
@@ -2802,7 +2910,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     // "Guardian on" in the ride-summary card: this phone's crash detection setting.
     final guardianOn = context.select<SettingsService?, bool>((s) => s?.crashDetection ?? true);
 
-    return Scaffold(
+    final cockpit = Scaffold(
       backgroundColor: AppTheme.map,
       body: LayoutBuilder(builder: (context, box) {
         final h = box.maxHeight;
@@ -3288,6 +3396,64 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           ],
         );
       }),
+    );
+    // Always the same tree shape, so the map and the sheet keep their state when the Ride AOD comes and goes.
+    // Under the AOD the cockpit is not painted and its animations pause (less GPU work, a cooler phone).
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        TickerMode(enabled: !_aodOn, child: Offstage(offstage: _aodOn, child: cockpit)),
+        if (_aodOn) Positioned.fill(child: _aodView(convoy, me, uid, snap, service, now)),
+      ],
+    );
+  }
+
+  /// The Ride AOD content: speed, next turn, the leader (or the group), time, battery and the SOS hint.
+  Widget _aodView(ConvoyModel convoy, RiderModel me, String uid, RideSnapshot snap, ConvoyService service, int now) {
+    NextTurn? turn;
+    try {
+      final line = _guide.active;
+      final along = line?.matched?.alongM;
+      final steps = _guide.activeRoute?.steps ?? const [];
+      if (line != null && along != null) turn = NextTurn.compute(steps: steps, line: line, alongM: along);
+    } catch (_) {
+      turn = null;
+    }
+    double? leaderM;
+    double? leaderRel;
+    String? group;
+    if (!convoy.isSolo) {
+      final lead = RideFacts.findLead(convoy);
+      if (lead != null && lead.userId != uid && RideFacts.hasPosition(lead) && RideFacts.hasPosition(me)) {
+        leaderM = GeoMath.haversine(me.lat, me.lng, lead.lat, lead.lng);
+        final heading = LiveCockpitMapScreen.myHeading(me, null);
+        leaderRel = GeoMath.bearing(me.lat, me.lng, lead.lat, lead.lng) - heading;
+      }
+      final riding = RideFacts.ridingCount(convoy.riders.values, nowMs: now);
+      group = '$riding of ${convoy.riders.length} riding';
+    }
+    var battery = -1;
+    var charging = false;
+    try {
+      battery = service.currentBatteryLevel;
+      charging = service.isCharging;
+    } catch (_) {}
+    return RideAodView(
+      speedKmh: me.speedKmh,
+      turn: turn,
+      leaderDistanceM: leaderM,
+      leaderRelativeBearing: leaderRel,
+      groupLine: group,
+      batteryPercent: battery,
+      charging: charging,
+      onHoldSos: () {
+        final auth = _auth;
+        if (auth != null && !SosHoldScreen.isOpen) _openSosHold(service, auth);
+      },
+      onWake: () {
+        _lastTouchMs = DateTime.now().millisecondsSinceEpoch;
+        _syncWakelock();
+      },
     );
   }
 

@@ -27,6 +27,9 @@ import 'package:coroute_app/data/services/meta_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/data/services/timeline_service.dart';
+import 'package:coroute_app/data/services/device_diagnostic_service.dart';
+import 'package:coroute_app/data/services/intercom_service.dart';
+import 'package:coroute_app/data/services/safety_service.dart';
 import 'package:coroute_app/data/services/track_recorder.dart';
 import 'package:coroute_app/data/services/track_uploader.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
@@ -42,6 +45,9 @@ class AuditEnvironment {
   final SettingsService settings;
   final MembershipService membership;
   final ThemeController theme;
+  final SafetyService safety;
+  final IntercomService intercom;
+  final DeviceDiagnosticService diagnostics;
 
   AuditEnvironment({
     required this.api,
@@ -54,10 +60,15 @@ class AuditEnvironment {
     required this.settings,
     required this.membership,
     required this.theme,
+    required this.safety,
+    required this.intercom,
+    required this.diagnostics,
   });
 
   void dispose() {
     convoy.dispose();
+    safety.dispose();
+    intercom.dispose();
   }
 
   static Future<AuditEnvironment> create({
@@ -73,6 +84,8 @@ class AuditEnvironment {
         .setMockMethodCallHandler(const MethodChannel('dev.fluttercommunity.plus/charging'), (call) async => 'discharging');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(const MethodChannel('flutter.baseflow.com/permissions/methods'), (call) async => 1);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('plugins.flutter.io/path_provider'), (call) async => Directory.systemTemp.path);
 
     FlutterError.onError = (FlutterErrorDetails details) {
       final msg = details.exceptionAsString();
@@ -126,6 +139,9 @@ class AuditEnvironment {
     final settings = SettingsService();
     final membership = MembershipService(api);
     final theme = ThemeController();
+    final safety = SafetyService(convoy, settings, auth);
+    final intercom = IntercomService(rt, settings: settings);
+    final diagnostics = DeviceDiagnosticService(apiClient: api);
 
     return AuditEnvironment(
       api: api,
@@ -138,6 +154,9 @@ class AuditEnvironment {
       settings: settings,
       membership: membership,
       theme: theme,
+      safety: safety,
+      intercom: intercom,
+      diagnostics: diagnostics,
     );
   }
 }
@@ -253,6 +272,9 @@ Future<void> renderAndSaveScreen({
         ChangeNotifierProvider<SettingsService>.value(value: env.settings),
         ChangeNotifierProvider<MembershipService>.value(value: env.membership),
         ChangeNotifierProvider<ThemeController>.value(value: env.theme),
+        ChangeNotifierProvider<SafetyService>.value(value: env.safety),
+        ChangeNotifierProvider<IntercomService>.value(value: env.intercom),
+        ChangeNotifierProvider<DeviceDiagnosticService>.value(value: env.diagnostics),
       ],
       child: RepaintBoundary(
         key: key,

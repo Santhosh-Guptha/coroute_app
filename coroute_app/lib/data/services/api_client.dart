@@ -7,6 +7,7 @@ import '../../core/config/app_config.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import '../../domain/diag/diag_redact.dart';
 import '../../domain/membership/plan_gate_messages.dart'; // Play payments policy: neutral plan refusals
+import '../../domain/auth/session_policy.dart'; // 3.57 sessions: refresh once, end only on gateway codes
 
 /// Thrown for any non-2xx gateway response.
 class ApiException implements Exception {
@@ -20,7 +21,11 @@ class ApiException implements Exception {
   /// Why the gateway refused a request it understood (for example COUPON_EXPIRED,
   /// PER_USER_LIMIT_REACHED, TIER_MISMATCH): the `reason` field of its error body.
   final String? reason;
-  const ApiException(this.statusCode, this.message, [this.code, this.reason]);
+
+  /// Round 4: the gateway's whole error body (for example `device` and `lockToken` of a 423 RIDE_ACTIVE_ELSEWHERE,
+  /// `methods` of a 403 MFA_REQUIRED, `triesLeft` of a wrong code). Null when not from the gateway.
+  final Map<String, dynamic>? body;
+  const ApiException(this.statusCode, this.message, [this.code, this.reason, this.body]);
 
   bool get isUnauthorized => statusCode == 401;
   bool get isOffline => statusCode == 0;
@@ -49,6 +54,10 @@ class ApiException implements Exception {
 /// Single HTTP client for the CoRoute gateway.
 ///
 /// * Attaches the JWT (kept in the platform keystore via flutter_secure_storage).
+/// * 3.57 sessions: asks for a short access token + rotating refresh token at sign-in (`X-CoRoute-Session: 2`);
+///   a 401 `TOKEN_EXPIRED` is refreshed once (one refresh at a time) and the call repeated once. Only the
+///   gateway's own session codes end the session; a failed refresh because of the network never does.
+///   Builds before 10025 keep the long sliding token; a stored one keeps working (the gateway migrates it).
 /// * Normalises errors into [ApiException].
 /// * Notifies listeners when the session expires so the UI can return to login.
 class ApiClient extends ChangeNotifier {
@@ -61,13 +70,18 @@ class ApiClient extends ChangeNotifier {
         _storage = storage ?? const FlutterSecureStorage();
 
   static const _tokenKey = 'coroute_jwt';
+  static const _refreshKey = 'coroute_refresh';
   final http.Client _http;
   final FlutterSecureStorage _storage;
   String? _token;
+  String? _refreshToken;
   bool _loaded = false;
 
   String? get token => _token;
   bool get hasToken => _token != null && _token!.isNotEmpty;
+
+  /// True when this phone holds a refresh token (signed in with a 3.57+ build).
+  bool get hasRefreshToken => _refreshToken != null && _refreshToken!.isNotEmpty;
 
   /// The gateway's message when it last ended the session (for example "Your account has
   /// been blocked by the administrator."), so the sign-in screen can say why.
@@ -88,6 +102,7 @@ class ApiClient extends ChangeNotifier {
     for (var attempt = 0; attempt < 4; attempt++) {
       try {
         _token = await _storage.read(key: _tokenKey);
+        _refreshToken = await _storage.read(key: _refreshKey);
         break;
       } catch (e) {
         debugPrint('Secure storage read note (attempt ${attempt + 1}): $e');
@@ -103,10 +118,12 @@ class ApiClient extends ChangeNotifier {
 
   Future<void> setToken(String? token) async {
     _token = token;
+    if (token == null) _refreshToken = null; // the session is over: its refresh token goes too
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         if (token == null) {
           await _storage.delete(key: _tokenKey);
+          await _storage.delete(key: _refreshKey);
         } else {
           await _storage.write(key: _tokenKey, value: token);
         }
@@ -119,11 +136,97 @@ class ApiClient extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 3.57: stores a new session (sign-in or refresh). [refreshToken] null keeps the stored one.
+  Future<void> setSession(String token, {String? refreshToken}) async {
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      _refreshToken = refreshToken;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          await _storage.write(key: _refreshKey, value: refreshToken);
+          break;
+        } catch (e) {
+          debugPrint('Secure storage write note (attempt ${attempt + 1}): $e');
+          await Future.delayed(Duration(milliseconds: 250 * (attempt + 1)));
+        }
+      }
+    }
+    await setToken(token);
+  }
+
+  Future<bool>? _refreshing;
+
+  /// Refreshes the access token once (concurrent callers share one request). True when a new token is stored.
+  /// A refused refresh (the gateway says the session is over) ends the session; a network failure keeps it.
+  Future<bool> refreshSession() {
+    final inFlight = _refreshing;
+    if (inFlight != null) return inFlight;
+    final f = _doRefresh().whenComplete(() => _refreshing = null);
+    _refreshing = f;
+    return f;
+  }
+
+  Future<bool> _doRefresh() async {
+    final rt = _refreshToken;
+    if (rt == null || rt.isEmpty) return false;
+    http.Response res;
+    try {
+      res = await _http
+          .post(Uri.parse('${AppConfig.apiUrl}/auth/refresh'), headers: _headers(auth: false), body: jsonEncode({'refreshToken': rt}))
+          .timeout(const Duration(seconds: 12));
+    } catch (e) {
+      DiagLog.warn(DiagCat.network, 'refresh_offline', {'type': e.runtimeType.toString()});
+      return false; // offline: keep the session, try again on the next call
+    }
+    Map? body;
+    try {
+      final d = jsonDecode(res.body);
+      if (d is Map) body = d;
+    } catch (_) {}
+    if (res.statusCode == 200 && body != null && body['token'] is String) {
+      await setSession(body['token'] as String, refreshToken: body['refreshToken'] as String?);
+      return true;
+    }
+    final code = body?['code']?.toString();
+    if (body != null && SessionPolicy.actionFor(res.statusCode, code, canRefresh: false) == SessionAction.end && hasToken) {
+      lastSessionEndMessage = body['error']?.toString() ?? 'You were signed out. Please sign in again.';
+      await setToken(null);
+    }
+    return false;
+  }
+
+  /// Refreshes first when the access token has less than [minSeconds] left (before a socket reconnect).
+  Future<void> ensureFreshToken({int minSeconds = 60}) async {
+    if (!hasRefreshToken) return;
+    final left = SessionPolicy.secondsLeft(_token);
+    if (left != null && left < minSeconds) await refreshSession();
+  }
+
+  /// 3.57: ends this session on the gateway (best effort, short timeout; the phone forgets it either way).
+  Future<void> revokeSession() async {
+    if (!hasToken && !hasRefreshToken) return;
+    try {
+      await _http
+          .post(Uri.parse('${AppConfig.apiUrl}/auth/logout'), headers: _headers(), body: jsonEncode({if (hasRefreshToken) 'refreshToken': _refreshToken}))
+          .timeout(const Duration(seconds: 6));
+    } catch (_) {
+      // Offline: the session ends on the server after 30 days without use, and this phone forgets it now.
+    }
+  }
+
+  /// 3.57: "Sign out of all devices": every session and token of the account ends on the gateway.
+  /// Throws [ApiException] when the gateway could not be reached (nothing was signed out anywhere).
+  Future<void> revokeAllSessions() async {
+    await post('/auth/logout-all', const {}, const Duration(seconds: 12));
+  }
+
   Map<String, String> _headers({bool auth = true}) => {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         if (auth && hasToken) 'Authorization': 'Bearer $_token',
         if (appBuild > 0) 'X-CoRoute-Build': '$appBuild',
+        // 3.57: this build refreshes short access tokens (read by the gateway at sign-in).
+        'X-CoRoute-Session': '2',
+        'X-CoRoute-Client': 'app',
       };
 
   Future<dynamic> get(String path, {Duration timeout = const Duration(seconds: 10)}) =>
@@ -131,6 +234,7 @@ class ApiClient extends ChangeNotifier {
 
   /// GET for non-JSON bodies (for example a GPX file). Throws [ApiException] on failure.
   Future<String> getText(String path, {Duration timeout = const Duration(seconds: 20)}) async {
+    await ensureFreshToken();
     http.Response res;
     try {
       res = await _http.get(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()).timeout(timeout);
@@ -163,6 +267,7 @@ class ApiClient extends ChangeNotifier {
   /// 3.55: GET for binary bodies (an admin downloading a diagnostics log bundle). Throws
   /// [ApiException] on failure (the body is not read as JSON).
   Future<Uint8List> getBytes(String path, {Duration timeout = const Duration(seconds: 60)}) async {
+    await ensureFreshToken();
     http.Response res;
     try {
       res = await _http.get(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()).timeout(timeout);
@@ -250,7 +355,11 @@ class ApiClient extends ChangeNotifier {
   /// Headers for an image the gateway only shows to the signed-in rider or an admin (Image.network).
   Map<String, String> get authHeaders => {if (hasToken) 'Authorization': 'Bearer $_token'};
 
-  Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout, {bool retried = false, String method = '?', String path = ''}) async {
+  /// Round 4: shows the 2-step prompt when an admin call answers 403 MFA_REQUIRED (set in main.dart); resolves true
+  /// when the session passed the step-up (POST /auth/mfa/step-up), so the call is repeated once.
+  Future<bool> Function(Map<String, dynamic> challenge)? onMfaRequired;
+
+  Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout, {bool retried = false, bool refreshed = false, bool mfaRetried = false, String method = '?', String path = ''}) async {
     http.Response res;
     // Domain move: the base this attempt used (call() reads AppConfig.apiUrl when it runs).
     final base = AppConfig.apiBaseUrl;
@@ -263,7 +372,7 @@ class ApiClient extends ChangeNotifier {
       throw const ApiException(0, 'The server did not respond. Check your connection.');
     } catch (e) {
       // The host could not be reached at all (DNS / TLS): try the other gateway host once.
-      if (AppConfig.gatewayHosts.reportFailure(base, e) && !retried) return _send(call, timeout, retried: true, method: method, path: path);
+      if (AppConfig.gatewayHosts.reportFailure(base, e) && !retried) return _send(call, timeout, retried: true, refreshed: refreshed, mfaRetried: mfaRetried, method: method, path: path);
       DiagLog.warn(DiagCat.network, 'api_offline', {'method': method, 'path': DiagRedact.pathTemplate(path), 'type': e.runtimeType.toString(), 'ms': sw.elapsedMilliseconds});
       throw ApiException(0, 'Network error: ${e.runtimeType}');
     }
@@ -304,7 +413,23 @@ class ApiClient extends ChangeNotifier {
             : 'Request failed (${res.statusCode})';
     final code = (fromGateway && decoded is Map && decoded['code'] != null) ? decoded['code'].toString() : null;
     final reason = (fromGateway && decoded is Map && decoded['reason'] != null) ? decoded['reason'].toString() : null;
-    final error = ApiException(res.statusCode, PlanGateMessages.neutral(code, reason, message), code, reason);
+    // 3.57: a short access token ran out: one refresh (shared), then this call once more. Never a loop.
+    if (fromGateway && SessionPolicy.actionFor(res.statusCode, code, canRefresh: !refreshed && hasRefreshToken) == SessionAction.refresh) {
+      if (await refreshSession()) return _send(call, timeout, retried: retried, refreshed: true, mfaRetried: mfaRetried, method: method, path: path);
+    }
+    // Round 4: an admin call answered MFA_REQUIRED: the app asks for the 2-step code (step-up), then repeats once.
+    final mfa = onMfaRequired;
+    if (fromGateway && res.statusCode == 403 && code == 'MFA_REQUIRED' && mfa != null && !mfaRetried) {
+      bool ok = false;
+      try {
+        ok = await mfa(decoded is Map ? Map<String, dynamic>.from(decoded) : const <String, dynamic>{});
+      } catch (_) {
+        ok = false;
+      }
+      if (ok) return _send(call, timeout, retried: retried, refreshed: refreshed, mfaRetried: true, method: method, path: path);
+    }
+    final error = ApiException(res.statusCode, PlanGateMessages.neutral(code, reason, message), code, reason,
+        fromGateway && decoded is Map ? Map<String, dynamic>.from(decoded) : null);
     if (error.endsSession && hasToken) {
       // Only the gateway saying so ends the session; bad networks never sign anyone out.
       lastSessionEndMessage = message;

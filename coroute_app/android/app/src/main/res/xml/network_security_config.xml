@@ -6,4 +6,48 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!--
+      Round 4 certificate pinning for the two CoRoute gateway hosts only (docs/security/SECURITY_AUDIT_v3.55.md #30,
+      rotation: gateway/deploy/RUNBOOK.md "Certificate pins"). Pins are SHA-256 of the SubjectPublicKeyInfo of CA ROOTS
+      (never of our leaf or intermediate certificates, which Caddy renews every 60-90 days), computed from the root
+      certificates themselves (/etc/ssl/certs and Node's bundled Mozilla store gave the same values):
+
+        Let's Encrypt (Caddy's first issuer):   ISRG Root X1 (RSA), ISRG Root X2 (ECDSA)
+        ZeroSSL / Sectigo (Caddy's fallback):    USERTrust RSA, USERTrust ECC, and as backups the newer
+                                                 Sectigo Public Server Authentication Root R46 / E46
+
+      A connection passes when ANY certificate of the validated chain matches one pin. The pin-set FAILS OPEN after
+      `expiration` (Android then checks the system CAs only), so a pin mistake can never brick the app for longer
+      than that; the next release must move the date forward (RUNBOOK). Other hosts (maps, tiles, Google) are not pinned.
+    -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">coroute.devmonks.space</domain>
+        <domain includeSubdomains="false">coroute.duckdns.org</domain>
+        <pin-set expiration="2027-11-01">
+            <!-- ISRG Root X1 -->
+            <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
+            <!-- ISRG Root X2 -->
+            <pin digest="SHA-256">diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=</pin>
+            <!-- USERTrust RSA Certification Authority (ZeroSSL RSA chain) -->
+            <pin digest="SHA-256">x4QzPSC810K5/cMjb05Qm4k3Bw5zBn4lTdO/nEW/Td4=</pin>
+            <!-- USERTrust ECC Certification Authority (ZeroSSL ECC chain) -->
+            <pin digest="SHA-256">ICGRfpgmOUXIWcQ/HXPLQTkFPEFPoDyjvH7ohhQpjzs=</pin>
+            <!-- Sectigo Public Server Authentication Root R46 (backup: Sectigo's next RSA root) -->
+            <pin digest="SHA-256">Douxi77vs4G+Ib/BogbTFymEYq0QSFXwSgVCaZcI09Q=</pin>
+            <!-- Sectigo Public Server Authentication Root E46 (backup: Sectigo's next ECC root) -->
+            <pin digest="SHA-256">sLVjNUaFYfW7n6EtgBeEpjOlcnBdNPMrZDRF36iwBdE=</pin>
+        </pin-set>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Debuggable builds only (never release): QA may inspect traffic with a user-installed proxy CA. -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" overridePins="true" />
+        </trust-anchors>
+    </debug-overrides>
 </network-security-config>

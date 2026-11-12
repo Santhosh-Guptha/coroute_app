@@ -34,6 +34,16 @@ class RideChatStore {
     }
   }
 
+  /// 3.57 sign-out: the chats of ended rides, unread marks and hidden riders leave the phone (the rider's quick
+  /// action order is a preference, not personal data, and stays).
+  static Future<void> clearPersonal() async {
+    final p = await _p();
+    if (p == null) return;
+    for (final k in [keyArchive, keySeen, keyHidden]) {
+      await p.remove(k);
+    }
+  }
+
   static Future<List<String>> loadOrder() async => (await _p())?.getStringList(keyOrder) ?? const [];
 
   static Future<void> saveOrder(List<String> ids) async {

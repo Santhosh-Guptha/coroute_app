@@ -89,15 +89,15 @@ void main() {
     s.addListener(() => notified++);
     await s.setVoiceWarnings(false);
     await s.setHazardAlerts(false); // always on: ignored
-    await s.setRideOnLockScreen(false); // always on: ignored
+    await s.setRideOnLockScreen(false); // lock-screen cockpit: the rider's choice again (saved)
     await s.setAutoReroute(false); // always on: ignored
     await s.setHardwarePtt(true);
     await s.markNetConsentSeen();
     await s.bumpNetConsentPrompts();
     await s.bumpNetConsentPrompts();
-    expect(notified, 5);
+    expect(notified, 6);
     await s.setVoiceWarnings(false); // no change: no notification
-    expect(notified, 5);
+    expect(notified, 6);
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool(NetworkConstants.keyVoiceWarnings), isFalse);
@@ -109,7 +109,7 @@ void main() {
     await again.load();
     expect(again.voiceWarnings, isFalse);
     expect(again.hazardAlerts, isTrue);
-    expect(again.rideOnLockScreen, isTrue);
+    expect(again.rideOnLockScreen, isFalse, reason: '"Show cockpit on lock screen while riding" is kept');
     expect(again.autoReroute, isTrue);
     expect(again.hardwarePtt, isTrue);
     expect(again.netConsentSeen, isTrue);

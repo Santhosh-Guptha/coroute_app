@@ -193,6 +193,16 @@ class PushService extends ChangeNotifier {
     return s.length > 32 ? s.substring(0, 32) : s;
   }
 
+  /// 3.57 sign-out: removes this phone's push token on the gateway while the session still works (called before
+  /// the session is revoked), then at FCM. The later token drop finds nothing left to do.
+  Future<void> unregisterNow() async {
+    if (!_hadToken) return;
+    _hadToken = false;
+    final bearer = _api.token ?? _lastBearer;
+    _lastBearer = null;
+    await _signedOut(bearer);
+  }
+
   Future<void> _signedOut(String? bearer) async {
     final token = _registeredToken;
     _registeredToken = null;

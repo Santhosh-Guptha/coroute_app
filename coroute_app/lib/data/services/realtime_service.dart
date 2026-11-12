@@ -197,6 +197,22 @@ class RealtimeService extends ChangeNotifier {
   bool _refused = false;
   bool get isRefused => _refused;
 
+  /// Round 4: true when the gateway did not understand first-message auth (a gateway from before round 4), so the
+  /// next attempt puts the token in the URL. Cleared again after a connection with the URL token.
+  bool _authInUrl = false;
+
+  /// The socket URL: without the token (first-message auth), or with ?token= for a gateway from before round 4.
+  static String wsAuthInUrl(String base, String? token) =>
+      token == null ? base : '$base?token=${Uri.encodeQueryComponent(token)}';
+
+  /// The first message of a round 4 socket.
+  static Map<String, Object> wsAuthMessage(String token) => {'type': 'AUTH', 'token': token};
+
+  /// An older gateway answers a socket without ?token= with 4401 "Unauthorized" before HELLO; a round 4 gateway
+  /// that refuses the token itself uses its own reason (SESSION_INVALID, TOKEN_EXPIRED, SIGNED_OUT, AUTH_TIMEOUT).
+  static bool shouldRetryAuthInUrl(int? closeCode, String? closeReason) =>
+      closeCode == closeSignedOut && (closeReason == null || closeReason.isEmpty || closeReason == 'Unauthorized');
+
   /// Decides what a socket close means: whether to tell the app, and whether to reconnect.
   @visibleForTesting
   static ({bool authRejected, bool reconnect}) closeOutcome(int? closeCode) {
@@ -378,9 +394,17 @@ class RealtimeService extends ChangeNotifier {
       return;
     }
     try {
-      final uri = Uri.parse('${AppConfig.wsUrl}?token=${Uri.encodeQueryComponent(_token!)}');
+      // Round 4: the token is the first message (never in the URL, so no proxy or access log sees it). A gateway
+      // from before round 4 refuses a socket without ?token=; then this phone uses the URL once more (see onDone).
+      final inUrl = _authInUrl;
+      final uri = Uri.parse(wsAuthInUrl(AppConfig.wsUrl, inUrl ? _token : null));
       final ch = WebSocketChannel.connect(uri);
       _channel = ch;
+      if (!inUrl) {
+        try {
+          ch.sink.add(jsonEncode(wsAuthMessage(_token!)));
+        } catch (_) {/* the close handler reconnects */}
+      }
       final seq = ++_channelSeq;
       _helloOnChannel = false;
       _readyOnChannel = false;
@@ -407,6 +431,14 @@ class RealtimeService extends ChangeNotifier {
           _failureNoted = true;
           _noteConnectFailure(LinkProblem.serverUnreachable);
         }
+        // Round 4 fallback: an older gateway closed a first-message socket before HELLO ("Unauthorized"): retry with
+        // the token in the URL (old protocol) instead of treating it as a sign-out.
+        if (seq == _channelSeq && !inUrl && !_helloOnChannel && shouldRetryAuthInUrl(ch.closeCode, ch.closeReason)) {
+          _authInUrl = true;
+          _scheduleReconnect();
+          return;
+        }
+        if (seq == _channelSeq && _helloOnChannel && inUrl) _authInUrl = false;
         final outcome = closeOutcome(ch.closeCode);
         if (!outcome.reconnect) {
           _refused = true;

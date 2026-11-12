@@ -6,6 +6,7 @@ import '../../core/ui/ui.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/safety_native.dart';
+import '../../domain/security/lock_screen_cockpit_policy.dart';
 
 /// Pale rose used for secondary text on the solid red SOS screens.
 const Color sosPale = Color(0xFFFFD0D7);
@@ -265,6 +266,8 @@ class SosHoldScreen extends StatelessWidget {
       final sent = await Navigator.of(context, rootNavigator: true).push<bool>(
         MaterialPageRoute<bool>(
           fullscreenDialog: true,
+          // Opens over the locked cockpit without unlocking (lock_screen_cockpit_policy.dart).
+          settings: const RouteSettings(name: LockScreenCockpitPolicy.routeSosHold),
           builder: (ctx) => SosHoldScreen(
             onSend: () => Navigator.of(ctx).pop(true),
             onCancel: () => Navigator.of(ctx).pop(false),

@@ -7,6 +7,7 @@ import '../../core/ui/ui.dart';
 import '../../data/models/medical_info.dart';
 import '../../data/services/auth_service.dart';
 import '../safety/emergency_texts_disclosure.dart';
+import '../security/secure_screen.dart';
 import '../safety/safety_card_sheet.dart';
 
 /// The one profile form: name, mobile number, bike (or pillion), the
@@ -255,6 +256,11 @@ class _ProfileFormState extends State<ProfileForm> {
 
   @override
   Widget build(BuildContext context) {
+    // Round 4: FLAG_SECURE on the Medical ID / emergency contact form (no screenshots, blank in Recents).
+    return SecureScreen(child: _form(context));
+  }
+
+  Widget _form(BuildContext context) {
     final header = widget.header;
     final err = _error;
     return ListView(

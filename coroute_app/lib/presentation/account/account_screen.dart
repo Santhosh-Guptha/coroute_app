@@ -17,6 +17,7 @@ import '../social/user_avatar.dart';
 import '../widgets/feature_switch.dart';
 import 'edit_profile_screen.dart';
 import 'privacy_terms_sheet.dart';
+import 'sign_out_flow.dart';
 
 /// The Profile tab, minimal (owner direction, Nov 11; docs/SETTINGS_MINIMAL_v3.55.md):
 ///  * Top box: picture, full name and @username; tap opens the profile details (My profile:
@@ -235,12 +236,9 @@ class AccountScreen extends StatelessWidget {
                         icon: Icons.logout_rounded,
                         title: signOutTitle,
                         chevron: false,
-                        onTap: () async {
-                          await auth.logout();
-                          if (context.mounted) {
-                            Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
-                          }
-                        },
+                        // 3.57: this phone or every device, keep emergency info (default), never mid-ride,
+                        // then the sign-in screen with the stack cleared (lib/presentation/account/sign_out_flow.dart).
+                        onTap: () => SignOutFlow.run(context, auth),
                       ),
                       _SettingsRow(
                         key: Key(accountRowKeys[1]),
@@ -285,8 +283,16 @@ class AccountScreen extends StatelessWidget {
       builder: (_) => const _TypeDeleteSheet(),
     );
     if (typed != true || !context.mounted) return;
-    final res = await context.read<AuthService>().deleteAccount();
+    final auth = context.read<AuthService>();
+    var res = await auth.deleteAccount();
     if (!context.mounted) return;
+    // 3.57: the gateway asks to confirm it is the rider (password, or Google), then the deletion runs again.
+    if (res['code'] == 'REAUTH_REQUIRED') {
+      final ok = await _reauth(context, auth);
+      if (!ok || !context.mounted) return;
+      res = await auth.deleteAccount();
+      if (!context.mounted) return;
+    }
     if (res['success'] == true) {
       final messenger = ScaffoldMessenger.of(context);
       Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
@@ -297,6 +303,42 @@ class AccountScreen extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['error']?.toString() ?? 'Could not delete the account.')));
     }
   }
+}
+
+/// 3.57: "Confirm it is you" before deleting the account (password; Google accounts confirm with Google).
+Future<bool> _reauth(BuildContext context, AuthService auth) async {
+  if (auth.signsInWithGoogle) {
+    final r = await auth.reauthenticate(withGoogle: true);
+    if (r['success'] != true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(r['error']?.toString() ?? 'Google did not confirm.')));
+    }
+    return r['success'] == true;
+  }
+  final ctrl = TextEditingController();
+  final pw = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Confirm it is you'),
+      content: TextField(
+        key: const Key('reauth_password'),
+        controller: ctrl,
+        obscureText: true,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Your password'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Confirm')),
+      ],
+    ),
+  );
+  ctrl.dispose();
+  if (pw == null || pw.isEmpty || !context.mounted) return false;
+  final r = await auth.reauthenticate(password: pw);
+  if (r['success'] != true && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(r['error']?.toString() ?? 'That password is not right.')));
+  }
+  return r['success'] == true;
 }
 
 /// A row inside a [DsCard] list: teal icon, label with an optional caption under it, a

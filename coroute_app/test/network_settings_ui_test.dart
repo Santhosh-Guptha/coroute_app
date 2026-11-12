@@ -86,9 +86,9 @@ void main() {
     final (auth, patches) = authWithPatches();
     await host(tester, const SettingsScreen(), settings: settings, auth: auth);
     expect(tester.takeException(), isNull);
-    // Main screen: voice alerts, siren alerts, battery saver and data saver (push and leaderboard
-    // need their services). Safety switches are gone: they are always on.
-    expect(find.byType(Switch), findsNWidgets(4));
+    // Main screen: voice alerts, siren alerts, battery saver, data saver and "Show cockpit on lock screen while
+    // riding" (push and leaderboard need their services). Safety switches are gone: they are always on.
+    expect(find.byType(Switch), findsNWidgets(5));
     expect(find.text(SafetyTexts.hazardTitle), findsNothing);
     expect(find.text(SafetyTexts.lockTitle), findsNothing);
     expect(find.text(SafetyTexts.crashTitle), findsNothing);

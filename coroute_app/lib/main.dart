@@ -31,6 +31,14 @@ import 'presentation/social/friend_notice_host.dart'; // 3.55 friend request not
 import 'presentation/social/ride_invite_screen.dart'; // 3.55 crew ride invites
 import 'domain/social/username_rules.dart' show InviteCodes;
 import 'data/services/auth_service.dart';
+import 'data/services/app_lock_service.dart';
+import 'domain/auth/account_flows.dart';
+import 'presentation/auth/mfa_prompt_dialog.dart';
+import 'presentation/security/app_lock_gate.dart';
+import 'presentation/security/locked_cockpit_gate.dart'; // cockpit on the lock screen while riding
+import 'data/services/lock_screen_cockpit_service.dart';
+import 'presentation/safety/sos_hold_screen.dart';
+import 'presentation/widgets/emergency_sos_sheet.dart';
 import 'data/services/background_service.dart';
 import 'data/services/alarm_notifier.dart'; // 3.55 siren lock-screen heads-up
 import 'data/services/p2p_mesh_service.dart';
@@ -52,6 +60,8 @@ import 'data/services/ride_notification_service.dart';
 import 'data/services/medical_id_lock_sync.dart';
 import 'data/services/safety_native.dart';
 import 'data/services/safety_service.dart';
+import 'data/services/session_guard.dart'; // 3.57 never signed out mid-ride
+import 'domain/auth/session_policy.dart';
 import 'data/services/solo_guardian_service.dart';
 import 'data/services/sos_battery_reserve.dart';
 import 'data/services/settings_service.dart';
@@ -176,7 +186,40 @@ class CoRouteApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<ThemeController>.value(value: theme),
         ChangeNotifierProvider<SettingsService>(create: (_) => settings ?? (SettingsService()..load())),
-        ChangeNotifierProvider(create: (_) => ApiClient()),
+        ChangeNotifierProvider(create: (_) {
+          final api = ApiClient();
+          // Round 4: an admin call answered MFA_REQUIRED: ask for the 2-step code (step-up), then the call repeats once.
+          api.onMfaRequired = (body) async {
+            final ctx = appNavigatorKey.currentContext;
+            if (ctx == null) return false;
+            Future<String?> submit({String? code, String? recoveryCode, String? emailCode}) async {
+              try {
+                await api.post('/auth/mfa/step-up', {'code': ?code, 'recoveryCode': ?recoveryCode, 'emailCode': ?emailCode});
+                return null;
+              } on ApiException catch (e) {
+                return e.message;
+              } catch (_) {
+                return 'Could not check the code. Try again.';
+              }
+            }
+            Future<String?> sendEmail() async {
+              try {
+                await api.post('/auth/mfa/step-up/email-code', const {});
+                return null;
+              } on ApiException catch (e) {
+                return e.message;
+              }
+            }
+            return MfaPromptDialog.show(ctx, challenge: MfaChallenge.fromBody(body), submit: submit, sendEmailCode: sendEmail);
+          };
+          return api;
+        }),
+        // Round 4: "Lock CoRoute with fingerprint or screen lock" (off by default; never during a ride or SOS).
+        // Started by _SessionBinder once the saved session is read (a cold start locks only a signed-in phone).
+        ChangeNotifierProvider<AppLockService>(lazy: false, create: (_) => AppLockService()),
+        // Cockpit on the lock screen while riding (docs/features_355/lock_screen_cockpit.md): wired and started by
+        // _SessionBinder (sign-in, the setting, the ride state). Never over the keyguard without a ride.
+        ChangeNotifierProvider<LockScreenCockpitService>(lazy: false, create: (_) => LockScreenCockpitService()),
         // 3.55 diagnostics log (Settings › More › Diagnostics, the post-ride safety prompt).
         ChangeNotifierProvider<DiagLogService>.value(value: DiagLogService.instance),
         ChangeNotifierProvider<DeviceDiagnosticService>(create: (ctx) => DeviceDiagnosticService(apiClient: ctx.read<ApiClient>())..loadCachedReport()),
@@ -640,7 +683,7 @@ class _App extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: appNavigatorKey,
-      navigatorObservers: [appRouteObserver, PushRouterHost.observer],
+      navigatorObservers: [appRouteObserver, PushRouterHost.observer, context.read<LockScreenCockpitService>().guard],
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeFor(theme.palette),
@@ -666,7 +709,11 @@ class _App extends StatelessWidget {
                   // 3.55 diagnostics: "send the log of this ride?" after a safety moment; support's log request.
                   child: DiagPromptHost(
                     navigatorKey: appNavigatorKey,
-                    child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+                    // Locked cockpit (padlock chip, private screens covered until the unlock) over the round 4 app
+                    // lock (above the screens, below the crash alarm and the SOS flows). They never show together.
+                    child: LockedCockpitGate(
+                      child: AppLockGate(navigatorKey: appNavigatorKey, child: _UpdateGate(child: child ?? const SizedBox.shrink())),
+                    ),
                   ),
                 ),
               ),
@@ -739,10 +786,89 @@ class _SessionBinder extends StatefulWidget {
 
 class _SessionBinderState extends State<_SessionBinder> {
   String? _boundUserId;
+  bool _wired = false;
+  String _shownNotice = '';
+  List<Listenable> _lockCockpitSources = const [];
+  VoidCallback? _lockCockpitRefresh;
+
+  /// 3.57: what a sign-out must wait for (lib/data/services/session_guard.dart), the push token removed before
+  /// the session is revoked, cached personal data wiped after it, and the "signed out after the ride" notice.
+  void _wire() {
+    if (_wired) return;
+    _wired = true;
+    final convoys = context.read<ConvoyService>();
+    final auth = context.read<AuthService>();
+    final push = context.read<PushService>();
+    final trips = context.read<TripStorageService>();
+    SessionGuard.instance.probe = () {
+      final safety = SafetyService.hasInstance ? SafetyService.instance : null;
+      return RideSafetyState(
+        inConvoy: convoys.activeConvoy != null,
+        rideActive: safety?.rideOn ?? false,
+        sosOrCountdown: (safety?.emergencyOpen ?? false) || convoys.pendingSos != null,
+        pendingEmergencyTexts: safety?.emergencyTextsPending ?? false,
+      );
+    };
+    // Round 4 app lock: armed only while signed in; the cold-start check runs once the saved session is read.
+    final lock = context.read<AppLockService>();
+    lock.signedIn = () => auth.isAuthenticated;
+    if (!auth.isLoading) {
+      lock.start().ignore();
+    } else {
+      void waitLoaded() {
+        if (auth.isLoading) return;
+        auth.removeListener(waitLoaded);
+        lock.start().ignore();
+      }
+      auth.addListener(waitLoaded);
+    }
+    // Cockpit on the lock screen: re-checked whenever the ride, the sign-in or the setting changes.
+    final lockCockpit = context.read<LockScreenCockpitService>();
+    final settings = context.read<SettingsService>();
+    lockCockpit
+      ..signedIn = (() => auth.isAuthenticated)
+      ..settingOn = (() => settings.rideOnLockScreen)
+      ..safetyFlowOpen = (() =>
+          SosHoldScreen.isOpen || EmergencySosSheet.isShowing || (SafetyService.hasInstance && SafetyService.instance.alarm != null));
+    _lockCockpitSources = [auth, settings, convoys, context.read<SafetyService>(), SessionGuard.instance];
+    _lockCockpitRefresh = lockCockpit.refresh;
+    for (final l in _lockCockpitSources) {
+      l.addListener(lockCockpit.refresh);
+    }
+    lockCockpit.start().ignore();
+    auth.beforeSignOut.add(push.unregisterNow);
+    auth.afterSignOut.add(trips.clearLocal);
+    SessionGuard.instance.addListener(_guardChanged);
+  }
+
+  void _guardChanged() {
+    final msg = SessionGuard.instance.pendingMessage;
+    if (msg.isEmpty || msg == _shownNotice) {
+      if (msg.isEmpty) _shownNotice = '';
+      return;
+    }
+    _shownNotice = msg;
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null) return;
+    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 8)));
+  }
+
+  @override
+  void dispose() {
+    SessionGuard.instance.removeListener(_guardChanged);
+    final refresh = _lockCockpitRefresh;
+    if (refresh != null) {
+      for (final l in _lockCockpitSources) {
+        l.removeListener(refresh);
+      }
+    }
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _wire();
     final auth = context.watch<AuthService>();
     final convoys = context.read<ConvoyService>();
     final intercom = context.read<IntercomService>();
