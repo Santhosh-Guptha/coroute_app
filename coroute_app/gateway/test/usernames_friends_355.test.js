@@ -456,7 +456,7 @@ test('GET /me/stats from stored trips; ride group usernames; account erase remov
   await F.inviteCodeOf(t.soda, a.user.userId);
   await raw('POST', '/me/avatar', PNG_1x1, a.token);
   await t.api('POST', `/convoys/${gid}/leave`, null, a.token);
-  const del = await t.api('DELETE', '/me', null, a.token);
+  const del = await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, a.token);
   assert.equal(del.status, 200, JSON.stringify(del.json));
   const left = async (coll, filter) => (await t.soda.query(coll, filter, { limit: 10 })).length;
   assert.equal(await left(U.COLL, { userId: a.user.userId }), 0);

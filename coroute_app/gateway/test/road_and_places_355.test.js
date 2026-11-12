@@ -226,7 +226,7 @@ test('place reviews: one per rider and place, text rules, photos after an admin 
   assert.equal((await t.api('GET', `/places/reviews?placeId=${place.placeId}`, null, asha.token)).json.summary.count, 2);
 
   // Account deletion removes the rider's reviews.
-  assert.equal((await t.api('DELETE', '/me', null, shanmuk.token)).status, 200);
+  assert.equal((await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, shanmuk.token)).status, 200);
   await sleep(30);
   page = (await t.api('GET', `/places/reviews?placeId=${place.placeId}`, null, asha.token)).json;
   assert.deepEqual(page.summary, { count: 1, avg: 4 });

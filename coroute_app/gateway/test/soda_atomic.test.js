@@ -15,7 +15,7 @@ test('atomic patch tests the observed document before replacement without retryi
     assert.equal(calls[0].options.method, 'PATCH');
     assert.equal(calls[0].options.headers['Content-Type'], 'application/json-patch+json');
     assert.deepEqual(JSON.parse(calls[0].options.body), [
-      { op: 'test', path: '', value: { sequence: 1 } }, { op: 'replace', path: '', value: { sequence: 2 } }]);
+      { op: 'test', path: '/sequence', value: 1 }, { op: 'replace', path: '', value: { sequence: 2 } }]);
   }
 });
 

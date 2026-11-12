@@ -239,7 +239,7 @@ test('RIDE_INVITE always pushes (even when connected); admin switch stops pushes
   assert.equal(off.sent, 0);
   assert.equal((await t.api('PUT', '/admin/features/pushNotifications', { enabled: true }, admin.token)).status, 200);
 
-  assert.equal((await t.api('DELETE', '/me', null, r.token)).status, 200);
+  assert.equal((await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, r.token)).status, 200);
   await sleep(50);
   assert.equal((await t.gw.push.tokensOf(r.user.userId)).length, 0, 'tokens erased with the account');
 });

@@ -341,6 +341,8 @@ class Repo {
     await this.soda.removeWhere(C.placeReviews, { userId: uid });
     // 3.55 rider score (src/rider_score.js, its own collection).
     await this.soda.removeWhere('rider_scores', { userId: uid }).catch((e) => { if (e.status !== 404) throw e; });
+    // 3.57 server-side sessions (src/sessions.js): every record of the account goes too.
+    await this.soda.removeWhere('auth_sessions', { userId: uid }).catch((e) => { if (e.status !== 404) throw e; });
     await this.soda.removeWhere(C.users, { userId: uid });
     return { groups: groups.size };
   }

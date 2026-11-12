@@ -221,7 +221,7 @@ test('deleting the account deletes the rider\'s logs and requests', async () => 
   const up = await upload(R.token, bundle([line({})]));
   assert.equal(up.status, 201);
   await t.api('POST', '/admin/diag-logs/request', { userId: R.user.userId }, admin.token);
-  assert.equal((await t.api('DELETE', '/me', null, R.token)).status, 200);
+  assert.equal((await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, R.token)).status, 200);
   const rows = [];
   for (const name of Object.values(D.COLLECTIONS)) {
     for (const doc of (t.soda.collections.get(name) || new Map()).values()) rows.push(JSON.stringify(doc));

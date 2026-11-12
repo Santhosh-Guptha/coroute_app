@@ -21,7 +21,8 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null, requireRecentAuth = null, fieldCrypto = null, rideLock = null, securityMail = null }) {
+  const { sendSession, ctxOf, isLegacyClient } = require('./security_routes');
   const r = express.Router();
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
@@ -33,7 +34,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   });
   const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
 
-  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.', code: 'RATE_LIMITED' } });
   const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: 'draft-7', legacyHeaders: false });
   const diagSubmitLimiter = rateLimit({
     windowMs: 24 * 60 * 60 * 1000,
@@ -95,6 +96,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       role: config.gatewayRole,
       node: nodeName || null,
       leases: lease ? Object.entries(lease.status()).filter(([, v]) => v.holding).map(([k]) => k) : [],
+      // 3.57: field encryption at rest: ON, OFF (no DATA_ENC_KEY) or KEY_MISSING (stored values use a key this node lacks).
+      dataEncryption: fieldCrypto ? (fieldCrypto.missingKids.size ? 'KEY_MISSING' : fieldCrypto.enabled ? 'ON' : 'OFF') : 'OFF',
     });
   }));
 
@@ -116,15 +119,42 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     });
   });
 
-  r.post('/auth/register', authLimiter, wrap(async (req, res) => res.status(201).json(await auth.register(req.body || {}))));
+  // 3.57: sign-ins create a server session (src/sessions.js); website kinds get their refresh token as an httpOnly cookie.
+  // Round 4: e-mail verification first (no enumeration): the same generic 202 for a new and a registered address.
+  // Builds before 10025 (and API clients) follow REGISTER_VERIFY_LEGACY: 'verify' (default) answers them with a readable
+  // message they show as is (400 EMAIL_VERIFICATION_SENT, same for every address); 'allow' keeps 201 + token / 409.
+  const REGISTER_MESSAGE = 'Check your e-mail to finish creating your account';
+  r.post('/auth/register', authLimiter, wrap(async (req, res) => {
+    const legacy = isLegacyClient(req);
+    const verify = !legacy || config.registerVerifyLegacy === 'verify';
+    const started = Date.now();
+    const out = await auth.register(req.body || {}, ctxOf(req), { verify });
+    if (!verify) return sendSession(res, out, 201);
+    // About the same time whether the address was new or registered (hashing is done for both).
+    const wait = 700 - (Date.now() - started);
+    if (wait > 0 && config.env !== 'test') await new Promise((ok) => setTimeout(ok, wait));
+    res.set('Cache-Control', 'no-store');
+    if (legacy) {
+      return res.status(400).json({ error: `${REGISTER_MESSAGE}. Open the link we sent you, then sign in here with your e-mail and password.`, code: 'EMAIL_VERIFICATION_SENT' });
+    }
+    res.status(202).json({ ok: true, pending: true, message: REGISTER_MESSAGE, resendAfterSec: 60 });
+  }));
   // Wrong passwords are also limited per account (an attacker rotating IPs), correct logins do not count.
   const loginIdLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 10, skipSuccessfulRequests: true, standardHeaders: 'draft-7', legacyHeaders: false,
     keyGenerator: (req) => `login:${String(req.body?.identifier || '').trim().toLowerCase().slice(0, 120)}`,
-    message: { error: 'Too many attempts, try again later.' },
+    // The same answer as a locked account (src/auth.js), so neither tells whether the account exists.
+    message: { error: 'Too many attempts, try again later.', code: 'RATE_LIMITED' },
   });
-  r.post('/auth/login', authLimiter, loginIdLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
-  r.post('/auth/google', authLimiter, wrap(async (req, res) => res.json(await auth.loginWithGoogle(req.body || {}))));
+  r.post('/auth/login', authLimiter, loginIdLimiter, wrap(async (req, res) => sendSession(res, await auth.login(req.body || {}, ctxOf(req)))));
+  r.post('/auth/google', authLimiter, wrap(async (req, res) => sendSession(res, await auth.loginWithGoogle(req.body || {}, ctxOf(req)))));
+  // Round 4: the account deletion link e-mailed to builds before 10025 (single use, 30 min, only a hash stored).
+  r.post('/auth/delete/confirm', authLimiter, wrap(async (req, res) => {
+    const user = await auth.consumeDeleteConfirmation(req.body?.token);
+    const out = await auth.deleteAccount(user.userId, { prepare: prepareErase });
+    if (hub) hub.disconnectUser(user.userId, 4401, 'ACCOUNT_GONE');
+    res.json({ ...out, message: 'Your CoRoute account and its data were deleted.' });
+  }));
   // Guest mode was retired in 3.55 (410 GUEST_RETIRED); kept so old builds get a clear message.
   r.post('/auth/guest', authLimiter, wrap(async (req, res) => res.json(await auth.loginAsGuest(req.body || {}))));
 
@@ -228,9 +258,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Sliding session on EVERY authenticated call (not only /me): a phone that stays on one long
   // multi-day ride (sockets, telemetry, SOS) without reopening the app is never signed out by
   // token age mid-ride. Signed from the database document (current role and password version).
+  // 3.57: long (older app build) tokens only, re-signed for the same session; short tokens use POST /auth/refresh.
   r.use((req, res, next) => {
-    if (req.dbUser && req.tokenIssuedAt && Date.now() - req.tokenIssuedAt > config.tokenRefreshAfterHours * 3600000) {
-      try { res.set('X-CoRoute-Token', auth.issueToken(req.dbUser)); } catch { /* never in the way */ }
+    if (req.dbUser && !req.tokenShort && !res.get('X-CoRoute-Token') && req.tokenIssuedAt && Date.now() - req.tokenIssuedAt > config.tokenRefreshAfterHours * 3600000) {
+      try { res.set('X-CoRoute-Token', auth.issueToken(req.dbUser, { sid: req.sessionSid })); } catch { /* never in the way */ }
     }
     next();
   });
@@ -257,9 +288,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const me = await auth.me(req.user.userId, { appBuild: parseInt(req.get('X-CoRoute-Build') || '0', 10) });
     // Sliding session: a rider who opens the app at least once a month is never signed out.
     // The new token is built from the database user, so role changes take effect too.
-    if (!res.get('X-CoRoute-Token') && Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
+    if (!req.tokenShort && !res.get('X-CoRoute-Token') && Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
       // Signed from the database document so the token carries the current password version.
-      res.set('X-CoRoute-Token', auth.issueToken(req.dbUser || me));
+      res.set('X-CoRoute-Token', auth.issueToken(req.dbUser || me, { sid: req.sessionSid }));
     }
     res.json(me);
   }));
@@ -284,8 +315,27 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (timeline) timeline.forgetUser(user.userId, id);
     return { id, skipGroups };
   }
-  r.post('/me/password', wrap(async (req, res) => res.json(await auth.changePassword(req.user.userId, req.body || {}))));
+  r.post('/me/password', wrap(async (req, res) => {
+    const s = req.authSession || null;
+    const recentAuth = !!(s && auth.sessions && auth.sessions.recentlyAuthenticated(await auth.sessions.get(s.sessionId)));
+    res.json(await auth.changePassword(req.user.userId, req.body || {}, { session: s, recentAuth }));
+  }));
   r.delete('/me', wrap(async (req, res) => {
+    // 3.57: deleting the account needs a recent re-authentication (POST /auth/reauth, or the password in the body)
+    // from every client that knows the new sessions.
+    if (requireRecentAuth && req.authSession && req.authSession.v2) await requireRecentAuth(req);
+    else if (requireRecentAuth && req.authSession && !req.authSession.v2) {
+      // Round 4: builds before 10025 (long tokens) never delete at once without the password: the password in the
+      // body still deletes now; otherwise a single-use 30-minute link goes to the account address (202 + message).
+      const b = req.body || {};
+      if ((typeof b.currentPassword === 'string' && b.currentPassword) || (typeof b.password === 'string' && b.password)) {
+        await auth.verifyIdentity(req.user.userId, { password: b.currentPassword || b.password });
+      } else {
+        const sent = await auth.requestDeleteConfirmation(req.user.userId);
+        return res.status(202).json({ ok: true, pending: true, code: 'DELETE_CONFIRM_SENT',
+          message: `We e-mailed ${sent.maskedEmail} a link to confirm deleting your account. It works once, for ${config.deleteConfirmTtlMin} minutes. Your account stays until you open it.` });
+      }
+    }
     const out = await auth.deleteAccount(req.user.userId, { prepare: prepareErase });
     if (hub) hub.disconnectUser(req.user.userId, 4401, 'ACCOUNT_GONE');
     res.json(out);
@@ -311,9 +361,18 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     }
   };
 
+  /** Round 4 ride lock: the session that starts / joins a ride becomes the riding one (src/ride_lock.js). */
+  const markRiding = (req, snap) => {
+    const gid = snap && (snap.groupId || (snap.convoy && snap.convoy.groupId));
+    if (rideLock && gid && req.sessionSid) rideLock.noteRide(req.sessionSid, req.user.userId, gid, { force: true }).catch(() => {});
+  };
   r.post('/convoys', wrap(async (req, res) => {
     await ensureProfileComplete(req);
-    res.status(201).json(await convoys.createConvoy(req.user, req.body || {}));
+    // Another device of this account is on a ride: this session (signed in before) cannot start a second one.
+    if (rideLock) await rideLock.assertCanRide(req.user.userId, req.sessionSid, { reason: 'start' });
+    const snap = await convoys.createConvoy(req.user, req.body || {});
+    markRiding(req, snap);
+    res.status(201).json(snap);
   }));
   // Join codes are short, so wrong codes are limited per rider and per network; correct joins do not count.
   const joinMessage = { error: `Too many wrong codes. Try again in ${config.joinWindowMin} minutes.`, code: 'TOO_MANY_ATTEMPTS' };
@@ -327,7 +386,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   });
   r.post('/convoys/join', joinLimiterIp, joinLimiterUser, wrap(async (req, res) => {
     await ensureProfileComplete(req);
-    res.json(await convoys.joinByCode(req.user, req.body?.code, req.body?.rider || {}));
+    if (rideLock) await rideLock.assertCanRide(req.user.userId, req.sessionSid, { reason: 'join' });
+    const snap = await convoys.joinByCode(req.user, req.body?.code, req.body?.rider || {});
+    markRiding(req, snap);
+    res.json(snap);
   }));
   r.get('/convoys/active', wrap(async (req, res) => {
     const meta = await repo.findActiveMembership(req.user.userId);
@@ -1140,7 +1202,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // eslint-disable-next-line no-unused-vars
   r.use((err, req, res, next) => {
     if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) return res.status(err.statusCode).json({ error: err.message });
-    if (err instanceof AuthError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    if (err instanceof AuthError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}), ...(err.extra && typeof err.extra === 'object' ? err.extra : {}) });
     if (err instanceof ValidationError) return res.status(err.status).json({ error: err.message, code: err.code, fields: err.fields });
     if (err instanceof ConvoyError) return res.status(err.status).json({ error: err.message, ...(err.reason ? { code: err.reason, reason: err.reason } : {}) });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Malformed JSON' });

@@ -392,3 +392,144 @@ curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/ga
 * `santhosh` (password `Santhosh@180901`) with passwordless sudo.
 * `antigravity` (password `Antigravity@CoRoute2026#VM`) with passwordless sudo for automated deployments.
 * SSH Password authentication enabled in `/etc/ssh/sshd_config.d/50-password-auth.conf`.
+
+## Sessions & security (3.57)
+
+Docs: `docs/features_355/sessions_and_security.md`, findings `docs/security/SECURITY_AUDIT_v3.55.md`.
+
+### New secrets (OCI Vault -> /run/coroute/secrets.env, identical on VM1 and VM2)
+
+| Secret | Create with | Notes |
+|---|---|---|
+| `DATA_ENC_KEY` | `openssl rand -base64 32` | AES-256-GCM field encryption. Set `DATA_ENC_KEY_ID=k1` (non-secret, gateway.env). |
+| `BLIND_INDEX_KEY` | `openssl rand -base64 32` | keyed hashes (session IP hash, device fingerprints). |
+| `DATA_ENC_KEYS_PREVIOUS` | only during a rotation | `k1:<old base64>`; keep it until `node scripts/encrypt_fields.js` (dry run) shows 0 to encrypt. |
+
+Never print them, never put them in git or in `gateway.env`. Losing `DATA_ENC_KEY` loses the encrypted phone numbers,
+emergency contacts and Medical ID fields: keep a Vault backup of the secret version. `GET /api/health` reports
+`dataEncryption: ON | OFF | KEY_MISSING` (KEY_MISSING = this node meets values written with a key it lacks: fix the
+env on that node before anything else; SOS texts would have no contact numbers).
+
+### Key rotation
+
+1. New key in Vault; set `DATA_ENC_KEYS_PREVIOUS=k1:<old>`, `DATA_ENC_KEY=<new>`, `DATA_ENC_KEY_ID=k2` on BOTH nodes.
+2. Restart VM2, then VM1. Reads re-encrypt lazily; `node scripts/encrypt_fields.js --write` finishes the rest.
+3. When the dry run shows 0, remove `DATA_ENC_KEYS_PREVIOUS` (both nodes).
+
+### Admin 2-step break-glass
+
+An administrator who lost the authenticator phone AND the recovery codes:
+
+1. Two people present (four-eyes). Verify the admin's identity out of band (call back on the known number).
+2. On a gateway VM, as the service user, with the production env loaded:
+   `node scripts/admin_mfa_reset.js <admin e-mail> "<ticket id and reason>"`
+3. It turns 2-step off for that account, ends every session of the account and writes an `AUTH / MFA_BREAK_GLASS`
+   audit row. The admin enrols again at the next web admin sign-in (scan the new QR, store the new recovery codes).
+4. Note the ticket in `VM_OPERATIONS_LOG.md`. If no admin can sign in at all, `ADMIN_MFA_ENFORCE=off` on VM2 for
+   the minutes needed (restart), enrol, then set it back to `all` and restart.
+
+### Incident: a token or session may be stolen
+
+* One rider: Admin console (or the rider at /account) "Sign out of all devices"; or `POST /api/auth/logout-all` with
+  the rider's token. Sockets close at once on both nodes.
+* Everyone: rotate `JWT_SECRET` (with `JWT_SECRET_PREVIOUS` only if you need a grace period; without it every
+  session ends and riders sign in again; rides keep their safety features locally).
+
+
+## Round 4 security (ride lock, sign-up verification, 2-step, pins, HSTS)
+
+Docs: `docs/features_355/sessions_and_security.md` §9-§12. New settings (all optional, defaults shown) are listed in
+`deploy/.env.example` under "round 4". SMTP must work: verification links, ride sign-in codes, 2-step e-mail codes and
+deletion links all go by e-mail (`SMTP_HOST` / `MAIL_FROM`). Check after deploy: create an account on `/signin` with a
+real address and confirm the link arrives (Gmail and Outlook, inbox not spam).
+
+### Release order
+
+Both gateway nodes first (VM2 then VM1), then the app. Old app builds keep working: the ride lock answers them with a
+readable `error`, sign-up gives them a readable message (`REGISTER_VERIFY_LEGACY=verify`), account deletion e-mails a
+link, their admin screens keep `web` 2-step rules, and their sockets keep `?token=`.
+
+### Ride lock support cases
+
+* "My phone died / was stolen during a ride and I cannot sign in": the sign-in screen offers **Send code to my e-mail**.
+* No access to the e-mail: web admin › Riders › the rider › More › **End ride lock…** (MASTER_ADMIN, reason required,
+  audited). It does not end the ride or any SOS.
+* Emergency switch: `RIDE_LOCK=off` on both nodes, restart (blocks stop at once; nothing else changes).
+
+### WebSocket tokens and access logs
+
+Apps from 10025 send the token as the first socket message, never in the URL. Builds before 10025 still use
+`/ws?token=…`. The gateway logger redacts `token=` values. Caddy writes no access log in our Caddyfiles; if you ever add
+one, strip the query token and the auth headers:
+
+```
+log {
+	output file /var/log/caddy/access.log
+	format filter {
+		wrap json
+		fields {
+			request>uri query {
+				replace token REDACTED
+			}
+			request>headers>Authorization replace REDACTED
+			request>headers>Sec-Websocket-Protocol replace REDACTED
+			request>headers>Cookie replace REDACTED
+		}
+	}
+}
+```
+
+(`Sec-WebSocket-Protocol` can carry `coroute.bearer.<token>` from other clients.) Never log request bodies.
+
+### HSTS ramp-up
+
+The gateway sends `Strict-Transport-Security: max-age=$HSTS_MAX_AGE; includeSubDomains[; preload]`; Caddy also sets
+it per host (`deploy/caddy/Caddyfile.vm*`). `coroute.duckdns.org` already has one year. For `coroute.devmonks.space`:
+
+1. Now: Caddy `max-age=300` (5 min). Check every page, `/api`, `/ws` and the app on that host for a week.
+2. Week 2: `max-age=86400` (1 day) in Caddy, `HSTS_MAX_AGE=86400` on both nodes.
+3. Week 3: `max-age=604800` (7 days).
+4. Week 5: `max-age=31536000` (1 year). Keep `includeSubDomains` on the `coroute.` host only (other sites live on
+   `devmonks.space`).
+5. Preload (`HSTS_PRELOAD=true`) only if the owner wants it AND the apex `devmonks.space` and every subdomain are HTTPS
+   forever: a subdomain cannot be preloaded alone, and removal from the preload list takes months. Not recommended now.
+
+Going back: lower max-age first and wait out the old one; browsers keep the last value until it expires.
+
+### Certificate pins (Android release builds)
+
+`android/app/src/main/res/xml/network_security_config.xml` pins the two gateway hosts to CA ROOT keys (SPKI SHA-256):
+ISRG Root X1 and X2 (Let's Encrypt, Caddy's first issuer), USERTrust RSA and ECC (ZeroSSL, Caddy's automatic fallback
+when Let's Encrypt fails) and, as backups, Sectigo Public Server Authentication Root R46 and E46. The pin-set has
+`expiration="2027-11-01"`: after that date Android ignores the pins (fails open) and checks normal system trust.
+
+Rotation checklist (every release, and at least every 6 months):
+
+1. Is the expiration more than 6 months away? If not, move it to about 12 months after the release date.
+2. Has Let's Encrypt or ZeroSSL/Sectigo announced a new root (for example a new ISRG root generation)? If yes, add
+   its pin in an app release at least 2 months before they start issuing from it. Compute a pin from the root
+   certificate, never copy it from a web page:
+   `openssl x509 -in Root.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64`
+3. Changing CA (for example to Google Trust Services): add the new CA's roots in an app release first, wait until
+   most riders updated, only then switch Caddy.
+4. If a wrong pin ever ships: riders on that build cannot reach the gateway (SOS texts and the lock-screen Medical ID
+   still work, they do not use the gateway). Fix: ship an app update; as a server-side bridge, make Caddy serve a
+   chain from a pinned CA (`issuer acme` with the Let's Encrypt directory, `preferred_chains { root_common_name "ISRG Root X1" }`).
+5. Debug builds accept user-installed CAs and skip the pins (`debug-overrides`); release builds never do.
+
+Optional (not applied: needs `caddy validate` on the VM first, and newer Caddy versions need a ZeroSSL API key for `issuer zerossl`): make the issuer explicit so the chain is predictable:
+
+```
+tls {
+	issuer acme {
+		dir https://acme-v02.api.letsencrypt.org/directory
+		dns duckdns {env.DUCKDNS_TOKEN}
+		dns_challenge_override_domain _acme-challenge.coroute.duckdns.org
+		resolvers 1.1.1.1 8.8.8.8
+	}
+	issuer zerossl {
+		dns duckdns {env.DUCKDNS_TOKEN}
+	}
+	protocols tls1.2 tls1.3
+}
+```

@@ -59,6 +59,16 @@ function createSoda() {
 }
 
 async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore, mailTransport, smsProviders, smsFetch, pushImageStore } = {}) {
+  // 3.57 security: every log line is redacted (tokens, passwords, OTPs, e-mails, phone numbers; src/redact.js).
+  logger = require('./redact').redactingLogger(logger);
+  // 3.57 security: protected fields (phones, emergency contact, medical ID, 2-step secrets) are encrypted at rest
+  // with AES-256-GCM when DATA_ENC_KEY is set (src/field_crypto.js); every module reads them decrypted.
+  const fieldCrypto = require('./field_crypto').fieldCryptoFromConfig(config, logger);
+  const rawSoda = soda;
+  soda = require('./field_crypto').encryptingSoda(soda, fieldCrypto, { logger });
+  if (!fieldCrypto.enabled && config.env === 'production') {
+    logger.warn('[config] DATA_ENC_KEY is not set: phone numbers, emergency contacts and medical ID fields are stored without field encryption.');
+  }
   const repo = new Repo(soda);
   const nodeName = config.nodeName || process.env.NODE_NAME || require('os').hostname();
   // Scheduled jobs run on exactly one node of a two-VM deployment (src/job_lease.js, GATEWAY_ROLE).
@@ -78,7 +88,10 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       .catch((e) => logger.warn(`[coupons] default coupon seed failed: ${e.message}`));
   }
 
-  const gate = new UserGate(repo);
+  // 3.57 server-side sessions (src/sessions.js): every token is bound to one; revokes end it everywhere at once.
+  const sessions = new (require('./sessions').SessionStore)({ soda, logger, fieldCrypto });
+  if (migrate) await sessions.init();
+  const gate = new UserGate(repo, { sessions });
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
   // 3.55 admin feature switches: one cached copy per node (re-read every 30 s and on a mirror poke);
@@ -107,6 +120,19 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // 3.16: the live link index and the role / live link audit rows go through the same audit as the network.
   const audit = new SafetyAudit({ repo, logger });
   convoys.audit = audit;
+  sessions.audit = audit;
+  // An app session is never ended by its absolute lifetime during a ride, an open SOS / crash alert (src/sessions.js).
+  sessions.isRiding = async (userId) => {
+    for (const room of convoys.rooms.values()) {
+      if (!room || !room.riders || !room.riders.has(userId)) continue;
+      if (['PLANNING', 'STARTED', 'PAUSED'].includes((room.meta || {}).tripStatus)) return true;
+      for (const al of (room.alerts && room.alerts.values ? room.alerts.values() : [])) if (al && !al.resolved && al.userId === userId) return true;
+    }
+    return !!(await repo.getActiveTrip(userId).catch(() => null));
+  };
+  // Round 4 ride lock (src/ride_lock.js): no sign-in on another device while this account's device is on a live ride.
+  const rideLock = new (require('./ride_lock').RideLock)({ sessions, repo, convoys, audit, codes: auth.codes, logger });
+  auth.rideLock = rideLock;
   // A phone number, emergency-text opt-out or nearby-assistance switch change reaches the rider's live ride.
   auth.onProfileChanged = (user, keys) => convoys.applyProfile(user.userId, user, keys);
   const tracks = new TrackStore(repo);
@@ -158,22 +184,31 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
+        // 3.57: the default for every response without its own policy (API answers, /e/, /join ...): no inline or
+        // third-party script at all. Pages that need Razorpay or Google (/plans, /checkout, /signin) set their own.
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://checkout.razorpay.com", "https://cdn.razorpay.com"],
+        scriptSrc: ["'self'"],
+        scriptSrcAttr: ["'none'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com", "https://*.razorpay.com"],
+        connectSrc: ["'self'"],
         fontSrc: ["'self'"],
-        frameSrc: ["'self'", "https://api.razorpay.com", "https://checkout.razorpay.com"],
+        frameSrc: ["'none'"],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],
-        formAction: ["'self'", "https://api.razorpay.com"],
+        formAction: ["'self'"],
       },
     },
     frameguard: { action: 'deny' },
     xContentTypeOptions: true,
+    // 3.57: HSTS from config (Caddy may set its own per host; docs/security/SECURITY_AUDIT_v3.55.md).
+    strictTransportSecurity: { maxAge: config.hstsMaxAge, includeSubDomains: true, preload: config.hstsPreload },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   }));
+  // 3.57: API answers are never cached by browsers or proxies unless a route says otherwise (public stats do);
+  // private data cannot come back from the cache after sign-out (Back button, shared computers).
+  app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); res.set('Pragma', 'no-cache'); next(); });
   // 3.55: a request id on every request (X-Request-Id from Caddy / the client when well-formed, else a new
   // one), echoed in the response; server-side errors are logged with it (never bodies or personal data).
   app.use((req, res, next) => {
@@ -199,6 +234,11 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const server = http.createServer(app);
   const startedAt = Date.now();
   const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery, emergencyGateway, publicRides });
+  hub.rideLock = rideLock;
+  // 3.57: sockets kept open only for a ride (their session was signed out) close when that ride ends.
+  convoys.on('roomEnded', (gid) => { try { hub.closeRevokedOf(gid); } catch { /* the next message closes them */ } });
+  // 3.57: browsers may open the socket only from this site (the app sends no Origin).
+  hub.allowedOrigins = new Set([...siteOriginsOf(config), ...config.corsOrigins].map((o) => String(o).toLowerCase()));
   network.attach(hub);
   discovery.attach(hub);
   publicRides.attach(hub);
@@ -211,6 +251,26 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const mirror = new Mirror({ convoys, logger, node: nodeName, ...(mirrorOpts || {}) });
   mirror.attach(hub);
   mirror.register('pr', publicRides);
+  // 3.57: a session revoked on one node closes its sockets on both (the database stays the truth).
+  const kickRevoked = ({ sids = [], userId = null, all = false, exceptSid = null, reason = 'SIGNED_OUT' } = {}) => {
+    const held = /^ACCOUNT_(ON_HOLD|BLOCKED)$/.test(String(reason));
+    const code = held ? 4403 : 4401;
+    const why = held ? String(reason) : 'SIGNED_OUT';
+    // A sign-out never cuts a rider out of a live ride (SOS relay, crash alerts): that socket closes when the ride ends.
+    // Hold, block and deletion close everything at once (admin decisions, unchanged).
+    const spareRiding = !held && reason !== 'ACCOUNT_DELETED';
+    if (all || (userId && exceptSid)) hub.disconnectUser(userId, code, why, { exceptSid, spareRiding });
+    else for (const sid of sids) hub.disconnectSession(sid, code, why, { spareRiding });
+  };
+  sessions.onRevoke = (ev) => {
+    kickRevoked(ev);
+    try { mirror.ext('ss', { op: 'REVOKE', sids: (ev.sids || []).slice(0, 1000), userId: ev.userId, all: !!ev.all, exceptSid: ev.exceptSid || null, reason: ev.reason }); } catch { /* the peer's cache expires within USER_GATE_TTL_MS */ }
+  };
+  sessions.onRemoteRevoke = (ev) => kickRevoked(ev);
+  mirror.register('ss', sessions);
+  // Round 4: a ride handover asked for on the node without the room (the web node) is told to the group by the peer.
+  mirror.register('rl', rideLock);
+  rideLock.toPeer = (op) => { if (!mirror.linked()) return false; mirror.ext('rl', op); return true; };
   // A switch changed on one node pokes the other to re-read the document (the DB stays the truth).
   mirror.register('ff', featureFlags);
   // Every connected app switches within seconds (each node tells its own sockets).
@@ -389,6 +449,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
       // 3.56 website screenshots: the bundled mime table predates AVIF.
       if (p.endsWith('.avif')) res.setHeader('Content-Type', 'image/avif');
+      if (p.endsWith('.woff2') || p.endsWith('.woff')) res.setHeader('Access-Control-Allow-Origin', '*');
       // The APK/IPA keeps its name across releases: always check for a newer one.
       if (p.endsWith('.apk')) {
         res.setHeader('Cache-Control', 'no-cache');
@@ -432,7 +493,22 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   require('./engagement').attachEngagement({ app, repo, gate, logger });
   // 3.55 diagnostics logs (src/diag_logs.js): rider uploads, admin viewer, erase cascade, leased retention.
   const diagLogs = require('./diag_logs').attachDiagLogs({ repo, hub, featureFlags, lease, logger, ...(diagObjectStore !== undefined ? { objectStore: diagObjectStore } : {}) });
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs }));
+  // 3.57 round 3 web admin Riders (src/admin_riders.js): list, rider page, assign plan / personal coupon / 1:1 e-mail,
+  // global search, the e-mail wizard's system templates, and the rider's own coupons for /account.
+  const riderAdmin = new (require('./admin_riders').RiderAdmin)({ repo, auth, hub, convoys, studio: notifications.studio, templates: notifications.templates,
+    lifecycle: notifications.lifecycle, diagLogs, config });
+  riderAdmin.rideLock = rideLock;
+  {
+    const ra = require('./admin_riders');
+    app.use('/api/admin/riders', requireAuth(gate), requireAdmin, ra.adminRidersRouter({ riders: riderAdmin }));
+    app.use('/api/admin/search', requireAuth(gate), requireAdmin, ra.adminSearchRouter({ riders: riderAdmin }));
+    app.use('/api/admin/email-wizard', requireAuth(gate), requireAdmin, ra.emailWizardRouter({ riders: riderAdmin }));
+    app.use('/api/me/coupons', requireAuth(gate), ra.meCouponsRouter({ riders: riderAdmin }));
+  }
+  // 3.57 sessions & security endpoints (refresh, sign out, sign out everywhere, sessions list, password reset, re-auth,
+  // e-mail change, 2-step verification). Before the main router (its requireAuth catch-all would answer first).
+  const security = require('./security_routes').attachSecurityRoutes({ app, auth, gate, sessions, rideLock, logger, mailerOf: () => notifications.mailer });
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs, requireRecentAuth: security.requireRecentAuth, fieldCrypto, rideLock, securityMail: security.mail }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -479,10 +555,15 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     lease.run('db-keepalive', config.keepAliveEveryMinutes * min, () => retention.keepAlive());
     lease.run('subscriptions', subscriptions.everyMs, () => subscriptions.runOnce(), { firstDelayMs: 90000 });
     lease.run('rider-score-daily', 24 * 60 * min, ({ signal } = {}) => riderScore.recomputeAll({ signal }), { firstDelayMs: 10 * min });
+    // 3.57: ended session records are removed 30 days after their last activity.
+    lease.run('auth-sessions-sweep', 6 * 60 * min, () => sessions.sweep(), { firstDelayMs: 15 * min });
+    // Round 4: sign-ups never verified within REGISTER_PURGE_DAYS (7) are removed.
+    lease.run('unverified-accounts-purge', 6 * 60 * min, () => auth.purgeUnverified(), { firstDelayMs: 20 * min });
     notifications.startJobs();
     publicStats.start(lease);
     if (backupModule && typeof backupModule.startBackupJobs === 'function') {
-      backupModule.startBackupJobs({ lease, repo, soda, logger });
+      // Backups copy the stored (encrypted) documents as they are: the raw client, not the decrypting wrapper.
+      backupModule.startBackupJobs({ lease, repo, soda: rawSoda, logger });
     }
   };
   subscriptions.start = () => retention.start();
@@ -512,7 +593,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { notifications, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

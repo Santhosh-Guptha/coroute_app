@@ -429,7 +429,7 @@ test('suspended and deleted accounts leave their crews; a deleted admin hands ov
   assert.equal(await CR.memberOf(t.soda, crew.crewId, c.user.userId), null);
 
   // Deleted admin: the co-admin takes over; open-poll votes removed, closed-poll votes kept anonymously.
-  const del = await t.api('DELETE', '/me', null, a.token);
+  const del = await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, a.token);
   assert.equal(del.status, 200, JSON.stringify(del.json));
   d = await detail(crew, b);
   assert.equal(d.json.crew.myRole, 'ADMIN');
@@ -444,7 +444,7 @@ test('suspended and deleted accounts leave their crews; a deleted admin hands ov
   assert.equal((await t.soda.query(CR.COLLECTIONS.votes, { userId: a.user.userId }, { limit: 10 })).length, 0);
   assert.equal((await t.soda.query(CR.COLLECTIONS.invites, { invitedBy: a.user.userId }, { limit: 10 })).length, 0);
   // The last member deleting their account deletes the crew.
-  await t.api('DELETE', '/me', null, b.token);
+  await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, b.token);
   assert.equal(await t.soda.findOne(CR.COLLECTIONS.crews, { crewId: crew.crewId }), null);
   assert.equal((await t.soda.query(CR.COLLECTIONS.polls, { crewId: crew.crewId }, { limit: 10 })).length, 0);
 });

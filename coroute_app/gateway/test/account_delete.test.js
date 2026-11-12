@@ -66,7 +66,7 @@ test('deleting an account leaves no trace of the rider in any collection; the ot
   assert.ok(everything().some(([, j]) => j.includes(B.user.userId)), 'B is stored before the delete');
   wa.close(); wb.close();
 
-  const del = await t.api('DELETE', '/me', null, B.token);
+  const del = await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, B.token);
   assert.equal(del.status, 200);
   await t.gw.timeline.idle();
   await sleep(50);
@@ -171,7 +171,7 @@ test('deleting an account removes its review photo files, every guardian grant (
   const smsToken = smsUrl.split('/e/')[1];
   assert.equal(await view(smsToken), 200);
 
-  assert.equal((await t.api('DELETE', '/me', null, G.token)).status, 200);
+  assert.equal((await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, G.token)).status, 200);
   await wg.closed;
   wl.close();
 

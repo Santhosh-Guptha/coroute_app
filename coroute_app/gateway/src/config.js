@@ -96,12 +96,74 @@ const config = {
   // JWT_SECRET_PREVIOUS (optional, rotation grace): tokens signed with it are still ACCEPTED (never signed);
   // the response carries a fresh X-CoRoute-Token signed with JWT_SECRET. Remove it after the grace period.
   jwtSecretPrevious: (process.env.JWT_SECRET_PREVIOUS || '').trim(),
+  // ---- 3.57 sessions & security (src/sessions.js, src/security_routes.js, docs/features_355/sessions_and_security.md) ----
+  // Clients that opt in (app builds >= 10025 with X-CoRoute-Session: 2, the website, /admin, /operator) get a short
+  // access token plus a rotating refresh token; older app builds keep a long sliding token bound to a session record.
+  accessTokenTtlMin: int('ACCESS_TOKEN_TTL_MIN', 15),
+  sessionAppAbsoluteDays: int('SESSION_APP_ABSOLUTE_DAYS', 60),
+  sessionAppIdleDays: int('SESSION_APP_IDLE_DAYS', 30),
+  sessionWebAbsoluteDays: int('SESSION_WEB_ABSOLUTE_DAYS', 7),
+  sessionWebIdleMin: int('SESSION_WEB_IDLE_MIN', 60),
+  sessionAdminAbsoluteHours: int('SESSION_ADMIN_ABSOLUTE_HOURS', 12),
+  sessionAdminIdleMin: int('SESSION_ADMIN_IDLE_MIN', 30),
+  // A refresh token presented again within this many seconds of its rotation is a lost reply or a second tab,
+  // not theft (the session continues with a new token). Older reuse revokes the whole session.
+  refreshReuseGraceSec: int('REFRESH_REUSE_GRACE_SEC', 60),
+  // Recent re-authentication window for sensitive actions (password / e-mail change, account deletion, 2FA).
+  reauthWindowMin: int('REAUTH_WINDOW_MIN', 10),
+  // Failed sign-ins before an account is locked (progressive: 15 min, 30, 60 ... up to 24 h) and the step of the
+  // progressive delay added to failed sign-ins after the third (ms; 0 in tests).
+  loginLockThreshold: int('LOGIN_LOCK_THRESHOLD', 10),
+  loginLockMinutes: int('LOGIN_LOCK_MINUTES', 15),
+  loginDelayStepMs: int('LOGIN_DELAY_STEP_MS', isTest ? 0 : 400),
+  passwordResetTtlMin: int('PASSWORD_RESET_TTL_MIN', 30),
+  // 2-step verification (round 4: default 'all'):
+  //   'web'    required for MASTER_ADMIN at the web admin sign-in only;
+  //   'all'    'web' + every admin API call needs a 2-step session from clients that know codes: app builds >= 10025
+  //            (session kind 'app'; the app asks for the code on MFA_REQUIRED), the web admin, the website and the
+  //            operator console. Older app builds (session kind 'legacy') keep the 'web' behaviour so they are not
+  //            locked out of their admin screens (retire with MIN_APP_BUILD=10025, then 'strict');
+  //   'strict' every admin API call from every client needs a 2-step session; 'off'.
+  adminMfaEnforce: oneOf('ADMIN_MFA_ENFORCE', ['off', 'web', 'all', 'strict'], 'all'),
+  // ---- round 4: ride lock (src/ride_lock.js) ----
+  // While a session's device is on a live ride (solo or group, or has an open SOS / crash alert) and was seen within
+  // RIDE_LOCK_STALE_MIN minutes, a sign-in on another device answers 423 RIDE_ACTIVE_ELSEWHERE (e-mail code override).
+  rideLockEnabled: String(process.env.RIDE_LOCK || 'on').trim().toLowerCase() !== 'off',
+  rideLockStaleMin: Math.max(1, int('RIDE_LOCK_STALE_MIN', 10)),
+  // E-mailed one-time codes (ride lock override, e-mail 2-step): lifetime and wrong tries per code.
+  emailCodeTtlMin: Math.max(1, int('EMAIL_CODE_TTL_MIN', 10)),
+  emailCodeMaxTries: Math.max(1, int('EMAIL_CODE_MAX_TRIES', 5)),
+  // ---- round 4: e-mail verification at sign-up (no account enumeration) ----
+  // Link lifetime (hours) and the purge of accounts never verified (days).
+  registerVerifyTtlHours: Math.max(1, int('REGISTER_VERIFY_TTL_HOURS', 24)),
+  registerPurgeDays: Math.max(1, int('REGISTER_PURGE_DAYS', 7)),
+  // App builds below 10025 expect a token from /auth/register. 'verify' (production default, the safe option): they
+  // get the same e-mail verification as everyone, answered with a readable message they show (no token, no 409);
+  // 'allow': the old behaviour for them (201 + token, 409 for a taken address: the enumeration signal stays).
+  registerVerifyLegacy: oneOf('REGISTER_VERIFY_LEGACY', ['verify', 'allow'], isTest ? 'allow' : 'verify'),
+  // Builds below this one are "legacy" for the round 4 compatibility rules (register, delete, admin 2-step).
+  modernAppBuild: int('MODERN_APP_BUILD', 10025),
+  // Account deletion from builds before 10025 without a password: confirmation link lifetime (minutes).
+  deleteConfirmTtlMin: Math.max(5, int('DELETE_CONFIRM_TTL_MIN', 30)),
+  // ---- round 4: WebSocket authentication ----
+  // New clients send { type: 'AUTH', token } as their first message (no token in the URL); the socket must
+  // authenticate within this many ms. ?token= stays accepted for builds before 10025.
+  wsAuthTimeoutMs: Math.max(500, int('WS_AUTH_TIMEOUT_MS', 5000)),
+  // Field encryption at rest (src/field_crypto.js): AES-256-GCM key + id, older keys (read only), blind index key.
+  dataEncKey: require('./field_crypto').parseKey(process.env.DATA_ENC_KEY, 'DATA_ENC_KEY'),
+  dataEncKeyId: (process.env.DATA_ENC_KEY_ID || 'k1').trim(),
+  dataEncKeysPrevious: require('./field_crypto').parseKeyList(process.env.DATA_ENC_KEYS_PREVIOUS),
+  blindIndexKey: require('./field_crypto').parseKey(process.env.BLIND_INDEX_KEY, 'BLIND_INDEX_KEY'),
+  // HSTS sent by the gateway (Caddy may send its own): max-age seconds, includeSubDomains always, preload opt-in.
+  hstsMaxAge: int('HSTS_MAX_AGE', 31536000),
+  hstsPreload: String(process.env.HSTS_PRELOAD || '').trim().toLowerCase() === 'true',
   // Password hashes (src/password_hash.js): scrypt on the libuv threadpool, scrypt$N$r$p$salt$hash.
-  // N = 2^15, r = 8, p = 1 is ~100 ms and 32 MiB per hash; the test suite defaults to 2^10.
+  // N = 2^15, r = 8, p = 3 (OWASP scrypt equivalent of N=2^17,p=1): ~300 ms and 32 MiB per hash; the test suite
+  // defaults to 2^10. Hashes at older parameters (p = 1) are upgraded at the next sign-in.
   // Legacy bcrypt hashes are verified in a worker thread and re-hashed to scrypt at the next sign-in.
   passwordScryptN: int('PASSWORD_SCRYPT_N', isTest ? 1024 : 32768),
   passwordScryptR: int('PASSWORD_SCRYPT_R', 8),
-  passwordScryptP: int('PASSWORD_SCRYPT_P', 1),
+  passwordScryptP: int('PASSWORD_SCRYPT_P', isTest ? 1 : 3),
   // Concurrent scrypt jobs (each holds a threadpool thread and 128*N*r bytes); the rest queue.
   passwordHashConcurrency: int('PASSWORD_HASH_CONCURRENCY', 2),
   passwordBcryptWorkers: int('PASSWORD_BCRYPT_WORKERS', 1),

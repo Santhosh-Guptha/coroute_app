@@ -99,7 +99,7 @@ test('the app is told exactly when a session really ended, and never otherwise',
   ws.close();
 
   // Deleted account: ACCOUNT_GONE.
-  await api('DELETE', '/me', null, reg.json.token);
+  await api('DELETE', '/me', { currentPassword: 'Password#123' }, reg.json.token);
   const gone = await api('GET', '/me', null, reg.json.token);
   assert.equal(gone.status, 404);
   assert.equal(gone.json.code, 'ACCOUNT_GONE');

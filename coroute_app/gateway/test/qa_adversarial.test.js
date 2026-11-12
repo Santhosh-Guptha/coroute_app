@@ -340,7 +340,7 @@ test('deleting a renamed rider (who created the convoy) also removes the old nam
   // B renames after the ride, then deletes the account.
   const ren = await t.api('PATCH', '/me', { name: 'Qa New Name' }, B.token);
   assert.equal(ren.status, 200, JSON.stringify(ren.json));
-  assert.equal((await t.api('DELETE', '/me', null, B.token)).status, 200);
+  assert.equal((await t.api('DELETE', '/me', { currentPassword: 'Password#123' }, B.token)).status, 200);
   await t.gw.timeline.idle();
   const needles = [B.user.userId, 'Qa Old Name', 'Qa New Name', 'qaoldname@coroute.test', '+919833333333', 'AP09QA1234', '+919844444444', 'Qa Kin'];
   const leaks = [];

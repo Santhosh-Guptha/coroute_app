@@ -255,7 +255,7 @@ test('meta endpoint, join link page, account deletion and admin password reset',
   // delete account: user, memberships and trips are gone; token stops working
   await fetch(base + '/api/convoys', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ name: 'Doomed convoy' }) });
   await fetch(base + '/api/trips', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ tripId: 'TRIP-DEL', endTimeEpochMs: Date.now() }) });
-  const del = await fetch(base + '/api/me', { method: 'DELETE', headers: H(tmpLogin.token) });
+  const del = await fetch(base + '/api/me', { method: 'DELETE', headers: H(tmpLogin.token), body: JSON.stringify({ currentPassword: 'Fresh#Password9' }) });
   assert.equal(del.status, 200);
   assert.equal(await gw.repo.findUserByEmail('deleteme@coroute.test'), null);
   assert.equal((await gw.repo.listTripsForUser(u.user.userId)).length, 0);

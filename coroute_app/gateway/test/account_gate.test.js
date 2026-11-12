@@ -50,8 +50,14 @@ test('a blocked rider is stopped on REST and on the socket at once', async () =>
   assert.equal(held.status, 403);
   assert.equal(held.json.code, 'ACCOUNT_ON_HOLD');
   await t.api('PATCH', `/admin/users/${u.user.userId}/status`, { status: 'ACTIVE' }, admin.token);
-  assert.equal((await t.api('GET', '/me', null, u.token)).status, 200);
-  assert.equal(await socketOutcome(u.token), 'open');
+  // 3.57 (owner request): a hold or block ends every session, so after re-activation the rider signs in again.
+  const after = await t.api('GET', '/me', null, u.token);
+  assert.equal(after.status, 401);
+  assert.equal(after.json.code, 'SESSION_INVALID');
+  const again = await t.api('POST', '/auth/login', { identifier: 'gateblocked@coroute.test', password: 'Password#123' });
+  assert.equal(again.status, 200);
+  assert.equal((await t.api('GET', '/me', null, again.json.token)).status, 200);
+  assert.equal(await socketOutcome(again.json.token), 'open');
 });
 
 test('a deleted account is gone everywhere; its sockets are closed', async () => {
@@ -82,7 +88,11 @@ test('a demoted admin loses admin access at once (role comes from the database)'
   // The token still says RIDER; the database says admin.
   assert.equal((await t.api('GET', '/admin/fleet', null, a2.token)).status, 200);
   assert.equal((await t.api('PATCH', `/admin/users/${a2.user.userId}/role`, { role: 'RIDER' }, admin.token)).status, 200);
-  assert.equal((await t.api('GET', '/admin/fleet', null, a2.token)).status, 403);
+  // 3.57: losing the admin role also ends every session of the account (401), not only the admin rights (403).
+  const after = await t.api('GET', '/admin/fleet', null, a2.token);
+  assert.ok([401, 403].includes(after.status), String(after.status));
+  const again = await t.api('POST', '/auth/login', { identifier: 'secondadmin@coroute.test', password: 'Password#123' });
+  assert.equal((await t.api('GET', '/admin/fleet', null, again.json.token)).status, 403);
 });
 
 test('a password change ends other sessions and keeps this device signed in', async () => {

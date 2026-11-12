@@ -75,7 +75,7 @@ test('admin plan assignment and data cleanup', async (t) => {
     const hostPlan = await gw.repo.findMembershipByOwner(hostId);
     assert.ok(!Object.hasOwn(hostPlan.members || {}, palId), 'Pal left the host\'s plan');
 
-    const me = await api('DELETE', '/me', null, host.token);
+    const me = await api('DELETE', '/me', { currentPassword: 'Password#123' }, host.token);
     assert.equal(me.status, 200, JSON.stringify(me.json));
     const left = await gw.soda.query('memberships', { ownerUserId: hostId }, { limit: 10 });
     assert.equal(left.length, 0, 'the host\'s plan went with the account');

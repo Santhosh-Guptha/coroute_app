@@ -171,8 +171,24 @@ class SodaClient {
   /** Atomic JSON Patch test + replacement (Oracle SODA 18c+). Never retry an ambiguous write. */
   async compareAndReplace(collection, key, expected, replacement) {
     try {
+      const patch = [];
+      if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+        for (const [k, v] of Object.entries(expected)) {
+          if (k !== '_id' && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null)) {
+            patch.push({ op: 'test', path: `/${k}`, value: v });
+          }
+        }
+      } else {
+        patch.push({ op: 'test', path: '', value: expected });
+      }
+      const cleanReplacement = (replacement && typeof replacement === 'object' && !Array.isArray(replacement))
+        ? { ...replacement }
+        : replacement;
+      if (cleanReplacement && cleanReplacement._id) delete cleanReplacement._id;
+      patch.push({ op: 'replace', path: '', value: cleanReplacement });
+
       await this._request('PATCH', `/${encodeURIComponent(collection)}/${encodeURIComponent(key)}`,
-        [{ op: 'test', path: '', value: expected }, { op: 'replace', path: '', value: replacement }],
+        patch,
         { retries: 0, contentType: 'application/json-patch+json' });
       return true;
     } catch (e) {

@@ -10,9 +10,10 @@
  */
 const crypto = require('crypto');
 
+// 3.57: AUTH (session security events: REFRESH_REUSE, SESSION_EXTENDED_RIDE, ACCOUNT_LOCKED ..., never tokens).
 // 3.55: ADMIN_WARNING (SENT / ACK, never the text).
 // 3.16: LIVE_LINK (CREATE / REVOKE / EXPIRE / VIEW, never the token) and ADMIN_CONTACT (CALL, never the number).
-const KINDS = new Set(['RAISE', 'STATUS', 'NOTIFY', 'ANSWER', 'HAZARD', 'REPORT_FALSE', 'RESOLVE', 'EXPIRE', 'DISCOVERY_NOTIFY', 'WAVE', 'RESET', 'LIVE_LINK', 'ADMIN_CONTACT', 'ADMIN_WARNING']);
+const KINDS = new Set(['RAISE', 'STATUS', 'NOTIFY', 'ANSWER', 'HAZARD', 'REPORT_FALSE', 'RESOLVE', 'EXPIRE', 'DISCOVERY_NOTIFY', 'WAVE', 'RESET', 'LIVE_LINK', 'ADMIN_CONTACT', 'ADMIN_WARNING', 'AUTH']);
 const ID = /^[A-Za-z0-9_.:-]{1,80}$/;
 
 /** A row reduced to the allowed fields, with types and sizes enforced. */
