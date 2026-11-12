@@ -84,6 +84,19 @@ while IFS= read -r line || [ -n "$line" ]; do
   unset value
 done < "$IDS_FILE"
 
+if [ -r "/etc/coroute/crypto.env" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"; line="${line//[[:space:]]/}"
+    [ -z "$line" ] && continue
+    if [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=(.+)$ ]]; then
+      k_name="${BASH_REMATCH[1]}"; k_val="${BASH_REMATCH[2]}"
+      env_line "$k_name" "$k_val" >> "$tmp_gw"
+      seen[$k_name]=1
+      count=$((count + 1))
+    fi
+  done < "/etc/coroute/crypto.env"
+fi
+
 for r in $REQUIRED; do
   [ -n "${seen[$r]:-}" ] || die "required secret $r is not listed in $IDS_FILE"
 done
