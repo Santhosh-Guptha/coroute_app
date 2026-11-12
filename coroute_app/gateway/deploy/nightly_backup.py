@@ -45,16 +45,21 @@ COLLECTIONS = [
 
 
 def load_env():
-    """Loads environment variables from gateway.env."""
+    """Loads environment variables from gateway.env and secrets.env."""
     env = {}
-    path = ENV_PATH if os.path.exists(ENV_PATH) else FALLBACK_ENV_PATH
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip().strip("'\"")
+    paths = [ENV_PATH, "/run/coroute/secrets.env", FALLBACK_ENV_PATH]
+    for path in paths:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        env[k.strip()] = v.strip().strip("'\"")
+    if "ORACLE_PASSWORD" in env and "ORACLE_SODA_PASSWORD" not in env:
+        env["ORACLE_SODA_PASSWORD"] = env["ORACLE_PASSWORD"]
+    if "ORACLE_USER" in env and "ORACLE_SODA_USER" not in env:
+        env["ORACLE_SODA_USER"] = env["ORACLE_USER"]
     return env
 
 
@@ -151,13 +156,15 @@ def main():
 
     # Prune old backups (> 30 days)
     print("[*] Checking backup retention in Object Storage...")
-    objects = os_client.list_objects(ns, BUCKET_NAME, prefix="coroute_db_backup_").data.objects
+    objects = os_client.list_objects(ns, BUCKET_NAME, prefix="coroute_db_backup_", fields="name,timeCreated").data.objects
     now = time.time()
     for obj in objects:
-        age_days = (now - obj.time_created.timestamp()) / 86400
-        if age_days > 30:
-            print(f"  - Pruning expired backup ({age_days:.1f} days old): {obj.name}")
-            os_client.delete_object(ns, BUCKET_NAME, obj.name)
+        if obj.time_created:
+            t = obj.time_created.timestamp() if hasattr(obj.time_created, "timestamp") else now
+            age_days = (now - t) / 86400
+            if age_days > 30:
+                print(f"  - Pruning expired backup ({age_days:.1f} days old): {obj.name}")
+                os_client.delete_object(ns, BUCKET_NAME, obj.name)
 
     print(f"[{datetime.utcnow().isoformat()}] Backup completed successfully.")
 
