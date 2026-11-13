@@ -1,7 +1,7 @@
 # CoRoute Virtual Machine Operations & Activity Log
 
 ## System Overview
-- **Host**: `152.67.181.198` (Oracle Cloud VM)
+- **Host**: `<vm1-public-ip>` (Oracle Cloud VM)
 - **Domain**: `coroute.duckdns.org`
 - **Application**: CoRoute Real-Time Gateway & Mobile Backend
 - **Audit System Log**: `/var/log/coroute_operations.log`
@@ -12,7 +12,7 @@
 
 ### 1. Account: `santhosh`
 - **Role**: Primary System Administrator
-- **Home**: `/home/santhosh`
+- **Home**: `/home/<admin-user>`
 - **Groups**: `sudo`, `coroute`
 - **SSH Access**: Key-based (`~/.ssh/authorized_keys`) & Password authentication enabled
 - **Sudo Privilege**: Full passwordless sudo via `/etc/sudoers.d/90-coroute-users`
@@ -35,7 +35,7 @@
   2. Release split APKs compiled: `app-arm64-v8a-release.apk` (10.6 MB), `app-armeabi-v7a-release.apk` (10.2 MB).
   3. Git remote sync: Commits `c562db5` and `9912bbb` pushed to `origin/main`.
   4. Gateway deployment: Synced updated gateway codebase to `/opt/coroute/gateway/`.
-  5. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=73`, personal email `santhoshbukka5@gmail.com`).
+  5. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=73`, personal email `<owner-email>`).
   6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/`.
   7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY`.
   8. OS Account Provisioning: Created users `santhosh` and `antigravity` with SSH and sudo configuration.
@@ -65,11 +65,11 @@
 ### Tooling: Automated VM Setup & Zero-Downtime Cutover (2026-10-09)
 - **Operator User**: `antigravity`
 - **Activities**:
-  1. Authored turnkey deployment script [`gateway/deploy/setup_new_vm.sh`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/gateway/deploy/setup_new_vm.sh).
+  1. Authored turnkey deployment script [`gateway/deploy/setup_new_vm.sh`](gateway/deploy/setup_new_vm.sh).
   2. Integrated full stack bootstrapping: Node.js 22, Caddy with automated Let's Encrypt TLS, firewall hardening.
   3. Pre-configured production secrets preserving `JWT_SECRET` for seamless user session continuity.
   4. Implemented pre-cutover APK prefetching and automatic DuckDNS dynamic DNS cutover.
-  5. Added comprehensive deployment runbook documentation in [`gateway/deploy/RUNBOOK.md`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/gateway/deploy/RUNBOOK.md).
+  5. Added comprehensive deployment runbook documentation in [`gateway/deploy/RUNBOOK.md`](gateway/deploy/RUNBOOK.md).
 
 ### Website Redesign: Production Deployment (2026-10-09)
 - **Operator User**: `antigravity` (password authentication only, zero key files)
@@ -229,7 +229,7 @@
      - `coroute.apk` (ARM64, 11.3 MB, SHA-256: `572FE8A81F0A4263C1D54ECF484D6EBF333A3250226155F7E39D467D62EEDC66`)
      - `coroute-32bit.apk` (ARMv7, 11.0 MB, SHA-256: `631F6FF93BA572D664CEF8D1DF8AD3EC658A98D48A964AECD13EF7E59C487CE5`)
      - `coroute-x86_64.apk` (x86_64, 11.5 MB, SHA-256: `F0F527B4C71BDBC77A04D52A9F2209DC572B79AF8156C558E16F8EE2F074DAF5`)
-  5. Deployed to Oracle Cloud VM `152.67.181.198` (`coroute.duckdns.org`):
+  5. Deployed to Oracle Cloud VM `<vm1-public-ip>` (`coroute.duckdns.org`):
      - Published binaries to `/opt/coroute/gateway/public/`.
      - Updated `/etc/coroute/gateway.env` to `LATEST_APP_BUILD=90`.
      - Restarted `coroute-gateway.service`, verified status `HEALTHY` on v3.30.0.

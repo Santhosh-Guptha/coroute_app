@@ -2,7 +2,10 @@
 set -euo pipefail
 
 echo "=============================================="
-echo " Configuring CoRoute Relay VM 2 (129.225.79.93) "
+# Real values (hosts, e-mail, client ids) come from the environment or deploy/inventory.local.env (git-ignored).
+. "$(dirname "${BASH_SOURCE[0]}")/_inventory.sh"
+need ORACLE_SODA_URL GOOGLE_CLIENT_IDS BOOTSTRAP_ADMIN_EMAILS PUBLIC_HOST
+echo " Configuring CoRoute Relay VM 2 "
 echo "=============================================="
 
 # 1. Swapfile (2GB) for stability
@@ -51,17 +54,17 @@ cat > /etc/coroute/gateway.env << EOF
 NODE_ENV=production
 HOST=0.0.0.0
 PORT=3000
-ORACLE_SODA_URL=https://gfe473165e66472-coroutedb.adb.ap-hyderabad-1.oraclecloudapps.com/ords/coroute/soda/latest
+ORACLE_SODA_URL=${ORACLE_SODA_URL}
 ORACLE_USER=COROUTE
 ORACLE_PASSWORD=${ORACLE_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
 JWT_TTL_DAYS=30
-GOOGLE_CLIENT_IDS=87798956679-ivggpbpote5cf2cvi8mtg8gja3r1sfve.apps.googleusercontent.com
-BOOTSTRAP_ADMIN_EMAILS=santhoshbukka5@gmail.com
+GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}
+BOOTSTRAP_ADMIN_EMAILS=${BOOTSTRAP_ADMIN_EMAILS}
 RETENTION_ENDED_CONVOY_DAYS=90
 RETENTION_VOICE_LOG_DAYS=7
 RETENTION_STALE_CONVOY_HOURS=36
-API_HOST=129.225.79.93
+API_HOST=${PUBLIC_HOST}
 LATEST_APP_BUILD=103
 MIN_APP_BUILD=60
 GUARDIAN_ENABLED=true

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[*] Hardening Node 1 (152.67.181.198)..."
+. "$(dirname "${BASH_SOURCE[0]}")/_inventory.sh"
+need VM2_PRIVATE_IP VM_SSH_PRIVATE_KEY_FILE
+echo "[*] Hardening Node 1..."
 
 # 1. Disable PasswordAuthentication on Node 1
 echo "PasswordAuthentication no" > /etc/ssh/sshd_config.d/50-password-auth.conf
@@ -14,8 +16,8 @@ systemctl disable --now rpcbind rpcbind.socket 2>/dev/null || true
 echo "  ✓ rpcbind disabled"
 
 # 3. Harden Node 2 over private network
-echo "[*] Hardening Node 2 (10.0.0.99 / 129.225.79.93)..."
-ssh -i /home/ubuntu/.ssh/vm_provision_ssh.key -o StrictHostKeyChecking=no ubuntu@10.0.0.99 '
+echo "[*] Hardening Node 2 over the private network..."
+ssh -i "$VM_SSH_PRIVATE_KEY_FILE" -o StrictHostKeyChecking=accept-new "${REMOTE_USER:-ubuntu}@$VM2_PRIVATE_IP" '
   sudo bash -c "
     systemctl disable --now rpcbind rpcbind.socket 2>/dev/null || true
     echo PasswordAuthentication no > /etc/ssh/sshd_config.d/60-cloudimg-settings.conf

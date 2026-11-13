@@ -4,7 +4,7 @@
 - App name: **CoRoute** · Category: **Maps & Navigation** (alt: Travel & Local) · Free, no ads, no in-app purchases.
 - Short description and full description: see `store/LISTING.md` (kept in one place).
 - Privacy policy URL: `https://coroute.devmonks.space/privacy` (served by the gateway; `https://coroute.duckdns.org/privacy` until the new domain is live, see `docs/DOMAIN_MIGRATION_devmonks.md`).
-- Contact e-mail: santhoshbukka5@gmail.com
+- Contact e-mail: <owner-email>
 
 ## Data safety form answers
 | Question | Answer |

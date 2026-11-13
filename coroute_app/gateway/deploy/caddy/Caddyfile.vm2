@@ -1,8 +1,9 @@
-# /etc/caddy/Caddyfile on VM2 (WEB + mirror node, 10.0.0.99). Installed by deploy/setup_node.sh (NODE_ROLE=web).
+# /etc/caddy/Caddyfile on VM2 (WEB + mirror node). Installed by deploy/setup_node.sh (NODE_ROLE=web).
 #
 # VM2 is the NLB *backup*: it receives public traffic only when VM1 fails its health check, and then serves
 # everything (LIVE and WEB) from its own gateway. In normal operation VM1's Caddy reaches this VM's gateway
-# directly on 10.0.0.99:3000 (VCN only; the gateway trusts X-Forwarded-For from 10.0.0.70, see TRUST_PROXY).
+# directly on its private address, port 3000 (VCN only; the gateway trusts X-Forwarded-For from VM1's private
+# address, see TRUST_PROXY; the real addresses live in deploy/inventory.local.env).
 #
 # Needs a Caddy build with github.com/caddy-dns/duckdns; DUCKDNS_TOKEN from /run/coroute/caddy.env.
 # DuckDNS holds ONE TXT record: issue this VM's certificate first, then VM1's (renewals then stay apart).
@@ -48,13 +49,54 @@
 	}
 }
 
+# v3.56 performance (docs/infra/INFRASTRUCTURE_PLAN_v3.56.md): website assets, icons and APKs straight from this
+# node's disk when the file exists (Node never sees them); hashed assets (?v=<hash>, added by src/pages.js) are
+# immutable for a year, the rest cached 7 days, APKs always revalidated. Precompressed .gz/.zst files written by
+# deploy/release.sh are sent as they are (no per-request compression). Pages, /admin and /operator assets (own CSP),
+# partials (_*.html) and anything missing go on to the gateway as before.
+(coroute_static) {
+	@coroute_static {
+		path /assets/* /fonts/* /favicon.svg /favicon-32.png /apple-touch-icon.png /icon-512.png /og-image.png /site.webmanifest /watch.webmanifest /coroute.apk /coroute-32bit.apk
+		not path *.html
+		not path_regexp /_[^/]*$
+		file {
+			root {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		}
+	}
+	handle @coroute_static {
+		root * {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		@versioned query v=*
+		header @versioned Cache-Control "public, max-age=31536000, immutable"
+		@apk path *.apk
+		header @apk Cache-Control "no-cache"
+		header @apk Content-Type "application/vnd.android.package-archive"
+		header /fonts/* Access-Control-Allow-Origin "*"
+		header ?Cache-Control "public, max-age=604800"
+		file_server {
+			precompressed zstd gzip
+		}
+	}
+	# Prometheus metrics never leave the VM (the gateway also refuses non-loopback clients).
+	handle /metrics {
+		respond 404
+	}
+}
+
 # Both names during the domain move: installed apps have coroute.duckdns.org built in (keep it >= 6 months).
 coroute.devmonks.space, coroute.duckdns.org {
 	import coroute_tls
 	import coroute_common
-	reverse_proxy 127.0.0.1:3000 {
-		stream_close_delay 5m
-		flush_interval -1
+	import coroute_static
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			stream_close_delay 5m
+			flush_interval -1
+			transport http {
+				# Below the gateway's HTTP_KEEPALIVE_MS (75 s): Caddy never reuses a connection Node just closed.
+				keepalive 60s
+				keepalive_idle_conns 64
+			}
+		}
 	}
 }
 

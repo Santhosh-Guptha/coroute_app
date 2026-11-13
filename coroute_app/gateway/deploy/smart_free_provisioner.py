@@ -5,7 +5,10 @@ import time
 import socket
 
 print('=== COROUTE ALWAYS-FREE SMART PROVISIONER ===')
-config_path = os.path.expanduser('~/.oci/config')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _inventory import inv, inv_file_text  # noqa: E402  (values from deploy/inventory.local.env or the environment)
+
+config_path = os.path.expanduser(inv('OCI_CONFIG_FILE', default='~/.oci/config'))
 if not os.path.exists(config_path):
     print(f'[!] Config not found at {config_path}')
     sys.exit(1)
@@ -15,22 +18,12 @@ compute = oci.core.ComputeClient(config)
 net = oci.core.VirtualNetworkClient(config)
 
 tenancy = config['tenancy']
-ad = 'izDz:AP-HYDERABAD-1-AD-1'
-subnet_id = 'ocid1.subnet.oc1.ap-hyderabad-1.aaaaaaaaxysx22ozumttrploiqs2zjbujhqhk5higxkmmgaap3f5zzficvwq'
-
-ssh_key = (
-    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDuXnceKvdpz1yeWMpC9h0YPg7thZQXtigXt/"
-    "9ZOpjBzF7HS1niz3oiAu9Ok3zM9s5aNIZz9lFjU9UMX4DnT5mYVEyzsiw8wgQYaQfgz/zsRyRAE"
-    "7QZHDPhdqE/yHY0vsshmvg75CHzdNl6vbPW4EXkE7CSTASYHw8EY6cJQdT33p3FfpKFyn1cy+pM"
-    "7rerVEgqRYuvcOtbzpT6PMzGy9OSdEQudKR1la1DidabbpiQ4YgCQl1faRdhJAcNwE3oMZu8iqkp"
-    "1XiqCQHyUCFoiu53Re19yinpa8Og0gwnCFUSF16n0z6qdS52VQOXCPomwNJhTE+jwVy46IKhlX4"
-    "Pxrqr ssh-key-2026-10-01"
-)
-
-# ARM Ubuntu 24.04 image
-arm_image_id = 'ocid1.image.oc1.ap-hyderabad-1.aaaaaaaacx5cw6qxwnemznb2wojrfdbkuepvgwzlwzqa2snxqslops3nmlua'
-# x86_64 Ubuntu 24.04 image
-x86_image_id = 'ocid1.image.oc1.ap-hyderabad-1.aaaaaaaaxtiml6mrewgrfk5rscnz4smerzrthu4hbqfchw4ylt47677t6cgq'
+ad = inv('OCI_AVAILABILITY_DOMAIN')
+subnet_id = inv('OCI_SUBNET_OCID')
+ssh_key = inv_file_text('VM_SSH_PUBLIC_KEY_FILE')
+# ARM and x86_64 Ubuntu images of the region
+arm_image_id = inv('OCI_ARM_IMAGE_OCID')
+x86_image_id = inv('OCI_X86_IMAGE_OCID')
 
 # Check existing non-terminated instances
 current_instances = [i for i in compute.list_instances(compartment_id=tenancy).data if i.lifecycle_state != 'TERMINATED']

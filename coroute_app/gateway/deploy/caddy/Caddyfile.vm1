@@ -1,7 +1,7 @@
-# /etc/caddy/Caddyfile on VM1 (LIVE node, 10.0.0.70). Installed by deploy/setup_node.sh (NODE_ROLE=live).
+# /etc/caddy/Caddyfile on VM1 (LIVE node). Installed by deploy/setup_node.sh (NODE_ROLE=live).
 #
 #   LIVE routes (rides, sockets, SOS, live links, guardian)  -> 127.0.0.1:3000 (this VM)
-#   everything else (website, auth, payments, admin, ...)     -> 10.0.0.99:3000 (VM2), this VM as fallback
+#   everything else (website, auth, payments, admin, ...)     -> VM2_PRIVATE_IP:3000 (VM2), this VM as fallback
 #
 # The LIVE matcher is generated from deploy/route_split.md: node deploy/gen_caddy_routes.js
 # Needs a Caddy build with github.com/caddy-dns/duckdns (setup_node.sh installs one); DUCKDNS_TOKEN comes
@@ -54,13 +54,47 @@
 	}
 }
 
+# v3.56 performance (docs/infra/INFRASTRUCTURE_PLAN_v3.56.md): website assets, icons and APKs straight from this
+# node's disk when the file exists (Node never sees them); hashed assets (?v=<hash>, added by src/pages.js) are
+# immutable for a year, the rest cached 7 days, APKs always revalidated. Precompressed .gz/.zst files written by
+# deploy/release.sh are sent as they are (no per-request compression). Pages, /admin and /operator assets (own CSP),
+# partials (_*.html) and anything missing go on to the gateway as before.
+(coroute_static) {
+	@coroute_static {
+		path /assets/* /fonts/* /favicon.svg /favicon-32.png /apple-touch-icon.png /icon-512.png /og-image.png /site.webmanifest /watch.webmanifest /coroute.apk /coroute-32bit.apk
+		not path *.html
+		not path_regexp /_[^/]*$
+		file {
+			root {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		}
+	}
+	handle @coroute_static {
+		root * {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		@versioned query v=*
+		header @versioned Cache-Control "public, max-age=31536000, immutable"
+		@apk path *.apk
+		header @apk Cache-Control "no-cache"
+		header @apk Content-Type "application/vnd.android.package-archive"
+		header /fonts/* Access-Control-Allow-Origin "*"
+		header ?Cache-Control "public, max-age=604800"
+		file_server {
+			precompressed zstd gzip
+		}
+	}
+	# Prometheus metrics never leave the VM (the gateway also refuses non-loopback clients).
+	handle /metrics {
+		respond 404
+	}
+}
+
 # Both names during the domain move: installed apps have coroute.duckdns.org built in (keep it >= 6 months).
 coroute.devmonks.space, coroute.duckdns.org {
 	import coroute_tls
 	import coroute_common
+	import coroute_static
 
 	# BEGIN GENERATED LIVE ROUTES (deploy/gen_caddy_routes.js from deploy/route_split.md; do not edit by hand)
-	@live expression `path_regexp('(?i)^(?:/ws|/api/guardian(?:/.*)?|/api/admin/users(?:/.*)?)/?$') || (method('DELETE') && path_regexp('(?i)^(?:/api/convoys/[^/]+/riders/[^/]+|/api/v1/sos/live-links|/api/me|/api/membership/members/[^/]+|/api/admin/convoys/[^/]+)/?$')) || (method('GET', 'HEAD') && path_regexp('(?i)^(?:/api/health|/api/health/live|/e/[^/]+|/api/public/live/[^/]+|/join/[^/]+|/watch|/watch-sw[.]js|/api/convoys/active|/api/convoys/[^/]+|/api/convoys/[^/]+/emergency-roster|/api/admin/fleet|/api/admin/groups|/api/admin/emergencies|/api/admin/safety|/api/admin/feature-analytics|/api/admin/stats|/api/admin/analytics(?:/.*)?)/?$')) || (method('PATCH') && path_regexp('(?i)^(?:/api/me)/?$')) || (method('POST') && path_regexp('(?i)^(?:/api/convoys|/api/convoys/join|/api/convoys/[^/]+/leave|/api/convoys/[^/]+/trip-head|/api/convoys/[^/]+/status|/api/convoys/[^/]+/tracks|/api/v1/sos/dispatch-external|/api/sos/dispatch-external|/api/geo/essentials|/api/admin/emergencies/[^/]+/[^/]+/contact|/api/admin/broadcast)/?$')) || (method('POST', 'DELETE') && path_regexp('(?i)^(?:/api/convoys/[^/]+/alerts/[^/]+/live-link)/?$'))`
+	@live expression `path_regexp('(?i)^(?:/ws|/api/guardian(?:/.*)?|/api/admin/users(?:/.*)?|/api/admin/public-ride(?:/.*)?|/api/admin/riders/[^/]+/ride-lock(?:/.*)?|/api/operator(?:/.*)?|/api/ride-invites(?:/.*)?)/?$') || (method('DELETE') && path_regexp('(?i)^(?:/api/convoys/[^/]+/riders/[^/]+|/api/v1/sos/live-links|/api/me|/api/membership/members/[^/]+|/api/admin/convoys/[^/]+|/api/crews/[^/]+/ride-invites/[^/]+)/?$')) || (method('GET', 'HEAD') && path_regexp('(?i)^(?:/api/health|/api/health/live|/e/[^/]+|/api/public/live/[^/]+|/join/[^/]+|/watch|/watch-sw[.]js|/api/convoys/active|/api/convoys/[^/]+|/api/convoys/[^/]+/emergency-roster|/api/admin/fleet|/api/admin/groups|/api/admin/emergencies|/api/admin/safety|/api/admin/feature-analytics|/api/admin/stats|/api/admin/analytics(?:/.*)?|/api/admin/riders/[^/]+|/api/admin/intel/overview|/api/me/ride-invites)/?$')) || (method('GET', 'HEAD', 'POST') && path_regexp('(?i)^(?:/api/crews/[^/]+/ride-invites)/?$')) || (method('PATCH') && path_regexp('(?i)^(?:/api/me)/?$')) || (method('POST') && path_regexp('(?i)^(?:/api/convoys|/api/convoys/join|/api/convoys/[^/]+/leave|/api/convoys/[^/]+/trip-head|/api/convoys/[^/]+/status|/api/convoys/[^/]+/tracks|/api/v1/sos/dispatch-external|/api/sos/dispatch-external|/api/geo/essentials|/api/admin/emergencies/[^/]+/[^/]+/contact|/api/admin/broadcast)/?$')) || (method('POST', 'DELETE') && path_regexp('(?i)^(?:/api/convoys/[^/]+/alerts/[^/]+/live-link)/?$'))`
 	# END GENERATED LIVE ROUTES
 
 	handle @live {
@@ -68,12 +102,18 @@ coroute.devmonks.space, coroute.duckdns.org {
 			# WebSockets are proxied natively; keep them open for 5 min across a config reload.
 			stream_close_delay 5m
 			flush_interval -1
+			transport http {
+				# Below the gateway's HTTP_KEEPALIVE_MS (75 s): Caddy never reuses a connection Node just closed.
+				keepalive 60s
+				keepalive_idle_conns 64
+			}
 		}
 	}
 
 	handle {
 		# WEB: VM2 first, this VM when VM2 is down (failed dial, or failed health check).
-		reverse_proxy 10.0.0.99:3000 127.0.0.1:3000 {
+		# VM2_PRIVATE_IP is replaced by deploy/setup_node.sh (PEER_IP; the real address lives in inventory.local.env).
+		reverse_proxy VM2_PRIVATE_IP:3000 127.0.0.1:3000 {
 			lb_policy first
 			lb_try_duration 5s
 			lb_try_interval 250ms
@@ -84,6 +124,11 @@ coroute.devmonks.space, coroute.duckdns.org {
 			health_timeout 3s
 			health_status 2xx
 			flush_interval -1
+			transport http {
+				# Below the gateway's HTTP_KEEPALIVE_MS (75 s): Caddy never reuses a connection Node just closed.
+				keepalive 60s
+				keepalive_idle_conns 64
+			}
 		}
 	}
 }

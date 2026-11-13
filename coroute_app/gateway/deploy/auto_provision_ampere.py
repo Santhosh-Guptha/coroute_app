@@ -2,13 +2,13 @@
 """
 CoRoute - Automated Oracle Cloud Ampere A1 Provisioner & Load-Balancer
 =====================================================================
-Continuously polls Oracle Cloud Infrastructure (OCI) in ap-hyderabad-1 for an
+Continuously polls Oracle Cloud Infrastructure (OCI) in the inventory region for an
 Always-Free Ampere A1 (VM.Standard.A1.Flex) instance (alternating between 2 OCPU/12GB
 and 1 OCPU/6GB for maximum allocation probability).
 
 When Oracle frees host capacity and launches the VM, this script AUTOMATICALLY:
 1. Waits for the instance to transition to the RUNNING state.
-2. Extracts its Private IP (10.0.0.X) and Public IP.
+2. Extracts its private and public IP.
 3. Whitelists the new Ampere node in the Oracle Autonomous Database (SODA) Access Control List (ACL).
 4. Connects over the high-speed 10 Gbps private VCN and performs zero-touch setup:
    - Configures 2GB swap space for peak memory stability
@@ -18,9 +18,11 @@ When Oracle frees host capacity and launches the VM, this script AUTOMATICALLY:
    - Configures and starts coroute-gateway systemd service
    - Opens firewall ports (22, 80, 443, 3000)
 5. Automatically registers the new Ampere node into Caddy's load-balancer upstream pool:
-   `reverse_proxy 127.0.0.1:3000 10.0.0.99:3000 <AMPERE_PRIVATE_IP>:3000 { ... }`
+   `reverse_proxy 127.0.0.1:3000 <VM2_PRIVATE_IP>:3000 <AMPERE_PRIVATE_IP>:3000 { ... }`
 6. Hot-reloads Caddy with zero downtime so new member traffic distributes across all nodes!
-7. Verifies live cluster health on https://coroute.duckdns.org/status and logs audit records.
+7. Verifies live cluster health on https://<PUBLIC_HOST>/status and logs audit records.
+
+All addresses, OCIDs and key paths come from deploy/inventory.local.env (git-ignored) or the environment.
 """
 
 import os
@@ -50,14 +52,20 @@ except ImportError:
 # ==============================================================================
 # OCI CONFIGURATION & CLUSTER CONSTANTS
 # ==============================================================================
-TENANCY_OCID = "ocid1.tenancy.oc1..aaaaaaaamo3nfjelm4dk4nbm2melqjbbcjsgpzigaonwqjf7okyufjp6x2ta"
-REGION = "ap-hyderabad-1"
-AVAILABILITY_DOMAIN = "izDz:AP-HYDERABAD-1-AD-1"
-COMPARTMENT_OCID = TENANCY_OCID
+# Every real identifier comes from the environment or the git-ignored deploy/inventory.local.env
+# (deploy/_inventory.py; template deploy/inventory.example.env). A missing value stops the script with a clear message.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _inventory import inv, inv_file_text  # noqa: E402
 
-VCN_ID = "ocid1.vcn.oc1.ap-hyderabad-1.amaaaaaa4ylewkaaj3nlmu5tgxnngmzvwg6gmswtckytfoprbbpeilipkxbq"
-SUBNET_ID = "ocid1.subnet.oc1.ap-hyderabad-1.aaaaaaaaxysx22ozumttrploiqs2zjbujhqhk5higxkmmgaap3f5zzficvwq"
-ADB_ID = "ocid1.autonomousdatabase.oc1.ap-hyderabad-1.anuhsljr4ylewkaat3cu32stdgcpi7lfcoxzq3meuxgypqw4kxep3yanqvlq"
+TENANCY_OCID = inv("OCI_TENANCY_OCID")
+REGION = inv("OCI_REGION")
+AVAILABILITY_DOMAIN = inv("OCI_AVAILABILITY_DOMAIN")
+COMPARTMENT_OCID = inv("OCI_COMPARTMENT_OCID", default=TENANCY_OCID)
+
+VCN_ID = inv("OCI_VCN_OCID")
+SUBNET_ID = inv("OCI_SUBNET_OCID")
+ADB_ID = inv("OCI_ADB_OCID")
+PUBLIC_HOST = inv("PUBLIC_HOST", default="coroute.devmonks.space")
 
 SHAPE = "VM.Standard.A1.Flex"
 BOOT_VOLUME_SIZE_GBS = 50  # 100% within remaining 100GB Always-Free storage
@@ -69,31 +77,18 @@ SHAPE_CANDIDATES = [
     {"ocpus": 1.0, "memory_in_gbs": 6.0,  "label": "1 OCPU / 6 GB RAM"},
 ]
 
-DEFAULT_SSH_PUBLIC_KEY = (
-    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDuXnceKvdpz1yeWMpC9h0YPg7thZQXtigXt/"
-    "9ZOpjBzF7HS1niz3oiAu9Ok3zM9s5aNIZz9lFjU9UMX4DnT5mYVEyzsiw8wgQYaQfgz/zsRyRAE"
-    "7QZHDPhdqE/yHY0vsshmvg75CHzdNl6vbPW4EXkE7CSTASYHw8EY6cJQdT33p3FfpKFyn1cy+pM"
-    "7rerVEgqRYuvcOtbzpT6PMzGy9OSdEQudKR1la1DidabbpiQ4YgCQl1faRdhJAcNwE3oMZu8iqkp"
-    "1XiqCQHyUCFoiu53Re19yinpa8Og0gwnCFUSF16n0z6qdS52VQOXCPomwNJhTE+jwVy46IKhlX4"
-    "Pxrqr ssh-key-2026-10-01"
-)
-
-SSH_PRIVATE_KEY_PATHS = [
-    os.path.expanduser("~/.ssh/vm_provision_ssh.key"),
-    os.path.expanduser("~/.ssh/oracle_vm.key"),
-    os.path.expanduser("~/.ssh/id_rsa"),
-]
-SSH_PRIVATE_KEY_PATH = next((p for p in SSH_PRIVATE_KEY_PATHS if os.path.exists(p)), SSH_PRIVATE_KEY_PATHS[0])
+DEFAULT_SSH_PUBLIC_KEY = inv_file_text("VM_SSH_PUBLIC_KEY_FILE")
+SSH_PRIVATE_KEY_PATH = os.path.expanduser(inv("VM_SSH_PRIVATE_KEY_FILE"))
 
 
 def get_oci_config():
-    """Loads OCI config from ~/.oci/config."""
-    config_file = os.path.expanduser("~/.oci/config")
+    """Loads the OCI config file (OCI_CONFIG_FILE, default ~/.oci/config)."""
+    config_file = os.path.expanduser(inv("OCI_CONFIG_FILE", default="~/.oci/config"))
     if os.path.exists(config_file):
         try:
             return oci.config.from_file(config_file)
         except Exception as e:
-            print(f"[!] Warning reading ~/.oci/config: {e}")
+            print(f"[!] Warning reading the OCI config file: {e}")
 
     # Fallback to env
     return {
@@ -125,8 +120,8 @@ def find_ubuntu_arm_image(compute_client):
     if images:
         return images[0].id
 
-    # Fallback known OCID in ap-hyderabad-1
-    return "ocid1.image.oc1.ap-hyderabad-1.aaaaaaaacx5cw6qxwnemznb2wojrfdbkuepvgwzlwzqa2snxqslops3nmlua"
+    # Fallback: the image named in the inventory
+    return inv("OCI_ARM_IMAGE_OCID")
 
 
 def wait_for_ssh(ip, port=22, timeout=240):
@@ -507,7 +502,7 @@ def main():
             print("\n[*] Verifying live load-balanced cluster health...")
             time.sleep(3)
             try:
-                out = subprocess.check_output(["curl", "-s", "https://coroute.duckdns.org/status"], universal_newlines=True)
+                out = subprocess.check_output(["curl", "-s", f"https://{PUBLIC_HOST}/status"], universal_newlines=True)
                 print(f"  Cluster Health: {out.strip()}")
             except Exception as e:
                 print(f"  Health check notice: {e}")
@@ -521,7 +516,7 @@ def main():
             print("\n" + "=" * 70)
             print(" [SUCCESS] AMPERE A1 AUTO-CONFIGURATION & LOAD-BALANCING COMPLETE!")
             print(f" Cluster Size:   3 Nodes (VM 1 + VM 2 + Ampere A1)")
-            print(f" Ingress URL:    https://coroute.duckdns.org")
+            print(f" Ingress URL:    https://{PUBLIC_HOST}")
             print(f" Billing:        $0.00 Always-Free Tier Guaranteed")
             print("=" * 70)
 

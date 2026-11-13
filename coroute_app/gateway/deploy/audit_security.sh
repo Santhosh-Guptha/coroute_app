@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+. "$(dirname "${BASH_SOURCE[0]}")/_inventory.sh"
+need VM2_PRIVATE_IP VM_SSH_PRIVATE_KEY_FILE
 echo "=========================================================="
 echo "         COROUTE INFRASTRUCTURE SECURITY AUDIT           "
 echo "=========================================================="
 
-echo -e "\n--- [NODE 1: coroute-server (152.67.181.198)] ---"
+echo -e "\n--- [NODE 1: coroute-server] ---"
 
 echo "[1.1] Open Listening Ports:"
 sudo ss -tulpn | grep LISTEN
@@ -23,9 +25,9 @@ echo -e "\n[1.5] UFW Status:"
 sudo ufw status || true
 
 echo -e "\n=========================================================="
-echo "--- [NODE 2: coroute-relay-2 (129.225.79.93 / 10.0.0.99)] ---"
+echo "--- [NODE 2: coroute-relay-2] ---"
 
-ssh -i ~/.ssh/vm_provision_ssh.key -o StrictHostKeyChecking=no ubuntu@10.0.0.99 '
+ssh -i "$VM_SSH_PRIVATE_KEY_FILE" -o StrictHostKeyChecking=accept-new "${REMOTE_USER:-ubuntu}@$VM2_PRIVATE_IP" '
   echo "[2.1] Open Listening Ports:"
   sudo ss -tulpn | grep LISTEN
 

@@ -2,8 +2,8 @@
 # Idempotent provisioning of one CoRoute gateway node on a fresh Ubuntu 22.04/24.04 OCI VM (micro or A1).
 # Contains no secrets: secrets come from OCI Vault at boot (coroute-secrets.service -> deploy/fetch_secrets.sh).
 #
-#   sudo NODE_NAME=vm1 NODE_ROLE=live NODE_IP=10.0.0.70 PEER_IP=10.0.0.99 bash deploy/setup_node.sh
-#   sudo NODE_NAME=vm2 NODE_ROLE=web  NODE_IP=10.0.0.99 PEER_IP=10.0.0.70 bash deploy/setup_node.sh
+#   sudo NODE_NAME=vm1 NODE_ROLE=live NODE_IP=<vm1-private-ip> PEER_IP=<vm2-private-ip> bash deploy/setup_node.sh
+#   sudo NODE_NAME=vm2 NODE_ROLE=web  NODE_IP=<vm2-private-ip> PEER_IP=<vm1-private-ip> bash deploy/setup_node.sh
 #
 # Installs: Node 22, Caddy with the DuckDNS DNS module, OCI CLI, chrony, unattended security upgrades,
 # a 2 GB swap file, the coroute user and directories, systemd units, the node's Caddyfile, firewall rules
@@ -161,7 +161,8 @@ case "$DOMAIN" in
   *) sed "s/coroute\.duckdns\.org/$DOMAIN/g" "$CF" > /etc/caddy/Caddyfile ;;
 esac
 # VM1 forwards WEB routes to the peer's gateway: use the real peer IP.
-sed -i "s/10\.0\.0\.99:3000/$PEER_IP:3000/g" /etc/caddy/Caddyfile
+sed -i "s/VM2_PRIVATE_IP/$PEER_IP/g" /etc/caddy/Caddyfile
+grep -q "VM2_PRIVATE_IP" /etc/caddy/Caddyfile && { echo "Caddyfile still holds the VM2_PRIVATE_IP placeholder" >&2; exit 1; }
 caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null 2>&1 || true
 
 log "firewall (iptables): 443/80 public; 3000 and 3101 from $PEER_IP only"

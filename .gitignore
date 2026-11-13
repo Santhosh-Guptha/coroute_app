@@ -22,6 +22,7 @@ Thumbs.db
 
 # Local Credentials & Secrets Vault
 CLUSTER_CREDENTIALS.md
+VM_CONFIGURATIONS.md
 *CREDENTIALS*.md
 *.credentials*
 tmp/

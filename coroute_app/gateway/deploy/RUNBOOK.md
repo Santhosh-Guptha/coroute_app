@@ -388,10 +388,11 @@ curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/ga
 4. **Resilient Sockets**: The mobile app's WebSocket engine automatically detects connection drops and reconnects within 1–3 seconds, re-joining active rides without rider action.
 5. **Pre-Fetched APKs**: Before switching DNS, the script automatically downloads the release APK binaries from the active server into `/opt/coroute/gateway/public/`.
 
-### Administrative Accounts Created:
-* `santhosh` (password `Santhosh@180901`) with passwordless sudo.
-* `antigravity` (password `Antigravity@CoRoute2026#VM`) with passwordless sudo for automated deployments.
-* SSH Password authentication enabled in `/etc/ssh/sshd_config.d/50-password-auth.conf`.
+### Administrative accounts (redacted in v3.56)
+An earlier version of this section listed two administrator user names with their passwords in plain text and turned
+on SSH password login. **Those passwords are compromised (they are in git history): lock or rotate both accounts**
+(`sudo passwd -l <user>` after confirming key login) and use SSH keys only. `deploy/host/apply.sh` disables SSH
+password login (section "v3.56 host tuning"). Never write a password, token or key into this repository.
 
 ## Sessions & security (3.57)
 
@@ -533,3 +534,152 @@ tls {
 	protocols tls1.2 tls1.3
 }
 ```
+
+---
+
+## v3.56 infrastructure (roles, tuning, DR, watchdog, backups, releases, load tests, scaling)
+
+Plan and numbers: `docs/infra/INFRASTRUCTURE_PLAN_v3.56.md`. Step-by-step execution prompt for the release agent:
+`docs/NEXT_AGENT_PROMPT_v3.55_round5_infra.md`. Hosts are SSH aliases `vm1`..`vm5`; real addresses only in the
+untracked `deploy/inventory.local.env` (template `inventory.example.env`).
+
+### Roles
+
+| VM | Role | `GATEWAY_ROLE` | Caddyfile | `host/apply.sh --role` |
+|---|---|---|---|---|
+| vm1 | realtime primary (WS, convoys, SOS), NLB primary | `live` | `caddy/Caddyfile.vm1` | `realtime` |
+| vm2 | web / admin / webhooks + hot mirror, NLB backup | `web` | `caddy/Caddyfile.vm2` | `web` |
+| vm3 | DR warm standby + watchdog + offsite backups + restore drill (tenancy 2) | `standby` | `caddy/Caddyfile.vm3-dr` | `dr` |
+| vm4 | staging / canary + load-test runner + watchdog of vm3 (tenancy 2) | (own) | `caddy/Caddyfile.vm4-staging` | `staging` |
+| vm5 | A1 worker: Valhalla, tiles, Umami, batch (tenancy 2, pending) | — | `caddy/Caddyfile.vm5-worker` | `worker` |
+
+`GATEWAY_ROLE=standby`: the gateway boots and answers `/api/health` (so the watchdog proves it can reach the
+database), never takes a job lease, and `/api/health/live` answers 503 `standby`.
+
+### Host tuning (`deploy/host/apply.sh`)
+
+```bash
+sudo ./deploy/host/apply.sh --role realtime --peer-ip <vm2 private ip> --dry-run   # read the diff first
+sudo ./deploy/host/apply.sh --role realtime --peer-ip <vm2 private ip>
+```
+Idempotent. sysctl (`/etc/sysctl.d/90-coroute.conf`: somaxconn 4096, tw_reuse, file-max, swappiness 10,
+vfs_cache_pressure 50, keepalives, small socket buffer minimums, fq/bbr), nofile 65535, journald 200 MB / 14 days,
+logrotate for Caddy, unattended security upgrades (no reboot, never nodejs/caddy), fail2ban (sshd), SSH keys-only /
+no root / no passwords (refuses if the sudo user has no `authorized_keys`), firewall (iptables on vm1/vm2 because of
+the OCI image rules, ufw on vm3-vm5), systemd drop-ins (`Restart=always`, `TimeoutStopSec=45`, `MemoryMax`, heap),
+safe `gateway.env` keys when absent (`NODE_COMPRESSION=off`, `HTTP_KEEPALIVE_MS=75000`, `ORACLE_MAX_INFLIGHT=10`,
+`WS_DEFLATE=off`, `SHUTDOWN_DRAIN_MS=15000` on vm1/vm2). It never restarts the gateway, never deletes firewall rules,
+and does not enable zram (the micros have swap files; zram costs CPU the 1/8 OCPU lacks). After apply:
+`systemctl restart coroute-gateway` on vm2, check health, then vm1 (or let the next release restart them).
+
+NLB: set the backend set health check to HTTPS `/api/health/live`, interval 5 s, timeout 3 s, 2 retries, so
+`SHUTDOWN_DRAIN_MS=15000` moves new connections to vm2 before vm1 tells its sockets to reconnect.
+
+### Releases (`deploy/release.sh`)
+
+From the owner's machine (Linux, macOS, WSL or Windows Git Bash; needs bash, tar, gzip, ssh, scp, node):
+```bash
+cp gateway/deploy/inventory.example.env gateway/deploy/inventory.local.env   # once, fill in
+gateway/deploy/release.sh                    # vm4 -> smoke + quick load -> (confirm) vm2 -> (confirm) vm1
+gateway/deploy/release.sh --with-dr          # ... and vm3 standby
+gateway/deploy/release.sh --only vm4         # staging only
+gateway/deploy/release.sh --rollback vm1     # previous release on vm1
+```
+Each VM gets `/opt/coroute/releases/<version-time-git>/` (npm ci on the VM), the `/opt/coroute/gateway` symlink
+switches atomically, the gateway restarts, and the health gate (HEALTHY, expected version, `/api/health/live` 200 on
+vm1/vm2) must pass within `HEALTH_TIMEOUT_S` or the VM switches back by itself and the release stops. Data and APKs
+live in `/opt/coroute/shared/` (first run migrates the old directory to `releases/legacy-<time>`). Static assets are
+precompressed in the bundle (`.gz`, `.zst` when zstd exists) for Caddy's `file_server`.
+
+Caddy (v3.56 Caddyfiles) is installed separately, one VM at a time, vm2 first:
+```bash
+sudo cp /opt/coroute/gateway/deploy/caddy/Caddyfile.vm2 /etc/caddy/Caddyfile        # vm1: Caddyfile.vm1, then
+# vm1 only: put vm2's private IP into the WEB reverse_proxy line, exactly as setup_node.sh does with PEER_IP
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && sudo systemctl reload caddy
+gateway/deploy/staging/smoke.sh https://coroute.devmonks.space                        # read-only smoke test
+```
+
+### DR: vm3 warm standby and failover
+
+Install: `sudo SECRETS_MODE=vault|file DR_TLS=dns bash deploy/dr/install_standby.sh`, then `release.sh --only vm3`.
+* **Secrets.** Preferred: copies of the production secrets in the **tenancy-2 Vault**, read with vm3's instance
+  principal (`/etc/coroute/secret_ids.env` with tenancy-2 OCIDs; dynamic group + policy in tenancy 2). Works when
+  tenancy 1 is suspended, which a cross-tenancy read of the tenancy-1 Vault would not. Stopgap (`SECRETS_MODE=file`):
+  ```bash
+  # from the owner's machine; the values are never printed
+  ssh vm2 'sudo cat /run/coroute/secrets.env /run/coroute/caddy.env' | ssh vm3 'sudo install -m 600 /dev/stdin /etc/coroute/dr-secrets.env'
+  ```
+* **Certificates** are obtained on vm3 by DNS-01 (DuckDNS) while it is a standby, so a promotion only switches DNS.
+* **Database.** The standby reaches the production ADB over its public endpoint (vm3's IP on the ADB ACL). For a
+  tenancy-1 suspension the DR ADB in tenancy 2 (owner decision) must hold last night's restore:
+  `RESTORE_SODA_URL=... node scripts/backup_restore.js --file <newest> --wipe` (never production: the script refuses
+  the backup's source host).
+
+**Promote (manual by default):** only when vm1 AND vm2 are down. `sudo bash deploy/dr/promote_vm3.sh` (refuses while
+the public site answers 200; asks before each step): `GATEWAY_ROLE=all`, restart, wait for `/api/health/live` 200,
+Caddy reload, DNS of both names to vm3 (`deploy/dr/dns_switch.sh`: DuckDNS by API; devmonks.space by the provider API
+when `/etc/coroute/dns.env` has it, otherwise the script prints the exact record to set by hand). Settings for the
+scripts: `/etc/coroute/dr.env` on vm3 (`VM3_PUBLIC_IP`, `NLB_PUBLIC_IP`, `PUBLIC_HOST`).
+**Back to normal:** start vm1/vm2, confirm they are healthy behind the NLB, then `sudo bash deploy/dr/demote_vm3.sh`
+(DNS back to the NLB, waits out the TTL while vm3 still serves, then standby). Never run vm1 and a promoted vm3 at the
+same time for longer than the DNS switch: they do not mirror each other.
+**Automatic option:** `WATCH_AUTO_PROMOTE=1` in `/etc/coroute/watchdog.env` promotes once after `public`, `vm1` and
+`vm2` were all down for `WATCH_PROMOTE_AFTER_MIN` (15) minutes. Off unless the owner decides otherwise.
+
+### Watchdog (vm3, and vm4 watching vm3)
+
+`/opt/coroute/watchdog/coroute_watchdog.js` (no dependencies, ≈ 30 MB): every 30 s checks each `WATCH_TARGETS`
+entry (`http`: 2xx and `HEALTHY` for `/api/health`; `ws`: upgrade 101), one alert e-mail after 3 failures in a row,
+one recovery e-mail, a daily summary at 03:00 UTC with uptime per target, the last backup and the last restore drill.
+Mail through the existing SMTP settings (password from `/run/coroute/secrets.env`). Per-node checks use the VM's
+public IP with the TLS name `coroute.duckdns.org` (Caddy's `:443` answers `/api/health/live` by IP).
+```bash
+sudo nano /etc/coroute/watchdog.env      # from deploy/watchdog/watchdog.example.env
+sudo systemctl enable --now coroute-watchdog && journalctl -u coroute-watchdog -f
+```
+Uptime Kuma was considered: ≈ 150-250 MB with its database, too much next to the standby gateway on 1 GB.
+
+### Backups (v3.56)
+
+| Layer | Where | What | Keep |
+|---|---|---|---|
+| 1 | gateway job (both VMs, leased) | encrypted hourly `critical` + nightly `full` to the tenancy-1 bucket (PAR) | `BACKUP_RETENTION_DAYS` (30) |
+| 2 | vm3 `coroute-backup.timer` 22:40 UTC (`deploy/nightly_backup.py`) | encrypted full export (same AES-256-GCM format) to vm3's disk `/var/backups/coroute/{daily,weekly,monthly}` | 7 daily, 4 weekly, 3 monthly |
+| 3 | same run | copy to the tenancy-2 bucket through `OFFSITE_PAR_URL` (write-only PAR) | bucket lifecycle rule, 100 days |
+| check | same run + `coroute-restore-drill.timer` (Sundays) | decrypt, verify the manifest, restore every collection into an in-memory DB, compare counts, mail the result | `/var/lib/coroute-backup/last*.json` |
+
+```bash
+sudo nano /etc/coroute/backup.env                                   # OFFSITE_PAR_URL, ALERT_TO (deploy/backup/backup.example.env)
+sudo python3 /opt/coroute/nightly_backup.py --dry-run && sudo python3 /opt/coroute/nightly_backup.py
+sudo systemctl enable --now coroute-backup.timer
+sudo cp /opt/coroute/gateway/deploy/backup/coroute-restore-drill.* /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl enable --now coroute-restore-drill.timer && sudo systemctl start coroute-restore-drill
+```
+The old `nightly_backup.py` uploaded unencrypted JSON; it is replaced. Object Storage Always Free: 20 GB and 50,000
+requests a month per tenancy; layer 3 uses about 60 requests a month. Keep `BACKUP_ENCRYPTION_KEY` in the owner's
+password manager too: without it no backup can be read.
+
+### Load tests
+
+`gateway/tool/load/README.md`. Locally: `node tool/load/ws_load.js --riders 3000 --group-size 8 --hz 0.4`. Staging:
+`deploy/staging/quick_load.sh` (also the release gate). Never against production (the tools refuse it).
+
+### Metrics and load shedding
+
+`curl -s http://127.0.0.1:3000/metrics` on a VM (Prometheus text; loopback only, 404 through Caddy). Watch:
+`coroute_event_loop_lag_ms{quantile="0.99"}`, `coroute_ws_connections`, `coroute_db_calls_total`,
+`coroute_db_queue_length`, `coroute_load_shedding`, `coroute_process_resident_memory_bytes`. Load shedding (`LOAD_SHED=on`)
+answers 503 + Retry-After for non-essential reads only (reviews, community stats, leaderboards, intel layers, POI
+cells, analytics) while the event loop lags > 250 ms, > 200 requests are in flight, the heap is > 90 % or > 200 DB
+calls wait. Never shed: SOS, alerts, crash reports, auth, convoys / ride telemetry, guardian, live links, health,
+payment webhooks, WebSockets. Drill: `LOAD_SHED=force` on staging.
+
+### Scaling triggers
+
+| Signal (vm1) | Action |
+|---|---|
+| > 500 concurrent riders sustained, or lag p99 > 100 ms for 10 min, or CPU steal (`%st` in `top`) > 30 % | plan the A1 realtime move (plan section 5) |
+| `coroute_ws_connections` > 2,000 on a micro | set / check `LIVE_RIDER_CAP=2500` |
+| `coroute_db_calls_total` rate > 300/s | `INTEL_CONSENT_TTL_MS=300000`, `WS_GATE_TTL_MS=300000` |
+| `coroute_db_queue_length` > 0 for minutes | ADB is the bottleneck: check its CPU in the console |
+| disk on vm3 > 80 % | lower backup retention or move old monthly copies offsite only |

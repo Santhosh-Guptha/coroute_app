@@ -6,7 +6,7 @@
 #
 # This script completely configures a fresh Oracle Cloud (or any Linux) VM:
 #  1. Installs Node.js 22 LTS, Caddy web server, git, and build tools
-#  2. Creates system accounts (coroute, santhosh, antigravity) with sudo & SSH
+#  2. Creates system accounts (coroute + VM_ADMIN_USERS from the inventory) with sudo & SSH
 #  3. Clones and installs the CoRoute Gateway backend & dependencies
 #  4. Restores production environment secrets (Oracle ATP SODA, JWT secret, etc.)
 #     * Preserves exact JWT secret so existing mobile app users stay logged in!
@@ -26,6 +26,10 @@
 # ==============================================================================
 
 set -euo pipefail
+# Real values (database host, admin logins, e-mail, client ids) come from the environment or the git-ignored
+# deploy/inventory.local.env (deploy/_inventory.sh); nothing real is written in this tracked script.
+. "$(dirname "${BASH_SOURCE[0]}")/_inventory.sh"
+need ORACLE_SODA_URL VM_ADMIN_USERS GOOGLE_CLIENT_IDS BOOTSTRAP_ADMIN_EMAILS
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -123,45 +127,31 @@ if ! id coroute >/dev/null 2>&1; then
   log_ok "Created system service user: coroute"
 fi
 
-# Admin user: santhosh
-if ! id santhosh >/dev/null 2>&1; then
-  useradd -m -s /bin/bash santhosh
-  echo "santhosh:Santhosh@180901" | chpasswd
-  usermod -aG sudo,coroute santhosh
-  log_ok "Created user: santhosh"
-else
-  echo "santhosh:Santhosh@180901" | chpasswd
-  usermod -aG sudo,coroute santhosh
-  log_ok "Updated user: santhosh"
+# Admin users (v3.56): SSH keys only. No password is ever set here (an earlier version hard-coded two passwords:
+# they are compromised and must not be reused). Pass public keys in ADMIN_SSH_PUBKEYS, one "user:ssh-ed25519 AAAA..." per line.
+for u in $VM_ADMIN_USERS; do
+  if ! id "$u" >/dev/null 2>&1; then useradd -m -s /bin/bash "$u"; log_ok "Created user: $u"; fi
+  usermod -aG sudo,coroute "$u"
+  passwd -l "$u" >/dev/null 2>&1 || true   # key login only
+done
+if [ -n "${ADMIN_SSH_PUBKEYS:-}" ]; then
+  printf '%s\n' "$ADMIN_SSH_PUBKEYS" | while IFS=: read -r u key; do
+    { [ -n "$u" ] && [ -n "$key" ] && id "$u" >/dev/null 2>&1; } || continue
+    h=$(getent passwd "$u" | cut -d: -f6); install -d -m 700 -o "$u" -g "$u" "$h/.ssh"
+    grep -qxF "$key" "$h/.ssh/authorized_keys" 2>/dev/null || echo "$key" >> "$h/.ssh/authorized_keys"
+    chown "$u:$u" "$h/.ssh/authorized_keys"; chmod 600 "$h/.ssh/authorized_keys"
+  done
 fi
 
-# Agent user: antigravity (for automated deployments)
-if ! id antigravity >/dev/null 2>&1; then
-  useradd -m -s /bin/bash antigravity
-  echo "antigravity:Antigravity@CoRoute2026#VM" | chpasswd
-  usermod -aG sudo,coroute antigravity
-  log_ok "Created user: antigravity"
-else
-  echo "antigravity:Antigravity@CoRoute2026#VM" | chpasswd
-  usermod -aG sudo,coroute antigravity
-  log_ok "Updated user: antigravity"
-fi
-
-# Passwordless sudo for administrative users
-cat > /etc/sudoers.d/90-coroute-users << 'EOF'
-santhosh ALL=(ALL) NOPASSWD:ALL
-antigravity ALL=(ALL) NOPASSWD:ALL
-EOF
+# Passwordless sudo for administrative users (they have no password; access is by SSH key)
+: > /etc/sudoers.d/90-coroute-users
+for u in $VM_ADMIN_USERS; do echo "$u ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/90-coroute-users; done
 chmod 440 /etc/sudoers.d/90-coroute-users
 log_ok "Configured sudo permissions in /etc/sudoers.d/90-coroute-users."
 
-# Enable SSH Password Authentication for admin accounts
-mkdir -p /etc/ssh/sshd_config.d
-cat > /etc/ssh/sshd_config.d/50-password-auth.conf << 'EOF'
-PasswordAuthentication yes
-EOF
-systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
-log_ok "SSH password authentication enabled."
+# SSH: keys only (v3.56; deploy/host/apply.sh applies the full hardening). Remove an old password-login drop-in.
+rm -f /etc/ssh/sshd_config.d/50-password-auth.conf
+log_ok "SSH password login not enabled (keys only)."
 
 # ------------------------------------------------------------------------------
 # 5. Application Directories & Gateway Codebase
@@ -204,13 +194,13 @@ cat > /etc/coroute/gateway.env << EOF
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=3000
-ORACLE_SODA_URL=https://gfe473165e66472-coroutedb.adb.ap-hyderabad-1.oraclecloudapps.com/ords/coroute/soda/latest
+ORACLE_SODA_URL=${ORACLE_SODA_URL}
 ORACLE_USER=COROUTE
 ORACLE_PASSWORD=${ORACLE_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
 JWT_TTL_DAYS=30
-GOOGLE_CLIENT_IDS=87798956679-ivggpbpote5cf2cvi8mtg8gja3r1sfve.apps.googleusercontent.com
-BOOTSTRAP_ADMIN_EMAILS=santhoshbukka5@gmail.com
+GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}
+BOOTSTRAP_ADMIN_EMAILS=${BOOTSTRAP_ADMIN_EMAILS}
 RETENTION_ENDED_CONVOY_DAYS=90
 RETENTION_VOICE_LOG_DAYS=7
 RETENTION_STALE_CONVOY_HOURS=36
@@ -340,7 +330,7 @@ LOG_MSG="[$TIMESTAMP] [MIGRATION] [IP: $PUBLIC_IP] New VM automated setup comple
 echo "$LOG_MSG" >> /var/log/coroute_operations.log
 
 # Create/append ACTIVITY_LOG for users
-for user_home in /home/santhosh /home/antigravity; do
+for u in $VM_ADMIN_USERS; do user_home="/home/$u"
   if [[ -d "$user_home" ]]; then
     cat >> "${user_home}/ACTIVITY_LOG.md" << EOF
 
@@ -362,6 +352,6 @@ echo -e " Public Domain:   ${CYAN}https://coroute.duckdns.org${NC}"
 echo -e " Health Check:    ${CYAN}https://coroute.duckdns.org/api/health${NC}"
 echo -e " Metadata:        ${CYAN}https://coroute.duckdns.org/api/meta${NC}"
 echo -e " Download APK:    ${CYAN}https://coroute.duckdns.org/coroute.apk${NC}"
-echo -e " Admin Users:     ${YELLOW}santhosh${NC} and ${YELLOW}antigravity${NC} (passwordless sudo enabled)"
+echo -e " Admin Users:     ${YELLOW}${VM_ADMIN_USERS}${NC} (passwordless sudo enabled)"
 echo -e " Existing Users:  ${GREEN}Uninterrupted sessions & auto-reconnect preserved.${NC}"
 echo -e "${GREEN}==============================================================================${NC}"

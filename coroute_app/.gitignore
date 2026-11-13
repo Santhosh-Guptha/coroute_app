@@ -61,3 +61,13 @@ Claude outputs/
 _to_delete/
 release/**/*.apk
 release/**/*.aab
+
+# v3.56 VM inventory with real addresses (gateway/deploy/inventory.example.env is the template)
+inventory.local.env
+**/inventory.local.env
+# v3.56 templates without real values (the filled copies stay ignored)
+!gateway/deploy/inventory.example.env
+!gateway/deploy/backup/backup.example.env
+!gateway/deploy/watchdog/watchdog.example.env
+# Round 6: the gateway env template is documentation (placeholders only; test/config_env_example_356.test.js checks it)
+!gateway/deploy/.env.example

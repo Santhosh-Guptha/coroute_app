@@ -5,8 +5,13 @@
  *
  *   node deploy/gen_caddy_routes.js           rewrite the GENERATED block in Caddyfile.vm1 (and print it)
  *   node deploy/gen_caddy_routes.js --print   print the matcher only
- *   node deploy/gen_caddy_routes.js --check   every route defined in src/ must match a LIVE or WEB row (exit 1 if not)
- *   node deploy/gen_caddy_routes.js --list    every route defined in src/ with its class
+ *   node deploy/gen_caddy_routes.js --check   every route the gateway SERVES must match a LIVE or WEB row, and the
+ *                                             GENERATED block of Caddyfile.vm1 must be current (exit 1 if not)
+ *   node deploy/gen_caddy_routes.js --list    every served route with its class and the row that matched
+ *
+ * Round 6: --check / --list boot the real express app on the in-memory store and walk every router with its mount
+ * prefix (src/route_policy.js walkRoutes), so no route can hide behind `app.use('/api/x', router)`. The old text
+ * scan of src/ (srcRoutes) is kept only as a fallback when the app cannot be loaded (--static).
  *
  * Row syntax (markdown table): | LIVE|WEB | METHODS (comma list or *) | /path/:param/* | source | why |
  * `:param` matches one path segment, a trailing `/*` the path itself and everything below it.
@@ -123,25 +128,76 @@ function classify(rows, method, p) {
   return web ? { cls: 'WEB', row: web } : { cls: null };
 }
 
-function main(argv) {
+/** Routes the gateway really serves: [{ method, path }] from the booted app (in-memory store, no network). */
+async function appRoutes() {
+  process.env.NODE_ENV = 'test';
+  const { createApp } = require(path.join(SRC, 'app'));
+  const { MemorySoda } = require(path.join(SRC, 'oracle', 'memory_soda'));
+  const { walkRoutes } = require(path.join(SRC, 'route_policy'));
+  const quiet = { info() {}, warn() {}, error() {} };
+  const gw = await createApp({ soda: new MemorySoda(), logger: quiet });
+  const out = [];
+  try {
+    for (const k of walkRoutes(gw.app)) {
+      const method = k.slice(0, k.indexOf(' '));
+      for (const p of k.slice(k.indexOf(' ') + 1).split(',')) out.push({ method: method === '_ALL' ? '*' : method, path: p.length > 1 ? p.replace(/\/$/, '') : p });
+    }
+  } finally { await gw.shutdown().catch(() => {}); }
+  // Mounted only with GUARDIAN_ENABLED=true, and the WebSocket upgrade: always part of the split.
+  out.push({ method: '*', path: '/api/guardian/x' }, { method: 'GET', path: '/ws' });
+  return out;
+}
+
+/** Every served route with its class: [{ method, path, cls, row }]. cls null = unclassified. */
+function classifyAll(rows, routes) {
+  return routes.map((r) => {
+    // A route that answers every method must be LIVE or WEB as a whole: classify it as its GET.
+    const c = classify(rows, r.method === '*' ? 'GET' : r.method, r.path.replace(/\*$/, 'x'));
+    return { ...r, cls: c.cls, row: c.row || null };
+  });
+}
+
+/** True when the GENERATED block of Caddyfile.vm1 is what route_split.md says. */
+function caddyInSync(rows) {
+  const src = fs.readFileSync(CADDY_VM1, 'utf8');
+  const a = src.indexOf(BEGIN); const b = src.indexOf(END);
+  if (a < 0 || b < a) return false;
+  const have = src.slice(a, b + END.length).split('\n').map((l) => l.trim());
+  return JSON.stringify(have) === JSON.stringify(liveMatcher(rows));
+}
+
+async function main(argv) {
   const rows = parseRows();
   if (argv.includes('--check') || argv.includes('--list')) {
+    let routes;
+    if (argv.includes('--static')) routes = srcRoutes();
+    else {
+      try { routes = await appRoutes(); } catch (e) {
+        console.error(`cannot boot the gateway to list its routes (${String(e.message).split('\n')[0]}). Run npm ci in gateway/ first.`);
+        process.exit(2);
+      }
+    }
     let missing = 0;
-    for (const r of srcRoutes()) {
-      const c = classify(rows, r.method, r.path);
-      if (!c.cls) missing++;
-      if (argv.includes('--list') || !c.cls) console.log(`${(c.cls || 'UNCLASSIFIED').padEnd(12)} ${r.method.padEnd(6)} ${r.path}  (${r.file}:${r.line})`);
+    for (const r of classifyAll(rows, routes)) {
+      if (!r.cls) missing++;
+      if (argv.includes('--list') || !r.cls) console.log(`${(r.cls || 'UNCLASSIFIED').padEnd(12)} ${r.method.padEnd(6)} ${r.path}${r.row ? `   <= ${r.row.path}` : ''}`);
     }
     if (missing) {
       console.error(`\n${missing} route(s) are in neither list: add them to deploy/route_split.md (LIVE if they touch rooms, sockets or live links), then rerun without --check.`);
       process.exit(1);
     }
-    if (argv.includes('--check')) console.log('route_split.md covers every route in src/.');
-    return;
+    if (argv.includes('--check')) {
+      if (!caddyInSync(rows)) {
+        console.error('deploy/caddy/Caddyfile.vm1: the GENERATED LIVE block is stale. Run: node deploy/gen_caddy_routes.js');
+        process.exit(1);
+      }
+      console.log(`route_split.md covers every served route (${routes.length}); Caddyfile.vm1 is current.`);
+    }
+    process.exit(0);
   }
   const lines = argv.includes('--print') ? liveMatcher(rows) : writeCaddy(rows);
   console.log(lines.join('\n'));
 }
 
-if (require.main === module) main(process.argv.slice(2));
-module.exports = { parseRows, liveMatcher, regexBody, classify, srcRoutes };
+if (require.main === module) main(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(2); });
+module.exports = { parseRows, liveMatcher, regexBody, classify, srcRoutes, appRoutes, classifyAll, caddyInSync };
