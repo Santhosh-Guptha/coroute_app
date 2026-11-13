@@ -2,6 +2,7 @@ import '../../domain/membership/plan_gate_messages.dart';
 import '../../domain/tracking/ride_power_policy.dart';
 import '../../domain/tracking/battery_saver.dart';
 import '../../domain/tracking/location_cadence.dart';
+import '../../domain/tracking/adaptive_position_rate.dart'; // round 8 adaptive position rate
 import '../../domain/tracking/speed_estimator.dart';
 import 'solo_fix_source.dart' show speedFixOf;
 import '../../domain/tracking/battery_performance_monitor.dart';
@@ -232,6 +233,8 @@ class ConvoyService extends ChangeNotifier {
   final SpeedEstimator _speedEst = SpeedEstimator();
   DateTime? _stationarySince;
   DateTime _lastTelemetryPush = DateTime.fromMillisecondsSinceEpoch(0);
+  /// Round 8: when this phone sends its position (speed, stop, turn, SOS, lead / sweep; battery / data saver kept).
+  final AdaptivePositionRate _posRate = AdaptivePositionRate();
   String? _systemBroadcastMessage;
   String? _lastError;
   String? _pendingJoinCode;
@@ -2513,17 +2516,25 @@ class ConvoyService extends ChangeNotifier {
     final movedFar = current == null ||
         Geolocator.distanceBetween(current.lat, current.lng, shownLat, shownLng) > 40;
     final critical = convoy.activeAlerts.isNotEmpty || assistRequests.isNotEmpty || hazards.isNotEmpty;
-    // Faster riders report more often (smooth markers for the group), never near the gateway's
-    // 3 TELEMETRY/s limit, and slower in big groups (fan-out), data saver or battery saving.
-    final interval = LocationCadence.telemetryInterval(
-      _gpsBand.band,
-      base: _power.telemetryInterval(moving: isMoving, lowData: settings?.lowData ?? false, critical: critical),
+    // Round 8 adaptive rate (domain/tracking/adaptive_position_rate.dart): about 1 s above 60 km/h, 2.5 s in town, 5 s
+    // slow, 10 s stopped, 30 s parked; at once on a sharp turn / stop, moving off, the own SOS or becoming lead /
+    // sweeper; data saver and battery saving still slow it (never below the 1 s floor, never while the group has an
+    // alert), big groups stay held back (fan-out).
+    final rateCtx = PositionContext(
+      speedKmh: speedKmh,
+      headingDeg: fusedHeading,
       moving: isMoving,
+      parked: _gpsIdleProfile,
       lowData: (settings?.lowData ?? false) || _power.conserving || isLowBattery ||
           BatterySaverProfile.slowTelemetry(batterySaver, critical: critical),
+      critical: critical,
+      ownSos: convoy.activeAlerts.any((a) => a.userId == userId && !a.resolved),
+      leadOrSweep: updated.role == 'LEAD' || updated.role == 'SWEEPER',
       groupSize: convoy.riders.length,
     );
-    if (since >= interval || movedFar || shouldClearStatus) {
+    // A 40 m jump or a cleared stop still goes out at once, as before (but never closer than the 1 s floor).
+    final floorOk = since.inMilliseconds >= AdaptivePositionRate.floorMs;
+    if (_posRate.shouldSend(rateCtx, _clock()) || (floorOk && (movedFar || shouldClearStatus))) {
       _pushTelemetry(updated);
     }
   }
@@ -2563,6 +2574,8 @@ class ConvoyService extends ChangeNotifier {
   void _pushTelemetry(RiderModel r) {
     _lastTelemetryPush = DateTime.now();
     final now = _clock();
+    final ownSos = activeConvoy?.activeAlerts.any((a) => a.userId == r.userId && !a.resolved) ?? false;
+    _posRate.noteSent(now, speedKmh: r.speedKmh, headingDeg: r.heading, ownSos: ownSos, leadOrSweep: r.role == 'LEAD' || r.role == 'SWEEPER');
     if (_activeGroupId != null && now - _lastAliveStampMs >= NetConstants.aliveStampEvery.inMilliseconds) {
       _lastAliveStampMs = now;
       SharedPreferences.getInstance().then((p) => p.setInt(NetConstants.keyLastAliveAt, now)).catchError((Object _) => false);
@@ -2581,9 +2594,28 @@ class ConvoyService extends ChangeNotifier {
       isSos: hasActiveSos,
       fuelUsableKm: r.fuelUsableKm,
     );
+    final fuel = activeConvoy?.featurePolicy.groupFuelEnabled == false ? null : fuelEstimate?.call();
+    // Round 8 'pos2': a gateway that offers it gets the compact P2 frame (~65 bytes instead of ~240); others JSON.
+    if (_rt.pos2Active) {
+      _rt.send(_rt.pos2.encode(
+        lat: r.lat,
+        lng: r.lng,
+        speedKmh: r.speedKmh,
+        heading: r.heading,
+        nowMs: now,
+        batteryLevel: _currentBatteryLevel,
+        isCharging: _isCharging,
+        statusReason: r.statusReason,
+        statusMessage: r.statusMessage,
+        stoppedSince: r.stoppedSince,
+        fuelEstimate: fuel,
+        fatigueLevel: fatigueLevel?.call(),
+      ));
+      return;
+    }
     _rt.send({
       'type': 'TELEMETRY',
-      'fuelEstimate': activeConvoy?.featurePolicy.groupFuelEnabled == false ? null : fuelEstimate?.call(),
+      'fuelEstimate': fuel,
       'lat': r.lat,
       'lng': r.lng,
       'speedKmh': double.parse(r.speedKmh.toStringAsFixed(1)),
@@ -3926,7 +3958,34 @@ class ConvoyService extends ChangeNotifier {
     final sent = _rt.send(p.toMessage());
     if (sent) _sosSentAt = _clock();
     DiagLog.info(DiagCat.sos, 'send', {'ok': sent, 'ageMs': _clock() - p.createdAt});
+    _sendSosOverHttp(p); // round 7: the second lane, never awaited
     return sent;
+  }
+
+  String? _sosHttpFor;
+  int _sosHttpAt = 0;
+
+  /// Round 7 faster SOS: the same SOS over HTTP (POST /convoys/:groupId/sos), next to the socket
+  /// frame and never instead of it. A socket can look connected for many seconds after the
+  /// network changed (the stale-link check takes up to 100 s); a fresh HTTP request often gets
+  /// through sooner. The gateway raises one alert per (rider, clientId) whichever copy arrives
+  /// first, so this can not double an SOS. Nothing waits for it and a failure changes nothing:
+  /// the pending SOS stays until the server's echo, exactly as before (an older gateway answers
+  /// 404, which is ignored). At most once per 10 s per SOS.
+  void _sendSosOverHttp(PendingSos p) {
+    final now = _clock();
+    if (!_api.hasToken) return;
+    if (_sosHttpFor == p.clientId && now - _sosHttpAt < 10000) return;
+    _sosHttpFor = p.clientId;
+    _sosHttpAt = now;
+    try {
+      final body = Map<String, dynamic>.of(p.toMessage())..remove('type');
+      _api.post('/convoys/${Uri.encodeComponent(p.groupId)}/sos', body, const Duration(seconds: 8)).then((r) {
+        DiagLog.info(DiagCat.sos, 'http', {'ok': true, 'ms': _clock() - now, 'dup': r is Map && r['duplicate'] == true});
+      }).catchError((Object e) {
+        DiagLog.info(DiagCat.sos, 'http', {'ok': false, 'ms': _clock() - now, 'type': e.runtimeType.toString()});
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadPendingSos() async {

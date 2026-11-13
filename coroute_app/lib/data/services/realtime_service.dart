@@ -7,8 +7,10 @@ import '../../core/config/app_config.dart';
 import '../../core/constants/net_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../models/safety_wire.dart';
+import '../../domain/net/inbound_frame_sequencer.dart';
 import '../../domain/sync/reconnect_policy.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
+import 'pos2_codec.dart'; // round 8 compact position frames ('pos2')
 
 /// Binary voice packet kinds (must match gateway/src/ws.js).
 class VoiceKind {
@@ -106,6 +108,15 @@ class RealtimeService extends ChangeNotifier {
 
   /// True when the connected gateway supports [feature] (see ProtocolFeatures).
   bool supports(String feature) => _features.contains(feature);
+
+  /// Round 8 'pos2': the gateway takes compact P2 position frames and sends RU2 batches to this phone.
+  bool get pos2Active => supports(Pos2Codec.feature);
+
+  /// Round 8: encoder of this phone's P2 frames (sequence number per app run).
+  final Pos2Codec pos2 = Pos2Codec();
+
+  /// Round 8: the current room's riders as full maps (RU2 entries carry telemetry only and are merged into these).
+  final RiderCache _riderCache = RiderCache();
 
   /// Why the link is down (notifies on change).
   LinkProblem get linkProblem => _linkProblem;
@@ -259,6 +270,7 @@ class RealtimeService extends ChangeNotifier {
   /// [prevExit] / [prevAliveAt] ("the app was killed last time") go with the next JOIN only,
   /// and only to a gateway that supports presence.
   void joinRoom(String groupId, {String? prevExit, int? prevAliveAt}) {
+    if (_groupId != groupId) _riderCache.clear();
     if (_groupId != null && _groupId != groupId) _send({'type': 'LEAVE'});
     _groupId = groupId;
     if (prevExit != null) _joinExtras = {'prevExit': prevExit, 'prevAliveAt': ?prevAliveAt};
@@ -273,11 +285,14 @@ class RealtimeService extends ChangeNotifier {
     if (extras != null && supports(ProtocolFeatures.presence)) msg.addAll(extras);
     // 3.15: say what this app understands, on every JOIN, only to a gateway that has the safety network.
     if (supports(ProtocolFeatures.safetyNet)) msg['caps'] = List<String>.of(NetworkConstants.clientCaps);
+    // Round 8: RU2 position batches only from a gateway that offers 'pos2' (older gateways never see the cap).
+    if (pos2Active) msg['caps'] = <String>[...((msg['caps'] as List<String>?) ?? const <String>[]), Pos2Codec.feature];
     if (_send(msg)) _joinExtras = null;
   }
 
   void leaveRoom({bool leaveConvoy = false}) {
     _joinExtras = null;
+    _riderCache.clear();
     if (_groupId == null) return;
     _send({'type': 'LEAVE', 'leaveConvoy': leaveConvoy});
     _groupId = null;
@@ -466,17 +481,44 @@ class RealtimeService extends ChangeNotifier {
     }
   }
 
+  // Round 7 (faster safety response): text frames pass through one sequencer. A small frame with
+  // nothing waiting is decoded and handled at once, exactly as before. A big frame (96 KB or
+  // more: the snapshot or position batch of a very large group; smaller ones decode in a
+  // millisecond or two) is decoded off the UI thread, and while frames wait, alert frames are
+  // handled before waiting position frames, never ahead of a snapshot or any other ordered frame.
+  static const Set<String> _alertFrames = {
+    'ALERT', 'ALERT_RESOLVED', 'EMERGENCY_UPDATE', 'SOS_RESPONSE', 'WAIT_REQUESTS', 'ASSIST_REQUEST', 'ASSIST_UPDATE', 'ASSIST_CLOSED', 'HAZARD', 'HAZARD_CLEAR',
+  };
+  static const Set<String> _positionFrames = {'RIDER_UPDATE', 'RIDER_UPDATES', 'RU2'};
+
+  static Map<String, dynamic>? _decodeFrame(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  late final InboundFrameSequencer<Map<String, dynamic>> _frames = InboundFrameSequencer<Map<String, dynamic>>(
+    laneOfType: (t) => _alertFrames.contains(t) ? FrameLane.alert : (_positionFrames.contains(t) ? FrameLane.position : FrameLane.ordered),
+    decodeSmall: _decodeFrame,
+    decodeBig: (raw) => compute(_decodeFrame, raw),
+    deliver: _onJson,
+    bigBytes: 96 * 1024,
+  );
+
   void _onData(dynamic data) {
     _lastMessageAt = DateTime.now();
     if (data is String) {
-      Map<String, dynamic> msg;
-      try {
-        final decoded = jsonDecode(data);
-        if (decoded is! Map) return;
-        msg = Map<String, dynamic>.from(decoded);
-      } catch (_) {
-        return;
-      }
+      _frames.add(data);
+      return;
+    }
+    _onBinary(data);
+  }
+
+  void _onJson(Map<String, dynamic> msg) {
+    {
       final type = msg['type']?.toString();
       if (type == 'HELLO') {
         // Not in a ride: the server has this phone back. In a ride that is the SNAPSHOT (below).
@@ -511,8 +553,18 @@ class RealtimeService extends ChangeNotifier {
         if (list is! List) return;
         for (final r in list) {
           if (r is Map) {
+            _riderCache.put(r);
             _events.add(<String, dynamic>{'type': 'RIDER_UPDATE', 'rider': Map<String, dynamic>.from(r), 'ts': msg['ts']});
           }
+        }
+        return;
+      }
+      // Round 8 'pos2': compact telemetry for riders this phone already knows, merged into full rider maps and handed
+      // on as ordinary RIDER_UPDATE events (every listener stays as it was). Unknown riders wait for the next SNAPSHOT.
+      if (type == 'RU2') {
+        if (_groupId == null) return;
+        for (final r in _riderCache.applyRu2(msg)) {
+          _events.add(<String, dynamic>{'type': 'RIDER_UPDATE', 'rider': r, 'ts': msg['ts']});
         }
         return;
       }
@@ -531,9 +583,17 @@ class RealtimeService extends ChangeNotifier {
       if (type == 'SNAPSHOT' && msg['convoy'] is Map && msg['convoy']['groupId'] != _groupId) return;
       // Back in the ride (JOIN answered): the next drop starts with the quick retry again.
       if (type == 'SNAPSHOT') _policy.reset();
+      // Round 8: keep the full riders for RU2 merges.
+      if (type == 'SNAPSHOT' && msg['convoy'] is Map) _riderCache.putSnapshot((msg['convoy'] as Map)['riders']);
+      if (type == 'RIDER_UPDATE' && msg['rider'] is Map) _riderCache.put(msg['rider'] as Map);
+      if (type == 'RIDER_LEFT' && msg['userId'] != null) _riderCache.remove(msg['userId'].toString());
+      if (_events.isClosed) return;
       _events.add(msg);
       return;
     }
+  }
+
+  void _onBinary(dynamic data) {
     if (data is List<int>) {
       if (_groupId == null) return; // audio for a room we already left
       final bytes = data is Uint8List ? data : Uint8List.fromList(data);

@@ -61,3 +61,17 @@ and read the gateway side from `curl -s 127.0.0.1:3000/metrics` on vm4 (CPU seco
   See `docs/infra/INFRASTRUCTURE_PLAN_v3.56.md` section 4.
 * `dbTop` lists the hottest SODA calls (`op collection`): the steady state should be room snapshots and consent
   reads, not users / sessions (those are cached for 120 s on the socket hot path since v3.56).
+
+## Round 8: compact frames and stage gates
+
+```bash
+node tool/load/ws_load.js --riders 2000 --group-size 8 --hz 1 --seconds 30 --pos2        # P2 in, RU2 out (new apps)
+node tool/load/ws_load.js --preset gate2x   --target-riders 1000 --seconds 120 --pos2 --gate   # 2x target, pass/fail
+node tool/load/ws_load.js --preset soak     --target-riders 1000 --seconds 300 --sample-s 30   # memory / lag growth
+node tool/load/ws_load.js --preset failover --target-riders 1000 --seconds 60                  # drop every socket half way
+node tool/load/ws_load.js --preset flood    --target-riders 1000 --seconds 40                  # one IP + one account flood
+```
+`--failover-cmd "..."` (remote mode) runs a command at the failover point, e.g. stopping the staging gateway. The
+summary ends with a GATE block (SOS p99 < 150 ms, positions p99 < 250 ms server side, every SOS delivered, >= 99 %
+back within 10 s, flood limits engaged); `--gate` makes a failed target exit 1. Riders reconnect and resend an
+un-echoed SOS like the app. Results of round 8: `docs/quality/ROUND8_REALTIME_NOTES.md`.

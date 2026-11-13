@@ -1014,6 +1014,9 @@ class ConvoyManager extends EventEmitter {
     const medical = medicalOf(ownerDoc);
     if (medical) alert.medical = medical;
     room.alerts.set(alert.alertId, alert);
+    // Round 8: "SOS pending delivery" to the twin first (lane 0, before the database write and the fan-out). If this
+    // node dies before the ALERT reaches the room, the twin finishes the delivery (src/mirror.js sosPending / drain).
+    if (this.mirror && typeof this.mirror.sosPending === 'function') { try { this.mirror.sosPending(room.groupId, alert); } catch (e) { this.log.warn('[convoys] sos pending replicate failed', e.message); } }
     // Stored first. A failed store is logged and the alert still goes out (safety first); the sender gets
     // no echo, so the phone resends with the same clientId and the store is tried again.
     let persisted = true;

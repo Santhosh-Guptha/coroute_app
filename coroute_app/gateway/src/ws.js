@@ -32,8 +32,14 @@ const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { RoadHazardRegistry } = require('./road_hazards');
 // 3.55 admin feature switches (cached lookups, no DB read per message).
 const { wsFeaturesFor, firstOff, FEATURE_OFF, FEATURE_OFF_MESSAGE } = require('./feature_flags');
+// Round 8 realtime: abuse limits, compact position frames ('pos2'), interest management for big rides.
+const RL = require('./ws_limits');
+const { POS2_CAP, decodeP2, riderEntry, ru2Frame } = require('./pos2');
+const { Interest } = require('./interest');
 
-const VOICE_START = 0x01, VOICE_FRAME = 0x02, VOICE_END = 0x03;
+// Round 8 voice: the intercom relay lives in src/voice_relay.js (lowest priority, codec negotiation, caps, metrics,
+// optional separate process). ws.js keeps thin delegates, marked "Round 8 voice".
+const { VoiceRelay, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END, VOICE_FEATURE } = require('./voice_relay');
 
 const envInt = (k, d) => { const n = parseInt(process.env[k] || '', 10); return Number.isFinite(n) && n >= 0 ? n : d; };
 /** Position fan-out for large rooms: above this many sockets each rider's RIDER_UPDATE is throttled to one
@@ -66,14 +72,12 @@ const POS_BATCH_LARGE = POS_BATCH && String(process.env.WS_BATCH_LARGE || 'on').
  * 120 s, stale-while-revalidate up to twice that) instead of USER_GATE_TTL_MS: a position never waits for the
  * database. Holds, blocks, deletions and sign-outs still act at once (invalidate + socket kick, both nodes). */
 const GATE_HOT_TTL_MS = envInt('WS_GATE_TTL_MS', 120000);
-const HOT_TYPES = new Set(['TELEMETRY', 'PING']);
+const HOT_TYPES = new Set(['TELEMETRY', 'PING', 'P2']);
 /** v3.56: ping interval (a socket missing one pong is closed at the next tick). */
 const HEARTBEAT_MS = Math.max(5000, envInt('WS_HEARTBEAT_MS', 30000));
 /** v3.56: permessage-deflate. Off by default: on the 1/8-OCPU micro the CPU costs more than the bytes saved
  * (positions are ~300 B; measured in tool/load). WS_DEFLATE=on enables it with a 1 KB threshold. */
 const DEFLATE = String(process.env.WS_DEFLATE || 'off').toLowerCase() === 'on';
-/** Voice frames per second a single stream may relay (20 ms frames are 50/s). */
-const VOICE_MAX_FPS = envInt('VOICE_MAX_FPS', 100);
 
 /**
  * Outbound priority (per socket). While a socket's send buffer is under OUT_SOFT_BYTES everything goes out at
@@ -90,9 +94,6 @@ const PRIO_0 = new Set(['ALERT', 'ALERT_RESOLVED', 'SOS_RESPONSE', 'EMERGENCY_UP
   'DISSOLVED', 'TRIP_STATUS', 'HELLO', 'ASSIST_REQUEST', 'ROAD_HAZARD']);
 /** A rider whose last activity in a ride is older than this, and who is live nowhere, is a new live rider for the cap. */
 const LIVE_REJOIN_GRACE_MS = envInt('LIVE_REJOIN_GRACE_MS', 15 * 60000);
-
-/** Intercom sample rates: 16 kHz, and 8 kHz from phones in data saver mode. */
-const VOICE_RATES = new Set([8000, 16000]);
 
 /** Socket messages limited by the per-second action budget. */
 const ACTION_TYPES = new Set([
@@ -134,7 +135,7 @@ const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
  * may only send its own SOS / crash alert, position and keep-alives, and only receives control messages and its own
  * alerts: no other rider's position, chat, voice or member data.
  */
-const SAFETY_ONLY_IN = new Set(['PING', 'SOS', 'TELEMETRY', 'BYE', 'LAST_GASP_BEACON', 'JOIN', 'LEAVE', 'AUTH']);
+const SAFETY_ONLY_IN = new Set(['PING', 'SOS', 'TELEMETRY', 'P2', 'BYE', 'LAST_GASP_BEACON', 'JOIN', 'LEAVE', 'AUTH']);
 const SAFETY_ONLY_OUT = new Set(['ACK', 'ERROR', 'PONG', 'HELLO', 'RECONNECT', 'SAFETY_ONLY', 'TRIP_STATUS', 'DISSOLVED', 'LEFT']);
 const SAFETY_ONLY_MESSAGE = 'This phone was signed out of CoRoute. Until the ride ends it only sends your SOS, crash alerts and position.';
 /** Round 4: the subprotocol new clients may offer (the token then travels as "coroute.bearer.<token>", never in the URL). */
@@ -146,29 +147,14 @@ const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster']
 /** 3.16: sweeper role, follow-up check-in, town limit, live links (always on). */
 /** 3.55 'vehicle1': RIDER_VEHICLE (the rider's bike colour / model changed mid-ride).
  *  3.55 'pillion2': PILLION_SEAT / PILLION_UNSEAT (the pillion confirms the bike; the rider may decline). */
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2'];
+/** Round 8 'pos2': compact P2 position frames from the phone and RU2 batches to sockets with the 'pos2' cap
+ *  (src/pos2.js). WS_POS2=off stops advertising it (apps then keep TELEMETRY JSON; P2 frames are still accepted). */
+const POS2_ON = String(process.env.WS_POS2 || 'on').toLowerCase() !== 'off';
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2', ...(POS2_ON ? [POS2_CAP] : []), VOICE_FEATURE /* Round 8 voice: VOICE_CAPS / VOICE_CODEC */];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
 const ENCOUNTER_ID = /^ENC-[0-9A-F]{12}$/;
-
-function encodeVoice(kind, header, payload) {
-  const h = Buffer.from(JSON.stringify(header), 'utf8');
-  const out = Buffer.allocUnsafe(3 + h.length + (payload ? payload.length : 0));
-  out[0] = kind; out.writeUInt16BE(h.length, 1); h.copy(out, 3);
-  if (payload) payload.copy(out, 3 + h.length);
-  return out;
-}
-
-function decodeVoice(buf) {
-  if (!Buffer.isBuffer(buf) || buf.length < 3) return null;
-  const kind = buf[0];
-  const hl = buf.readUInt16BE(1);
-  if (hl > 2048 || buf.length < 3 + hl) return null;
-  let header;
-  try { header = JSON.parse(buf.subarray(3, 3 + hl).toString('utf8')); } catch { return null; }
-  return { kind, header, payload: buf.subarray(3 + hl) };
-}
 
 class Hub {
   /**
@@ -184,11 +170,23 @@ class Hub {
     this.byUser = new Map(); // userId -> Set<ws> (3.15 personal messages)
     this.admins = new Set();
     this.voice = new Map();
+    this.voiceRelay = new VoiceRelay(this); // Round 8 voice (src/voice_relay.js); floor state stays in this.voice
     this.roadHazards = new RoadHazardRegistry(); // groupId -> { group: stream|null, private: Map<from, stream> }
     this.posPending = new Map(); // groupId -> Map<userId, RIDER_UPDATE json> (large rooms, coalesced)
     this.posTimers = new Map(); // groupId -> flush timer
     this.posSentAt = new Map(); // groupId -> Map<userId, last fan-out time> (large rooms)
-    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0, queued: 0, batchFrames: 0, connections: 0 };
+    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0, queued: 0, batchFrames: 0, connections: 0,
+      // Round 8 (src/ws_limits.js, src/pos2.js, src/interest.js): one counter per limit and per new path.
+      rlIpConcurrent: 0, rlIpRate: 0, rlUserConnect: 0, rlUserEvicted: 0, rlWarned: 0, rlKicked: 0, rlInvalid: 0, rlInvalidKicked: 0,
+      rlJoinFlood: 0, rlIdleClosed: 0, rlSlowReader: 0, rlDropPos: 0, rlDropChat: 0, rlDropJoin: 0, rlDropPing: 0, rlDropOther: 0,
+      sosOverBudget: 0, sosOverFloorEcho: 0, pos2In: 0, pos2Miss: 0, pos2Frames: 0, interestHeld: 0, interestFarSent: 0 };
+    this.limits = RL.limitsConfig();
+    this.trusted = RL.trustFn(config.trustProxy);
+    this.ipLimiter = new RL.IpConnLimiter({ maxPerIp: this.limits.maxConnPerIp, perMin: this.limits.connPerMinPerIp });
+    this.userConnLimiter = new RL.UserConnLimiter({ perMin: this.limits.connPerMinPerUser });
+    this.interest = new Interest();
+    this.posLatest = new Map(); // groupId -> Map<userId, { msg, rj, p2, at }> (interest rooms: far riders' latest)
+    this.farTimers = new Map(); // groupId -> timer for withheld far positions
     this.outPending = new Set(); // sockets with queued outbound messages (see OUT_SOFT_BYTES)
     this.outTimer = null;
     /** Two-node live mirror (src/mirror.js), set by app.js; null on a single node. */
@@ -197,7 +195,7 @@ class Hub {
     this.allowedOrigins = null; // Set of origins, filled by app.js (site origins + CORS_ORIGINS)
     /** Round 4 ride lock (src/ride_lock.js), set by app.js; null in unit tests. */
     this.rideLock = null;
-    this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024, verifyClient: (info) => this._originAllowed(info.req),
+    this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024, verifyClient: (info, cb) => this._verifyClient(info, cb),
       perMessageDeflate: DEFLATE ? { threshold: 1024, concurrencyLimit: 4, serverNoContextTakeover: true, clientNoContextTakeover: true, zlibDeflateOptions: { level: 1, memLevel: 7 } } : false,
       // Round 4: echo only the plain protocol name (never the bearer entry, which carries the token).
       handleProtocols: (protocols) => (protocols && protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false) });
@@ -217,12 +215,16 @@ class Hub {
     convoys.on('roomEnded', (groupId) => this._dropRoomState(groupId));
 
     this.heartbeat = setInterval(() => {
+      const t = Date.now();
       for (const ws of this.wss.clients) {
         if (ws.isAlive === false) { ws.terminate(); continue; }
         // 3.57: a signed-out session's socket that is no longer in a live ride (left it) closes now.
         if (ws.revokedPending && !this._rideKeepsSocket(ws)) { this._kick(ws, 4401, 'SIGNED_OUT'); continue; }
+        // Round 8 timeouts (src/ws_limits.js): never a socket in a ride or an admin's fleet view.
+        if (this._idleOrSlow(ws, t)) continue;
         ws.isAlive = false; ws.ping();
       }
+      this.ipLimiter.sweep(); this.userConnLimiter.sweep();
     }, HEARTBEAT_MS);
     if (this.heartbeat.unref) this.heartbeat.unref();
     this.fleetTimer = setInterval(() => this._pushFleet().catch(() => {}), 15000);
@@ -235,13 +237,17 @@ class Hub {
     clearInterval(this.heartbeat); clearInterval(this.fleetTimer);
     if (this.outTimer) { clearTimeout(this.outTimer); this.outTimer = null; }
     for (const t of this.posTimers.values()) clearTimeout(t);
-    this.posTimers.clear(); this.posPending.clear();
+    for (const t of this.farTimers.values()) clearTimeout(t);
+    this.posTimers.clear(); this.posPending.clear(); this.farTimers.clear(); this.posLatest.clear();
     this.wss.close();
   }
 
   _dropRoomState(groupId) {
     const t = this.posTimers.get(groupId);
     if (t) clearTimeout(t);
+    const ft = this.farTimers.get(groupId);
+    if (ft) clearTimeout(ft);
+    this.farTimers.delete(groupId); this.posLatest.delete(groupId);
     this.posTimers.delete(groupId); this.posPending.delete(groupId); this.posSentAt.delete(groupId);
     this.voice.delete(groupId);
   }
@@ -264,24 +270,34 @@ class Hub {
     const set = this.rooms.get(gid);
     this.stats.posIn++;
     if (!set || !rider) return;
-    const rj = JSON.stringify(publicRider(rider));
-    const msg = `{"type":"RIDER_UPDATE","rider":${rj},"ts":${Date.now()}}`;
+    const ts = Date.now();
+    const pr = publicRider(rider);
+    const rj = JSON.stringify(pr);
+    // One position, three wire forms built once: RIDER_UPDATE (legacy), the batch entry, the RU2 entry (pos2).
+    const p = { msg: `{"type":"RIDER_UPDATE","rider":${rj},"ts":${ts}}`, rj, p2: riderEntry(pr, ts), ru2: null, ts };
     const big = set.size > POS_COALESCE_ABOVE;
+    // Round 8 interest management: the latest position of every rider of a big room, for the far-rider refresh.
+    if (this.interest.active(set.size)) {
+      let lm = this.posLatest.get(gid);
+      if (!lm) { lm = new Map(); this.posLatest.set(gid, lm); }
+      p.at = ts;
+      lm.set(rider.userId, p);
+    }
     const windowMs = big ? POS_COALESCE_MS : POS_MIN_MS;
     // A position relayed from the peer gateway (no local sender socket) never goes back to its own rider.
-    if (!(windowMs > 0)) return this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
-    const t = Date.now();
+    if (!(windowMs > 0)) return this._sendPosition(set, p, fromWs ? null : rider.userId, fromWs, rider.userId);
+    const t = ts;
     let sentAt = this.posSentAt.get(gid);
     if (!sentAt) { sentAt = new Map(); this.posSentAt.set(gid, sentAt); }
     let pending = this.posPending.get(gid);
     const last = sentAt.get(rider.userId) || 0;
     if (!(big && POS_BATCH_LARGE) && !(pending && pending.has(rider.userId)) && t - last >= windowMs) {
       sentAt.set(rider.userId, t);
-      return this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
+      return this._sendPosition(set, p, fromWs ? null : rider.userId, fromWs, rider.userId);
     }
     if (!pending) { pending = new Map(); this.posPending.set(gid, pending); }
     if (pending.has(rider.userId)) this.stats.posCoalesced++;
-    pending.set(rider.userId, { msg, rj });
+    pending.set(rider.userId, p);
     if (!this.posTimers.has(gid)) {
       // Large rooms: one flush per window for everyone. Small rooms: when this rider's window ends.
       const delay = big ? POS_COALESCE_MS : Math.max(25, last + windowMs - t);
@@ -308,50 +324,112 @@ class Hub {
       entries.push([uid, p]);
     }
     if (!entries.length) return;
+    if (this.interest.active(set.size)) return this._flushInterest(gid, set, room, entries, t);
     if (!POS_BATCH || entries.length < 2) {
-      for (const [uid, p] of entries) this._sendPosition(set, p.msg, uid, null, uid);
+      for (const [uid, p] of entries) this._sendPosition(set, p, uid, null, uid);
       return;
     }
-    let all = null; // the full batch, shared by every peer whose own rider is not in it
+    let all = null; let all2 = null; // the full batch (legacy / pos2), shared by every peer whose own rider is not in it
     const inBatch = new Set(entries.map(([uid]) => uid));
     for (const peer of set) {
       if (peer.readyState !== WebSocket.OPEN || peer.safetyOnly) continue;
       if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
       if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped += entries.length; continue; }
       const puid = peer.user && peer.user.userId;
-      if (peer.caps && peer.caps.has(BATCH_CAP) && !peer.outq && !(peer.bufferedAmount > OUT_SOFT_BYTES)) {
-        let frame; let n;
-        if (!inBatch.has(puid)) {
-          if (!all) all = `{"type":"RIDER_UPDATES","riders":[${entries.map(([, p]) => p.rj).join(',')}],"ts":${t}}`;
-          frame = all; n = entries.length;
-        } else {
-          const parts = [];
-          for (const [uid, p] of entries) if (uid !== puid) parts.push(p.rj);
-          if (!parts.length) continue;
-          frame = parts.length === 1 ? null : `{"type":"RIDER_UPDATES","riders":[${parts.join(',')}],"ts":${t}}`;
-          n = parts.length;
-          if (!frame) { for (const [uid, p] of entries) if (uid !== puid) this._out(peer, p.msg, 2, uid); this.stats.posOut += n; continue; }
+      const isP2 = !!(peer.caps && peer.caps.has(POS2_CAP));
+      if (!inBatch.has(puid) && !peer.outq && !(peer.bufferedAmount > OUT_SOFT_BYTES)) {
+        if (isP2) {
+          if (!all2) all2 = ru2Frame(entries.map(([, p]) => p.p2), t);
+          peer.send(all2);
+          this.stats.posOut += entries.length; this.stats.batchFrames++; this.stats.pos2Frames++;
+          continue;
         }
-        peer.send(frame);
-        this.stats.posOut += n; this.stats.batchFrames++;
-        continue;
+        if (peer.caps && peer.caps.has(BATCH_CAP)) {
+          if (!all) all = `{"type":"RIDER_UPDATES","riders":[${entries.map(([, p]) => p.rj).join(',')}],"ts":${t}}`;
+          peer.send(all);
+          this.stats.posOut += entries.length; this.stats.batchFrames++;
+          continue;
+        }
       }
-      for (const [uid, p] of entries) {
-        if (uid === puid) continue;
-        this._out(peer, p.msg, 2, uid);
-        this.stats.posOut++;
-      }
+      this._sendList(peer, entries.filter(([uid]) => uid !== puid), t);
     }
   }
 
-  _sendPosition(set, msg, fromUid, exceptWs, posUid = fromUid) {
+  /**
+   * Round 8 interest management (src/interest.js), rooms above WS_INTEREST_ABOVE sockets: each peer gets its nearest
+   * riders, lead / sweeper / owner and riders with an open alert now; everyone else's latest position every
+   * WS_INTEREST_FAR_MS. Alerts are separate frames and never pass through here.
+   */
+  _flushInterest(gid, set, room, entries, t) {
+    const special = this.interest.special(room);
+    const latest = this.posLatest.get(gid);
+    const farMs = this.interest.cfg.farMs;
+    let held = false;
+    for (const peer of set) {
+      if (peer.readyState !== WebSocket.OPEN || peer.safetyOnly) continue;
+      if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
+      if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped += entries.length; continue; }
+      const puid = peer.user && peer.user.userId;
+      const near = this.interest.near(room, puid, peer.interestCache || (peer.interestCache = {}), t);
+      const since = peer.farAt || 0;
+      const farDue = t - since >= farMs;
+      const list = []; const inList = new Set();
+      for (const [uid, p] of entries) {
+        if (uid === puid) continue;
+        if (farDue || near === null || near.has(uid) || special.has(uid)) { list.push([uid, p]); inList.add(uid); } else { this.stats.interestHeld++; held = true; }
+      }
+      if (farDue) {
+        if (latest) {
+          for (const [uid, x] of latest) {
+            if (!room.riders.has(uid)) { latest.delete(uid); continue; }
+            if (uid === puid || inList.has(uid) || x.at <= since) continue;
+            list.push([uid, x]); this.stats.interestFarSent++;
+          }
+        }
+        peer.farAt = t;
+      }
+      if (list.length) this._sendList(peer, list, t);
+    }
+    // Withheld positions reach their peers at the next far refresh even if nobody moves again.
+    if (held && !this.farTimers.has(gid)) {
+      const timer = setTimeout(() => {
+        this.farTimers.delete(gid);
+        const s = this.rooms.get(gid); const r = this.convoys.rooms.get(gid);
+        if (s && r && this.interest.active(s.size)) this._flushInterest(gid, s, r, [], Date.now());
+      }, farMs);
+      if (timer.unref) timer.unref();
+      this.farTimers.set(gid, timer);
+    }
+  }
+
+  /** Positions [[uid, p]] to one peer: one RU2 / RIDER_UPDATES frame when it can take it, else per-rider messages. */
+  _sendList(peer, list, t) {
+    if (!list.length) return;
+    const isP2 = !!(peer.caps && peer.caps.has(POS2_CAP));
+    const batch = isP2 || (POS_BATCH && !!(peer.caps && peer.caps.has(BATCH_CAP)));
+    if (batch && (isP2 || list.length > 1) && !peer.outq && !(peer.bufferedAmount > OUT_SOFT_BYTES)) {
+      peer.send(isP2 ? ru2Frame(list.map(([, x]) => x.p2), t) : `{"type":"RIDER_UPDATES","riders":[${list.map(([, x]) => x.rj).join(',')}],"ts":${t}}`);
+      this.stats.posOut += list.length; this.stats.batchFrames++;
+      if (isP2) this.stats.pos2Frames++;
+      return;
+    }
+    for (const [uid, x] of list) { this._out(peer, this._posData(peer, x), 2, uid); this.stats.posOut++; }
+  }
+
+  /** The wire form of one position for this peer: RU2 for 'pos2' sockets, RIDER_UPDATE JSON for the rest. */
+  _posData(peer, p) {
+    if (peer.caps && peer.caps.has(POS2_CAP)) { this.stats.pos2Frames++; return p.ru2 || (p.ru2 = ru2Frame([p.p2], p.ts)); }
+    return p.msg;
+  }
+
+  _sendPosition(set, p, fromUid, exceptWs, posUid = fromUid) {
     for (const peer of set) {
       if (peer === exceptWs || peer.readyState !== WebSocket.OPEN) continue;
       if (peer.safetyOnly) continue; // round 4: no other rider's position for a revoked session
       if (fromUid && peer.user && peer.user.userId === fromUid) continue;
       if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
       if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped++; continue; }
-      this._out(peer, msg, 2, posUid);
+      this._out(peer, this._posData(peer, p), 2, posUid);
       this.stats.posOut++;
     }
   }
@@ -524,6 +602,7 @@ class Hub {
     while (set.size >= MAX_SOCKETS_PER_USER) {
       const oldest = set.values().next().value;
       set.delete(oldest);
+      this.stats.rlUserEvicted++;
       this._kick(oldest, 1008, 'TOO_MANY_SOCKETS');
     }
     set.add(ws);
@@ -570,6 +649,75 @@ class Hub {
     for (const ws of this.admins) if (ws.readyState === WebSocket.OPEN && ws.allowed && !ws.safetyOnly && ws.user.role === ROLE_ADMIN) ws.send(msg);
   }
 
+  /**
+   * Upgrade check: the origin rule, then round 8 per-IP limits (concurrent sockets, new sockets per minute). A refused
+   * upgrade is answered HTTP 429 with Retry-After and costs no socket. The slot is freed when the TCP connection closes.
+   */
+  _verifyClient(info, cb) {
+    if (!this._originAllowed(info.req)) return cb(false);
+    const { key } = RL.clientIpOf(info.req, this.trusted);
+    const r = this.ipLimiter.admit(key);
+    if (!r.ok) {
+      if (r.reason === 'rate') this.stats.rlIpRate++; else this.stats.rlIpConcurrent++;
+      return cb(false, 429, 'Too Many Requests', { 'Retry-After': String(5 + Math.floor(Math.random() * 10)) });
+    }
+    if (key) {
+      let freed = false;
+      const free = () => { if (!freed) { freed = true; this.ipLimiter.release(key); } };
+      if (info.req.socket) info.req.socket.once('close', free); else free();
+    }
+    return cb(true);
+  }
+
+  /** Round 8 timeouts (heartbeat): idle sockets outside a ride, and peers that stopped reading. True when closed. */
+  _idleOrSlow(ws, t) {
+    const L = this.limits;
+    if (L.slowReaderMs > 0) {
+      if (ws.bufferedAmount > OUT_SOFT_BYTES) {
+        if (!ws.slowSince) ws.slowSince = t;
+        else if (t - ws.slowSince > L.slowReaderMs) { this.stats.rlSlowReader++; this._kick(ws, 1013, 'SLOW_LINK'); return true; }
+      } else ws.slowSince = 0;
+    }
+    if (L.idleMs > 0 && ws.allowed && !ws.groupId && !this.admins.has(ws) && t - (ws.lastInAt || ws.openedAt || t) > L.idleMs) {
+      this.stats.rlIdleClosed++; this._kick(ws, 4408, 'IDLE_TIMEOUT'); return true;
+    }
+    return false;
+  }
+
+  /**
+   * Round 8 per-socket token buckets: true when the message may go on. Over budget: positions and keep-alives are
+   * dropped silently, anything else gets the usual ERROR 429 "Slow down." (with its clientId, so the phone's outbox
+   * retries later); a RATE_LIMIT warning frame at most every 5 s per class; a socket that keeps flooding is closed 4429.
+   * Safety messages always pass.
+   */
+  _rateOk(ws, cls, cid) {
+    if (!ws.limiter || cls === 'safety') return true;
+    if (ws.rlKicked) return false; // frames already buffered behind the close: dropped, not counted again
+    const r = ws.limiter.check(cls);
+    if (r === 'ok') return true;
+    const k = `rlDrop${cls[0].toUpperCase()}${cls.slice(1)}`;
+    if (k in this.stats) this.stats[k]++;
+    if (r === 'kick') { ws.rlKicked = true; this.stats.rlKicked++; this._kick(ws, 4429, `RATE_LIMIT_${cls.toUpperCase()}`); return false; }
+    const wait = ws.limiter.warn(cls);
+    if (wait) { this.stats.rlWarned++; this.send(ws, { type: 'RATE_LIMIT', class: cls, retryMs: wait, ts: Date.now() }); }
+    if (cls !== 'pos' && cls !== 'ping') this.sendError(ws, 429, 'Slow down.', 'RATE_LIMITED', cid || undefined);
+    return false;
+  }
+
+  /** One invalid frame (malformed JSON, schema or size): true when the socket was closed for sending too many. */
+  _invalidFrame(ws) {
+    if (ws.rlKicked) return true;
+    this.stats.rlInvalid++;
+    if (ws.limiter && ws.limiter.invalid() === 'kick') { ws.rlKicked = true; this.stats.rlInvalidKicked++; this._kick(ws, 4400, 'INVALID_FRAMES'); return true; }
+    return false;
+  }
+
+  /** A refused JOIN (not a member): a socket guessing group ids is closed 4429 JOIN_FLOOD. */
+  _joinRefused(ws) {
+    if (ws.rlKicked) return;
+    if (ws.limiter && ws.limiter.joinRefused()) { ws.rlKicked = true; this.stats.rlJoinFlood++; this._kick(ws, 4429, 'JOIN_FLOOD'); }
+  }
+
   /** Same-origin, an allowed site origin, or no Origin header at all (native app, server clients). */
   _originAllowed(req) {
     const origin = req && req.headers ? req.headers.origin : undefined;
@@ -606,6 +754,8 @@ class Hub {
 
   _onConnection(ws, req) {
     this.stats.connections++;
+    ws.openedAt = Date.now();
+    ws.limiter = new RL.SocketLimiter(this.limits);
     const found = Hub.upgradeToken(req);
     if (found) return this._startSession(ws, found.token);
     // Round 4: no token in the request: the first message authenticates, within WS_AUTH_TIMEOUT_MS (5 s).
@@ -635,6 +785,8 @@ class Hub {
     // 3.57: a short access token that ran out: the app refreshes and reconnects at once (no sign-out).
     if (verified.expired) { ws.close(4401, verified.claims.typ === 'at' ? 'TOKEN_EXPIRED' : 'Unauthorized'); return; }
     const claims = verified.claims;
+    // Round 8: new sockets per account (a reconnect loop or a stolen token in a tight loop), before any database work.
+    if (!this.userConnLimiter.admit(claims.sub)) { this.stats.rlUserConnect++; ws.close(4429, 'TOO_MANY_CONNECTS'); return; }
 
     ws.claims = claims;
     ws.sid = claims.sid || null;
@@ -652,6 +804,8 @@ class Hub {
         if (!ws.allowed) return;
         const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
         if (buf.length > 0 && buf[0] === 0x10) {
+          ws.lastInAt = Date.now();
+          if (!this._rateOk(ws, 'pos')) return;
           this._onBinaryTelemetry(ws, buf).catch((e) => this._handleError(ws, e));
           return;
         }
@@ -808,8 +962,32 @@ class Hub {
     const t = Date.now();
     const recent = (ws.alarms[type] || []).filter((x) => t - x < 10000);
     ws.alarms[type] = recent;
-    if (recent.length >= config.wsAlarmsPer10s) return false;
+    // Round 8: the SOS budget never goes below WS_SOS_FLOOR_PER_10S (default 10), whatever WS_ALARMS_PER_10S says.
+    const limit = type === 'SOS' ? Math.max(config.wsAlarmsPer10s, this.limits.sosFloorPer10s) : config.wsAlarmsPer10s;
+    if (recent.length >= limit) return false;
     recent.push(t);
+    return true;
+  }
+
+  /**
+   * Round 8: an SOS above its per-socket floor. True when answered with the rider's newest open alert (an ALERT echo
+   * with duplicate: true, no database work); false when the rider has no open alert in the room (then it is raised
+   * like any other: an SOS is never dropped).
+   */
+  _sosOverFloor(ws, msg = {}) {
+    this.stats.sosOverBudget++;
+    const room = ws.groupId && this.convoys.rooms.get(ws.groupId);
+    if (!room) return false;
+    const cid = msg && msg.clientId !== undefined && msg.clientId !== null ? String(msg.clientId).slice(0, 64) : '';
+    let latest = null;
+    for (const a of room.alerts.values()) {
+      if (a.resolved || a.userId !== ws.user.userId) continue;
+      if (cid && a.clientId === cid) { latest = a; break; } // a resend of this very SOS: its own alert
+      if (!latest || (a.timestamp || 0) >= (latest.timestamp || 0)) latest = a;
+    }
+    if (!latest || (room.unsaved && room.unsaved.has(latest.alertId))) return false;
+    this.stats.sosOverFloorEcho++;
+    this.send(ws, { type: 'ALERT', alert: publicAlert(latest), duplicate: true, ts: Date.now() });
     return true;
   }
 
@@ -883,14 +1061,25 @@ class Hub {
 
   async _onJson(ws, data) {
     if (!(await ws.ready)) return;
+    ws.lastInAt = Date.now();
     let msg; let bad = false;
     try { msg = JSON.parse(data.toString()); } catch { bad = true; }
+    // Round 8 'pos2': a compact position frame carries "t":"P2" instead of a type.
+    if (!bad && msg && typeof msg === 'object' && msg.type === undefined && msg.t === 'P2') msg.type = 'P2';
+    // Round 8 per-socket buckets before any async work (safety messages always pass).
+    const okObj = !bad && !!msg && typeof msg === 'object' && !Array.isArray(msg);
+    if (okObj && !this._rateOk(ws, RL.classOf(msg.type), CLIENT_ID_TYPES.has(msg.type) ? clientIdOf(msg.clientId) : '')) return;
     // Re-check the account through the cached gate (no DB read inside the TTL): a hold, block,
     // delete, demotion or password change applies to an open socket too. v3.56: positions and pings use the
     // longer hot-path bound (WS_GATE_TTL_MS) and never wait for the database.
     if (!(await this._gateCheck(ws, { hot: !bad && !!msg && HOT_TYPES.has(msg.type) }))) return;
-    if (bad) return this.sendError(ws, 400, 'Malformed JSON');
-    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return this.sendError(ws, 400, 'Malformed JSON');
+    if (bad || !okObj) { if (this._invalidFrame(ws)) return; return this.sendError(ws, 400, 'Malformed JSON'); }
+    // Round 8 schema / size check per type (src/ws_limits.js validateInbound; safety types always pass).
+    const why = RL.validateInbound(msg, data.length);
+    if (why) {
+      if (this._invalidFrame(ws)) return;
+      return this.sendError(ws, 400, 'Invalid message.', 'INVALID_MESSAGE', CLIENT_ID_TYPES.has(msg.type) ? clientIdOf(msg.clientId) || undefined : undefined);
+    }
     // Outbox messages (3.14): a valid clientId makes the message idempotent and earns an ACK.
     // An invalid clientId is treated as absent (old behaviour).
     const cid = CLIENT_ID_TYPES.has(msg.type) ? clientIdOf(msg.clientId) : '';
@@ -919,7 +1108,12 @@ class Hub {
     const u = ws.user;
     // Every message that writes to the database has a budget per socket.
     if (ACTION_TYPES.has(msg.type) && !this._allow(ws, 'action', config.wsActionsPerSec)) throw new ConvoyError('Slow down.', 429);
-    if (ALARM_TYPES.has(msg.type) && !this._allowAlarm(ws, msg.type)) throw new ConvoyError('Slow down.', 429);
+    if (ALARM_TYPES.has(msg.type) && !this._allowAlarm(ws, msg.type)) {
+      // Round 8: an SOS is never refused by a rate limit. Above its floor (WS_SOS_FLOOR_PER_10S) the rider's open alert
+      // is echoed back (the phone marks it delivered); with no open alert it is handled as usual.
+      if (msg.type !== 'SOS') throw new ConvoyError('Slow down.', 429);
+      if (this._sosOverFloor(ws, msg)) return;
+    }
     // 3.55 admin feature switches: a message of a feature the admin turned off gets the usual ERROR
     // shape (403, reason FEATURE_OFF). Keyed by type, so a case that does not exist yet costs nothing.
     if (firstOff(this.convoys.featureFlags, wsFeaturesFor(msg))) throw new ConvoyError(FEATURE_OFF_MESSAGE, 403, FEATURE_OFF);
@@ -938,8 +1132,8 @@ class Hub {
 
       case 'JOIN': {
         const groupId = String(msg.groupId || '');
-        if (groupId.length > 64) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
-        if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
+        if (groupId.length > 64) { this._joinRefused(ws); throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER'); }
+        if (!(await this.convoys.isMember(groupId, u.userId))) { this._joinRefused(ws); throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER'); }
         if (this.mirror && this.mirror.capReached(u.userId) && !this._rejoining(groupId, u.userId)) {
           throw new ConvoyError('Server busy, try in a few minutes', 503, 'SERVER_BUSY');
         }
@@ -999,6 +1193,22 @@ class Hub {
         if (this.rideLock && ws.sid && !ws.safetyOnly) this.rideLock.noteRide(ws.sid, u.userId, gid).catch(() => {});
         // Only telemetry fields are applied (never role or profile); see ConvoyManager.patchRider.
         const rider = this.convoys.patchRider(room, u.userId, msg, { emit: false });
+        this._fanoutPosition(gid, ws, rider);
+        if (this.mirror && rider) this.mirror.position(gid, rider);
+        return;
+      }
+      case 'P2': {
+        // Round 8 compact position frame (src/pos2.js): same rules and budget as TELEMETRY.
+        const gid = this._requireRoom(ws);
+        if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
+        const dec = decodeP2(msg, ws.p2key || (ws.p2key = {}));
+        if (!dec) return this.sendError(ws, 400, 'Invalid position.', 'INVALID_MESSAGE');
+        if (dec.miss) { this.stats.pos2Miss++; return; } // a delta without its full fix: the next full one follows
+        this.stats.pos2In++;
+        const room = await this._liveRoom(ws, gid);
+        if (!room) return;
+        if (this.rideLock && ws.sid && !ws.safetyOnly) this.rideLock.noteRide(ws.sid, u.userId, gid).catch(() => {});
+        const rider = this.convoys.patchRider(room, u.userId, dec.patch, { emit: false });
         this._fanoutPosition(gid, ws, rider);
         if (this.mirror && rider) this.mirror.position(gid, rider);
         return;
@@ -1160,6 +1370,10 @@ class Hub {
         if (!this.convoys.buddies) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
         return this._once(ws, cid, 'BUDDY_PING', () => this.convoys.buddies.ping(gid, u, msg));
       }
+      // Round 8 voice: the app's receivable codecs (HELLO feature 'voice2'); answered with VOICE_CODEC.
+      case 'VOICE_CAPS':
+        this._requireRoom(ws);
+        return this.voiceRelay.onCaps(ws, msg);
       case 'MIC_STATE': {
         const gid = this._requireRoom(ws);
         const room = this.convoys.rooms.get(gid);
@@ -1406,187 +1620,17 @@ class Hub {
   }
 
   // ---------------------------------------------------------------- voice
-  _voiceState(groupId) {
-    if (!this.voice.has(groupId)) this.voice.set(groupId, { group: null, private: new Map() });
-    return this.voice.get(groupId);
-  }
-
-  _onVoice(ws, data) {
-    const gid = ws.groupId;
-    if (!gid) return; // not in a room: drop silently
-    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    if (buf.length > config.voiceMaxFrameBytes + 2100) return;
-    const pkt = decodeVoice(buf);
-    if (!pkt) return;
-    const state = this._voiceState(gid);
-    const to = pkt.header.to ? String(pkt.header.to) : null;
-    const t = Date.now();
-
-    if (pkt.kind === VOICE_START) {
-      // Talk is a group feature: a solo ride (Community host) has no one to talk to.
-      const soloRoom = this.convoys.rooms.get(gid);
-      if (soloRoom && typeof this.convoys.isSoloRide === 'function' && this.convoys.isSoloRide(soloRoom)) {
-        return this.sendError(ws, 403, 'Talk is for group rides. This is a solo ride.', 'SOLO_RIDE');
-      }
-      // 3.55: group talk switched off by the admin (only a new stream start is refused).
-      if (firstOff(this.convoys.featureFlags, ['intercom'])) return this.sendError(ws, 403, FEATURE_OFF_MESSAGE, FEATURE_OFF);
-      // 3.56 access mode: group talk left out of a hybrid free-tier ride.
-      if (typeof this.convoys.rideFeatureOff === 'function' && this.convoys.rideFeatureOff(gid, ['intercom'])) {
-        return this.sendError(ws, 403, "This isn't included in this ride.", 'GROUP_FEATURE_LOCKED');
-      }
-      // Validate target (must be a current room member, and not yourself).
-      if (to) {
-        const set = this.rooms.get(gid);
-        const target = set && [...set].find((c) => c.user.userId === to);
-        if (!target || to === ws.user.userId) return this.sendError(ws, 404, 'Rider is not online in this convoy.');
-      } else {
-        const cur = state.group;
-        if (cur && cur.ws !== ws && t - cur.lastAt < config.voiceStreamIdleMs) {
-          return this.send(ws, { type: 'VOICE_BUSY', speaker: cur.fromName, ts: t });
-        }
-        // The floor held by a rider on the peer gateway (hand-back window) is busy too.
-        const rem = state.remote;
-        if (rem && t - rem.lastAt < config.voiceStreamIdleMs) return this.send(ws, { type: 'VOICE_BUSY', speaker: rem.fromName, ts: t });
-        state.remote = null;
-        if (cur && cur.ws !== ws) this._endStream(gid, cur, 'preempted');
-      }
-      const channel = pkt.header.channel === 'LEAD_ONLY' ? 'LEAD_ONLY' : 'ALL';
-      if (channel === 'LEAD_ONLY') {
-        const room = this.convoys.rooms.get(gid);
-        const speakerRider = room && room.riders ? room.riders.get(ws.user.userId) : null;
-        const speakerRole = speakerRider ? speakerRider.role : ws.user.role;
-        const isLeader = (room && this.convoys.isLead(room, ws.user)) || speakerRole === 'SWEEPER' || ws.user.role === 'ADMIN' || ws.user.role === 'MASTER_ADMIN';
-        if (!isLeader) {
-          return this.sendError(ws, 403, 'The lead channel is for the Trip owner, Lead and sweeper.');
-        }
-      }
-      const stream = {
-        streamId: crypto.randomBytes(6).toString('hex'), ws, from: ws.user.userId, fromName: ws.user.name, to,
-        channel,
-        startedAt: t, lastAt: t, frames: 0, sampleRate: VOICE_RATES.has(Number(pkt.header.sampleRate)) ? Number(pkt.header.sampleRate) : 16000, codec: String(pkt.header.codec || 'pcm16').slice(0, 16),
-      };
-      if (to) state.private.set(ws.user.userId, stream); else state.group = stream;
-      ws.voiceStream = stream;
-      this.convoys.featureAnalytics?.record('voice', true);
-      const hdr = { ...this._hdr(stream), channel: stream.channel, sampleRate: stream.sampleRate, codec: stream.codec };
-      this._relay(gid, stream, VOICE_START, hdr, null);
-      if (this.mirror) this.mirror.voice(gid, VOICE_START, hdr, null);
-      this.roomSend(gid, {
-        type: 'MIC_STATUS',
-        userId: ws.user.userId,
-        isSpeaking: true,
-        channel: stream.channel,
-        ts: t,
-      });
-      return;
-    }
-
-    const stream = ws.voiceStream;
-    if (!stream || (stream.to || null) !== to) return; // frame without a stream → drop
-
-    if (pkt.kind === VOICE_FRAME) {
-      if (t - stream.startedAt > config.voiceMaxStreamMs) return this._endStream(gid, stream, 'max-duration');
-      if (pkt.payload.length === 0 || pkt.payload.length > config.voiceMaxFrameBytes) return;
-      // Frame budget per stream: a flooding client cannot multiply audio across the whole room.
-      if (!stream.rateAt || t - stream.rateAt >= 1000) { stream.rateAt = t; stream.rateN = 0; }
-      if (++stream.rateN > VOICE_MAX_FPS) return;
-      stream.lastAt = t; stream.frames++;
-      const hdr = { ...this._hdr(stream), seq: pkt.header.seq | 0 };
-      this._relay(gid, stream, VOICE_FRAME, hdr, pkt.payload);
-      if (this.mirror) this.mirror.voice(gid, VOICE_FRAME, hdr, pkt.payload);
-      return;
-    }
-    if (pkt.kind === VOICE_END) this._endStream(gid, stream, 'end');
-  }
-
-  _hdr(s) { return { streamId: s.streamId, from: s.from, fromName: s.fromName, to: s.to, channel: s.channel || 'ALL', ts: Date.now() }; }
-
-  _relay(gid, stream, kind, header, payload) {
-    const set = this.rooms.get(gid);
-    if (!set) return;
-    const frame = encodeVoice(kind, header, payload);
-    const room = this.convoys.rooms.get(gid);
-    for (const client of set) {
-      if (client === stream.ws || client.readyState !== WebSocket.OPEN || client.safetyOnly) continue;
-      if (stream.to && client.user.userId !== stream.to) continue; // 1:1 — only the chosen rider hears it
-      if (stream.channel === 'LEAD_ONLY') {
-        const rider = room && room.riders ? room.riders.get(client.user.userId) : null;
-        const role = rider ? rider.role : client.user.role;
-        const isLeadOrSweeper = role === 'LEAD' || role === 'SWEEPER' || (room && room.meta && room.meta.createdByUserId === client.user.userId) || client.user.role === 'ADMIN' || client.user.role === 'MASTER_ADMIN';
-        if (!isLeadOrSweeper) continue;
-      }
-      if (client.bufferedAmount > 512 * 1024 || client.outq) continue; // slow link: drop audio rather than build latency
-      client.send(frame);
-    }
-  }
-
-  _endStream(gid, stream, reason) {
-    const state = this.voice.get(gid);
-    if (state) {
-      if (state.group === stream) state.group = null;
-      if (state.private.get(stream.from) === stream) state.private.delete(stream.from);
-    }
-    if (stream.ws.voiceStream === stream) stream.ws.voiceStream = null;
-    const hdr = { ...this._hdr(stream), reason };
-    this._relay(gid, stream, VOICE_END, hdr, null);
-    if (this.mirror) this.mirror.voice(gid, VOICE_END, hdr, null);
-    this.roomSend(gid, {
-      type: 'MIC_STATUS',
-      userId: stream.from,
-      isSpeaking: false,
-      ts: Date.now(),
-    });
-    const durationMs = Date.now() - stream.startedAt;
-    if (stream.frames > 0) {
-      this.repo.logVoiceSession({ groupId: gid, from: stream.from, to: stream.to, startedAt: stream.startedAt, durationMs, frames: stream.frames, reason });
-    }
-  }
-
-  _endVoiceStreamsOf(ws) {
-    if (ws.voiceStream && ws.groupId) this._endStream(ws.groupId, ws.voiceStream, 'disconnect');
-  }
-
-  /**
-   * Voice from a rider on the peer gateway (hand-back window), relayed to this node's sockets of the room.
-   * The group floor: a remote START while a local group stream is live goes to the room authority
-   * (`peerHasFloorAuthority`: the peer is the GATEWAY_ROLE=live node): the local stream is preempted, or
-   * the remote one is ignored here (the peer preempts it when our START reaches it).
-   */
-  applyRemoteVoice(gid, kind, header, payload, { peerHasFloorAuthority = false } = {}) {
-    if (!header || typeof header.streamId !== 'string') return;
-    const state = this._voiceState(gid);
-    const rp = state.remotePrivate || (state.remotePrivate = new Map());
-    const t = Date.now();
-    const pseudo = { ws: null, to: header.to || null, channel: header.channel === 'LEAD_ONLY' ? 'LEAD_ONLY' : 'ALL' };
-    if (kind === VOICE_START) {
-      if (!header.to) {
-        const cur = state.group;
-        if (cur && t - cur.lastAt < config.voiceStreamIdleMs) {
-          if (!peerHasFloorAuthority) return;
-          this._endStream(gid, cur, 'preempted');
-        }
-        state.remote = { streamId: header.streamId, from: header.from, fromName: header.fromName, lastAt: t };
-      } else {
-        rp.set(header.streamId, { lastAt: t });
-      }
-      this._relay(gid, pseudo, kind, header, null);
-      return;
-    }
-    const known = (state.remote && state.remote.streamId === header.streamId) ? state.remote : rp.get(header.streamId);
-    if (!known) return;
-    known.lastAt = t;
-    if (kind === VOICE_END) {
-      if (state.remote === known) state.remote = null; else rp.delete(header.streamId);
-    }
-    this._relay(gid, pseudo, kind, header, kind === VOICE_FRAME ? payload : null);
-  }
-
+  // Round 8 voice: delegates to src/voice_relay.js (VoiceRelay). Names kept for mirror.js and older callers.
+  _voiceState(groupId) { return this.voiceRelay.voiceState(groupId); }
+  _onVoice(ws, data) { return this.voiceRelay.onBinary(ws, data); }
+  _hdr(s) { return this.voiceRelay._hdr(s); }
+  _relay(gid, stream, kind, header, payload) { return this.voiceRelay.fanout(gid, stream, kind, header, payload); }
+  _endStream(gid, stream, reason) { return this.voiceRelay.endStream(gid, stream, reason); }
+  _endVoiceStreamsOf(ws) { return this.voiceRelay.endStreamsOf(ws); }
+  /** Voice from a rider on the peer gateway (hand-back window); see VoiceRelay.applyRemote. */
+  applyRemoteVoice(gid, kind, header, payload, opts = {}) { return this.voiceRelay.applyRemote(gid, kind, header, payload, opts); }
   /** The group floor of a room for the mirror snapshot, or null. */
-  floorOf(gid) {
-    const st = this.voice.get(gid);
-    const g = st && st.group;
-    return g ? { streamId: g.streamId, from: g.from, fromName: g.fromName } : null;
-  }
+  floorOf(gid) { return this.voiceRelay.floorOf(gid); }
 }
 
 module.exports = { Hub, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END, FEATURES, FEATURES_314 };

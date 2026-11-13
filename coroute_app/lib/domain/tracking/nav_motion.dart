@@ -568,6 +568,64 @@ class MarkerTrack {
   }
 }
 
+/// Round 7: a [MarkerTrack] that keeps gliding when the next report is late.
+///
+/// The plain track reaches the reported point and stops until the next report, so a rider whose
+/// reports arrive unevenly (a weak network, a coalesced batch) moves in a stop-go way. This one
+/// dead-reckons after the tween: it carries on along the last reported course at the speed seen
+/// between the last two reports, slowing to a stop over [coastMs] (at most 60% of the report
+/// interval, 1.2 s). The next report eases in from wherever the marker is drawn, so it never
+/// jumps. The coast is short on purpose: a rider who brakes is overshot by less than a third of
+/// one report's travel. Standing riders, teleports and odd intervals do not coast.
+class GlideTrack extends MarkerTrack {
+  GlideTrack(super.lat, super.lng, super.heading, super.nowMs);
+
+  static const double minSpeedMps = 1.5;
+  static const double maxSpeedMps = 70;
+  static const int maxCoastMs = 1200;
+
+  double _vLat = 0, _vLng = 0; // degrees per ms
+  int _coastMs = 0;
+
+  /// How long the marker coasts after reaching the last report (0 = not at all).
+  int get coastMs => _coastMs;
+
+  int get _endMs => _startMs + _durationMs;
+
+  @override
+  bool isAnimating(int nowMs) => super.isAnimating(nowMs) || (_coastMs > 0 && nowMs - _endMs < _coastMs);
+
+  @override
+  (double lat, double lng, double heading) valueAt(int nowMs) {
+    final base = super.valueAt(nowMs);
+    if (_coastMs <= 0 || nowMs <= _endMs) return base;
+    final dt = math.min(nowMs - _endMs, _coastMs).toDouble();
+    final eff = dt - dt * dt / (2 * _coastMs); // speed falls linearly to zero
+    return (base.$1 + _vLat * eff, base.$2 + _vLng * eff, base.$3);
+  }
+
+  @override
+  bool retarget(double lat, double lng, double heading, int nowMs) {
+    final prevLat = _toLat, prevLng = _toLng;
+    final interval = nowMs - _lastReportMs;
+    final changed = super.retarget(lat, lng, heading, nowMs);
+    if (!changed) return false;
+    _vLat = 0;
+    _vLng = 0;
+    _coastMs = 0;
+    if (_durationMs > 0 && interval >= 300 && interval <= 3000) {
+      final step = NavMath.distanceM(prevLat, prevLng, lat, lng);
+      final v = step / (interval / 1000);
+      if (v >= minSpeedMps && v <= maxSpeedMps) {
+        _vLat = (lat - prevLat) / interval;
+        _vLng = (lng - prevLng) / interval;
+        _coastMs = math.min((interval * 0.6).round(), maxCoastMs);
+      }
+    }
+    return true;
+  }
+}
+
 /// Grid clustering of map markers at one zoom: points whose screen
 /// positions share a [cellPx] cell become one group. [pinned] points (me,
 /// the selected rider, the lead, anyone in trouble) always stay alone.
