@@ -1,0 +1,33 @@
+# Valhalla motorcycle routing for CoRoute (feature 13, round 4). OWNER-GATED, A1 ONLY.
+# Needs the Ampere A1 (4 OCPU / 24 GB): the first India tile build peaks at about 8-12 GB RAM and 1-2 hours;
+# serving needs 2-4 GB RAM. Do NOT run this on the E2.1.Micro VMs.
+#
+# Image: the Valhalla project's own scripted image (Valhalla is MIT licensed). Data: Geofabrik's India extract of
+# OpenStreetMap (ODbL: attribution "© OpenStreetMap contributors" is shown in the app and on the website).
+# Multi-arch (arm64 works on the A1).
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:3.5.1
+    container_name: coroute-valhalla
+    restart: unless-stopped
+    ports:
+      # Bind to the private interface only; the gateway VMs reach it over the VCN (security list: 8002 from the two VMs).
+      - "${VALHALLA_BIND:-127.0.0.1}:8002:8002"
+    volumes:
+      - ./custom_files:/custom_files
+    environment:
+      - tile_urls=https://download.geofabrik.de/asia/india-latest.osm.pbf
+      - use_tiles_ignore_pbf=True        # restart serves the built tiles; rebuild only with force_rebuild
+      - force_rebuild=False
+      - build_elevation=False            # elevation tiles add ~20 GB; not needed for motorcycle costing
+      - build_admins=True                # country / state rules (driving side, access)
+      - build_time_zones=True
+      - build_transit=False
+      - server_threads=3
+      - concurrency=3                    # build threads (keep one core for the OS on 4 OCPU)
+    mem_limit: 14g                       # the build stays under this; serving uses far less
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/status"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
