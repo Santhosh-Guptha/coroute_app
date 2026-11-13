@@ -1,0 +1,17 @@
+<section id="speed">
+<div class="head">
+<p class="eyebrow">SPEED WORK · 3,000 RIDERS, GROUPS OF 8</p>
+<h2>Faster with the same hardware</h2>
+</div>
+<table class="t" style="font-size:30px;">
+<tr><th style="width:46%">Measure</th><th style="width:27%">Before</th><th style="width:27%">After</th></tr>
+<tr><td>Gateway CPU</td><td>37 %</td><td>24 %</td></tr>
+<tr style="background:#E7ECE8"><td>Slowest 1 % of position updates</td><td>47 ms</td><td>9 ms</td></tr>
+<tr><td>Database calls per second</td><td>305</td><td>123</td></tr>
+<tr style="background:#E7ECE8"><td>Website files per second</td><td>3,500</td><td>12,200</td></tr>
+<tr><td>SOS delivered</td><td>100 %</td><td>100 %</td></tr>
+</table>
+<p class="small">How: positions batched and throttled per rider, account checks cached, website files from Caddy, a database call budget, and an SOS lane that never waits.</p>
+<p class="footer">07 · Local load test, in-memory database</p>
+<aside>Compression on live connections was tested and rejected: memory went from 161 MB to 603 MB at 2,000 connections.</aside>
+</section>

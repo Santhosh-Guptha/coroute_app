@@ -1,0 +1,24 @@
+<section id="tuning" class="alt">
+<div class="head">
+<p class="eyebrow">STEP 3 · SERVER TUNING</p>
+<h2>One script per role, read the dry run first</h2>
+</div>
+<div class="row">
+<div class="col">
+<p class="cmd">sudo ./deploy/host/apply.sh \<br>&#160;&#160;--role realtime --peer-ip &lt;vm2-private&gt; \<br>&#160;&#160;--dry-run<br><br># then without --dry-run<br># roles: realtime · web · dr · staging · worker</p>
+<p class="small">Safe to run again. It never restarts the gateway or deletes firewall rules.</p>
+</div>
+<div class="col">
+<ul style="font-size:28px; line-height:1.5;">
+<li>Network and file limits sized for many open connections</li>
+<li>Swap used only when needed; logs capped at 200 MB</li>
+<li>Security updates automatic, never reboots</li>
+<li>SSH keys only, no root, no passwords; fail2ban</li>
+<li>Firewall: 80/443 public, internal ports only from the peer</li>
+<li>Gateway restarts itself, with a memory limit</li>
+</ul>
+</div>
+</div>
+<p class="footer">10 · Then restart vm2, check health, then vm1</p>
+<aside>Also set the load balancer health check to /api/health/live every 5 seconds, so a release drains riders to vm2 before vm1 restarts. The script refuses to disable SSH passwords if your user has no SSH key.</aside>
+</section>

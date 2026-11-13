@@ -1,0 +1,137 @@
+:root {
+  --ink: #13202B;
+  --paper: #F4F6F2;
+  --paper2: #E7ECE8;
+  --teal: #1F6F67;
+  --teal-lt: #7FD1C4;
+  --orange: #B4561C;
+  --orange-lt: #F2A066;
+  --soft: #4A5866;
+  --soft-dk: #BFD3D0;
+  --line: #C9D3CF;
+}
+
+section {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', Arial, sans-serif;
+  padding: 128px 128px 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  counter-increment: page;
+}
+
+section.dark {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+section.alt { background: var(--paper2); }
+
+.eyebrow {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--teal);
+}
+.dark .eyebrow { color: var(--teal-lt); }
+
+h1 { font-size: 120px; font-weight: 700; line-height: 1.02; letter-spacing: -2px; }
+h2 { font-size: 64px; font-weight: 600; line-height: 1.1; letter-spacing: -1px; }
+h3 { font-size: 36px; font-weight: 600; line-height: 1.2; }
+p { font-size: 32px; line-height: 1.4; }
+.lead { font-size: 40px; line-height: 1.35; color: var(--soft); }
+.dark .lead { color: var(--soft-dk); }
+.small { font-size: 26px; line-height: 1.4; color: var(--soft); }
+.dark .small { color: var(--soft-dk); }
+.mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+
+.footer {
+  position: absolute;
+  left: 128px;
+  bottom: 64px;
+  width: 1664px;
+  font-size: 24px;
+  color: var(--soft);
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+.dark .footer { color: var(--soft-dk); }
+
+.head { display: flex; flex-direction: column; gap: 16px; }
+
+.cards { display: flex; gap: 28px; }
+.card {
+  flex: 1;
+  background: #FFFFFF;
+  border: 2px solid var(--line);
+  border-radius: 20px;
+  padding: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.alt .card { background: var(--paper); }
+.dark .card { background: #1C2D3A; border-color: #2E4454; }
+.card p { font-size: 28px; color: var(--soft); }
+.dark .card p { color: var(--soft-dk); }
+.card .tag {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--teal);
+}
+.dark .card .tag { color: var(--teal-lt); }
+.card.warn { border-color: var(--orange); }
+.card.warn .tag { color: var(--orange); }
+
+.bignums { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 28px; }
+.num { display: flex; flex-direction: column; gap: 12px; border-top: 4px solid var(--teal); padding-top: 24px; }
+.num .val { font-size: 96px; font-weight: 700; line-height: 1; color: var(--ink); }
+.dark .num .val { color: var(--paper); }
+.num .lbl { font-size: 28px; line-height: 1.3; color: var(--soft); }
+.dark .num .lbl { color: var(--soft-dk); }
+.dark .num { border-top-color: var(--teal-lt); }
+
+table.t { font-size: 26px; color: var(--ink); width: 100%; }
+.dark table.t { color: var(--paper); }
+
+.steps { display: flex; flex-direction: column; gap: 0; }
+.step { display: flex; gap: 32px; align-items: flex-start; padding: 22px 0; border-top: 2px solid var(--line); }
+.step:last-child { border-bottom: 2px solid var(--line); }
+.step .n {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--teal);
+  width: 64px;
+}
+.step .what { font-size: 32px; font-weight: 600; width: 520px; }
+.step .how { font-size: 28px; color: var(--soft); flex: 1; line-height: 1.35; }
+
+.cmd {
+  background: var(--ink);
+  color: var(--teal-lt);
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 24px;
+  line-height: 1.5;
+  padding: 28px 32px;
+  border-radius: 16px;
+}
+
+.pill {
+  font-size: 24px;
+  font-weight: 600;
+  padding: 6px 18px;
+  border-radius: 999px;
+  background: var(--paper2);
+  color: var(--teal);
+  align-self: flex-start;
+}
+
+.row { display: flex; gap: 48px; }
+.col { flex: 1; display: flex; flex-direction: column; gap: 24px; }
+
+.rise { animation: rise 600ms cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 110ms); }
+@keyframes rise { from { opacity: 0; transform: translateY(24px); } }

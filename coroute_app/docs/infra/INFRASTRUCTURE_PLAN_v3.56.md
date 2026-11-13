@@ -97,7 +97,7 @@ Two options; **B2 first** (no network change), B1 when traffic needs it.
   can only become the NLB primary through **cross-tenancy local VCN peering** (LPG pair, free, same region only; NLB
   IP-address backends reachable through the peering must be verified in the console first) or by moving public DNS
   to vm5 (vm5's Caddy then forwards WEB routes to vm2 over TLS and loses the NLB's 30 s failover). The clean answer is
-  an **A1 in tenancy 1** (its own 4 OCPU / 24 GB Always Free allowance is unused): run the capacity retry loop there
+  an **A1 in tenancy 1** (its own 2 OCPU / 12 GB Always Free allowance is unused; corrected 13 Nov 2026, it is not 4 / 24): run the capacity retry loop there
   too, make it the NLB primary with `GATEWAY_ROLE=live`, keep vm2 as the mirror, and vm1 becomes a second web node.
 
 ## 3. Roles and memory budgets
@@ -192,8 +192,8 @@ Other bottlenecks:
 | Riders (concurrent) | Do this | Trigger to move on |
 |---|---|---|
 | **now -> 1k** | v3.56 release (this round): static from Caddy, batching, gate TTL, DB budget, load shedding, metrics. `LIVE_RIDER_CAP=2500`, `SHUTDOWN_DRAIN_MS=15000`, NLB health interval 5 s. Watch `/metrics` on vm1. | sustained > 500 live riders, or event-loop lag p99 > 100 ms for 10 min, or `%st` (CPU steal) > 30 % on vm1 |
-| **1k -> 5k** | Realtime onto an A1: best an **A1 in tenancy 1** as NLB primary (`GATEWAY_ROLE=live`, `LIVE_RIDER_CAP=8000`), vm2 stays the mirror, vm1 becomes a second web node; otherwise vm5 via cross-tenancy peering (decision 2). `INTEL_CONSENT_TTL_MS=300000`. Keep the micros as standby: on failover they carry ≈ 2.5k, the rest get "Server busy" until the A1 is back. | ADB calls > 300/s, A1 CPU > 60 % |
-| **5k -> 20k** | A1 at its full Always Free size (4 OCPU / 24 GB) as live primary (≈ 15k riders by the local numbers, 1:1 per core); a **second A1** (the other tenancy's allowance) as mirror peer so a failover does not drop 15k riders onto a micro. Cut DB calls: `WS_GATE_TTL_MS=300000`, `RIDER_PERSIST_INTERVAL_MS` 60 s, consent 10 min. Beyond ≈ 20k: shard convoys across two live pairs (route by join code / groupId in Caddy); not built, and the honest point where a paid database tier is cheaper than more engineering. | — |
+| **1k -> 5k** | Realtime onto an A1: best an **A1 in tenancy 1** as NLB primary (`GATEWAY_ROLE=live`, `LIVE_RIDER_CAP=2500` while the twin is the vm2 micro: the pair is only as safe as its smaller node, HIGH_TRAFFIC_PLAN_v3.57 section 3; 6000 once the twin is an A1 too), vm2 stays the mirror, vm1 becomes a second web node; otherwise vm5 via cross-tenancy peering (decision 2). `INTEL_CONSENT_TTL_MS=300000`. Keep the micros as standby: on failover they carry ≈ 2.5k, the rest get "Server busy" until the A1 is back. | ADB calls > 300/s, A1 CPU > 60 % |
+| **5k -> 20k** | A1 at its full Always Free size (**2 OCPU / 12 GB**, corrected; ≈ 6-7k riders safe as a pair, HIGH_TRAFFIC_PLAN_v3.57 section 3) as live primary; a **second A1** (the other tenancy's allowance) as mirror peer so a failover does not drop 15k riders onto a micro. Cut DB calls: `WS_GATE_TTL_MS=300000`, `RIDER_PERSIST_INTERVAL_MS` 60 s, consent 10 min. Beyond ≈ 20k: shard convoys across two live pairs (route by join code / groupId in Caddy); not built, and the honest point where a paid database tier is cheaper than more engineering. | — |
 
 ## 6. Failure scenarios and recovery
 
@@ -211,7 +211,7 @@ Other bottlenecks:
 ## 7. vm5 (A1) plan: routing, map tiles, batch, AI
 
 * **Valhalla motorcycle routing** (`gateway/deploy/valhalla`, MIT, India tiles, ODbL attribution): fits 12 GB for the
-  build with 8 GB swap and `concurrency=2` (the compose file says 3 for a 4-OCPU A1; change it in `.env`), serves in
+  build with 8 GB swap and `concurrency=2` (the compose file's 3 assumed a larger A1; the Always Free A1 is 2 OCPU, keep 2 in `.env`), serves in
   2-4 GB. vm5 is in another tenancy, so the gateways reach it over the internet: `deploy/caddy/Caddyfile.vm5-worker`
   serves `routing.<domain>` over HTTPS **only to the gateways' public egress IPs**. Switch with `ROUTER_KIND=valhalla`,
   `GEO_ROUTE_URL=https://routing.<domain>` on vm2 then vm1; OSRM stays the fallback and the SOS helper matrix stays on
@@ -240,7 +240,7 @@ Verify the numbers in the console (Governance > Limits, Quotas and Usage) once a
 | Resource | Always Free allowance (per tenancy) | Our use |
 |---|---|---|
 | AMD E2.1.Micro | 2 instances, 1/8 OCPU + 1 GB each | tenancy 1: vm1, vm2; tenancy 2: vm3, vm4 (all used) |
-| Ampere A1 | 4 OCPU + 24 GB total (3,000 OCPU-h, 18,000 GB-h / month) | tenancy 2: vm5 2 OCPU / 12 GB pending; tenancy 1: **unused** |
+| Ampere A1 | **2 OCPU + 12 GB** total per account (corrected 13 Nov 2026 from Oracle's Always Free page; earlier drafts said 4 / 24) | tenancy 2: vm5 2 OCPU / 12 GB pending; tenancy 1: **unused** |
 | Block volume | 200 GB total (boot + block), 5 volume backups | tenancy 2: 96 + 48 + 50 = 194 GB: **no room for more**; tenancy 1: ≈ 93 GB |
 | Autonomous Database | 2 databases, 1 OCPU each, 20 GB storage each | tenancy 1: production; tenancy 2: DR ADB (proposed) |
 | Network Load Balancer | 1 | tenancy 1 (in use) |

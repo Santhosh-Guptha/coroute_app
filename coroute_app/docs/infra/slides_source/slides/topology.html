@@ -1,0 +1,30 @@
+<section id="topology" class="alt">
+<div class="head">
+<p class="eyebrow">TOPOLOGY</p>
+<h2>How the pieces connect</h2>
+</div>
+<div style="position:relative; width:1664px; height:640px;">
+<svg aria-label="Connection lines between phones, load balancer, servers, database and backups" width="1664" height="640" viewBox="0 0 1664 640" style="position:absolute; left:0; top:0; width:1664px; height:640px;">
+<path d="M220 300 H 340" stroke="#1F6F67" stroke-width="4" fill="none"/>
+<path d="M600 300 C 660 300, 660 150, 720 150" stroke="#1F6F67" stroke-width="4" fill="none"/>
+<path d="M600 300 C 660 300, 660 450, 720 450" stroke="#1F6F67" stroke-width="4" fill="none" stroke-dasharray="12 10"/>
+<path d="M850 230 V 370" stroke="#B4561C" stroke-width="4" fill="none" stroke-dasharray="6 8"/>
+<path d="M980 150 C 1060 150, 1060 300, 1120 300" stroke="#4A5866" stroke-width="3" fill="none"/>
+<path d="M980 450 C 1060 450, 1060 300, 1120 300" stroke="#4A5866" stroke-width="3" fill="none"/>
+<path d="M1380 300 C 1420 300, 1420 520, 1440 520" stroke="#4A5866" stroke-width="3" fill="none" stroke-dasharray="10 8"/>
+<rect x="1180" y="40" width="470" height="590" rx="24" fill="none" stroke="#C9D3CF" stroke-width="3" stroke-dasharray="14 10"/>
+</svg>
+<div class="card" style="position:absolute; left:0; top:230px; width:220px; box-sizing:border-box; padding:24px;"><h3 style="font-size:30px;">Phones &amp; browsers</h3></div>
+<div class="card" style="position:absolute; left:340px; top:220px; width:260px; box-sizing:border-box; padding:24px;"><p class="tag">LOAD BALANCER</p><p>Free network LB, health check every 5 s</p></div>
+<div class="card" style="position:absolute; left:720px; top:80px; width:260px; box-sizing:border-box; padding:24px;"><p class="tag">vm1 · LIVE</p><p>Caddy + gateway</p></div>
+<div class="card" style="position:absolute; left:720px; top:380px; width:260px; box-sizing:border-box; padding:24px;"><p class="tag">vm2 · WEB</p><p>Caddy + gateway</p></div>
+<p style="position:absolute; left:870px; top:278px; width:220px; font-size:24px; color:#B4561C; font-weight:600;">encrypted mirror</p>
+<div class="card" style="position:absolute; left:1120px; top:230px; width:260px; box-sizing:border-box; padding:24px;"><p class="tag">DATABASE</p><p>Autonomous DB (free)</p></div>
+<p class="small" style="position:absolute; left:1200px; top:56px; width:440px; font-size:24px;">Account 2 (separate)</p>
+<div class="card" style="position:absolute; left:1440px; top:110px; width:200px; box-sizing:border-box; padding:20px;"><p class="tag">vm3</p><p style="font-size:24px;">DR + backups</p></div>
+<div class="card" style="position:absolute; left:1440px; top:270px; width:200px; box-sizing:border-box; padding:20px;"><p class="tag">vm4</p><p style="font-size:24px;">Staging</p></div>
+<div class="card" style="position:absolute; left:1440px; top:450px; width:200px; box-sizing:border-box; padding:20px;"><p class="tag">BACKUPS</p><p style="font-size:24px;">Object Storage</p></div>
+</div>
+<p class="footer">03 · Solid line = live traffic · dashed = standby or backup path</p>
+<aside>The load balancer sends everything to vm1 while vm1 is healthy; vm2 is the backup. Caddy on vm1 sends website, admin and payment routes to vm2. vm1 and vm2 keep identical in-memory rides over an encrypted mirror link, so a failover loses nothing. vm3 and vm4 reach the database over its public endpoint with an allowlist.</aside>
+</section>

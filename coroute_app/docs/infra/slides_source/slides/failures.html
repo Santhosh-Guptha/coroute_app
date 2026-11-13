@@ -1,0 +1,17 @@
+<section id="failures">
+<div class="head">
+<p class="eyebrow">WHEN THINGS BREAK</p>
+<h2>What happens, and how fast we recover</h2>
+</div>
+<table class="t" style="font-size:25px;">
+<tr><th style="width:20%">Failure</th><th style="width:44%">What happens</th><th style="width:20%">Recovery</th><th style="width:16%">Downtime</th></tr>
+<tr><td>vm1 down</td><td>Riders move to vm2, which already has every ride</td><td>Automatic</td><td>30–60 s</td></tr>
+<tr style="background:#E7ECE8"><td>vm2 down</td><td>vm1 serves the website too; extras may say “busy”</td><td>Automatic</td><td>≤ 5 s</td></tr>
+<tr><td>Database down</td><td>Rides and SOS continue in memory; phones still text contacts</td><td>Restarts itself, or restore</td><td>minutes to 1 h</td></tr>
+<tr style="background:#E7ECE8"><td>Account 1 suspended</td><td>Watchdog emails within 90 s</td><td>Promote vm3</td><td>15–30 min</td></tr>
+<tr><td>Bad release</td><td>Stops at the first failed health check</td><td>Rolls back itself</td><td>seconds</td></tr>
+<tr style="background:#E7ECE8"><td>Region outage</td><td>Account 2 survives only if it’s in another region</td><td>Restore offsite backup</td><td>hours</td></tr>
+</table>
+<p class="footer">13 · SOS and alerts are saved before they are confirmed, so a failover loses none</p>
+<aside>A tenancy-1 suspension loses up to 24 hours of data unless the DR database in account 2 is set up (owner decision). The region-outage answer depends on account 2's home region.</aside>
+</section>

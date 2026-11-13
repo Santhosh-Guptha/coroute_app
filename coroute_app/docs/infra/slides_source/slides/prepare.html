@@ -1,0 +1,23 @@
+<section id="prepare">
+<div class="head">
+<p class="eyebrow">STEPS 1–2 · PREPARE AND BACK UP</p>
+<h2>Nothing changes before a tested backup exists</h2>
+</div>
+<div class="row">
+<div class="col">
+<h3>Prepare</h3>
+<ul style="font-size:30px; line-height:1.5;">
+<li>Lock or rotate the two admin accounts whose passwords leaked into git history</li>
+<li>Copy <span class="mono">inventory.example.env</span> to <span class="mono">inventory.local.env</span> and fill in real values (never committed)</li>
+<li>Create <span class="mono">DATA_ENC_KEY</span> and <span class="mono">BLIND_INDEX_KEY</span> in the Vault; same on both servers; keep an offline copy</li>
+</ul>
+</div>
+<div class="col">
+<h3>Back up</h3>
+<p class="cmd">ssh vm2 &amp;&amp; cd /opt/coroute/gateway<br>node scripts/backup_export.js --set full<br>node scripts/backup_restore.js \<br>&#160;&#160;--latest full --dry-run</p>
+<p class="small">Without the backup key no backup can be read. Store it in your password manager too.</p>
+</div>
+</div>
+<p class="footer">09 · Prepare</p>
+<aside>Real IP addresses, Oracle account IDs and key paths live only in inventory.local.env and on the servers, never in git. The export writes an AES-256-GCM encrypted file; the restore dry run decrypts it and checks it against its manifest without writing anything.</aside>
+</section>

@@ -1,0 +1,14 @@
+<section id="flow" class="alt">
+<div class="head">
+<p class="eyebrow">HOW A REQUEST MOVES</p>
+<h2>Four rules keep rides safe while servers change</h2>
+</div>
+<div class="cards" style="flex-wrap:wrap;">
+<div class="card rise" style="--i:0; flex:1 1 700px;"><p class="tag">1 · LOAD BALANCER</p><h3>vm1 first, vm2 as backup</h3><p>It checks vm1’s health every 5 seconds. If vm1 stops answering, all traffic goes to vm2.</p></div>
+<div class="card rise" style="--i:1; flex:1 1 700px;"><p class="tag">2 · ROUTE SPLIT</p><h3>Live on vm1, web on vm2</h3><p>Caddy on vm1 keeps rides and SOS (96 routes) and sends the other 475 routes to vm2.</p></div>
+<div class="card rise" style="--i:2; flex:1 1 700px;"><p class="tag">3 · MIRROR</p><h3>Every ride exists twice</h3><p>SOS and alerts are saved to the database first, then copied, then confirmed to the phone.</p></div>
+<div class="card rise" style="--i:3; flex:1 1 700px;"><p class="tag">4 · JOB LEASE</p><h3>Each background job runs once</h3><p>Ride jobs prefer vm1, the rest prefer vm2. If one dies, the other takes over after 2 minutes.</p></div>
+</div>
+<p class="footer">05 · Traffic flow</p>
+<aside>On failover, phones reconnect in 0.3 to 1 second and re-join; vm2 already holds every ride. When vm1 returns it syncs, and riders are handed back 25 per second after 15 seconds.</aside>
+</section>

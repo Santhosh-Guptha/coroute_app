@@ -1,0 +1,17 @@
+<section id="roles">
+<div class="head">
+<p class="eyebrow">ROLES AND LIMITS</p>
+<h2>What each server does, and what it can hold</h2>
+</div>
+<table class="t">
+<tr><th style="width:12%">Server</th><th style="width:32%">Job</th><th style="width:30%">Memory budget</th><th style="width:26%">Setting</th></tr>
+<tr><td>vm1</td><td>Live rides, SOS, groups (load balancer primary)</td><td>1 GB + 2 GB swap · up to ~2,500 riders</td><td class="mono">GATEWAY_ROLE=live</td></tr>
+<tr style="background:#E7ECE8"><td>vm2</td><td>Website, admin, payments, ride mirror</td><td>1 GB + 2 GB swap · takes vm1’s riders on failover</td><td class="mono">GATEWAY_ROLE=web</td></tr>
+<tr><td>vm3</td><td>DR standby, watchdog, backups, restore test</td><td>1 GB + 4 GB swap</td><td class="mono">GATEWAY_ROLE=standby</td></tr>
+<tr style="background:#E7ECE8"><td>vm4</td><td>Staging, load tests, watches vm3</td><td>1 GB + 3 GB swap</td><td class="mono">own staging DB</td></tr>
+<tr><td>vm5</td><td>Routing, tiles, analytics, batch (pending)</td><td>12 GB, 2 Ampere cores</td><td class="mono">worker</td></tr>
+</table>
+<p class="small">On the 1 GB servers, Caddy sets the ceiling (about 100 KB per open ride connection), not Node.</p>
+<p class="footer">04 · Roles</p>
+<aside>Set LIVE_RIDER_CAP=2500 on the micros so new riders see "server busy" instead of the server swapping. Phones still send emergency SMS on their own.</aside>
+</section>

@@ -168,6 +168,33 @@ offline map cache; the intelligence adds no app tile traffic.
   (the existing 3.16 route weather uses it: owner decision O-W1). Add a licensed source later behind a new env.
 * Map matching to road segments, Valhalla at runtime, raw track storage: not on the micro VMs (see capability note).
 
+## 9b. Round 7: curve prediction, road speed limits, one warning scheduler
+
+Full design, estimate table, sources and limits of accuracy: [../features_355/curve_and_speed_limit.md](../features_355/curve_and_speed_limit.md).
+Notes for the lead: [../quality/ROUND7_SAFETY_NOTES.md](../quality/ROUND7_SAFETY_NOTES.md).
+
+| # | Feature | State | Where |
+|---|---|---|---|
+| 11 | Curve prediction on the phone (route line; road cells in free riding): class, side, series, advisory speed, time-based warning, no nagging | **Done** (device check pending) | `lib/domain/road/curve_predictor.dart`, `road_matcher.dart`, `road_ahead_engine.dart` |
+| 12 | Road cells (OSM ways per geohash-6 cell, 30-day cache, gzip, polite Overpass use) | **Done** | gateway `src/road_cells.js`, `GET /api/geo/roads`; app `road_data_service.dart` (30 MB disk LRU) |
+| 13 | Road speed limit: map tag, rider correction, implied type, estimate ("~ est."), overspeed rule | **Done** (device check pending) | `speed_limit_resolver.dart`, `india_speed_limits.dart`, cockpit `road_ahead_chips.dart` |
+| 14 | "Wrong limit" votes (consent, k >= 3, never upward) + admin list API | **Done** (admin page: request to the website agent) | `POST /api/geo/limit-corrections`, `/api/admin/geo/limit-corrections` |
+| 15 | Learned curves: hard-brake / skid cells raise a bend's class | **Done** | `IntelCareService.onHardBrakeSpots` -> `CurveAnalyzer.analyze(hardBrakeSpots:)` |
+| 16 | One scheduler for advisory voice warnings | **Done** | `lib/domain/safety/warning_scheduler.dart`, `RoadCareService` |
+
+Changes to earlier rows: the 3.55 sharp-bend warning (`BendAdvisor`) and the road part of the 3.55 speed-limit
+warning are replaced by rows 11 and 13 while riding (the old classes remain for the lock of their tests and as the
+fallback when the new engine is not attached). The 3.55 school / hospital caps stay. Section 9 "Map matching to road
+segments ... not on the micro VMs" still holds for the **gateway**; matching now happens on the **phone**.
+
+Warning order (voice): SOS / crash > others' SOS > hazard hotspot > sharp curve > speed limit > falling behind >
+rough road > fatigue / night / altitude > twisty section.
+
+New owner switches: `ROAD_CELLS_OVERPASS_URL`, `ROAD_CELLS_TTL_DAYS` (30), `ROAD_CELLS_MEM_MB` (12),
+`ROAD_CELLS_UPSTREAM_PER_MIN` (6), `ROAD_CELLS_UPSTREAM_PER_DAY` (2000), `ROAD_CELLS_CONCURRENCY` (1),
+`ROAD_LIMIT_K_MIN` (3). `GET /api/health` -> `roads`. New collection `road_limit_votes` (keyed rider hash, deleted
+with the account). No lease job: cells are built on demand.
+
 ## 10. Tests
 
 Gateway: `test/intel_privacy_356`, `intel_hazards_356`, `intel_crash_brain_356`, `intel_road_356`,

@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CoRoute Infrastructure v3.56</title>
+<style>
+:root{--bg:#F4F6F2;--bg2:#E7ECE8;--card:#FFFFFF;--ink:#13202B;--soft:#4A5866;--line:#C9D3CF;--teal:#1F6F67;--teal2:#2A8C82;--warn:#B4561C;--code:#13202B;--codetx:#BFEDE6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1A23;--bg2:#162531;--card:#1C2D3A;--ink:#EEF2EF;--soft:#B3C4C1;--line:#2E4454;--teal:#7FD1C4;--teal2:#7FD1C4;--warn:#F2A066;--code:#0A131A;--codetx:#9FE3D8}}
+:root[data-theme="dark"]{--bg:#0F1A23;--bg2:#162531;--card:#1C2D3A;--ink:#EEF2EF;--soft:#B3C4C1;--line:#2E4454;--teal:#7FD1C4;--teal2:#7FD1C4;--warn:#F2A066;--code:#0A131A;--codetx:#9FE3D8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+header{padding:56px 0 28px;border-bottom:1px solid var(--line)}
+.eyebrow{font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.12em;color:var(--teal);text-transform:uppercase;margin:0 0 8px}
+h1{font-size:clamp(32px,6vw,52px);line-height:1.08;margin:0 0 14px;letter-spacing:-.02em}
+h2{font-size:clamp(24px,4vw,32px);line-height:1.2;margin:0 0 14px;letter-spacing:-.01em}
+h3{font-size:19px;margin:0 0 6px}
+p{margin:0 0 12px}
+.lead{font-size:19px;color:var(--soft);max-width:760px}
+.meta{font-size:14px;color:var(--soft)}
+nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0}
+nav.toc a{font-size:14px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--ink);text-decoration:none;background:var(--card)}
+nav.toc a:hover{border-color:var(--teal)}
+section{padding:44px 0;border-bottom:1px solid var(--line)}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card .tag{font:600 12px/1.4 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em;color:var(--teal);margin:0 0 6px}
+.card.warn{border-color:var(--warn)}
+.card.warn .tag{color:var(--warn)}
+.card p{color:var(--soft);font-size:15px;margin:0}
+.nums{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.num{border-top:3px solid var(--teal);padding-top:10px}
+.num b{display:block;font-size:34px;line-height:1.1}
+.num span{color:var(--soft);font-size:14px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:560px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--bg2);font-weight:600}
+tr:last-child td{border-bottom:none}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+code{font-size:.9em;background:var(--bg2);padding:1px 6px;border-radius:6px}
+pre{background:var(--code);color:var(--codetx);padding:14px 16px;border-radius:12px;overflow-x:auto;font-size:14px;line-height:1.55;margin:10px 0 14px}
+pre code{background:none;padding:0;color:inherit}
+.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+.steps>li{counter-increment:s;position:relative;padding:18px 0 18px 64px;border-top:1px solid var(--line)}
+.steps>li:last-child{border-bottom:1px solid var(--line)}
+.steps>li::before{content:counter(s,decimal-leading-zero);position:absolute;left:0;top:16px;font:600 22px ui-monospace,Menlo,Consolas,monospace;color:var(--teal)}
+.steps h3{font-size:20px}
+.check{font-size:14px;color:var(--soft);border-left:3px solid var(--teal);padding:4px 0 4px 10px;margin:8px 0 0}
+.stop{font-size:14px;border-left:3px solid var(--warn);padding:4px 0 4px 10px;margin:8px 0 0}
+.diagram{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+.diagram svg{width:100%;height:auto;display:block}
+.diagram text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.legend{font-size:13px;color:var(--soft);margin:8px 4px 0}
+ul{padding-left:20px;margin:0 0 12px}
+li{margin:4px 0}
+footer{padding:28px 0 56px;font-size:14px;color:var(--soft)}
+.toggle{float:right;font-size:13px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;cursor:pointer}
+@media print{.toggle,nav.toc{display:none}section{break-inside:avoid-page}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<button class="toggle" id="themeBtn" type="button">Light / dark</button>
+<p class="eyebrow">CoRoute · v3.56 · 13 November 2026</p>
+<h1>Infrastructure &amp; setup guide</h1>
+<p class="lead">How CoRoute runs on five free Oracle Cloud servers, how much it carries, how to set it up step by step, and how it survives failures. Monthly cost: €0.</p>
+<p class="meta">Hosts are named vm1 to vm5. No real IP addresses, account IDs or keys appear here: those live only in the untracked <code>gateway/deploy/inventory.local.env</code> and on the servers. Sources: <code>docs/infra/INFRASTRUCTURE_PLAN_v3.56.md</code>, <code>gateway/deploy/RUNBOOK.md</code>.</p>
+<nav class="toc" aria-label="Contents">
+<a href="#servers">Servers</a><a href="#topology">Topology</a><a href="#flow">Traffic</a><a href="#capacity">Capacity</a><a href="#setup">Setup flow</a><a href="#release">Releases</a><a href="#dr">DR &amp; backups</a><a href="#failures">Failures</a><a href="#scaling">Growth</a><a href="#vm5">vm5</a><a href="#security">Security</a><a href="#decisions">Decisions</a>
+</nav>
+</header>
+
+<section id="servers">
+<p class="eyebrow">What we run</p>
+<h2>Five servers, one job each</h2>
+<div class="grid">
+<div class="card"><p class="tag">vm1 · LIVE</p><h3>Live rides</h3><p>Rides, groups, SOS, real-time GPS. Load balancer primary. <code>GATEWAY_ROLE=live</code></p></div>
+<div class="card"><p class="tag">vm2 · WEB</p><h3>Website &amp; standby</h3><p>Website, admin, payment notifications, and a live copy of every ride. <code>GATEWAY_ROLE=web</code></p></div>
+<div class="card"><p class="tag">vm3 · DR</p><h3>Disaster recovery</h3><p>Standby gateway, watchdog, offsite encrypted backups, weekly restore test. <code>GATEWAY_ROLE=standby</code></p></div>
+<div class="card"><p class="tag">vm4 · STAGING</p><h3>Test first</h3><p>Every release lands here first; load tests; watches vm3.</p></div>
+<div class="card warn"><p class="tag">vm5 · PENDING</p><h3>Big worker</h3><p>Ampere 2 cores / 12 GB: routing, map tiles, analytics, batch jobs once Oracle grants capacity.</p></div>
+</div>
+<div class="tablewrap" style="margin-top:18px">
+<table>
+<tr><th>Server</th><th>Account</th><th>Shape</th><th>Memory</th><th>Disk</th></tr>
+<tr><td>vm1</td><td>1</td><td>E2.1.Micro (1/8 core sustained)</td><td>1 GB + 2 GB swap</td><td>45 GB</td></tr>
+<tr><td>vm2</td><td>1</td><td>E2.1.Micro</td><td>1 GB + 2 GB swap</td><td>48 GB</td></tr>
+<tr><td>vm3</td><td>2</td><td>E2.1.Micro</td><td>1 GB + 4 GB swap</td><td>96 GB</td></tr>
+<tr><td>vm4</td><td>2</td><td>E2.1.Micro</td><td>1 GB + 3 GB swap</td><td>48 GB</td></tr>
+<tr><td>vm5</td><td>2</td><td>A1.Flex Ampere (pending)</td><td>12 GB</td><td>50 GB</td></tr>
+</table>
+</div>
+</section>
+
+<section id="topology">
+<p class="eyebrow">Topology</p>
+<h2>How the pieces connect</h2>
+<div class="diagram">
+<svg viewBox="0 0 1000 420" role="img" aria-label="Phones connect to the load balancer, which sends traffic to vm1 and, as backup, vm2. vm1 and vm2 mirror each other and use the database. In account 2, vm3 handles disaster recovery and backups and vm4 is staging.">
+<g fill="none" stroke-width="3">
+<path d="M130 210 H200" stroke="var(--teal2)"/>
+<path d="M370 210 C410 210 410 110 450 110" stroke="var(--teal2)"/>
+<path d="M370 210 C410 210 410 310 450 310" stroke="var(--teal2)" stroke-dasharray="9 7"/>
+<path d="M530 150 V270" stroke="var(--warn)" stroke-dasharray="4 6"/>
+<path d="M610 110 C650 110 650 210 680 210" stroke="var(--soft)"/>
+<path d="M610 310 C650 310 650 210 680 210" stroke="var(--soft)"/>
+<path d="M830 210 C850 210 850 340 860 340" stroke="var(--soft)" stroke-dasharray="7 6"/>
+</g>
+<rect x="760" y="20" width="230" height="390" rx="16" fill="none" stroke="var(--line)" stroke-width="2" stroke-dasharray="10 8"/>
+<text x="775" y="44" font-size="13" fill="var(--soft)">Account 2 (separate)</text>
+<g font-size="15" fill="var(--ink)">
+<rect x="10" y="180" width="120" height="60" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="70" y="206" text-anchor="middle">Phones &amp;</text><text x="70" y="226" text-anchor="middle">browsers</text>
+<rect x="200" y="175" width="170" height="70" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="285" y="204" text-anchor="middle" font-weight="600">Load balancer</text><text x="285" y="226" text-anchor="middle" font-size="12" fill="var(--soft)">health every 5 s</text>
+<rect x="450" y="75" width="160" height="70" rx="12" fill="var(--card)" stroke="var(--teal2)"/><text x="530" y="105" text-anchor="middle" font-weight="600">vm1 · live</text><text x="530" y="127" text-anchor="middle" font-size="12" fill="var(--soft)">Caddy + gateway</text>
+<rect x="450" y="275" width="160" height="70" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="530" y="305" text-anchor="middle" font-weight="600">vm2 · web</text><text x="530" y="327" text-anchor="middle" font-size="12" fill="var(--soft)">Caddy + gateway</text>
+<text x="542" y="215" font-size="12" fill="var(--warn)">mirror</text>
+<rect x="680" y="180" width="150" height="60" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="755" y="206" text-anchor="middle" font-weight="600">Database</text><text x="755" y="226" text-anchor="middle" font-size="12" fill="var(--soft)">Autonomous DB</text>
+<rect x="860" y="70" width="120" height="56" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="920" y="94" text-anchor="middle" font-weight="600">vm3</text><text x="920" y="113" text-anchor="middle" font-size="12" fill="var(--soft)">DR + backups</text>
+<rect x="860" y="160" width="120" height="56" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="920" y="184" text-anchor="middle" font-weight="600">vm4</text><text x="920" y="203" text-anchor="middle" font-size="12" fill="var(--soft)">staging</text>
+<rect x="860" y="312" width="120" height="56" rx="12" fill="var(--card)" stroke="var(--line)"/><text x="920" y="336" text-anchor="middle" font-weight="600">Backups</text><text x="920" y="355" text-anchor="middle" font-size="12" fill="var(--soft)">Object Storage</text>
+</g>
+</svg>
+<p class="legend">Solid line: live traffic. Dashed: standby or backup path. vm3 and vm4 reach the database over its public endpoint with an allowlist.</p>
+</div>
+</section>
+
+<section id="flow">
+<p class="eyebrow">How a request moves</p>
+<h2>Four rules keep rides safe while servers change</h2>
+<div class="grid">
+<div class="card"><p class="tag">1 · LOAD BALANCER</p><h3>vm1 first, vm2 as backup</h3><p>The free network load balancer checks <code>/api/health/live</code> on vm1 every 5 s. If vm1 fails, everything goes to vm2. Keep it on the network LB: the 10 Mbps flexible LB would cap traffic at about 1,000 riders.</p></div>
+<div class="card"><p class="tag">2 · ROUTE SPLIT</p><h3>Live on vm1, web on vm2</h3><p>Caddy on vm1 keeps the 96 live routes (rides, SOS, live links) and sends the other 475 to vm2 over the private network. <code>release.sh</code> stops on an unclassified route.</p></div>
+<div class="card"><p class="tag">3 · MIRROR</p><h3>Every ride exists twice</h3><p>vm1 and vm2 keep identical rides over an encrypted link. SOS, alerts and chat are saved to the database first, copied, then confirmed to the phone.</p></div>
+<div class="card"><p class="tag">4 · JOB LEASE</p><h3>Each job runs once</h3><p>Background jobs run on exactly one server. Ride jobs prefer vm1, the rest vm2; the other takes over after a 120 s grace.</p></div>
+</div>
+</section>
+
+<section id="capacity">
+<p class="eyebrow">Capacity</p>
+<h2>What one 1 GB server carries</h2>
+<div class="nums">
+<div class="num"><b>500–600</b><span>live riders, comfortable all day</span></div>
+<div class="num"><b>2,500</b><span>riders in short peaks</span></div>
+<div class="num"><b>400/s</b><span>normal page and API requests</span></div>
+<div class="num"><b>1,500/s</b><span>website files from disk</span></div>
+</div>
+<p style="margin-top:18px">Measured locally and divided by 6–8 for the micro’s 1/8 core. When full it slows gracefully: older positions are dropped first, extras such as leaderboards answer “busy”, and SOS always gets through. Set <code>LIVE_RIDER_CAP=2500</code> so new riders see “server busy” before the server starts swapping.</p>
+<h3 style="margin-top:22px">Speed work this round (3,000 riders, groups of 8)</h3>
+<div class="tablewrap">
+<table>
+<tr><th>Measure</th><th>Before</th><th>After</th></tr>
+<tr><td>Gateway CPU</td><td>37 %</td><td>24 %</td></tr>
+<tr><td>Slowest 1 % of position updates</td><td>47 ms</td><td>9 ms</td></tr>
+<tr><td>Database calls per second</td><td>305</td><td>123</td></tr>
+<tr><td>Website files per second</td><td>3,500</td><td>12,200</td></tr>
+<tr><td>SOS delivered</td><td>100 %</td><td>100 %</td></tr>
+</table>
+</div>
+</section>
+
+<section id="setup">
+<p class="eyebrow">Setup flow</p>
+<h2>Seven steps, in this order</h2>
+<p>Run from your machine with SSH aliases <code>vm1</code>…<code>vm5</code>. After every step, check health. <b>If a check fails, undo the last step and stop.</b> Never restart vm1 and vm2 together; vm2 always goes first.</p>
+<ol class="steps">
+<li>
+<h3>Prepare</h3>
+<ul>
+<li>Lock or rotate the two admin accounts whose passwords leaked into git history.</li>
+<li>Fill the private inventory file (never committed):</li>
+</ul>
+<pre><code>cp gateway/deploy/inventory.example.env gateway/deploy/inventory.local.env
+# edit: VM1_PRIVATE_IP, VM2_PRIVATE_IP, public IPs, NLB IP, OCI IDs, hosts</code></pre>
+<ul><li>Create <code>DATA_ENC_KEY</code> and <code>BLIND_INDEX_KEY</code> in the Oracle Vault (<code>openssl rand -base64 32</code> each), identical on vm1 and vm2, with an offline copy.</li></ul>
+<p class="check">Check: scripts that read the inventory stop with a clear message if a value is missing.</p>
+</li>
+<li>
+<h3>Back up first</h3>
+<pre><code>ssh vm2
+cd /opt/coroute/gateway
+node scripts/backup_export.js --set full
+node scripts/backup_restore.js --latest full --dry-run</code></pre>
+<p class="check">Check: the dry run decrypts the backup and matches its manifest. Keep <code>BACKUP_ENCRYPTION_KEY</code> in your password manager too: without it no backup can be read.</p>
+</li>
+<li>
+<h3>Tune each server</h3>
+<pre><code>sudo ./deploy/host/apply.sh --role web --dry-run          # vm2: read the diff
+sudo ./deploy/host/apply.sh --role web
+sudo ./deploy/host/apply.sh --role realtime --peer-ip &lt;vm2-private&gt;   # vm1
+# other roles: dr (vm3), staging (vm4), worker (vm5)</code></pre>
+<p>Network and file limits, swap only when needed, capped logs, automatic security updates (never reboots), SSH keys only with fail2ban, firewall per role, gateway restart policy with a memory limit. It never restarts the gateway itself. Set the load balancer health check to HTTPS <code>/api/health/live</code>, every 5 s, timeout 3 s, 2 retries.</p>
+<p class="stop">It refuses to disable SSH passwords if your user has no SSH key: add your key first.</p>
+</li>
+<li>
+<h3>Staging on vm4</h3>
+<pre><code>gateway/deploy/release.sh --only vm4
+gateway/deploy/staging/smoke.sh https://staging.coroute.devmonks.space
+gateway/deploy/staging/quick_load.sh</code></pre>
+<p class="check">Check: smoke prints OK; the quick load test passes. Staging uses its own database (the seeding tool refuses production).</p>
+</li>
+<li>
+<h3>Release to production</h3>
+<pre><code>gateway/deploy/release.sh            # vm4 → (confirm) vm2 → (confirm) vm1
+gateway/deploy/release.sh --rollback vm1</code></pre>
+<p>Each server unpacks into its own release folder, switches a symlink, restarts and must pass its health check, or switches back on its own and stops the release. Then install the matching Caddyfile, vm2 first:</p>
+<pre><code>sudo cp /opt/coroute/gateway/deploy/caddy/Caddyfile.vm2 /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo systemctl reload caddy</code></pre>
+<p class="check">Check: <code>curl -s http://127.0.0.1:3000/api/health</code> says HEALTHY on each server; the public smoke test passes.</p>
+</li>
+<li>
+<h3>Disaster recovery on vm3</h3>
+<pre><code>sudo SECRETS_MODE=vault DR_TLS=dns bash deploy/dr/install_standby.sh
+gateway/deploy/release.sh --only vm3
+sudo systemctl enable --now coroute-watchdog
+sudo systemctl enable --now coroute-backup.timer coroute-restore-drill.timer</code></pre>
+<p class="check">Check: <code>/api/health/live</code> on vm3 answers 503 “standby” (correct); the first watchdog summary email arrives; the restore test email says counts match.</p>
+</li>
+<li>
+<h3>vm5 when it arrives</h3>
+<p>Apply the <code>worker</code> role, then each job only after the owner says yes: Valhalla routing (switch with <code>ROUTER_KIND=valhalla</code> after a week of side-by-side checks), map tiles, a private road-data server, Umami analytics, batch jobs.</p>
+</li>
+</ol>
+</section>
+
+<section id="release">
+<p class="eyebrow">Release rules</p>
+<h2>Every release, every time</h2>
+<ul>
+<li><b>Order:</b> build → vm4 staging → vm2 → vm1. vm1 is never touched after a failure earlier in the chain.</li>
+<li><b>Gateway before app:</b> deploy the gateway first, then publish the APK. One gateway serves every app version; each new feature checks the app version.</li>
+<li><b>Version settings:</b> set <code>LATEST_APP_BUILD</code> to the newest build so older apps are offered the update. Raise <code>MIN_APP_BUILD</code> only when an old build must stop working.</li>
+<li><b>Drain:</b> with <code>SHUTDOWN_DRAIN_MS=15000</code> the load balancer moves riders to vm2 before vm1 restarts.</li>
+</ul>
+</section>
+
+<section id="dr">
+<p class="eyebrow">Disaster recovery &amp; backups</p>
+<h2>vm3 watches, backs up and stands ready</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Layer</th><th>Where</th><th>What</th><th>Kept</th></tr>
+<tr><td>1</td><td>Gateway job on vm1/vm2</td><td>Encrypted hourly critical + nightly full to account 1 storage</td><td>30 days</td></tr>
+<tr><td>2</td><td>vm3, nightly 22:40 UTC</td><td>Encrypted full export to vm3’s disk</td><td>7 daily, 4 weekly, 3 monthly</td></tr>
+<tr><td>3</td><td>Same run</td><td>Copy to account 2 storage (write-only link)</td><td>100 days</td></tr>
+<tr><td>Check</td><td>vm3, Sundays</td><td>Decrypt, restore in memory, compare counts, email result</td><td>—</td></tr>
+</table>
+</div>
+<p style="margin-top:14px"><b>Watchdog:</b> checks the site, vm1 and vm2 every 30 s; one alert email after 3 failures, one recovery email, a daily summary. vm4 watches vm3.</p>
+<p><b>Promote vm3 (manual by default)</b>, only when vm1 and vm2 are both down:</p>
+<pre><code>sudo bash deploy/dr/promote_vm3.sh   # refuses while the site answers; asks before each step
+sudo bash deploy/dr/demote_vm3.sh    # after vm1/vm2 are healthy again</code></pre>
+<p class="meta">Certificates are obtained on vm3 in advance, so promotion only switches DNS. Never run vm1 and a promoted vm3 together longer than the switch: they don’t mirror each other.</p>
+</section>
+
+<section id="failures">
+<p class="eyebrow">When things break</p>
+<h2>What happens and how fast we recover</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Failure</th><th>What happens</th><th>Recovery</th><th>Downtime</th></tr>
+<tr><td>vm1 down</td><td>Riders move to vm2, which already holds every ride; phones reconnect in about a second</td><td>Automatic</td><td>30–60 s</td></tr>
+<tr><td>vm2 down</td><td>vm1 serves the website too; extras may answer “busy”</td><td>Automatic</td><td>≤ 5 s</td></tr>
+<tr><td>Database down</td><td>Rides and SOS continue in memory; phones still text contacts; new sign-ins fail</td><td>Restarts itself, or restore a backup</td><td>minutes to ~1 h</td></tr>
+<tr><td>Account 1 suspended</td><td>Watchdog emails within 90 s</td><td>Promote vm3</td><td>15–30 min, up to 24 h of data</td></tr>
+<tr><td>Region outage</td><td>Account 2 survives only if it’s in another region</td><td>Restore an offsite backup</td><td>hours</td></tr>
+<tr><td>Bad release</td><td>Stops at the first failed health check</td><td>Rolls back itself</td><td>seconds</td></tr>
+</table>
+</div>
+</section>
+
+<section id="scaling">
+<p class="eyebrow">Growth path</p>
+<h2>What to do as riders grow</h2>
+<div class="grid">
+<div class="card"><p class="tag">NOW → 1,000</p><h3>Today’s setup</h3><p>This release and the 2,500-rider cap. Move on at 500+ riders for long periods, or lag over 100 ms for 10 minutes.</p></div>
+<div class="card"><p class="tag">1,000 → 5,000</p><h3>Live rides on Ampere</h3><p>An Ampere server in account 1 (free allowance unused) becomes the live node; vm2 stays the mirror.</p></div>
+<div class="card"><p class="tag">5,000 → 20,000</p><h3>Full Ampere pair</h3><p>2 cores / 12 GB live node (the Always Free size per account) plus a second Ampere as mirror: about 6,000-7,000 riders. Beyond that: split groups across pairs or a paid tier.</p></div>
+</div>
+</section>
+
+<section id="vm5">
+<p class="eyebrow">vm5 plan</p>
+<h2>Heavy jobs for the Ampere server</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Job</th><th>Why</th><th>Memory</th></tr>
+<tr><td>Valhalla routing</td><td>Motorcycle routes on our own server instead of the public demo</td><td>8–12 GB to build once, 2–4 GB to run</td></tr>
+<tr><td>Map tiles</td><td>OpenStreetMap’s free tile servers don’t allow heavy app use</td><td>2–4 GB disk</td></tr>
+<tr><td>Road data</td><td>Curve and speed-limit data without the public Overpass server</td><td>regional extract</td></tr>
+<tr><td>Umami analytics</td><td>Cookie-less website statistics</td><td>≈ 400 MB</td></tr>
+<tr><td>Batch jobs</td><td>Nightly road, safety and business numbers</td><td>≤ 1 GB</td></tr>
+</table>
+</div>
+</section>
+
+<section id="security">
+<p class="eyebrow">Security</p>
+<h2>Locked down by default</h2>
+<ul>
+<li><b>SSH:</b> keys only, no root, no passwords, fail2ban.</li>
+<li><b>Firewall:</b> 80/443 public; internal ports (3000, 3101) only from the peer’s private address; Oracle security lists as the outer layer.</li>
+<li><b>Secrets:</b> Oracle Vault → memory-only folder <code>/run/coroute</code>, never on disk, in git or in logs.</li>
+<li><b>Backups:</b> AES-256-GCM encrypted before they leave the gateway.</li>
+<li><b>Database:</b> allowlisted servers only, low-privilege schema user.</li>
+<li><b>Metrics:</b> only reachable from the server itself (404 through Caddy).</li>
+</ul>
+<div class="card warn" style="margin-top:12px"><p class="tag">ACTION NEEDED</p><h3>Two leaked passwords</h3><p>Removed from the files but still in git history. Lock or rotate both accounts before the hardening script turns off SSH passwords. An optional history rewrite is in <code>docs/security/GIT_HISTORY_CLEANUP.md</code>.</p></div>
+</section>
+
+<section id="decisions">
+<p class="eyebrow">Open decisions</p>
+<h2>What the owner needs to decide</h2>
+<ol>
+<li>Lock or rotate the two leaked admin accounts.</li>
+<li>Get an Ampere server in account 1 for live rides.</li>
+<li>Confirm account 2’s home region (decides the region-outage story).</li>
+<li>Create a free backup database in account 2 for DR.</li>
+<li>Which DNS provider hosts devmonks.space (so the DR switch can be scripted).</li>
+<li>Map tiles: self-host on vm5 or stay as-is for now.</li>
+<li>Valhalla routing and Umami on vm5: yes or no.</li>
+<li>A weekly backup copy outside Oracle.</li>
+<li>Automatic DR switch, or keep it manual.</li>
+<li>The 2,500-rider cap per micro server.</li>
+</ol>
+</section>
+
+<footer>CoRoute infrastructure v3.56 · Oracle Cloud Always Free · every tool used is free and permissively licensed (Caddy, Node.js, Valhalla, Umami and others).</footer>
+</div>
+<script>
+(function(){var b=document.getElementById('themeBtn');if(!b)return;b.addEventListener('click',function(){var r=document.documentElement;var cur=r.getAttribute('data-theme');var dark=cur?cur==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;r.setAttribute('data-theme',dark?'light':'dark');});})();
+</script>
+</body>
+</html>

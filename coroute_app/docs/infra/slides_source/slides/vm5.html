@@ -1,0 +1,17 @@
+<section id="vm5" class="alt">
+<div class="head">
+<p class="eyebrow">STEP 7 · vm5 (AMPERE, 2 CORES, 12 GB)</p>
+<h2>The heavy jobs move here when Oracle grants it</h2>
+</div>
+<table class="t" style="font-size:28px;">
+<tr><th style="width:28%">Job</th><th style="width:44%">Why</th><th style="width:28%">Memory</th></tr>
+<tr><td>Valhalla routing</td><td>Motorcycle routes on our own server, off the public demo</td><td>8–12 GB to build once, 2–4 GB to run</td></tr>
+<tr style="background:#F4F6F2"><td>Map tiles</td><td>OpenStreetMap’s free tiles don’t allow heavy app use</td><td>2–4 GB disk</td></tr>
+<tr><td>Road data (Overpass)</td><td>Curve and speed-limit data without the public server</td><td>regional extract</td></tr>
+<tr style="background:#F4F6F2"><td>Umami analytics</td><td>Cookie-less website stats</td><td>≈ 400 MB</td></tr>
+<tr><td>Batch jobs</td><td>Nightly road, safety and business numbers</td><td>≤ 1 GB</td></tr>
+</table>
+<p class="small">All free and permissively licensed (MIT, BSD, Apache). Each is an owner decision before it’s switched on.</p>
+<p class="footer">15 · Routing switch: ROUTER_KIND=valhalla after a week of side-by-side checks</p>
+<aside>The SOS helper search stays on OSRM even after a Valhalla switch. Map tiles via vector PMTiles need an app change; server-rendered raster tiles only change the tile URL.</aside>
+</section>

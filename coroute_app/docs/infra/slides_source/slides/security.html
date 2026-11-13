@@ -1,0 +1,21 @@
+<section id="security">
+<div class="head">
+<p class="eyebrow">SECURITY</p>
+<h2>Locked down by default</h2>
+</div>
+<div class="row">
+<div class="col">
+<div class="steps">
+<div class="step"><p class="what" style="width:300px;">SSH</p><p class="how">Keys only, no root, no passwords, fail2ban</p></div>
+<div class="step"><p class="what" style="width:300px;">Firewall</p><p class="how">80/443 public; internal ports only from the peer</p></div>
+<div class="step"><p class="what" style="width:300px;">Secrets</p><p class="how">Oracle Vault → memory-only folder, never on disk or in git</p></div>
+<div class="step"><p class="what" style="width:300px;">Backups</p><p class="how">AES-256-GCM encrypted before they leave the gateway</p></div>
+<div class="step"><p class="what" style="width:300px;">Database</p><p class="how">Allowlisted servers only; low-privilege schema user</p></div>
+<div class="step"><p class="what" style="width:300px;">Metrics</p><p class="how">Visible only on the server itself</p></div>
+</div>
+</div>
+<div class="card warn" style="width:520px; flex:none; align-self:flex-start;"><p class="tag">ACTION NEEDED</p><h3>Two leaked passwords</h3><p>Removed from the files, but still in git history. Lock or rotate both accounts before the hardening script turns off SSH passwords.</p></div>
+</div>
+<p class="footer">16 · Real addresses and IDs live only in the untracked inventory file</p>
+<aside>Field encryption keys (DATA_ENC_KEY, BLIND_INDEX_KEY) must be identical on both production servers and backed up offline: losing them loses encrypted phone numbers and medical details. An optional git history rewrite is documented in docs/security/GIT_HISTORY_CLEANUP.md.</aside>
+</section>

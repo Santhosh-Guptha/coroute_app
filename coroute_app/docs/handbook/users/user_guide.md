@@ -522,3 +522,30 @@ After **Create account** we e-mail you a link. Open it (it works once, for 24 ho
 - **Profile › Help › Send feedback:** pick **Report a problem**, **Suggest a safety feature** or **Other**, write your message, and turn on **Attach diagnostics log** if the support team should see what happened. Turn on **You may reply by e-mail** if you want an answer.
 - **View diagnostics** (inside Send feedback) shows the log on your phone, and lets you send it or share the file.
 - See the *FAQ* and *Troubleshooting* guides for common questions and fixes.
+
+## 12. Bends and speed limits (advice while you ride)
+
+**Bend warnings.** Before a sharp bend or a hairpin CoRoute says, for example, "Sharp right bend in 150 metres.
+Slow to 35." and shows an arrow with that speed. It speaks only when you are faster than the comfortable speed
+for the bend, once per bend, and never during an SOS. A stretch with many bends is announced once ("Series of
+bends for 2 km"). It works without signal: with a planned route it reads the route; without one it reads the road
+you are on, if the road data for that area is on your phone (it is fetched along your route and around you while
+you have signal).
+
+**Speed limit sign.** The round sign in the ride screen shows the limit of the road you are on.
+
+* A plain number comes from the map.
+* **"~50" with "est."** is an estimate: the map has no limit for this road, so CoRoute guesses carefully from the
+  kind of road. For a motorcycle it is never above 60 km/h (80 on expressways and divided four-lane highways).
+* When you are over the limit, CoRoute says so once; after that only the sign turns red. An estimated limit never
+  speaks. Near a school or hospital the warning comes without a margin.
+
+**Wrong limit?** Stop, tap the sign, and tap what the road sign says. Or do it after the ride in Settings > Road
+safety > Limits on your last ride. When three riders agree, the limit changes for everyone. This needs "Help make
+roads safer" to be on.
+
+**Settings > Road safety > Bends and speed limits:** Curve warnings, Speed limit display, Overspeed warning and
+its margin (5 to 20 %), "About estimated limits", and how much road data is stored on your phone (with Clear).
+
+**Please remember:** this is advice. Maps can be wrong or old, and CoRoute does not know about rain, gravel,
+traffic or road works. Always follow the signs and ride at a speed you can stop from.

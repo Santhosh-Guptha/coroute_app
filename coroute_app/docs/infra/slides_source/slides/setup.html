@@ -1,0 +1,17 @@
+<section id="setup" class="alt" data-section="Setting it up, step by step">
+<div class="head">
+<p class="eyebrow">SETUP FLOW</p>
+<h2>Seven steps, in this order</h2>
+</div>
+<div class="steps">
+<div class="step"><p class="n">01</p><p class="what">Prepare</p><p class="how">Lock leaked accounts, fill the private inventory file, put keys in the Vault.</p></div>
+<div class="step"><p class="n">02</p><p class="what">Back up first</p><p class="how">Encrypted database backup and a test restore before touching anything.</p></div>
+<div class="step"><p class="n">03</p><p class="what">Tune each server</p><p class="how"><span class="mono">host/apply.sh</span> per role, dry run first. vm2 before vm1.</p></div>
+<div class="step"><p class="n">04</p><p class="what">Staging on vm4</p><p class="how">Deploy there, smoke test and load test.</p></div>
+<div class="step"><p class="n">05</p><p class="what">Release to production</p><p class="how"><span class="mono">release.sh</span>: vm4, then vm2, then vm1, with automatic rollback.</p></div>
+<div class="step"><p class="n">06</p><p class="what">DR on vm3</p><p class="how">Standby gateway, watchdog, offsite backups, weekly restore test.</p></div>
+<div class="step"><p class="n">07</p><p class="what">vm5 when it arrives</p><p class="how">Routing, map tiles, analytics, batch jobs.</p></div>
+</div>
+<p class="footer">08 · Stop at any failed health check</p>
+<aside>Every step has a check after it. If a health check fails, undo the last step and stop. Never restart vm1 and vm2 together.</aside>
+</section>

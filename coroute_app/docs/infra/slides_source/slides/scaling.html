@@ -1,0 +1,13 @@
+<section id="scaling" class="dark">
+<div class="head">
+<p class="eyebrow">GROWTH PATH</p>
+<h2>What to do as riders grow</h2>
+</div>
+<div class="cards">
+<div class="card rise" style="--i:0;"><p class="tag">NOW → 1,000 RIDERS</p><h3>Today’s setup</h3><p>This release, plus a 2,500-rider cap per micro. Watch vm1’s metrics.</p><p class="small">Move on when: over 500 riders for long, or lag over 100 ms for 10 minutes.</p></div>
+<div class="card rise" style="--i:1;"><p class="tag">1,000 → 5,000</p><h3>Live rides on Ampere</h3><p>A free Ampere server in account 1 becomes the live node; vm2 stays the mirror.</p><p class="small">Move on when: database over 300 calls/s or Ampere CPU over 60 %.</p></div>
+<div class="card rise" style="--i:2;"><p class="tag">5,000 → 20,000</p><h3>Full Ampere pair</h3><p>4 cores / 24 GB as live node, a second Ampere as its mirror, longer caches.</p><p class="small">Beyond 20,000: split groups across two pairs, or a paid database tier.</p></div>
+</div>
+<p class="footer">14 · One Ampere core ≈ 8× the sustained CPU of a whole micro</p>
+<aside>The cleanest next step is an Ampere server in account 1, whose free allowance is unused; it can sit behind the existing load balancer. vm5 in account 2 can only become the live node through cross-account network peering.</aside>
+</section>

@@ -145,6 +145,10 @@ diagnosticsUpload, riderScore, leaderboard ...).
 | POST | `/api/geo/essentials` | Bearer | Fuel, puncture, food, medical along a route (Overpass). |
 | GET | `/api/geo/poi-cells` | Bearer | Map places by cell (cached 7 days; 20/min). |
 | GET | `/api/geo/nearby-fuel` | Bearer | Nearest fuel stations. |
+| GET | `/api/geo/roads?cell=` | Bearer | Round 7: road geometry of one geohash-6 cell (classes, simplified lines, limit tags, one-way, school / hospital points, urban hint, rider corrections `fx`). gzip + `ETag` (304 on `If-None-Match`); 202 `{pending, retryAfterS}` + `Retry-After` while Overpass is over budget or backing off; cached 30 days (90/min). ODbL. |
+| POST | `/api/geo/limit-corrections` | Bearer | Round 7: one "wrong limit" vote `{way, cell, kmh, shownKmh?, shownSource?}`; needs "Help make roads safer" (else 202 `{accepted:false, reason:'NO_CONSENT'}`); 30/day. |
+| GET | `/api/admin/geo/limit-corrections` | MASTER_ADMIN | Round 7: votes per road (status, values, OSM link). `POST .../:way` `{action: apply\|reject\|reopen, kmh?}`. |
+| POST | `/api/convoys/:groupId/sos` | Bearer (member) | Round 7: the SOS over HTTP, sent next to the socket frame; idempotent per rider + `clientId` (201 new, 200 duplicate). LIVE. |
 | POST | `/api/geo/weather` | Bearer | Weather on route (MET Norway by default since 3.56, `WEATHER_PROVIDER=metno`; `open-meteo` only under a commercial agreement; `WEATHER_USER_PER_MIN` 6/min). |
 
 ### 1.5b Road & safety intelligence (round 4, `src/intel/`, docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md)

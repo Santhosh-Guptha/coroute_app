@@ -1,0 +1,21 @@
+<section id="release">
+<div class="head">
+<p class="eyebrow">STEPS 4–5 · RELEASES</p>
+<h2>Staging first, live server last, rollback on its own</h2>
+</div>
+<div style="display:flex; align-items:center; gap:20px;">
+<div class="card rise" style="--i:0; flex:1;"><p class="tag">BUILD</p><p>Bundle with pre-compressed website files</p></div>
+<x-shape kind="arrow-right" style="width:56px; height:28px; background:#1F6F67;"></x-shape>
+<div class="card rise" style="--i:1; flex:1;"><p class="tag">vm4 STAGING</p><p>Smoke test + quick load test</p></div>
+<x-shape kind="arrow-right" style="width:56px; height:28px; background:#1F6F67;"></x-shape>
+<div class="card rise" style="--i:2; flex:1;"><p class="tag">vm2 WEB</p><p>Health check must pass</p></div>
+<x-shape kind="arrow-right" style="width:56px; height:28px; background:#1F6F67;"></x-shape>
+<div class="card rise" style="--i:3; flex:1;"><p class="tag">vm1 LIVE</p><p>Riders drain to vm2, then restart</p></div>
+</div>
+<div class="row">
+<div class="col"><p class="cmd">gateway/deploy/release.sh<br>gateway/deploy/release.sh --only vm4<br>gateway/deploy/release.sh --rollback vm1</p></div>
+<div class="col"><p style="font-size:30px;">Each server keeps its previous release. A failed health check switches that server back by itself and <b>stops the release</b>, so vm1 is never touched after a failure on vm4 or vm2.</p></div>
+</div>
+<p class="footer">11 · Runs from your machine (Linux, macOS, WSL or Git Bash)</p>
+<aside>Always deploy the gateway before publishing a new APK. Older app versions keep working because each new feature checks the app version.</aside>
+</section>

@@ -1,0 +1,15 @@
+<section id="dr" class="alt" data-section="Staying up: recovery, growth, security and open decisions">
+<div class="head">
+<p class="eyebrow">STEP 6 · DISASTER RECOVERY</p>
+<h2>vm3 watches, backs up and stands ready</h2>
+</div>
+<div class="cards">
+<div class="card rise" style="--i:0;"><p class="tag">WATCHDOG</p><h3>Checks every 30 s</h3><p>Alert email after 3 failures, recovery email, daily summary. vm4 watches vm3.</p></div>
+<div class="card rise" style="--i:1;"><p class="tag">BACKUPS</p><h3>Three layers, encrypted</h3><p>Hourly and nightly in account 1, nightly copy on vm3 (7 daily, 4 weekly, 3 monthly), copy in account 2.</p></div>
+<div class="card rise" style="--i:2;"><p class="tag">RESTORE TEST</p><h3>Every Sunday</h3><p>Decrypts the newest backup, restores it in memory, compares counts, emails the result.</p></div>
+<div class="card warn rise" style="--i:3;"><p class="tag">PROMOTE</p><h3>Manual by default</h3><p>Only when vm1 and vm2 are both down: one script switches DNS to vm3.</p></div>
+</div>
+<p class="cmd">sudo bash deploy/dr/promote_vm3.sh&#160;&#160;&#160;# refuses while the site is up · demote_vm3.sh to go back</p>
+<p class="footer">12 · Certificates are ready on vm3 in advance, so promotion is just a DNS switch</p>
+<aside>Automatic promotion exists behind WATCH_AUTO_PROMOTE=1 (after 15 minutes of total outage) but is off until you decide. Never run vm1 and a promoted vm3 together longer than the DNS switch: they don't mirror each other.</aside>
+</section>
