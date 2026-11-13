@@ -246,6 +246,11 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       ok: true,
       profile: {
         username: u.username, name: u.name || '', avatarUrl: avatarOf(u, flagsOf),
+        // 3.56 "Adjust picture": is the private original kept, and how it is cropped now.
+        // avatarOriginalTag changes when another original is stored (a phone drops its cached copy);
+        // it is the tail of the id only and gives no access to anything.
+        avatarAdjustable: !!(u.avatarId && A.isOriginalId(u.avatarOriginalId)), avatarCrop: (u.avatarId && u.avatarCrop) || null,
+        avatarOriginalTag: u.avatarId && A.isOriginalId(u.avatarOriginalId) ? u.avatarOriginalId.slice(-8) : null,
         publicLeaderboard: u.publicLeaderboard !== false,
         discoverable: u.discoverable !== false,
         usernameChangedAt: last, nextUsernameChangeAt: last ? last + U.CHANGE_MS : 0,
@@ -310,6 +315,52 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       auth.gate?.invalidate?.(u.userId);
       res.status(201).json({ ok: true, avatarUrl: out.avatarUrl });
     } catch (e) { sendErr(res, e); }
+  }));
+
+  // 3.56 "Adjust picture" (src/avatars.js): private original + crop numbers.
+  const rawBody = (limit, mb) => {
+    const parse = express.raw({ type: () => true, limit });
+    return (req, res, next) => {
+      if (req.is('application/json') || req.is('multipart/form-data')) {
+        return res.status(415).json({ error: 'Send the picture bytes as image/jpeg, image/png or image/webp.', code: 'UNSUPPORTED_PHOTO' });
+      }
+      parse(req, res, (err) => {
+        if (!err) return next();
+        if (err.type === 'entity.too.large') return res.status(413).json({ error: `This picture is too large (up to ${mb} MB).`, code: 'PHOTO_TOO_LARGE' });
+        return res.status(400).json({ error: 'The picture did not arrive complete. Please try again.', code: 'NO_PHOTO' });
+      });
+    };
+  };
+  const avatarAdjustLimiter = limiter(60 * 60 * 1000, 30, 'Too many picture changes. Try again later.');
+  const noStore = (res) => res.set('Cache-Control', 'no-store');
+
+  r.post('/me/avatar/original', feature('profilePhotos'), avatarUploadLimiter, rawBody(A.ORIGINAL_MAX_BYTES, 2), wrap(async (req, res) => {
+    const u = await me(req);
+    try {
+      const out = await A.saveOriginal(repo, u, req.body);
+      noStore(res).status(201).json({ ok: true, originalId: out.originalId, width: out.width, height: out.height });
+    } catch (e) { sendErr(res, e); }
+  }));
+
+  // Body: the cropped picture. Crop numbers in ?cx=&cy=&zoom=&rot= ; ?original=<id> for a new picture.
+  r.post('/me/avatar/crop', feature('profilePhotos'), avatarAdjustLimiter, rawBody(A.MAX_BYTES, 2), wrap(async (req, res) => {
+    const u = await me(req);
+    try {
+      const q = req.query || {};
+      const original = typeof q.original === 'string' && q.original ? q.original : null;
+      if (original && !A.isOriginalId(original)) throw new A.AvatarError(409, 'Choose the picture again to adjust it.', 'NO_ORIGINAL');
+      const out = await A.saveCrop(repo, u, req.body, { crop: { cx: q.cx, cy: q.cy, zoom: q.zoom, rot: q.rot }, originalId: original });
+      auth.gate?.invalidate?.(u.userId);
+      noStore(res).status(201).json({ ok: true, avatarUrl: out.avatarUrl, avatarAdjustable: true, avatarCrop: out.crop });
+    } catch (e) { sendErr(res, e); }
+  }));
+
+  // Owner only: there is no id in the path, the picture is always the caller's own.
+  r.get('/me/avatar/original', feature('profilePhotos'), avatarReadLimiter, wrap(async (req, res) => {
+    const found = await A.readOriginal(repo, req.user.userId);
+    if (!found) return noStore(res).status(404).json({ error: 'There is no original picture to adjust.', code: 'NO_ORIGINAL' });
+    noStore(res).set('Content-Type', found.mime).set('Content-Disposition', 'inline').set('X-Content-Type-Options', 'nosniff')
+      .set('X-Robots-Tag', 'noindex').set('X-Avatar-Crop', JSON.stringify(found.crop || null)).send(found.data);
   }));
 
   r.delete('/me/avatar', friendWriteLimiter, wrap(async (req, res) => {
