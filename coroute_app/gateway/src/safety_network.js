@@ -22,6 +22,7 @@
  * External riders only ever see the whitelisted views at the bottom of this file, and only while
  * the incident is open.
  */
+const { rescueIdFor } = require('./rescue_beacon'); // Round 10 rescue beacon id
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const config = require('./config');
@@ -875,6 +876,7 @@ class SafetyNetwork extends EventEmitter {
       incidentStatus: a ? statusOf(a) : 'RESOLVED',
       subject: ACTIVE_RESPONDER.has(R.status) ? { firstName: firstName(a?.userName || subjectRider?.name), vehicleType: String(subjectRider?.vehicleType || ''), vehicleColor: String(subjectRider?.vehicleColor || '') } : null,
       medical,
+      rescueId: open && a ? (a.rescueId || rescueIdFor({ clientId: a.clientId, alertId: a.alertId })) : '', // Round 10
       ...extra,
     });
   }
@@ -1150,7 +1152,7 @@ function externalRequestView(inc, n) {
 }
 
 /** ASSIST_UPDATE: after acceptance adds the subject's first name, vehicle and medical info (open alert only). */
-function externalResponderView(inc, R, { incidentStatus, subject = null, medical = null, arrivalCheck = false } = {}) {
+function externalResponderView(inc, R, { incidentStatus, subject = null, medical = null, arrivalCheck = false, rescueId = '' } = {}) {
   const out = {
     type: 'ASSIST_UPDATE', incidentId: inc.incidentId, incidentStatus, myStatus: R.status,
     lat: r5(inc.lat), lng: r5(inc.lng), lastUpdateAt: inc.lastUpdateAt,
@@ -1158,6 +1160,8 @@ function externalResponderView(inc, R, { incidentStatus, subject = null, medical
   if (Number.isFinite(R.etaS)) out.etaS = r30(R.etaS);
   if (Number.isFinite(R.distanceM)) out.distanceM = Math.round(R.distanceM / 10) * 10;
   if (arrivalCheck) out.arrivalCheck = true;
+  // Round 10 rescue beacon: an accepted responder's phone can recognise the down rider's locator / BLE.
+  if (rescueId && ACTIVE_RESPONDER.has(R.status)) out.rescueId = rescueId;
   if (subject) out.subject = { firstName: String(subject.firstName || ''), vehicleType: String(subject.vehicleType || ''), vehicleColor: String(subject.vehicleColor || '') };
   if (medical) {
     const m = {};

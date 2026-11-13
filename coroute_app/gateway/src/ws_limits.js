@@ -23,7 +23,7 @@
  *                 once per 5 s per class (old apps ignore unknown types). Every drop also costs one "strike" token
  *                 (WS_RL_KICK_DROPS per 10 s, default 60): a socket that keeps flooding is closed with 4429
  *                 RATE_LIMIT_<CLASS>. Invalid frames (schema / size) have their own small budget -> 4400 INVALID_FRAMES.
- *   SAFETY        SOS, SOS_RESPOND, SOS_RESOLVE, WAIT, CHECK_IN, REPORT_DOWN, LAST_GASP_BEACON, ASSIST_ANSWER are
+ *   SAFETY        SOS, SOS_RESPOND, SOS_RESOLVE, WAIT, CHECK_IN, REPORT_DOWN, LAST_GASP_BEACON, ASSIST_ANSWER, MESH_BRIDGE are
  *                 never counted, never dropped and never rejected by the schema check (the convoy code clamps
  *                 their fields). The existing SOS-per-10-s budget gets a floor (WS_SOS_FLOOR_PER_10S, 10) and an SOS
  *                 above even that is answered with the rider's open alert instead of an error (see ws.js).
@@ -81,7 +81,9 @@ class TokenBucket {
 }
 
 /** Never counted, never dropped, never schema-rejected. */
-const SAFETY = new Set(['SOS', 'SOS_RESPOND', 'SOS_RESOLVE', 'WAIT', 'CHECK_IN', 'REPORT_DOWN', 'LAST_GASP_BEACON', 'ASSIST_ANSWER']);
+// Round 10: MESH_BRIDGE can carry an SOS from a rider without signal (src/mesh_bridge.js does its own frame count,
+// size and per-second limits for everything that is not an SOS).
+const SAFETY = new Set(['SOS', 'SOS_RESPOND', 'SOS_RESOLVE', 'WAIT', 'CHECK_IN', 'REPORT_DOWN', 'LAST_GASP_BEACON', 'ASSIST_ANSWER', 'MESH_BRIDGE']);
 const CLASS_OF = new Map([
   ['TELEMETRY', 'pos'], ['P2', 'pos'],
   ['CHAT', 'chat'], ['CHAT_REPORT', 'chat'], ['ROAD_WARN', 'chat'], ['ROAD_WARN_VOTE', 'chat'],
@@ -104,6 +106,7 @@ const MAX_BYTES = new Map([
   ['CHAT', 8192], ['CHAT_REPORT', 4096], ['MIC_STATE', 512], ['STATUS', 2048], ['CORIDER', 1024],
   ['ROUTE_SET', 256 * 1024], ['TRACK', 256 * 1024], ['STOP_ADD', 32 * 1024], ['STOP_SUGGEST', 32 * 1024], ['STOP_REORDER', 32 * 1024],
   ['CONFIG', 32 * 1024], ['TIMELINE_SINCE', 1024], ['ROAD_HAZARD', 4096], ['SIGNAL_AHEAD', 8192], ['RIDER_VEHICLE', 4096],
+  ['MESH_HELLO', 512],
 ]);
 const TYPE_RE = /^[A-Za-z0-9_]{1,32}$/;
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);

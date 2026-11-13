@@ -21,6 +21,7 @@ const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 const { validPhone, roleOf } = require('./validate');
 const { realContactNumber } = require('./auth');
 const { applyPublicRidePatch, publicRideView } = require('./public_ride_settings');
+const { rescueIdFor } = require('./rescue_beacon'); // Round 10 rescue beacon id
 
 const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER', 'HOSPITAL', 'REPAIR', 'STAY', 'PHARMACY', 'TYRE', 'WASHROOM', 'ATM', 'POLICE', 'PARKING']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
@@ -703,6 +704,15 @@ class ConvoyManager extends EventEmitter {
       if (patch.isCoRiding !== undefined) next.isCoRiding = !!patch.isCoRiding;
       if (patch.ridingWithUserId !== undefined && patch.ridingWithUserId !== null) next.ridingWithUserId = String(patch.ridingWithUserId).slice(0, 64);
     }
+    // Round 10 offline link: a position forwarded by a bridge phone (src/mesh_bridge.js) carries the bridge's user id;
+    // anything from the rider's own socket clears it (direct again).
+    if (trusted && patch && patch.viaBridge) {
+      next.viaBridge = String(patch.viaBridge).slice(0, 64);
+      next.viaBridgeAt = now();
+    } else if (next.viaBridge) {
+      next.viaBridge = '';
+      next.viaBridgeAt = 0;
+    }
     next.lastSeenEpochMs = now();
     room.riders.set(userId, next);
     room.dirty.add(userId);
@@ -954,6 +964,8 @@ class ConvoyManager extends EventEmitter {
       responders: {},
       ...this._emergencyFields(room, { lat: clampLat(lat), lng: clampLng(lng), msg, source: src, alertType: kind, t }),
     };
+    // Round 10 rescue beacon: the 16-bit id the phone's locator sound / BLE carries (src/rescue_beacon.js).
+    alert.rescueId = rescueIdFor({ msgRescueId: msg.rescueId, clientId: cid, alertId: alert.alertId });
     const ownerDoc = await withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null);
     await this._storeAlert(room, alert, ownerDoc, { sender: user.userId });
     return { alert, duplicate: false, persisted: !(room.unsaved && room.unsaved.has(alert.alertId)) };
@@ -2846,6 +2858,8 @@ function publicRider(r) {
     fuelEstimate: r.fuelEstimate && now() - r.fuelEstimate.updatedAt < 120000 ? r.fuelEstimate : null,
     micMuted: !!r.micMuted,
     isSpeaking: !!r.isSpeaking,
+    // Round 10 offline link: the rider has no signal and is reached through this rider's phone (bridge), while recent.
+    viaBridge: r.viaBridge && now() - (r.viaBridgeAt || 0) < 30000 ? r.viaBridge : '',
     // 3.55: fatigue level 0..3, only while recent (10 min); 0 for older apps that never send it.
     fatigueLevel: Number.isInteger(r.fatigueLevel) && Number.isFinite(r.fatigueAt) && now() - r.fatigueAt < 600000 ? r.fatigueLevel : 0,
   };
@@ -2923,6 +2937,8 @@ function publicAlert(a, { medical = true, summary = null } = {}) {
     lastUpdateAt: a.lastUpdateAt || a.timestamp || 0,
     reportedBy: a.reportedBy || '', reportedByName: a.reportedByName || '',
     resolveReason: a.resolveReason || null,
+    // Round 10 rescue beacon id (older stored alerts: derived the same way).
+    rescueId: a.rescueId || rescueIdFor({ clientId: a.clientId, alertId: a.alertId }),
   };
   if (summary && summary.network) out.network = summary.network;
   if (summary && summary.ownNearest !== undefined) out.ownNearest = summary.ownNearest;

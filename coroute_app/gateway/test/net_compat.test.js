@@ -21,7 +21,7 @@ test('HELLO keeps the 3.14 features first and appends net1, discovery1, pubride1
   const u = await h.rider('Hello');
   const ws = await h.t.connect(u.token);
   const hello = await ws.next((m) => m.type === 'HELLO');
-  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'pubride1', 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2', 'pos2', 'voice2']);
+  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'pubride1', 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2', 'pos2', 'voice2', 'mesh1']); // Round 10: mesh1 (src/mesh_bridge.js)
   ws.close();
 });
 

@@ -24,6 +24,7 @@ const crypto = require('crypto');
 const config = require('./config');
 const { verifyTokenDetailed, ROLE_ADMIN, AuthError, identityOf } = require('./auth');
 const { ConvoyError, publicRider, publicAlert } = require('./convoys');
+const { RescuePings } = require('./rescue_beacon'); // Round 10 rescue beacon
 /** Trip statuses of a ride that is still on (a revoked session keeps its ride socket during these). */
 const ACTIVE_RIDE = new Set(['PLANNING', 'STARTED', 'PAUSED']);
 const { clientIdOf } = require('./validate');
@@ -40,6 +41,7 @@ const { Interest } = require('./interest');
 // Round 8 voice: the intercom relay lives in src/voice_relay.js (lowest priority, codec negotiation, caps, metrics,
 // optional separate process). ws.js keeps thin delegates, marked "Round 8 voice".
 const { VoiceRelay, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END, VOICE_FEATURE } = require('./voice_relay');
+const { MeshBridge, MESH_CAP } = require('./mesh_bridge'); // Round 10 offline link bridge
 
 const envInt = (k, d) => { const n = parseInt(process.env[k] || '', 10); return Number.isFinite(n) && n >= 0 ? n : d; };
 /** Position fan-out for large rooms: above this many sockets each rider's RIDER_UPDATE is throttled to one
@@ -123,6 +125,8 @@ const ACTION_TYPES = new Set([
   'RIDER_VEHICLE',
   // 3.55 pillion seat
   'PILLION_SEAT', 'PILLION_UNSEAT',
+  // Round 10 rescue beacon (src/rescue_beacon.js; its own low rate limits too)
+  'RESCUE_PING',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
@@ -150,7 +154,7 @@ const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster']
 /** Round 8 'pos2': compact P2 position frames from the phone and RU2 batches to sockets with the 'pos2' cap
  *  (src/pos2.js). WS_POS2=off stops advertising it (apps then keep TELEMETRY JSON; P2 frames are still accepted). */
 const POS2_ON = String(process.env.WS_POS2 || 'on').toLowerCase() !== 'off';
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2', ...(POS2_ON ? [POS2_CAP] : []), VOICE_FEATURE /* Round 8 voice: VOICE_CAPS / VOICE_CODEC */];
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355', 'vehicle1', 'pillion2', ...(POS2_ON ? [POS2_CAP] : []), VOICE_FEATURE /* Round 8 voice: VOICE_CAPS / VOICE_CODEC */, MESH_CAP /* Round 10: MESH_HELLO / MESH_KEY / MESH_BRIDGE */];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
@@ -181,6 +185,7 @@ class Hub {
       rlJoinFlood: 0, rlIdleClosed: 0, rlSlowReader: 0, rlDropPos: 0, rlDropChat: 0, rlDropJoin: 0, rlDropPing: 0, rlDropOther: 0,
       sosOverBudget: 0, sosOverFloorEcho: 0, pos2In: 0, pos2Miss: 0, pos2Frames: 0, interestHeld: 0, interestFarSent: 0 };
     this.limits = RL.limitsConfig();
+    this.meshBridge = new MeshBridge(this); // Round 10 offline link (src/mesh_bridge.js)
     this.trusted = RL.trustFn(config.trustProxy);
     this.ipLimiter = new RL.IpConnLimiter({ maxPerIp: this.limits.maxConnPerIp, perMin: this.limits.connPerMinPerIp });
     this.userConnLimiter = new RL.UserConnLimiter({ perMin: this.limits.connPerMinPerUser });
@@ -213,6 +218,7 @@ class Hub {
     convoys.on('userMessage', (groupId, userId, payload) => this.sendToUser(userId, { groupId, ...payload }));
     // An ended ride: no queued positions or voice floor survive it.
     convoys.on('roomEnded', (groupId) => this._dropRoomState(groupId));
+    convoys.on('roomEnded', (groupId) => this.meshBridge.dropRoom(groupId)); // Round 10
 
     this.heartbeat = setInterval(() => {
       const t = Date.now();
@@ -235,6 +241,7 @@ class Hub {
     // Sockets closed by a restart are not "no signal": presence is left as it was.
     this.closing = true;
     clearInterval(this.heartbeat); clearInterval(this.fleetTimer);
+    this.meshBridge.close(); // Round 10
     if (this.outTimer) { clearTimeout(this.outTimer); this.outTimer = null; }
     for (const t of this.posTimers.values()) clearTimeout(t);
     for (const t of this.farTimers.values()) clearTimeout(t);
@@ -501,6 +508,8 @@ class Hub {
       return false;
     }
     if (type === 'ALERT_RESOLVED' || type === 'SOS_RESPONSE') return !!(ws.ownAlerts && ws.ownAlerts.has(String(payload.alertId || '')));
+    // Round 10: a responder's "ping the phone" still reaches a signed-out rider's own open SOS.
+    if (type === 'RESCUE_PING') return !!(ws.ownAlerts && ws.ownAlerts.has(String(payload.alertId || '')));
     return false;
   }
 
@@ -1276,6 +1285,13 @@ class Hub {
         return this._once(ws, cid, 'CHECK_IN', () => this.timeline.checkIn(gid, u, msg));
       }
       case 'SOS_RESOLVE': return void await this.convoys.resolveSos(this._requireRoom(ws), u, String(msg.alertId || ''), msg.reason);
+      // ---- Round 10 rescue beacon: "Ping the phone" (only the victim's sockets hear it; src/rescue_beacon.js) ----
+      case 'RESCUE_PING': {
+        const gid = this._requireRoom(ws);
+        if (!this.rescuePings) this.rescuePings = new RescuePings(this.convoys, { network: this.network });
+        const r = await this.rescuePings.ping(gid, u, msg);
+        return void this.send(ws, { type: 'RESCUE_PING_RESULT', alertId: typeof msg.alertId === 'string' ? msg.alertId : undefined, incidentId: typeof msg.incidentId === 'string' ? msg.incidentId : undefined, ...r, ts: Date.now() });
+      }
       // ---- 3.15 safety network and discovery ----
       case 'REPORT_DOWN': {
         if (!this.network) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
@@ -1371,6 +1387,9 @@ class Hub {
         return this._once(ws, cid, 'BUDDY_PING', () => this.convoys.buddies.ping(gid, u, msg));
       }
       // Round 8 voice: the app's receivable codecs (HELLO feature 'voice2'); answered with VOICE_CODEC.
+      // Round 10 offline link (src/mesh_bridge.js): capabilities + ride key, and frames forwarded by a bridge phone.
+      case 'MESH_HELLO': return void await this.meshBridge.onHello(ws, msg);
+      case 'MESH_BRIDGE': return void await this.meshBridge.onBridge(ws, msg);
       case 'VOICE_CAPS':
         this._requireRoom(ws);
         return this.voiceRelay.onCaps(ws, msg);
