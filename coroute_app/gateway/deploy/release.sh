@@ -110,7 +110,7 @@ deploy_one() { # deploy_one <ssh host>
 public_check() { # public_check <host> <label>
   local host="$1" label="$2" code ws
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$host/api/health" || true)
-  ws=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: Y29yb3V0ZXJlbGVhc2UxMg==' "https://$host/ws" || true)
+  ws=$(curl -s --http1.1 -o /dev/null -w '%{http_code}' --max-time 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: Y29yb3V0ZXJlbGVhc2UxMg==' "https://$host/ws" || true)
   local css; css=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$host/assets/site.css" || true)
   note "$label https://$host: /api/health $code, /ws upgrade $ws, static $css"
   [ "$DRY" = 1 ] || { [ "$code" = 200 ] && [ "$ws" = 101 ]; }
