@@ -280,7 +280,7 @@ test('product pages: shared page styles, real content anchors and honest safety 
     '/safety': ['call 112', 'New in 3.15', 'does not replace', 'only when other Coroute groups are riding', 'id="false-alarms"'],
     '/how-it-works': ['id="create"', 'id="join"', 'id="ride"', 'class="pg-faq"', 'Allow all the time'],
     '/about': ['Built because riders needed it.', 'Clear and open by design.', 'href="/#feedback"'],
-    '/get': ['Android 6.0 or newer', 'id="permissions"', 'href="/privacy"'],
+    '/get': ['Android 7.0 or newer', 'id="permissions"', 'href="/privacy"'],
   };
   for (const [p, needles] of Object.entries(pages)) {
     const html = await (await fetch(base + p)).text();
