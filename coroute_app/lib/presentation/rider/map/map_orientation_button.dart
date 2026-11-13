@@ -39,8 +39,9 @@ class MapOrientationButton extends StatelessWidget {
                   if (!controller.following) controller.resumeFollow();
                 },
                 child: SizedBox(
-                  width: 44,
-                  height: 44,
+                  // 3.56 audit A-01: 48 dp (gloves); was 44.
+                  width: 48,
+                  height: 48,
                   child: Center(
                     child: Transform.rotate(
                       angle: angle.isFinite ? angle : 0.0,

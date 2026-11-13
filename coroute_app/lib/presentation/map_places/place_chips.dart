@@ -6,6 +6,7 @@ import '../../domain/places/fuel_match.dart';
 import '../../domain/places/poi_category.dart';
 import 'fuel_ahead_sheet.dart';
 import 'place_style.dart';
+import 'rider_stops_layer.dart';
 
 /// Category chips for map places. Choices are saved on the phone.
 class PlaceCategoryChips extends StatelessWidget {
@@ -96,8 +97,11 @@ class _PlacesToggleState extends State<PlacesToggle> {
 /// Round 44 dp map button: opens the places sheet (category chips, and the
 /// stations ahead when a route is loaded).
 class PlacesMapButton extends StatelessWidget {
-  const PlacesMapButton({super.key, required this.service, this.usableKm, this.marginKm});
+  const PlacesMapButton({super.key, required this.service, this.usableKm, this.marginKm, this.riderStopsSwitch = false});
   final MapPlacesService service;
+
+  /// 3.56: also offer the "Where riders stop" switch (the live ride map; off by default there).
+  final bool riderStopsSwitch;
 
   /// Fuel estimate before reserve, and the reserve, for the "Fuel ahead" list (null = not set).
   final double? Function()? usableKm;
@@ -111,10 +115,11 @@ class PlacesMapButton extends StatelessWidget {
         child: InkWell(
           key: const ValueKey('placesMapButton'),
           customBorder: const CircleBorder(),
-          onTap: () => showPlacesSheet(context, service, usableKm: usableKm?.call(), marginKm: marginKm?.call() ?? 0),
+          onTap: () => showPlacesSheet(context, service, usableKm: usableKm?.call(), marginKm: marginKm?.call() ?? 0, riderStopsSwitch: riderStopsSwitch),
           child: SizedBox(
-            width: 44,
-            height: 44,
+            // 3.56 audit A-01: 48 dp (gloves); was 44.
+            width: 48,
+            height: 48,
             child: Tooltip(message: 'Places on map', child: Icon(Icons.place_rounded, color: AppTheme.brand)),
           ),
         ),
@@ -122,7 +127,7 @@ class PlacesMapButton extends StatelessWidget {
 }
 
 /// Places sheet: which categories show on the map, and the stations ahead.
-Future<void> showPlacesSheet(BuildContext context, MapPlacesService service, {double? usableKm, double marginKm = 0}) =>
+Future<void> showPlacesSheet(BuildContext context, MapPlacesService service, {double? usableKm, double marginKm = 0, bool riderStopsSwitch = false}) =>
     showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
@@ -159,6 +164,23 @@ Future<void> showPlacesSheet(BuildContext context, MapPlacesService service, {do
             if (service.lastError != null) ...[
               const SizedBox(height: 8),
               Text(service.lastError!, style: TextStyle(color: AppTheme.warnText, fontSize: 12)),
+            ],
+            if (riderStopsSwitch) ...[
+              const SizedBox(height: 8),
+              // 3.56: the learned rider stops on the ride map (off by default; the planner shows them always).
+              ValueListenableBuilder<bool>(
+                valueListenable: RiderStopsLivePref.on,
+                builder: (ctx, on, _) => SwitchListTile(
+                  key: const ValueKey('riderStopsLiveSwitch'),
+                  contentPadding: EdgeInsets.zero,
+                  secondary: Icon(Icons.coffee_rounded, color: AppTheme.accent),
+                  title: Text('Where riders stop', style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w600)),
+                  subtitle: Text('Places many riders stop at along your route. Anonymous; hidden while an alert is open.',
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12)),
+                  value: on,
+                  onChanged: (v) => RiderStopsLivePref.set(v),
+                ),
+              ),
             ],
             if (service.hasRoute) ...[
               const SizedBox(height: 8),

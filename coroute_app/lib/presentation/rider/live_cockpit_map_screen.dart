@@ -88,6 +88,7 @@ import '../map_places/place_review_prompt_banner.dart';
 import '../../data/services/place_review_service.dart';
 import '../../domain/places/place_dwell.dart';
 import '../map_places/place_chips.dart';
+import '../map_places/rider_stops_layer.dart';
 import '../ride/meet_here_sheet.dart';
 import '../ride/messages_sheet.dart';
 import '../../domain/navigation/nav_handoff.dart';
@@ -589,6 +590,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void initState() {
     super.initState();
     _loadDismissed();
+    RiderStopsLivePref.load().ignore(); // 3.56: the saved "Where riders stop" choice (off by default)
     WidgetsBinding.instance.addObserver(this);
 
     widget.focus?.addListener(_onFocusRequest);
@@ -3271,6 +3273,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   if (_placesFor(lowData) case final places?) ...[
                     PlacesMapButton(
                       service: places,
+                      riderStopsSwitch: true, // 3.56: "Where riders stop" on the ride map (off by default)
                       usableKm: () => context.read<SafetyService?>()?.estimatedUsableKm,
                       marginKm: () => context.read<SettingsService?>()?.fuelProfile.marginKm ?? 0,
                     ),
@@ -3919,6 +3922,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 if (s.category == 'FUEL') (lat: s.lat, lng: s.lng, name: s.name),
             ],
           ),
+        // 3.56 (round 6): "Where riders stop" on the ride map: off by default, switched on in the
+        // "Places on map" sheet, never while an alert is open (the map belongs to the emergency).
+        ValueListenableBuilder<bool>(
+          valueListenable: RiderStopsLivePref.on,
+          builder: (context, on, _) => MarkerLayer(
+            rotate: true,
+            markers: RiderStopsLivePref.show(switchedOn: on, alertOpen: convoy.activeAlerts.isNotEmpty) && SafetyService.hasInstance
+                ? riderStopMarkers(SafetyService.instance.intel.learnedStops)
+                : const <Marker>[],
+          ),
+        ),
         if (_essentials != null && convoy.activeAlerts.isEmpty)
           // The next essentials on the route: medium discs with the category icon (3.55; were a small tag).
           MarkerLayer(rotate: true, markers: [for (final p in _essentials!.upcoming.take(3)) Marker(
@@ -4416,8 +4430,9 @@ class _MapZoomButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         onTap: onTap,
         child: SizedBox(
-          width: 44,
-          height: 44,
+          // 3.56 audit A-01: 48 dp (gloves); was 44.
+          width: 48,
+          height: 48,
           child: Icon(icon, color: AppTheme.text, size: 24),
         ),
       ),

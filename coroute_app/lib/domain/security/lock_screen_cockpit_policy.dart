@@ -145,6 +145,51 @@ class LockScreenCockpitPolicy {
     return (title: senderName.trim().isEmpty ? 'Message' : senderName.trim(), message: text);
   }
 
+  /// 3.56 (round 6): calling from the locked cockpit. The ride safety cards, the incident banner, the
+  /// safety card and the rider card all offer "Call"; before, they dialled straight from a locked phone.
+  ///
+  /// The rule, in one line: **a locked phone calls emergency services, and the rider's own emergency
+  /// contact while the rider's own SOS or crash alarm is open; every other number waits for the unlock.**
+  ///
+  ///  * Public emergency lines ([emergencyNumbers]: 112 and the ambulance / police / highway lines):
+  ///    always, like the phone's own lock screen. They reveal nothing about the rider.
+  ///  * The rider's OWN emergency contact while the rider's OWN SOS / crash alarm is open
+  ///    ([ownEmergencyOpen]): a hurt rider, or a bystander holding the phone, must reach the family
+  ///    without a fingerprint. Outside an emergency the same number waits for the unlock, so a found
+  ///    or stolen phone can not be used to ring the owner's family.
+  ///  * Everything else (another rider, another rider's emergency contact, a place, a helpline that is
+  ///    not a public emergency line) asks for the phone's unlock first and dials when it succeeds. The
+  ///    numbers belong to other people; a locked phone must not hand them out or ring them.
+  ///
+  /// Not locked: never asks.
+  static bool callNeedsUnlock({
+    required bool locked,
+    required String number,
+    required List<String> emergencyNumbers,
+    required String? ownEmergencyContact,
+    required bool ownEmergencyOpen,
+  }) {
+    if (!locked) return false;
+    final n = _digits(number);
+    if (n.isEmpty) return true;
+    for (final e in emergencyNumbers) {
+      if (_digits(e) == n) return false;
+    }
+    if (ownEmergencyOpen && samePhone(number, ownEmergencyContact)) return false;
+    return true;
+  }
+
+  /// Same subscriber number: compared on the last 10 digits ("+91 98765 43210" = "09876543210"), at
+  /// least 7 digits on both sides (short codes are never "the same" as a contact).
+  static bool samePhone(String? a, String? b) {
+    final x = _digits(a ?? ''), y = _digits(b ?? '');
+    if (x.length < 7 || y.length < 7) return false;
+    String tail(String v) => v.length > 10 ? v.substring(v.length - 10) : v;
+    return tail(x) == tail(y);
+  }
+
+  static String _digits(String v) => v.replaceAll(RegExp(r'[^0-9]'), '');
+
   /// Android Back while locked never navigates (it stays on the cockpit).
   static bool backNavigates({required bool locked}) => !locked;
 

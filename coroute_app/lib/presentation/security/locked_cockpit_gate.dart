@@ -9,7 +9,9 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/app_lock_service.dart';
 import '../../data/services/app_security_native.dart';
+import '../../data/services/auth_service.dart';
 import '../../data/services/lock_screen_cockpit_service.dart';
+import '../../data/services/safety_service.dart';
 import '../../domain/security/lock_screen_cockpit_policy.dart';
 
 /// Locked cockpit (docs/features_355/lock_screen_cockpit.md): while CoRoute is shown over a locked keyguard during
@@ -89,6 +91,37 @@ class LockedCockpit {
     }
     return ok;
   }
+}
+
+/// 3.56 (round 6): every "Call" button of the ride screens goes through here. Not locked: dials at
+/// once. Locked: emergency lines dial at once, the rider's own emergency contact dials at once while
+/// the rider's own SOS / crash alarm is open, every other number asks for the phone's unlock first
+/// ([LockScreenCockpitPolicy.callNeedsUnlock] explains why). True when [dial] ran.
+Future<bool> callFromCockpit(BuildContext context, String number, FutureOr<void> Function() dial) async {
+  var locked = false;
+  try {
+    locked = Provider.of<LockScreenCockpitService?>(context, listen: false)?.locked ?? false;
+  } catch (_) {}
+  if (!locked) {
+    await dial();
+    return true;
+  }
+  String? own;
+  try {
+    own = Provider.of<AuthService?>(context, listen: false)?.emergencyContact;
+  } catch (_) {}
+  final needs = LockScreenCockpitPolicy.callNeedsUnlock(
+    locked: true,
+    number: number,
+    emergencyNumbers: SafetyConstants.emergencyNumbers,
+    ownEmergencyContact: own,
+    ownEmergencyOpen: SafetyService.hasInstance && SafetyService.instance.emergencyOpen,
+  );
+  if (!needs) {
+    await dial();
+    return true;
+  }
+  return LockedCockpit.run(context, CockpitAction.dialContact, dial);
 }
 
 /// The padlock chip; tapped, it opens Unlock, Call 112 and Medical ID.
