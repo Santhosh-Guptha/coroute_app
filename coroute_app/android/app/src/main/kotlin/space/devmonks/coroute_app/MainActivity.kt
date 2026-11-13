@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
     private var pushChannel: PushChannel? = null
     private var appSecurity: AppSecurityChannel? = null
     private var rideWindow: RideWindowChannel? = null
+    private var voiceCodec: VoiceCodecChannel? = null // Round 8 intercom Opus (VoiceCodecChannel.kt)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -90,6 +91,10 @@ class MainActivity : FlutterActivity() {
         rideWin.register()
         rideWindow = rideWin
         rideWindowMethods.setMethodCallHandler(rideWin)
+        // Round 8: intercom Opus encode / decode on MediaCodec (VoiceCodecChannel.kt).
+        val codec = VoiceCodecChannel()
+        voiceCodec = codec
+        MethodChannel(messenger, "coroute/voice_codec").setMethodCallHandler(codec)
     }
 
     // The screen-lock confirmation of the app lock on Android 6-8 (AppSecurityChannel); everything else as before.
@@ -170,6 +175,9 @@ class MainActivity : FlutterActivity() {
         rideWindow?.dispose() // also takes the window off the keyguard
         rideWindow = null
         MethodChannel(messenger, "coroute/ride_window").setMethodCallHandler(null)
+        MethodChannel(messenger, "coroute/voice_codec").setMethodCallHandler(null)
+        voiceCodec?.dispose()
+        voiceCodec = null
         ShareIn.channel?.let { ShareIn.dispose(it) }
         super.cleanUpFlutterEngine(flutterEngine)
     }

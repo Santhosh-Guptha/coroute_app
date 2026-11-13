@@ -1,0 +1,863 @@
+{
+ "speech": "flite TTS (4 voices)",
+ "seconds": 26.86,
+ "variants": {
+  "a_off": {
+   "info": {
+    "latency16k": 0,
+    "usPer10ms": 0.1,
+    "worstUsPer20ms": 3.5,
+    "meanVad": 0.0,
+    "windShare": 0.0,
+    "taps": 121
+   },
+   "latency16k": 0,
+   "measured_latency16k": 0,
+   "speech_loss_db": 0.0,
+   "mixes": {
+    "pink_5dB": {
+     "snr_in": 10.4,
+     "snr_out": 10.4,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.862,
+     "stoi_out": 0.862
+    },
+    "pink_0dB": {
+     "snr_in": 5.4,
+     "snr_out": 5.4,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.769,
+     "stoi_out": 0.769
+    },
+    "brown_5dB": {
+     "snr_in": 40.9,
+     "snr_out": 40.9,
+     "gain_db": -0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 1.0,
+     "stoi_out": 1.0
+    },
+    "brown_0dB": {
+     "snr_in": 35.7,
+     "snr_out": 35.7,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.999,
+     "stoi_out": 0.999
+    },
+    "wind_gusts_5dB": {
+     "snr_in": 28.0,
+     "snr_out": 28.0,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.999,
+     "stoi_out": 0.999
+    },
+    "wind_gusts_0dB": {
+     "snr_in": 22.8,
+     "snr_out": 22.8,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.997,
+     "stoi_out": 0.997
+    },
+    "engine_5dB": {
+     "snr_in": 7.9,
+     "snr_out": 7.9,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.932,
+     "stoi_out": 0.932
+    },
+    "engine_0dB": {
+     "snr_in": 3.0,
+     "snr_out": 3.0,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.877,
+     "stoi_out": 0.877
+    },
+    "road_roar_5dB": {
+     "snr_in": 6.7,
+     "snr_out": 6.7,
+     "gain_db": -0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.871,
+     "stoi_out": 0.871
+    },
+    "road_roar_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 2.0,
+     "gain_db": -0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.778,
+     "stoi_out": 0.778
+    },
+    "traffic_5dB": {
+     "snr_in": 6.9,
+     "snr_out": 6.9,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.817,
+     "stoi_out": 0.817
+    },
+    "traffic_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 2.0,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.744,
+     "stoi_out": 0.744
+    },
+    "highway_mix_5dB": {
+     "snr_in": 10.5,
+     "snr_out": 10.5,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.929,
+     "stoi_out": 0.929
+    },
+    "highway_mix_0dB": {
+     "snr_in": 5.5,
+     "snr_out": 5.5,
+     "gain_db": 0.0,
+     "noise_cut_db": -0.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.868,
+     "stoi_out": 0.868
+    }
+   }
+  },
+  "b_dart355_normal": {
+   "info": {
+    "latency16k": 192,
+    "usPer10ms": 89.9
+   },
+   "latency16k": 189,
+   "measured_latency16k": 189,
+   "speech_loss_db": -1.38,
+   "mixes": {
+    "pink_5dB": {
+     "snr_in": 10.4,
+     "snr_out": 2.8,
+     "gain_db": -7.6,
+     "noise_cut_db": 23.6,
+     "wind_share": null,
+     "stoi_in": 0.862,
+     "stoi_out": 0.703
+    },
+    "pink_0dB": {
+     "snr_in": 5.4,
+     "snr_out": 0.7,
+     "gain_db": -4.7,
+     "noise_cut_db": 23.9,
+     "wind_share": null,
+     "stoi_in": 0.769,
+     "stoi_out": 0.594
+    },
+    "brown_5dB": {
+     "snr_in": 40.9,
+     "snr_out": 10.5,
+     "gain_db": -30.4,
+     "noise_cut_db": 42.0,
+     "wind_share": null,
+     "stoi_in": 1.0,
+     "stoi_out": 0.896
+    },
+    "brown_0dB": {
+     "snr_in": 35.7,
+     "snr_out": 9.6,
+     "gain_db": -26.1,
+     "noise_cut_db": 49.6,
+     "wind_share": null,
+     "stoi_in": 0.999,
+     "stoi_out": 0.874
+    },
+    "wind_gusts_5dB": {
+     "snr_in": 28.0,
+     "snr_out": 10.2,
+     "gain_db": -17.9,
+     "noise_cut_db": 42.5,
+     "wind_share": null,
+     "stoi_in": 0.999,
+     "stoi_out": 0.896
+    },
+    "wind_gusts_0dB": {
+     "snr_in": 22.8,
+     "snr_out": 9.1,
+     "gain_db": -13.8,
+     "noise_cut_db": 45.6,
+     "wind_share": null,
+     "stoi_in": 0.997,
+     "stoi_out": 0.874
+    },
+    "engine_5dB": {
+     "snr_in": 7.9,
+     "snr_out": 5.2,
+     "gain_db": -2.7,
+     "noise_cut_db": 36.7,
+     "wind_share": null,
+     "stoi_in": 0.932,
+     "stoi_out": 0.808
+    },
+    "engine_0dB": {
+     "snr_in": 3.0,
+     "snr_out": 1.9,
+     "gain_db": -1.1,
+     "noise_cut_db": 36.4,
+     "wind_share": null,
+     "stoi_in": 0.877,
+     "stoi_out": 0.724
+    },
+    "road_roar_5dB": {
+     "snr_in": 6.7,
+     "snr_out": 2.3,
+     "gain_db": -4.4,
+     "noise_cut_db": 20.7,
+     "wind_share": null,
+     "stoi_in": 0.871,
+     "stoi_out": 0.725
+    },
+    "road_roar_0dB": {
+     "snr_in": 2.0,
+     "snr_out": -0.3,
+     "gain_db": -2.3,
+     "noise_cut_db": 20.5,
+     "wind_share": null,
+     "stoi_in": 0.778,
+     "stoi_out": 0.639
+    },
+    "traffic_5dB": {
+     "snr_in": 6.9,
+     "snr_out": 3.8,
+     "gain_db": -3.1,
+     "noise_cut_db": 10.8,
+     "wind_share": null,
+     "stoi_in": 0.817,
+     "stoi_out": 0.722
+    },
+    "traffic_0dB": {
+     "snr_in": 2.0,
+     "snr_out": -0.2,
+     "gain_db": -2.2,
+     "noise_cut_db": 12.5,
+     "wind_share": null,
+     "stoi_in": 0.744,
+     "stoi_out": 0.604
+    },
+    "highway_mix_5dB": {
+     "snr_in": 10.5,
+     "snr_out": 5.0,
+     "gain_db": -5.5,
+     "noise_cut_db": 33.1,
+     "wind_share": null,
+     "stoi_in": 0.929,
+     "stoi_out": 0.8
+    },
+    "highway_mix_0dB": {
+     "snr_in": 5.5,
+     "snr_out": 1.7,
+     "gain_db": -3.8,
+     "noise_cut_db": 33.0,
+     "wind_share": null,
+     "stoi_in": 0.868,
+     "stoi_out": 0.711
+    }
+   }
+  },
+  "c_rnnoise_normal": {
+   "info": {
+    "latency16k": 200,
+    "usPer10ms": 369.2,
+    "worstUsPer20ms": 9881.1,
+    "meanVad": 0.542,
+    "windShare": 0.0,
+    "taps": 121
+   },
+   "latency16k": 196,
+   "measured_latency16k": 196,
+   "speech_loss_db": 1.35,
+   "mixes": {
+    "pink_5dB": {
+     "snr_in": 10.4,
+     "snr_out": 15.1,
+     "gain_db": 4.7,
+     "noise_cut_db": 15.7,
+     "wind_share": 0.012,
+     "stoi_in": 0.862,
+     "stoi_out": 0.893
+    },
+    "pink_0dB": {
+     "snr_in": 5.4,
+     "snr_out": 12.1,
+     "gain_db": 6.6,
+     "noise_cut_db": 16.1,
+     "wind_share": 0.021,
+     "stoi_in": 0.769,
+     "stoi_out": 0.826
+    },
+    "brown_5dB": {
+     "snr_in": 40.9,
+     "snr_out": 21.0,
+     "gain_db": -19.9,
+     "noise_cut_db": 30.1,
+     "wind_share": 0.008,
+     "stoi_in": 1.0,
+     "stoi_out": 0.995
+    },
+    "brown_0dB": {
+     "snr_in": 35.7,
+     "snr_out": 20.9,
+     "gain_db": -14.9,
+     "noise_cut_db": 35.1,
+     "wind_share": 0.009,
+     "stoi_in": 0.999,
+     "stoi_out": 0.994
+    },
+    "wind_gusts_5dB": {
+     "snr_in": 28.0,
+     "snr_out": 18.3,
+     "gain_db": -9.8,
+     "noise_cut_db": 26.6,
+     "wind_share": 0.047,
+     "stoi_in": 0.999,
+     "stoi_out": 0.99
+    },
+    "wind_gusts_0dB": {
+     "snr_in": 22.8,
+     "snr_out": 17.9,
+     "gain_db": -4.9,
+     "noise_cut_db": 30.0,
+     "wind_share": 0.073,
+     "stoi_in": 0.997,
+     "stoi_out": 0.988
+    },
+    "engine_5dB": {
+     "snr_in": 7.9,
+     "snr_out": 15.8,
+     "gain_db": 7.9,
+     "noise_cut_db": 16.6,
+     "wind_share": 0.0,
+     "stoi_in": 0.932,
+     "stoi_out": 0.952
+    },
+    "engine_0dB": {
+     "snr_in": 3.0,
+     "snr_out": 12.4,
+     "gain_db": 9.4,
+     "noise_cut_db": 17.0,
+     "wind_share": 0.0,
+     "stoi_in": 0.877,
+     "stoi_out": 0.909
+    },
+    "road_roar_5dB": {
+     "snr_in": 6.7,
+     "snr_out": 12.8,
+     "gain_db": 6.1,
+     "noise_cut_db": 12.6,
+     "wind_share": 0.0,
+     "stoi_in": 0.871,
+     "stoi_out": 0.906
+    },
+    "road_roar_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 8.7,
+     "gain_db": 6.7,
+     "noise_cut_db": 12.8,
+     "wind_share": 0.0,
+     "stoi_in": 0.778,
+     "stoi_out": 0.825
+    },
+    "traffic_5dB": {
+     "snr_in": 6.9,
+     "snr_out": 11.1,
+     "gain_db": 4.2,
+     "noise_cut_db": 4.4,
+     "wind_share": 0.008,
+     "stoi_in": 0.817,
+     "stoi_out": 0.85
+    },
+    "traffic_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 6.4,
+     "gain_db": 4.4,
+     "noise_cut_db": 4.9,
+     "wind_share": 0.012,
+     "stoi_in": 0.744,
+     "stoi_out": 0.782
+    },
+    "highway_mix_5dB": {
+     "snr_in": 10.5,
+     "snr_out": 15.0,
+     "gain_db": 4.6,
+     "noise_cut_db": 15.9,
+     "wind_share": 0.027,
+     "stoi_in": 0.929,
+     "stoi_out": 0.945
+    },
+    "highway_mix_0dB": {
+     "snr_in": 5.5,
+     "snr_out": 12.2,
+     "gain_db": 6.7,
+     "noise_cut_db": 16.3,
+     "wind_share": 0.04,
+     "stoi_in": 0.868,
+     "stoi_out": 0.898
+    }
+   }
+  },
+  "d_rnnoise_strong": {
+   "info": {
+    "latency16k": 200,
+    "usPer10ms": 436.4,
+    "worstUsPer20ms": 17967.6,
+    "meanVad": 0.542,
+    "windShare": 0.0,
+    "taps": 121
+   },
+   "latency16k": 196,
+   "measured_latency16k": 196,
+   "speech_loss_db": -0.57,
+   "mixes": {
+    "pink_5dB": {
+     "snr_in": 10.4,
+     "snr_out": 15.1,
+     "gain_db": 4.6,
+     "noise_cut_db": 26.6,
+     "wind_share": 0.012,
+     "stoi_in": 0.862,
+     "stoi_out": 0.886
+    },
+    "pink_0dB": {
+     "snr_in": 5.4,
+     "snr_out": 12.5,
+     "gain_db": 7.0,
+     "noise_cut_db": 28.0,
+     "wind_share": 0.021,
+     "stoi_in": 0.769,
+     "stoi_out": 0.821
+    },
+    "brown_5dB": {
+     "snr_in": 40.9,
+     "snr_out": 21.0,
+     "gain_db": -19.8,
+     "noise_cut_db": 32.3,
+     "wind_share": 0.008,
+     "stoi_in": 1.0,
+     "stoi_out": 0.994
+    },
+    "brown_0dB": {
+     "snr_in": 35.7,
+     "snr_out": 20.9,
+     "gain_db": -14.8,
+     "noise_cut_db": 37.5,
+     "wind_share": 0.009,
+     "stoi_in": 0.999,
+     "stoi_out": 0.993
+    },
+    "wind_gusts_5dB": {
+     "snr_in": 28.0,
+     "snr_out": 17.6,
+     "gain_db": -10.5,
+     "noise_cut_db": 29.5,
+     "wind_share": 0.047,
+     "stoi_in": 0.999,
+     "stoi_out": 0.986
+    },
+    "wind_gusts_0dB": {
+     "snr_in": 22.8,
+     "snr_out": 17.2,
+     "gain_db": -5.6,
+     "noise_cut_db": 33.7,
+     "wind_share": 0.073,
+     "stoi_in": 0.997,
+     "stoi_out": 0.984
+    },
+    "engine_5dB": {
+     "snr_in": 7.9,
+     "snr_out": 15.8,
+     "gain_db": 7.9,
+     "noise_cut_db": 26.5,
+     "wind_share": 0.0,
+     "stoi_in": 0.932,
+     "stoi_out": 0.953
+    },
+    "engine_0dB": {
+     "snr_in": 3.0,
+     "snr_out": 12.5,
+     "gain_db": 9.5,
+     "noise_cut_db": 28.7,
+     "wind_share": 0.0,
+     "stoi_in": 0.877,
+     "stoi_out": 0.91
+    },
+    "road_roar_5dB": {
+     "snr_in": 6.7,
+     "snr_out": 13.1,
+     "gain_db": 6.3,
+     "noise_cut_db": 22.3,
+     "wind_share": 0.0,
+     "stoi_in": 0.871,
+     "stoi_out": 0.907
+    },
+    "road_roar_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 9.1,
+     "gain_db": 7.1,
+     "noise_cut_db": 22.6,
+     "wind_share": 0.0,
+     "stoi_in": 0.778,
+     "stoi_out": 0.822
+    },
+    "traffic_5dB": {
+     "snr_in": 6.9,
+     "snr_out": 11.7,
+     "gain_db": 4.7,
+     "noise_cut_db": 7.0,
+     "wind_share": 0.008,
+     "stoi_in": 0.817,
+     "stoi_out": 0.844
+    },
+    "traffic_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 6.9,
+     "gain_db": 4.9,
+     "noise_cut_db": 7.8,
+     "wind_share": 0.012,
+     "stoi_in": 0.744,
+     "stoi_out": 0.775
+    },
+    "highway_mix_5dB": {
+     "snr_in": 10.5,
+     "snr_out": 14.7,
+     "gain_db": 4.2,
+     "noise_cut_db": 25.4,
+     "wind_share": 0.027,
+     "stoi_in": 0.929,
+     "stoi_out": 0.943
+    },
+    "highway_mix_0dB": {
+     "snr_in": 5.5,
+     "snr_out": 12.2,
+     "gain_db": 6.7,
+     "noise_cut_db": 26.7,
+     "wind_share": 0.04,
+     "stoi_in": 0.868,
+     "stoi_out": 0.896
+    }
+   }
+  },
+  "e_strong_nowind": {
+   "info": {
+    "latency16k": 200,
+    "usPer10ms": 401.3,
+    "worstUsPer20ms": 9799.1,
+    "meanVad": 0.542,
+    "windShare": 0.0,
+    "taps": 121
+   },
+   "latency16k": 196,
+   "measured_latency16k": 196,
+   "speech_loss_db": -0.57,
+   "mixes": {
+    "pink_5dB": {
+     "snr_in": 10.4,
+     "snr_out": 16.0,
+     "gain_db": 5.5,
+     "noise_cut_db": 26.6,
+     "wind_share": 0.012,
+     "stoi_in": 0.862,
+     "stoi_out": 0.888
+    },
+    "pink_0dB": {
+     "snr_in": 5.4,
+     "snr_out": 13.1,
+     "gain_db": 7.6,
+     "noise_cut_db": 27.9,
+     "wind_share": 0.021,
+     "stoi_in": 0.769,
+     "stoi_out": 0.822
+    },
+    "brown_5dB": {
+     "snr_in": 40.9,
+     "snr_out": 21.1,
+     "gain_db": -19.8,
+     "noise_cut_db": 32.2,
+     "wind_share": 0.008,
+     "stoi_in": 1.0,
+     "stoi_out": 0.997
+    },
+    "brown_0dB": {
+     "snr_in": 35.7,
+     "snr_out": 21.0,
+     "gain_db": -14.8,
+     "noise_cut_db": 37.4,
+     "wind_share": 0.009,
+     "stoi_in": 0.999,
+     "stoi_out": 0.997
+    },
+    "wind_gusts_5dB": {
+     "snr_in": 28.0,
+     "snr_out": 20.6,
+     "gain_db": -7.5,
+     "noise_cut_db": 29.2,
+     "wind_share": 0.047,
+     "stoi_in": 0.999,
+     "stoi_out": 0.996
+    },
+    "wind_gusts_0dB": {
+     "snr_in": 22.8,
+     "snr_out": 19.9,
+     "gain_db": -2.9,
+     "noise_cut_db": 33.4,
+     "wind_share": 0.073,
+     "stoi_in": 0.997,
+     "stoi_out": 0.994
+    },
+    "engine_5dB": {
+     "snr_in": 7.9,
+     "snr_out": 15.8,
+     "gain_db": 7.9,
+     "noise_cut_db": 26.5,
+     "wind_share": 0.0,
+     "stoi_in": 0.932,
+     "stoi_out": 0.953
+    },
+    "engine_0dB": {
+     "snr_in": 3.0,
+     "snr_out": 12.5,
+     "gain_db": 9.5,
+     "noise_cut_db": 28.7,
+     "wind_share": 0.0,
+     "stoi_in": 0.877,
+     "stoi_out": 0.91
+    },
+    "road_roar_5dB": {
+     "snr_in": 6.7,
+     "snr_out": 13.1,
+     "gain_db": 6.3,
+     "noise_cut_db": 22.3,
+     "wind_share": 0.0,
+     "stoi_in": 0.871,
+     "stoi_out": 0.907
+    },
+    "road_roar_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 9.1,
+     "gain_db": 7.1,
+     "noise_cut_db": 22.6,
+     "wind_share": 0.0,
+     "stoi_in": 0.778,
+     "stoi_out": 0.822
+    },
+    "traffic_5dB": {
+     "snr_in": 6.9,
+     "snr_out": 11.8,
+     "gain_db": 4.8,
+     "noise_cut_db": 7.0,
+     "wind_share": 0.008,
+     "stoi_in": 0.817,
+     "stoi_out": 0.847
+    },
+    "traffic_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 7.0,
+     "gain_db": 5.0,
+     "noise_cut_db": 7.8,
+     "wind_share": 0.012,
+     "stoi_in": 0.744,
+     "stoi_out": 0.778
+    },
+    "highway_mix_5dB": {
+     "snr_in": 10.5,
+     "snr_out": 16.0,
+     "gain_db": 5.5,
+     "noise_cut_db": 25.3,
+     "wind_share": 0.027,
+     "stoi_in": 0.929,
+     "stoi_out": 0.95
+    },
+    "highway_mix_0dB": {
+     "snr_in": 5.5,
+     "snr_out": 12.9,
+     "gain_db": 7.4,
+     "noise_cut_db": 26.5,
+     "wind_share": 0.04,
+     "stoi_in": 0.868,
+     "stoi_out": 0.906
+    }
+   }
+  },
+  "f_strong_plus_dart_post": {
+   "info": {
+    "latency16k": 392,
+    "usPer10ms": 77.7
+   },
+   "latency16k": 447,
+   "measured_latency16k": 447,
+   "speech_loss_db": -1.39,
+   "mixes": {
+    "pink_5dB": {
+     "snr_in": 10.4,
+     "snr_out": 12.0,
+     "gain_db": 1.6,
+     "noise_cut_db": 29.5,
+     "wind_share": null,
+     "stoi_in": 0.862,
+     "stoi_out": 0.877
+    },
+    "pink_0dB": {
+     "snr_in": 5.4,
+     "snr_out": 10.7,
+     "gain_db": 5.3,
+     "noise_cut_db": 30.4,
+     "wind_share": null,
+     "stoi_in": 0.769,
+     "stoi_out": 0.82
+    },
+    "brown_5dB": {
+     "snr_in": 40.9,
+     "snr_out": 13.6,
+     "gain_db": -27.3,
+     "noise_cut_db": 32.5,
+     "wind_share": null,
+     "stoi_in": 1.0,
+     "stoi_out": 0.977
+    },
+    "brown_0dB": {
+     "snr_in": 35.7,
+     "snr_out": 13.6,
+     "gain_db": -22.1,
+     "noise_cut_db": 37.7,
+     "wind_share": null,
+     "stoi_in": 0.999,
+     "stoi_out": 0.977
+    },
+    "wind_gusts_5dB": {
+     "snr_in": 28.0,
+     "snr_out": 12.7,
+     "gain_db": -15.3,
+     "noise_cut_db": 29.9,
+     "wind_share": null,
+     "stoi_in": 0.999,
+     "stoi_out": 0.971
+    },
+    "wind_gusts_0dB": {
+     "snr_in": 22.8,
+     "snr_out": 12.6,
+     "gain_db": -10.2,
+     "noise_cut_db": 34.4,
+     "wind_share": null,
+     "stoi_in": 0.997,
+     "stoi_out": 0.969
+    },
+    "engine_5dB": {
+     "snr_in": 7.9,
+     "snr_out": 12.4,
+     "gain_db": 4.5,
+     "noise_cut_db": 28.5,
+     "wind_share": null,
+     "stoi_in": 0.932,
+     "stoi_out": 0.941
+    },
+    "engine_0dB": {
+     "snr_in": 3.0,
+     "snr_out": 10.8,
+     "gain_db": 7.8,
+     "noise_cut_db": 31.0,
+     "wind_share": null,
+     "stoi_in": 0.877,
+     "stoi_out": 0.905
+    },
+    "road_roar_5dB": {
+     "snr_in": 6.7,
+     "snr_out": 11.0,
+     "gain_db": 4.3,
+     "noise_cut_db": 25.0,
+     "wind_share": null,
+     "stoi_in": 0.871,
+     "stoi_out": 0.899
+    },
+    "road_roar_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 8.3,
+     "gain_db": 6.2,
+     "noise_cut_db": 25.9,
+     "wind_share": null,
+     "stoi_in": 0.778,
+     "stoi_out": 0.821
+    },
+    "traffic_5dB": {
+     "snr_in": 6.9,
+     "snr_out": 9.9,
+     "gain_db": 3.0,
+     "noise_cut_db": 8.2,
+     "wind_share": null,
+     "stoi_in": 0.817,
+     "stoi_out": 0.837
+    },
+    "traffic_0dB": {
+     "snr_in": 2.0,
+     "snr_out": 5.8,
+     "gain_db": 3.8,
+     "noise_cut_db": 7.9,
+     "wind_share": null,
+     "stoi_in": 0.744,
+     "stoi_out": 0.774
+    },
+    "highway_mix_5dB": {
+     "snr_in": 10.5,
+     "snr_out": 11.8,
+     "gain_db": 1.3,
+     "noise_cut_db": 27.4,
+     "wind_share": null,
+     "stoi_in": 0.929,
+     "stoi_out": 0.931
+    },
+    "highway_mix_0dB": {
+     "snr_in": 5.5,
+     "snr_out": 10.5,
+     "gain_db": 4.9,
+     "noise_cut_db": 29.4,
+     "wind_share": null,
+     "stoi_in": 0.868,
+     "stoi_out": 0.891
+    }
+   }
+  }
+ },
+ "ffi_check": {
+  "ffiIdenticalToC": true,
+  "diffSamples": 0,
+  "maxVad": 1.0,
+  "usPer20msViaFfi": 381.5
+ },
+ "cpu_strong_chain": {
+  "latency16k": 200,
+  "usPer10ms": 163.5,
+  "worstUsPer20ms": 1514.0,
+  "meanVad": 0.55,
+  "windShare": 0.04,
+  "taps": 121
+ },
+ "host": {
+  "machine": "x86_64",
+  "processor": "x86_64",
+  "python": "3.13.18"
+ }
+}

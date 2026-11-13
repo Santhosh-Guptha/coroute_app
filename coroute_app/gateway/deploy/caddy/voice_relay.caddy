@@ -1,0 +1,17 @@
+# Round 8 voice relay (VOICE_RELAY_MODE=process): /voice goes to the voice process, never to the live gateway.
+# Paste inside the coroute.devmonks.space / coroute.duckdns.org site block of Caddyfile.vm1 (and the DR / staging
+# copies that run the live gateway), ABOVE `handle @live`. Caddy's `handle` blocks are mutually exclusive and
+# sorted by matcher specificity; a path matcher `/voice*` beats the @live expression for /voice.
+# With VOICE_RELAY_MODE=inprocess (default) the gateway never hands out /voice tickets, so this block is idle.
+# The process binds VOICE_RELAY_HOST:VOICE_RELAY_PORT (default 127.0.0.1:3010); keep it loopback.
+handle /voice* {
+	reverse_proxy 127.0.0.1:{$VOICE_RELAY_PORT:3010} {
+		# Voice WebSockets: keep them across a config reload, no response buffering.
+		stream_close_delay 5m
+		flush_interval -1
+		transport http {
+			keepalive 60s
+			keepalive_idle_conns 16
+		}
+	}
+}

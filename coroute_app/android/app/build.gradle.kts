@@ -96,6 +96,15 @@ android {
         resValues = true
     }
 
+    // Round 8: native intercom voice cleanup, libcoroute_voice.so (RNNoise, BSD-3-Clause; src/main/cpp).
+    // Loaded from Dart with dart:ffi (lib/data/services/voice/voice_native_ffi.dart); no JNI.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     signingConfigs {
         create("release") {
             val storePath = signingValue("storeFile", "COROUTE_STORE_FILE")

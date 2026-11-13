@@ -157,6 +157,8 @@ The give-way side comes from the setting "Give way to the" (`auto` / `left` / `r
 
 ## 4. Clean intercom voice (VoiceCleanup)
 
+> Round 8: on Android the native RNNoise stage now runs first (Noise reduction: Strong / Normal / Off), and this Dart chain keeps the gate, breath cut, AGC and limiter. It is the full fallback without the native library. See `voice_clarity.md`.
+
 At 16 kHz, per frame, before encoding and sending:
 
 1. **High-pass at 140 Hz** (2nd-order biquad) removes wind rumble and engine drone.

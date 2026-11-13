@@ -62,7 +62,23 @@ class VoiceCleanup {
   /// Voice gate attenuation (tests switch it off to measure noise suppression alone).
   bool gate;
 
-  VoiceCleanup({this.handsFree = true, this.suppressNoise = true, this.agc = true, this.gate = true});
+  /// Round 8: the STFT Wiener stage. False when the native RNNoise stage already cleaned the frame
+  /// (noise reduction "Strong" / "Normal" with libcoroute_voice); breath / wind / gate / AGC still run.
+  bool spectralSuppression;
+
+  /// Round 8: the 20 ms wind-gust class (-18 dB). False with the native stage, whose 10 ms wind detector
+  /// (with RNNoise's voice probability) ducks gusts instead: the lab (tool/voice_lab) showed this class also
+  /// firing on about 10 % of clean-speech blocks (nasals and other low, weakly voiced sounds).
+  bool windSuppression;
+
+  VoiceCleanup({
+    this.handsFree = true,
+    this.suppressNoise = true,
+    this.agc = true,
+    this.gate = true,
+    this.spectralSuppression = true,
+    this.windSuppression = true,
+  });
 
   final Biquad _hpf = Biquad.highPass(sampleRate.toDouble(), 140);
   final Fft _fft = Fft(n);
@@ -209,7 +225,7 @@ class VoiceCleanup {
     }
     _blockHops++;
     final gMin = dbToAmp(gainFloorDb);
-    if (suppressNoise) {
+    if (suppressNoise && spectralSuppression) {
       for (var k = 0; k <= half; k++) {
         final post = _pow[k] / (_noise[k] * 1.4); // noise is a minimum: scale toward its mean
         final xi = 0.98 * _gPrev[k] * _gPrev[k] * _postPrev[k] + 0.02 * math.max(post - 1, 0);
@@ -331,7 +347,7 @@ class VoiceCleanup {
     }
     _breathRun = breathLike ? _breathRun + 1 : 0;
     final breath = suppressNoise && breathLike && _breathRun >= 3 && _sinceVoiced >= 5;
-    final wind = suppressNoise && windLike && !voiced;
+    final wind = suppressNoise && windSuppression && windLike && !voiced;
 
     // Gate.
     if (_voicedRun >= voxOpenBlocks) {

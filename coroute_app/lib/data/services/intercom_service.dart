@@ -10,12 +10,18 @@ import 'package:record/record.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/feature_gates.dart';
 import '../../domain/audio/dsp_core.dart';
+import '../../domain/audio/voice_clarity.dart';
 import '../../domain/audio/voice_cleanup.dart';
+import '../../domain/audio/voice_codec_policy.dart';
+import '../../domain/audio/voice_jitter.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'background_service.dart';
 import 'realtime_service.dart';
 import 'ride_mic_hub.dart';
 import 'settings_service.dart';
+import 'voice/voice_codec.dart';
+import 'voice/voice_link.dart';
+import 'voice/voice_native.dart';
 
 enum IntercomMode { ptt, vox }
 
@@ -81,6 +87,16 @@ class ActiveSpeakerInfo {
 ///   Off = raw frames and the old loudness VOX.
 /// * Received voice goes through a light peak limiter, so one loud rider does not blast.
 ///
+/// Round 8 voice clarity (docs/features_355/voice_clarity.md):
+/// * Noise reduction (Intercom options: Strong default / Normal / Off): the native RNNoise stage
+///   (libcoroute_voice via dart:ffi: 120 Hz high-pass, RNNoise, wind-gust ducker) runs before [VoiceCleanup],
+///   which then keeps only the voice gate, breath cut, AGC and limiter ([VoiceChainPlan]). Without the native
+///   library the 3.55 pure-Dart chain runs as before.
+/// * Opus (MediaCodec, [OpusTx] / [OpusRx]) when the gateway says the whole group can receive it (VOICE_CODEC)
+///   and this phone has the encoder; otherwise PCM16 as before. A refused Opus START restarts the talk in PCM.
+/// * Receive: adaptive jitter buffer (40-120 ms), loss concealment and drift control ([VoiceJitterBuffer]).
+/// * Process-mode gateway: voice goes over a separate socket ([VoiceLink]) when the gateway hands out a ticket.
+///
 /// Public actions for notification buttons / remotes (names are stable):
 /// * [toggleHandsFreeTalk] - hands-free talk on / off (arms or disarms VOX);
 /// * [toggleGroupMute] - stop / resume hearing the group (deafen);
@@ -116,10 +132,10 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _applyMicRate() {
-    if (_disposed || !_micOpen || _transmitting || _mode != IntercomMode.vox || _micRate == txSampleRate) return;
+    if (_disposed || !_micOpen || _transmitting || _mode != IntercomMode.vox || _micRate == _rateFor(_txCodec)) return;
     if (micHub != null) {
-      // The shared mic always records at 16 kHz; data saver only changes what is sent.
-      _micRate = txSampleRate;
+      // The shared mic always records at 16 kHz; data saver only changes what is sent (Opus stays 16 kHz).
+      _micRate = _rateFor(_txCodec);
       _decimator = null;
       return;
     }
@@ -181,6 +197,61 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   final List<Uint8List> _preRoll = [];
   final PeakLimiter _rxLimiter = PeakLimiter(ceiling: 0.8, releaseDbPerSecond: 6.0);
   bool _appInForeground = true;
+
+  // ---- Round 8 voice clarity / codec / receive path
+  /// The native cleanup stage (tests inject a fake or `() => null`). Null result = pure-Dart chain.
+  VoiceDenoiser? Function() denoiserFactory = createNativeVoiceDenoiser;
+  VoiceDenoiser? _native;
+  bool _nativeTried = false;
+  int? _nativeMode;
+  bool? _nativeWind;
+  OpusCaps _opus = OpusCaps.none;
+  String? _groupCodec; // last VOICE_CODEC of this group; null = never told (PCM)
+  String _txCodec = VoiceCodecs.pcm;
+  OpusTx? _opusTx;
+  final SerialVoiceSender _tx = SerialVoiceSender();
+  final OpusRx _opusRx = OpusRx();
+  VoiceJitterBuffer? _jb;
+  final Concealer _concealer = Concealer();
+  String? _rxCodec;
+  int _lastRxSamples = 640;
+  VoiceLink? _link;
+  bool _txViaLink = false;
+  final Stopwatch _clock = Stopwatch()..start();
+
+  /// What the cleanup runs for the current settings (rider choice, admin switch, native library present).
+  VoiceChainPlan get voiceChainPlan => VoiceChainPlan.forChoice(
+        settings?.noiseReduction ?? NoiseReduction.strong,
+        windNoiseMode: settings?.windNoiseMode ?? true,
+        adminOn: featureOn?.call('voiceCleanup') ?? true,
+        nativeAvailable: _nativeStage() != null,
+      );
+
+  /// Codec of the next talk.
+  @visibleForTesting
+  String get txCodec => _txCodec;
+  @visibleForTesting
+  String? get groupCodec => _groupCodec;
+
+  VoiceDenoiser? _nativeStage() {
+    if (!_nativeTried) {
+      _nativeTried = true;
+      try {
+        _native = denoiserFactory();
+      } catch (_) {
+        _native = null;
+      }
+      DiagLog.info(DiagCat.intercom, 'voice_native', {'available': _native != null});
+    }
+    return _native;
+  }
+
+  /// Codec for a talk that starts now: Opus only on the shared mic (16 kHz), when the group allows it and
+  /// this phone can encode.
+  String _chooseCodec() => micHub == null ? VoiceCodecs.pcm : VoiceCodecs.sendCodec(groupCodec: _groupCodec, opusEncoder: _opus.encoder);
+
+  /// Send rate for [codec]: Opus always encodes 16 kHz (16 kbit/s in data saver), PCM follows data saver.
+  int _rateFor(String codec) => codec == VoiceCodecs.opus ? AppConfig.audioSampleRate : txSampleRate;
 
   /// Voice cleanup on: rider setting AND admin switch 'voiceCleanup' (unknown = on).
   bool get voiceCleanupOn => (settings?.voiceCleanup ?? true) && (featureOn?.call('voiceCleanup') ?? true);
@@ -549,8 +620,10 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     final hub = micHub;
     if (hub != null) {
       _cleanup.reset();
+      _nativeStage()?.reset();
       _preRoll.clear();
-      _micRate = txSampleRate;
+      _txCodec = _chooseCodec();
+      _micRate = _rateFor(_txCodec);
       _decimator = null;
       _micOpen = true; // set first: frames may arrive before claim returns
       // Hands-free talk shares the phone's own mic with siren detection; push-to-talk
@@ -567,6 +640,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     }
     try {
       final rate = txSampleRate;
+      _txCodec = VoiceCodecs.pcm; // own recorder (no shared mic): PCM as 3.55
       final stream = await _recorder.startStream(RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: rate,
@@ -620,12 +694,30 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   /// threshold for hands-free when cleanup is on.
   void _onHubFrame(Int16List frame, MicFrameInfo info) {
     if (!_micOpen) return;
-    var x = int16ToFloat(frame);
+    Float64List x;
     bool? gate;
     if (voiceCleanupOn) {
-      _cleanup.handsFree = _mode == IntercomMode.vox;
-      x = _cleanup.process(x);
+      final plan = voiceChainPlan;
+      var src = frame;
+      final native = plan.nativeMode != null ? _nativeStage() : null;
+      if (native != null) {
+        // Round 8: RNNoise stage first (12.5 ms), then the Dart gate / breath / AGC / limiter.
+        if (_nativeMode != plan.nativeMode || _nativeWind != plan.nativeWindDuck) {
+          native.configure(mode: plan.nativeMode!, windDuck: plan.nativeWindDuck);
+          _nativeMode = plan.nativeMode;
+          _nativeWind = plan.nativeWindDuck;
+        }
+        if (frame.length % 160 == 0 && frame.length <= 960) src = native.process(frame);
+      }
+      _cleanup
+        ..handsFree = _mode == IntercomMode.vox
+        ..suppressNoise = plan.dartSuppressNoise
+        ..spectralSuppression = native == null && plan.dartSuppressNoise
+        ..windSuppression = native == null ? plan.dartWind : false;
+      x = _cleanup.process(int16ToFloat(src));
       gate = _cleanup.gateOpen;
+    } else {
+      x = int16ToFloat(frame);
     }
     if (_micRate == AppConfig.audioSampleRateLowData) {
       x = (_decimator ??= Decimator2()).process(x);
@@ -640,26 +732,90 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     _seq = 0;
     _transmitting = true;
     _txStartedAt = DateTime.now();
-    DiagLog.info(DiagCat.intercom, 'talk_start', {'mode': _mode, 'channel': _channel, 'lead': isRoadCaptain, 'direct': _talkTargetUserId != null, 'rate': _micRate});
+    // Round 8: the codec is decided per talk (the group may have changed since the mic opened).
+    final codec = _chooseCodec();
+    if (codec != _txCodec) {
+      _txCodec = codec;
+      final rate = _rateFor(codec);
+      if (rate != _micRate) {
+        _micRate = rate;
+        _decimator = null;
+        _preRoll.clear(); // recorded at the other rate
+      }
+    }
+    _txViaLink = _link?.isReady == true;
+    DiagLog.info(DiagCat.intercom, 'talk_start', {'mode': _mode, 'channel': _channel, 'lead': isRoadCaptain, 'direct': _talkTargetUserId != null, 'rate': _micRate, 'codec': _txCodec, 'link': _txViaLink});
     final header = <String, dynamic>{
       'to': _talkTargetUserId,
       'sampleRate': _micRate,
-      'codec': 'pcm16',
+      'codec': _txCodec,
       'channel': _channel == IntercomChannel.leadOnly ? 'LEAD_ONLY' : 'ALL',
     };
     if (isRoadCaptain) {
       header['role'] = 'LEAD';
       header['priority'] = true;
     }
-    _rt.sendVoice(VoiceKind.start, header);
+    _sendVoice(VoiceKind.start, header);
+    if (_txCodec == VoiceCodecs.opus) {
+      final tx = OpusTx(
+        sender: _tx,
+        bitrate: VoiceCodecs.opusBitrate(lowData: settings?.lowData ?? false),
+        onFrame: (payload) {
+          if (!_transmitting) return;
+          final h = <String, dynamic>{'to': _talkTargetUserId, 'seq': _seq++};
+          if (isRoadCaptain) {
+            h['role'] = 'LEAD';
+            h['priority'] = true;
+          }
+          _sendVoiceNow(VoiceKind.frame, h, payload);
+        },
+      );
+      tx.onFailure = () => _codecFallback('encoder');
+      _opusTx = tx;
+    }
     // 3.55: the frames just before the voice gate opened (the first syllable) go out first.
     if (_preRoll.isNotEmpty) {
       for (final b in _preRoll) {
-        _pending.add(b);
+        if (_opusTx != null) {
+          _opusTx!.add(b);
+        } else {
+          _pending.add(b);
+        }
       }
       _preRoll.clear();
     }
     notifyListeners();
+  }
+
+  /// Round 8: sends in order behind any Opus encode in flight ([SerialVoiceSender]).
+  void _sendVoice(int kind, Map<String, dynamic> header, [Uint8List? payload]) => _tx.run(() => _sendVoiceNow(kind, header, payload));
+
+  /// The voice socket of a process-mode gateway when this talk started on it, else the live socket.
+  void _sendVoiceNow(int kind, Map<String, dynamic> header, [Uint8List? payload]) {
+    final link = _link;
+    if (_txViaLink && link != null && link.isReady && link.send(VoiceLink.encode(kind, header, payload))) return;
+    _rt.sendVoice(kind, header, payload);
+  }
+
+  /// Round 8: back to PCM (the relay refused Opus, the group got an old build, or the encoder failed). A talk
+  /// in progress restarts at once in PCM (about one round trip of audio is lost).
+  void _codecFallback(String reason) {
+    if (_txCodec != VoiceCodecs.opus) return;
+    DiagLog.info(DiagCat.intercom, 'codec_fallback', {'reason': reason});
+    if (reason == 'encoder') _opus = const OpusCaps(encoder: false, decoder: true);
+    final wasTalking = _transmitting;
+    final tx = _opusTx;
+    _opusTx = null;
+    tx?.abandon();
+    if (wasTalking) {
+      _transmitting = false;
+      _pending.clear();
+      _sendVoice(VoiceKind.end, <String, dynamic>{'to': _talkTargetUserId});
+    }
+    _txCodec = VoiceCodecs.pcm;
+    _micRate = _rateFor(_txCodec);
+    _decimator = null;
+    if (wasTalking && _micOpen && !_micMuted && _rt.isConnected) _startStream();
   }
 
   void _endStream() {
@@ -672,7 +828,14 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       header['role'] = 'LEAD';
       header['priority'] = true;
     }
-    _rt.sendVoice(VoiceKind.end, header);
+    final tx = _opusTx;
+    _opusTx = null;
+    if (tx != null) {
+      // Round 8: the last Opus packet goes out first, then END (in order).
+      tx.finish(() => _sendVoiceNow(VoiceKind.end, header));
+    } else {
+      _sendVoice(VoiceKind.end, header);
+    }
     notifyListeners();
   }
 
@@ -727,6 +890,11 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
+    final opus = _opusTx;
+    if (opus != null) {
+      opus.add(chunk); // 20 ms packets, two per frame, sent by OpusTx.onFrame
+      return;
+    }
     _pending.add(chunk);
     final frameBytes = _txFrameBytes;
     while (_pending.length >= frameBytes) {
@@ -738,7 +906,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
         header['role'] = 'LEAD';
         header['priority'] = true;
       }
-      _rt.sendVoice(VoiceKind.frame, header, frame);
+      _sendVoice(VoiceKind.frame, header, Uint8List.fromList(frame));
     }
   }
 
@@ -801,6 +969,8 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _drain() async {
     if (_draining || !_playerReady) return;
     _draining = true;
+    // Round 8: the player found nothing to play while a stream is live: re-buffer to a raised target.
+    if (_jitter.isEmpty && _activeStreamId != null) _jb?.starved(_clock.elapsedMilliseconds);
     try {
       // Feed up to ~200 ms at a time so the native buffer stays small (low latency).
       var budget = _rxFrameBytes * 10;
@@ -950,6 +1120,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
         if (p.from.isNotEmpty) _speakingRiders[p.from] = true;
         _lastRxAt = DateTime.now();
         _rxLimiter.reset();
+        _rxStreamStarted(p);
 
         _triggerIncomingHapticPulse(isLead: isLead);
         final isEmergency = p.header['emergency'] == true ||
@@ -1003,22 +1174,25 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
             timestamp: DateTime.now(),
           );
 
+          _rxStreamStarted(p);
           _ensurePlayer(p.sampleRate).ignore();
           notifyListeners();
         }
         _lastRxAt = DateTime.now();
         if (p.payload.isEmpty) return;
-        // Cap the jitter buffer at ~600 ms; drop the oldest to keep latency bounded.
-        _jitter.addLast(Uint8List.fromList(p.payload));
-        _queuedBytes += p.payload.length;
-        while (_queuedBytes > _rxFrameBytes * 30 && _jitter.length > 1) {
-          _queuedBytes -= _jitter.removeFirst().length;
-        }
-        if (_playerReady && _queuedBytes >= _rxFrameBytes * 2) {
-          _drain();
-          try {
-            FlutterPcmSound.start(); // primes the feed loop if it had drained
-          } catch (_) {}
+        // Round 8: decode (Opus) / view (PCM) -> adaptive jitter buffer -> concealment -> playback queue.
+        final codec = p.header['codec']?.toString() ?? _rxCodec ?? VoiceCodecs.pcm;
+        final seq = (p.header['seq'] as num?)?.toInt();
+        if (codec == VoiceCodecs.opus) {
+          final sid = p.streamId;
+          _opusRx.decode(sid, Uint8List.fromList(p.payload), (pcm) {
+            if (sid != _activeStreamId || _deafened) return;
+            _rxPush(seq, pcm);
+          });
+        } else {
+          final even = p.payload.length & ~1;
+          final copy = Uint8List.fromList(Uint8List.sublistView(p.payload, 0, even));
+          _rxPush(seq, Int16List.view(copy.buffer, 0, even ~/ 2));
         }
         _rxIdleTimer?.cancel();
         _rxIdleTimer = Timer(const Duration(milliseconds: 1500), () => _resetPlayback(clearSpeaker: true));
@@ -1026,6 +1200,12 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
       case VoiceKind.end:
         if (p.streamId == _activeStreamId) {
+          // Round 8: the buffered tail plays out without waiting for the jitter target.
+          final jb = _jb;
+          if (jb != null) {
+            jb.markEnded();
+            _rxRelease(jb);
+          }
           if (p.from.isNotEmpty) _speakingRiders[p.from] = false;
           _activeIsLead = false;
           activeSpeakerNotifier.value = null;
@@ -1037,11 +1217,63 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// Round 8: a new incoming stream gets a fresh jitter buffer (40 ms frames on the wire) and concealer.
+  void _rxStreamStarted(VoicePacket p) {
+    _rxCodec = p.header['codec']?.toString() ?? VoiceCodecs.pcm;
+    _jb = VoiceJitterBuffer(frameMs: 40);
+    _concealer.reset();
+  }
+
+  /// One decoded frame of the active stream (PCM16 at the stream's rate). Frames without a sequence number
+  /// (never sent by CoRoute apps) skip the jitter buffer.
+  void _rxPush(int? seq, Int16List pcm) {
+    if (pcm.isEmpty) return;
+    _lastRxSamples = pcm.length;
+    final jb = _jb ??= VoiceJitterBuffer(frameMs: 40);
+    if (seq == null) {
+      _enqueuePlayback(pcm);
+      return;
+    }
+    jb.push(seq, pcm, _clock.elapsedMilliseconds);
+    _rxRelease(jb);
+  }
+
+  void _rxRelease(VoiceJitterBuffer jb) {
+    for (final r in jb.release(_clock.elapsedMilliseconds)) {
+      _enqueuePlayback(r.kind == JitterPullKind.frame ? _concealer.good(r.pcm!) : _concealer.lost(_lastRxSamples));
+    }
+  }
+
+  /// The playback queue (ducking, limiter and the player feed work on it as in 3.55).
+  void _enqueuePlayback(Int16List pcm) {
+    final bytes = Uint8List.view(pcm.buffer, pcm.offsetInBytes, pcm.lengthInBytes);
+    _jitter.addLast(Uint8List.fromList(bytes));
+    _queuedBytes += bytes.length;
+    // Cap at ~600 ms; drop the oldest to keep latency bounded.
+    while (_queuedBytes > _rxFrameBytes * 30 && _jitter.length > 1) {
+      _queuedBytes -= _jitter.removeFirst().length;
+    }
+    // Drift: a queue that stays well over the jitter target (sender clock faster than ours) loses a frame.
+    final jb = _jb;
+    final queuedMs = _queuedBytes * 10 ~/ (_rxFrameBytes > 0 ? _rxFrameBytes : 640) * 2;
+    if (jb != null && _jitter.length > 1 && jb.driftDrop(queuedMs, _clock.elapsedMilliseconds)) {
+      _queuedBytes -= _jitter.removeFirst().length;
+    }
+    if (_playerReady && _queuedBytes >= _rxFrameBytes * 2) {
+      _drain();
+      try {
+        FlutterPcmSound.start(); // primes the feed loop if it had drained
+      } catch (_) {}
+    }
+  }
+
   bool _rxStale() => DateTime.now().difference(_lastRxAt).inMilliseconds > 1500;
 
   void _resetPlayback({required bool clearSpeaker}) {
     _jitter.clear();
     _queuedBytes = 0;
+    _jb?.reset();
+    _concealer.reset();
     _isPriorityDucked = false;
     if (clearSpeaker) {
       if (_activeSpeakerId != null) _speakingRiders[_activeSpeakerId!] = false;
@@ -1087,7 +1319,10 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
         }
         notifyListeners();
       }
+    } else if (e['type'] == 'VOICE_CODEC') {
+      _onVoiceCodec(e);
     } else if (e['type'] == 'SNAPSHOT' && e['convoy'] is Map) {
+      _announceVoiceCaps(); // Round 8: after every JOIN (and re-JOIN after a reconnect)
       final riders = e['convoy']['riders'];
       if (riders is Map) {
         for (final entry in riders.entries) {
@@ -1109,12 +1344,70 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
             e['tripStatus']?.toString().toUpperCase() == 'ENDED')) {
       stopCaptureOnTripEnd();
     } else if (e['type'] == 'DISSOLVED' || e['type'] == 'LEFT') {
+      _forgetGroupVoice();
       stopCaptureOnTripEnd();
     }
   }
 
+  // ------------------------------------------------------------- Round 8 codec negotiation
+  /// Tells a gateway with the Round 8 relay ('voice2') which codecs this phone can receive.
+  Future<void> _announceVoiceCaps() async {
+    if (_disposed || !_rt.supports(VoiceCodecs.serverFeature)) return;
+    final caps = await VoiceCodecPlatform.instance.caps();
+    if (_disposed) return;
+    _opus = (_opus.decoder && !_opus.encoder && caps.encoder) ? _opus : caps; // keep an encoder marked broken
+    _rt.send({'type': 'VOICE_CAPS', 'codecs': VoiceCodecs.receivable(opusDecoder: _opus.decoder)});
+  }
+
+  void _onVoiceCodec(Map<String, dynamic> e) {
+    final gid = e['groupId']?.toString();
+    if (gid != null && _rt.groupId != null && gid != _rt.groupId) return;
+    final codec = e['codec']?.toString() == VoiceCodecs.opus ? VoiceCodecs.opus : VoiceCodecs.pcm;
+    _groupCodec = codec;
+    DiagLog.info(DiagCat.intercom, 'voice_codec', {'codec': codec, 'refused': e['refused'] == true});
+    if (codec == VoiceCodecs.pcm || e['refused'] == true) _codecFallback(e['refused'] == true ? 'refused' : 'group');
+    // Process-mode gateway: a ticket for the separate voice socket.
+    final v = e['voice'];
+    if (v is Map && v['ticket'] is String && v['path'] is String && gid != null) {
+      final link = _link ??= _newLink();
+      if (!link.isReady || link.groupId != gid) link.connect(path: v['path'] as String, ticket: v['ticket'] as String, groupId: gid);
+    }
+  }
+
+  VoiceLink _newLink() {
+    final link = VoiceLink();
+    link.packets.listen(_onVoicePacket);
+    link.onState = (ready) {
+      if (_disposed) return;
+      DiagLog.info(DiagCat.intercom, 'voice_link', {'ready': ready});
+      if (!ready && _txViaLink && _transmitting) {
+        // The voice socket dropped mid-talk: carry on over the live socket.
+        _txViaLink = false;
+        final tx = _opusTx;
+        _opusTx = null;
+        tx?.abandon();
+        _transmitting = false;
+        _pending.clear();
+        if (_micOpen && !_micMuted && _rt.isConnected) _startStream();
+      }
+      if (!ready && !_disposed && _rt.groupId != null) {
+        // Ask for a fresh ticket in a while (VOICE_CAPS is answered with VOICE_CODEC + ticket).
+        Timer(const Duration(seconds: 5), () {
+          if (!_disposed && _link?.isReady != true) _announceVoiceCaps();
+        });
+      }
+    };
+    return link;
+  }
+
+  void _forgetGroupVoice() {
+    _groupCodec = null;
+    _link?.close();
+  }
+
   /// Called when leaving a convoy: nothing may carry over to the next group.
   Future<void> reset() async {
+    _forgetGroupVoice();
     await stopCaptureOnTripEnd();
     audioLevel.value = 0.0;
     activeSpeakerNotifier.value = null;
@@ -1227,6 +1520,13 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       } catch (_) {}
     }
     _closeMic().ignore();
+    _opusTx?.abandon();
+    _opusTx = null;
+    _opusRx.dispose();
+    _link?.dispose();
+    _link = null;
+    _native?.dispose();
+    _native = null;
     try {
       _recorderInstance?.dispose().catchError((_) {});
     } catch (_) {}
