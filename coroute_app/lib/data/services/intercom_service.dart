@@ -15,6 +15,7 @@ import '../../domain/audio/voice_cleanup.dart';
 import '../../domain/audio/voice_codec_policy.dart';
 import '../../domain/audio/voice_jitter.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
+import '../../domain/mesh/mesh_voice_gate.dart'; // Round 10 offline link
 import 'background_service.dart';
 import 'realtime_service.dart';
 import 'ride_mic_hub.dart';
@@ -248,7 +249,25 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Codec for a talk that starts now: Opus only on the shared mic (16 kHz), when the group allows it and
   /// this phone can encode.
-  String _chooseCodec() => micHub == null ? VoiceCodecs.pcm : VoiceCodecs.sendCodec(groupCodec: _groupCodec, opusEncoder: _opus.encoder);
+  String _chooseCodec() => _offlineTalk
+      ? offlineVoice!.codecFor(opusEncoder: micHub != null && _opus.encoder) // Round 10: talk over the offline link
+      : (micHub == null ? VoiceCodecs.pcm : VoiceCodecs.sendCodec(groupCodec: _groupCodec, opusEncoder: _opus.encoder));
+
+  // ---- Round 10 offline link (docs/features_355/offline_long_range_link.md) BEGIN
+  /// Set in main.dart (OfflineLinkService). While the ride socket is down and the offline link runs, a talk goes over
+  /// the rider mesh (live, or a walkie-talkie clip when there is no live path); the same cleaned-up / encoded frames.
+  MeshVoiceGate? offlineVoice;
+  bool get _offlineTalk => !_rt.isConnected && (offlineVoice?.canTalk ?? false);
+
+  /// The socket or the offline link can carry a talk now.
+  bool get _canCarryTalk => _rt.isConnected || _offlineTalk;
+
+  /// The talk in progress started on the offline link (its frames and END go there too).
+  bool _txOffline = false;
+
+  /// A voice packet received over the mesh (same shape as the gateway's), played like any other.
+  void deliverOfflineVoice(VoicePacket p) => _onVoicePacket(p);
+  // ---- Round 10 offline link END
 
   /// Send rate for [codec]: Opus always encodes 16 kHz (16 kbit/s in data saver), PCM follows data saver.
   int _rateFor(String codec) => codec == VoiceCodecs.opus ? AppConfig.audioSampleRate : txSampleRate;
@@ -585,7 +604,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// PTT: call on press. Opens the mic and a stream to the chosen target.
   Future<bool> beginTransmission() async {
-    if (_micMuted || _transmitting || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked || !_talkSwitchOn) return false;
+    if (_micMuted || _transmitting || !_canCarryTalk || _pausedByPhoneCall || _microphoneRevoked || !_talkSwitchOn) return false; // Round 10: or offline link
     if (!await _ensurePermission()) return false;
     if (!await _openMic()) return false;
     _startStream();
@@ -600,7 +619,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// VOX: arm the open mic. Transmits only while sound exceeds the threshold.
   Future<bool> startVox() async {
-    if (_micMuted || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked || !_talkSwitchOn) return false;
+    if (_micMuted || !_canCarryTalk || _pausedByPhoneCall || _microphoneRevoked || !_talkSwitchOn) return false; // Round 10: or offline link
     if (!await _ensurePermission()) return false;
     _mode = IntercomMode.vox;
     final ok = await _openMic();
@@ -732,6 +751,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     _seq = 0;
     _transmitting = true;
     _txStartedAt = DateTime.now();
+    _txOffline = _offlineTalk; // Round 10: the whole talk stays on the path it started on
     // Round 8: the codec is decided per talk (the group may have changed since the mic opened).
     final codec = _chooseCodec();
     if (codec != _txCodec) {
@@ -759,7 +779,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     if (_txCodec == VoiceCodecs.opus) {
       final tx = OpusTx(
         sender: _tx,
-        bitrate: VoiceCodecs.opusBitrate(lowData: settings?.lowData ?? false),
+        bitrate: _txOffline ? offlineVoice!.opusBitrate : VoiceCodecs.opusBitrate(lowData: settings?.lowData ?? false), // Round 10: 8-12 kbit/s on the mesh
         onFrame: (payload) {
           if (!_transmitting) return;
           final h = <String, dynamic>{'to': _talkTargetUserId, 'seq': _seq++};
@@ -792,6 +812,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// The voice socket of a process-mode gateway when this talk started on it, else the live socket.
   void _sendVoiceNow(int kind, Map<String, dynamic> header, [Uint8List? payload]) {
+    if (_txOffline) return offlineVoice?.send(kind, header, payload); // Round 10 offline link
     final link = _link;
     if (_txViaLink && link != null && link.isReady && link.send(VoiceLink.encode(kind, header, payload))) return;
     _rt.sendVoice(kind, header, payload);
@@ -815,7 +836,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     _txCodec = VoiceCodecs.pcm;
     _micRate = _rateFor(_txCodec);
     _decimator = null;
-    if (wasTalking && _micOpen && !_micMuted && _rt.isConnected) _startStream();
+    if (wasTalking && _micOpen && !_micMuted && _canCarryTalk) _startStream();
   }
 
   void _endStream() {
@@ -862,7 +883,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       }
       if (talk) {
         // 3.55 fix: an armed VOX mic never starts a stream once the admin switched talk off.
-        if (!_transmitting && _rt.isConnected && _talkSwitchOn) _startStream();
+        if (!_transmitting && _canCarryTalk && _talkSwitchOn) _startStream(); // Round 10: or offline link
         _voxSilenceTimer?.cancel();
         // (the voice gate already holds 500 ms after the last voiced frame)
         _voxSilenceTimer = Timer(voiceGate != null ? const Duration(milliseconds: 120) : _voxHangover, () {

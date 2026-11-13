@@ -7,11 +7,19 @@ class MeshIncomingPacket {
   final int senderPort;
   final int receivedAtMs;
 
+  /// Round 10: signal strength of the link it came over (dBm; null = unknown, e.g. UDP over Wi-Fi).
+  final int? rssi;
+
+  /// Round 10: which radio path carried it ('udp', 'l2cap', 'gatt', ...).
+  final String via;
+
   MeshIncomingPacket({
     required this.data,
     required this.senderAddress,
     required this.senderPort,
     int? receivedAtMs,
+    this.rssi,
+    this.via = 'udp',
   }) : receivedAtMs = receivedAtMs ?? DateTime.now().millisecondsSinceEpoch;
 }
 

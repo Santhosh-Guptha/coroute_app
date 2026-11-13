@@ -142,6 +142,7 @@ import 'map/map_orientation_button.dart';
 import 'map/nav_camera_controller.dart';
 import '../../data/services/location_precision_service.dart';
 import 'widgets/cockpit_dual_state_banner.dart';
+import '../offline_link/offline_link_widgets.dart'; // Round 10 offline link
 import 'widgets/cockpit_permission_warning_banner.dart';
 import 'widgets/rider_management_sheet.dart';
 import '../widgets/sheet_coordinator.dart';
@@ -3128,6 +3129,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   const CockpitPermissionWarningBanner(
                     margin: EdgeInsets.only(top: Space.s8),
                   ),
+                  // Round 10 offline link: "Offline link: 5 riders, 2 hops", voice-message and chain-keeper notes.
+                  const OfflineLinkChip(margin: EdgeInsets.only(top: Space.s8)),
                   // In-cockpit alert slot
                   AnimatedSwitcher(
                     duration: Motion.screen,
@@ -3734,6 +3737,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           )),
           isLead: lead,
         ),
+        const OfflineLinkCapabilityLine(), // Round 10: "4 of 6 phones support long range"
         const SizedBox(height: Space.s12),
       ],
 
