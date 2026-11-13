@@ -1,0 +1,72 @@
+# /etc/systemd/system/coroute-worker.service  (round 8: separate background worker, docs/features_355/job_queue.md)
+# Runs gateway/worker.js from the same release tree as the gateway. It pulls jobs from the job queue (SODA collection
+# job_queue) by its own capacity; it never serves riders, never takes job leases and never links the live mirror.
+#
+# Where: vm2 (next to the web gateway: set WORKER_INPROCESS=off there first), vm5 (A1 worker: raise MemoryMax and
+# WORKER_CONCURRENCY in a drop-in), or vm3 at low priority (drop-in: Nice=15, CPUWeight=20, WORKER_TYPES=batch).
+# Settings: /etc/coroute/gateway.env (the same database / SMTP / FCM settings) + /etc/coroute/worker.env (worker only,
+# read last so it wins: WORKER_TYPES, WORKER_CONCURRENCY, WORKER_HEALTH_PORT ...). Secrets: /run/coroute/secrets.env.
+#   install:  sudo install -m 0644 deploy/worker/coroute-worker.service /etc/systemd/system/
+#             sudo install -m 0640 -o root -g coroute deploy/worker/worker.example.env /etc/coroute/worker.env
+#             sudo systemctl daemon-reload && sudo systemctl enable --now coroute-worker
+#   check:    curl -s http://127.0.0.1:8091/health ; curl -s http://127.0.0.1:8091/health/queue
+[Unit]
+Description=CoRoute background worker (job queue)
+Documentation=file:///opt/coroute/gateway/docs/features_355/job_queue.md
+Wants=network-online.target
+After=network-online.target coroute-secrets.service
+Requires=coroute-secrets.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=coroute
+Group=coroute
+WorkingDirectory=/opt/coroute/gateway
+EnvironmentFile=/etc/coroute/gateway.env
+EnvironmentFile=-/etc/coroute/worker.env
+EnvironmentFile=/run/coroute/secrets.env
+Environment=NODE_OPTIONS=--max-old-space-size=320
+ExecStart=/usr/bin/node worker.js
+Restart=always
+RestartSec=5
+# SIGTERM -> worker.js drains: claims nothing more, waits WORKER_DRAIN_MS (25 s), hands the rest back to the queue.
+KillSignal=SIGTERM
+TimeoutStopSec=40
+# Background work yields the CPU to anything interactive on the same VM (vm2's web gateway).
+Nice=5
+CPUWeight=50
+IOWeight=50
+# 1 GB micro (vm2): heap 320 MB. vm5 (A1): drop-in with MemoryMax=2G and NODE_OPTIONS=--max-old-space-size=1024.
+MemoryHigh=480M
+MemoryMax=560M
+LimitNOFILE=16384
+TasksMax=256
+# Hardening (as coroute-gateway.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+ReadWritePaths=-/opt/coroute/gateway/data -/var/lib/coroute
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=coroute-worker
+
+[Install]
+WantedBy=multi-user.target

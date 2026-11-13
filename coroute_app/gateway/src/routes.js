@@ -21,7 +21,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null, requireRecentAuth = null, fieldCrypto = null, rideLock = null, securityMail = null, intel = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null, requireRecentAuth = null, fieldCrypto = null, rideLock = null, securityMail = null, intel = null, roadCells = null }) {
   const { sendSession, ctxOf, isLegacyClient } = require('./security_routes');
   const r = express.Router();
   r.use((req, res, next) => {
@@ -106,6 +106,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       dataEncryption: fieldCrypto ? (fieldCrypto.missingKids.size ? 'KEY_MISSING' : fieldCrypto.enabled ? 'ON' : 'OFF') : 'OFF',
       // Round 4: road & safety intelligence job last runs and aggregate sizes (src/intel/engine.js health()).
       intel: intel ? await intel.health().catch(() => null) : null,
+      // Round 7: road cells cache (memory bytes, upstream budget, backoff) and limit votes.
+      roads: roadCells ? roadCells.health() : null,
     });
   }));
 
@@ -512,6 +514,22 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/v1/sos/dispatch-external', dispatchLimiter, dispatchExternalHandler);
   r.post('/sos/dispatch-external', dispatchLimiter, dispatchExternalHandler);
 
+  // Round 7 faster SOS: the same SOS over HTTP, sent by the phone next to the socket frame. convoys.raiseSos is
+  // idempotent per (rider, clientId), so whichever copy arrives first raises the alert and the other is a duplicate
+  // (one ALERT, one SMS round). Needs a clientId: without one the two lanes could not be told apart.
+  const sosHttpLimiter = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `soshttp:${req.user?.userId || req.ip}`, message: { error: 'Too many requests.', code: 'RATE_LIMITED' } });
+  r.post('/convoys/:groupId/sos', sosHttpLimiter, wrap(async (req, res) => {
+    const msg = req.body && typeof req.body === 'object' ? req.body : {};
+    const cid = typeof msg.clientId === 'string' ? msg.clientId.trim() : '';
+    if (!cid || cid.length > 64) return res.status(400).json({ error: 'clientId is required.', code: 'INVALID' });
+    const gid = String(req.params.groupId);
+    const out = await convoys.raiseSos(gid, req.user, { ...msg, type: 'SOS', clientId: cid });
+    if (!out.duplicate && emergencyGateway) {
+      emergencyGateway.dispatchForSos({ groupId: gid, user: req.user, alert: out.alert, msg }).catch(() => {});
+    }
+    res.status(out.duplicate ? 200 : 201).json({ alertId: out.alert.alertId, clientId: cid, duplicate: !!out.duplicate, persisted: out.persisted !== false });
+  }));
   r.post('/convoys/:groupId/leave', wrap(async (req, res) => { await convoys.leave(req.params.groupId, req.user.userId); res.json({ ok: true }); }));
 
   // Two-Role Trip Governance: Trip Owner assigns Trip Head

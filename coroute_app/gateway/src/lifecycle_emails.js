@@ -115,6 +115,14 @@ class LifecycleEmails {
     this.pending = new Set();
     this.ready = null;
     this.running = false;
+    this.jobs = null; // round 8: set by src/jobs/producers.js (email.lifecycle jobs when JOBS_QUEUE=on)
+  }
+
+  /** Round 8: hand the send to the job queue (never when already inside a job, or with the queue off). */
+  _jobsOn() { return !!(this.jobs && this.jobs.enabled && !require('./jobs/context').inJob()); }
+  async _enqueueSend(key, { delayMs = 0, priority = 3 } = {}) {
+    await this.jobs.enqueue('email.lifecycle', { key }, { key: `mail:${key}`, delayMs, priority });
+    return { queued: true };
   }
 
   origin() { return String(this.config.publicOrigin || this.config.linkOrigin || '').replace(/\/+$/, ''); }
@@ -260,6 +268,7 @@ class LifecycleEmails {
     if (!validEmail(user.email)) return { skipped: 'NO_EMAIL' };
     const key = `welcome:${user.userId}`;
     if (!(await this._claimKey(key, { kind: 'welcome', userId: user.userId, to: maskEmail(user.email) }))) return { skipped: 'ALREADY_QUEUED' };
+    if (this._jobsOn()) return this._enqueueSend(key).catch(() => this.process(key));
     return this.process(key);
   }
 
@@ -275,7 +284,11 @@ class LifecycleEmails {
         const key = `trip_memory:${meta.groupId}:${pm.userId}`;
         if (await this._claimKey(key, { kind: 'trip_memory', userId: pm.userId, groupId: meta.groupId, tripId: t.tripId, dueAt: due })) keys.push(key);
       }
-      if (!this.tripDelayMs) for (const k of keys) await this.process(k);
+      if (this._jobsOn()) {
+        // The ride summary (and its route picture, route_png.js) is built and sent on a worker. A failed enqueue is
+        // not lost: the row is QUEUED in mail_log and the leased 'lifecycle-mail' sweep sends it when due.
+        for (const k of keys) await this._enqueueSend(k, { delayMs: this.tripDelayMs, priority: 4 }).catch(() => (this.tripDelayMs ? null : this.process(k)));
+      } else if (!this.tripDelayMs) for (const k of keys) await this.process(k);
       return keys.length;
     });
   }

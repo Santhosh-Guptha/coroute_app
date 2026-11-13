@@ -12,6 +12,8 @@ const log = {
   try {
     const gw = await createApp({ logger: log });
     gw.retention.start();
+    // Round 8: the in-process job worker (WORKER_INPROCESS, src/jobs/) and the leased queue clean-up.
+    if (gw.app.locals.jobs) gw.app.locals.jobs.start();
     gw.server.listen(config.port, config.host, () => {
       log.info(`[CoRoute] gateway v${require('../package.json').version} listening on http://${config.host}:${config.port} (ws at /ws)`);
       log.info(`[CoRoute] Oracle SODA endpoint: ${config.sodaUrl}`);
@@ -19,6 +21,8 @@ const log = {
 
     const stop = async (sig) => {
       log.info(`[CoRoute] ${sig} received — flushing state and shutting down`);
+      // Round 8: running jobs finish or go back to the queue first (WORKER_DRAIN_MS), then the usual drain.
+      try { if (gw.app.locals.jobs) await gw.app.locals.jobs.stop(); } catch (e) { log.error('jobs drain error', e); }
       try { await gw.shutdown(); } catch (e) { log.error('shutdown error', e); }
       process.exit(0);
     };

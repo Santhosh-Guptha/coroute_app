@@ -156,11 +156,14 @@ function securityMailer({ mailerOf, origin, logger = console }) {
     return Promise.resolve(mailer.send({ to, subject: m.subject, text: m.text, html: m.html, headers: { 'X-CoRoute-Mail': 'security', 'X-CoRoute-Template': id } }))
       .catch((e) => { logger.warn?.(`[security-mail] ${e && e.message}`); return { sent: false }; });
   };
-  return {
+  // Round 8: the notices below call api.send (not the local function), so the job queue wrapper of send /
+  // sendTemplate (src/jobs/producers.js: priority 0, inline fallback) covers every security e-mail.
+  const api = {
     send,
     sendTemplate,
     onEvent(type, user, data = {}) {
       if (!user || !user.email) return;
+      const send = (...args) => api.send(...args);
       const acct = `${origin}/account`;
       switch (type) {
         case 'NEW_DEVICE':
@@ -205,6 +208,7 @@ function securityMailer({ mailerOf, origin, logger = console }) {
       }
     },
   };
+  return api;
 }
 
 /**

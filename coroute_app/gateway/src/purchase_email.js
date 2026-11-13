@@ -78,6 +78,7 @@ class PurchaseEmail {
     this.repo = repo; this.mailer = mailer; this.templates = templates; this.config = config; this.logger = logger; this.clock = clock;
     this.pending = new Set();
     this.ready = null;
+    this.jobs = null; // round 8: set by src/jobs/producers.js
   }
 
   get soda() { return this.repo && this.repo.soda; }
@@ -104,8 +105,28 @@ class PurchaseEmail {
   /** Hook after repo.updateRazorpayOrder(orderId, patch) -> next. */
   onOrderUpdated(next, patch) {
     if (!next || !patch || typeof patch !== 'object') return;
-    if (patch.status === 'PAID') this._later(() => this.sendReceipt(next.orderId));
-    if (patch.refundedAmountInPaise !== undefined || (patch.refundStatus && patch.refundedAmount !== undefined)) this._later(() => this.sendRefund(next.orderId));
+    if (patch.status === 'PAID') this.dispatchReceipt(next.orderId);
+    if (patch.refundedAmountInPaise !== undefined || (patch.refundStatus && patch.refundedAmount !== undefined)) {
+      this._dispatch('email.refund', next.orderId, `refund:${next.orderId}:${Number(next.refundedAmountInPaise) || 0}`, () => this.sendRefund(next.orderId));
+    }
+  }
+
+  /** The receipt of a paid order, in the background (round 8: an email.receipt job when JOBS_QUEUE=on). */
+  dispatchReceipt(orderId) { return this._dispatch('email.receipt', orderId, `receipt:${orderId}`, () => this.sendReceipt(orderId)); }
+
+  /**
+   * Round 8 (src/jobs/producers.js): enqueue the send, or run it in the background as before. The job key is
+   * rearmed when the earlier job is done (a receipt address added later); mail_log still sends each receipt once.
+   */
+  _dispatch(type, orderId, key, fn) {
+    const jobs = this.jobs;
+    if (jobs && jobs.enabled && !require('./jobs/context').inJob()) {
+      return this._later(() => jobs.enqueue(type, { orderId }, { key: `mail:${key}`, rearm: true, priority: 3 }).catch((e) => {
+        this.logger.warn?.(`[mail] enqueue failed (${String(e.code || e.message).slice(0, 60)}): sending now`);
+        return fn();
+      }));
+    }
+    return this._later(fn);
   }
 
   async _addressFor(order) {
@@ -262,7 +283,7 @@ function receiptEmailRouter({ repo, gate, service }) {
       if (!order || order.userId !== req.user.userId) return res.status(404).json({ error: 'Order not found', code: 'NOT_FOUND' });
       await repo.updateRazorpayOrder(order.orderId, { receiptEmail: email || null });
       // Already paid (a ₹0 or very fast payment): send now if it was skipped for lack of an address.
-      if (order.status === 'PAID' && email) service._later(() => service.sendReceipt(order.orderId));
+      if (order.status === 'PAID' && email) service.dispatchReceipt(order.orderId);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });

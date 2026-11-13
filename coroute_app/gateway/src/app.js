@@ -541,10 +541,31 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   intel = require('./intel/routes').attachIntel({ app, soda, repo, gate, lease, convoys, mirror, poiCells, logger, jwtSecret: config.jwtSecret, audit, ...(clock ? { clock } : {}) });
   if (migrate) await intel.init().catch((e) => logger.warn(`[intel] collection setup failed: ${e.message}`));
   intel.start();
+  // Round 7: road-geometry cells for curve prediction and speed limits on the phone, and "wrong limit" votes
+  // (src/road_cells.js, docs/features_355/curve_and_speed_limit.md). Before the main router, like the mounts above.
+  const roadCells = require('./road_cells').attachRoadCells({ app, repo, soda, gate, intel, logger, audit, hashKey: intel.key, ...(geoFetch ? { fetchImpl: geoFetch } : {}), ...(clock ? { clock } : {}) });
+  if (migrate) await roadCells.init().catch((e) => logger.warn(`[roads] collection setup failed: ${e.message}`));
   // 3.57 sessions & security endpoints (refresh, sign out, sign out everywhere, sessions list, password reset, re-auth,
   // e-mail change, 2-step verification). Before the main router (its requireAuth catch-all would answer first).
   const security = require('./security_routes').attachSecurityRoutes({ app, auth, gate, sessions, rideLock, logger, mailerOf: () => notifications.mailer });
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs, requireRecentAuth: security.requireRecentAuth, fieldCrypto, rideLock, securityMail: security.mail, intel }));
+  // ROUND 8 realtime: shard lookup for stage 4 group placement (src/shards.js; SHARDS=1 default = one pair, off).
+  app.use('/api', require('./shards').shardRouter({ repo, gate, requireAuth, config }));
+  // ---------------------------------------------------------------------------------------------------------
+  // ROUND 8 jobs mount block (src/jobs/, docs/features_355/job_queue.md). JOBS_QUEUE=off (default): every producer
+  // works inline as before. On: e-mails, push fan-out, road fetches, photo clean-up and the leased batch ticks are
+  // enqueued and worked by capacity-aware workers (in this process per WORKER_INPROCESS, or gateway/worker.js).
+  // SOS / alert paths are not touched. server.js / worker.js call app.locals.jobs.start() and .stop().
+  {
+    const J = require('./jobs');
+    const jobs = J.attachJobs({ soda: rawSoda, lease, metrics, config, logger, node: nodeName });
+    jobs.routeLease(lease, require('./jobs/producers').LEASE_ROUTES);
+    require('./jobs/producers').registerProducers({ jobs, notifications, push, security, roadCells, repo, logger });
+    app.locals.jobs = jobs;
+    app.use('/api/admin/jobs', requireAuth(gate), requireAdmin, J.adminJobsRouter({ jobs,
+      audit: typeof repo.addAuditEntry === 'function' ? (e) => repo.addAuditEntry(e).catch(() => {}) : null }));
+  }
+  // ---------------------------------------------------------------------------------------------------------
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs, requireRecentAuth: security.requireRecentAuth, fieldCrypto, rideLock, securityMail: security.mail, intel, roadCells }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -665,7 +686,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { business, metrics, shedder, intel, rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { business, metrics, shedder, intel, roadCells, rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

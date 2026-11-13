@@ -28,6 +28,12 @@
  *                                              o = any open signed-in socket (home screen too; push dedupe)
  *   U             personal message for a rider whose socket is on the peer
  *   binary 0x02   voice START/FRAME/END (frames only while the peer has sockets in that room)
+ *   SP            round 8 "SOS pending delivery": a new alert, sent in lane 0 BEFORE the origin stores it and fans it
+ *                 out. The receiver keeps it until the EV that carries that alert arrives (then it was delivered);
+ *                 if the link dies first (the origin crashed between store and fan-out), the receiver finishes the
+ *                 delivery: the alert joins its room, is stored if the origin never stored it, goes to its sockets
+ *                 (riders reconnecting there get it in the SNAPSHOT) and to the safety network / SMS gateway.
+ *                 Records not delivered within MIRROR_SOS_PENDING_TTL_MS (10 min) while the link stays up are dropped.
  *   XS            state of a registered extension (src/public_ride.js 'pr'), after the rooms, before SNAP_END;
  *                 its changes travel as EV with g '' and x = {k, op} (same ordering, ack and resend as rooms)
  * Events are applied idempotently: a receiver ignores an EV whose seq is not above the last one seen from
@@ -63,6 +69,7 @@ const os = require('os');
 const { performance } = require('perf_hooks');
 const { WebSocketServer, WebSocket } = require('ws');
 const config = require('./config');
+const { publicAlert } = require('./convoys');
 
 const ROLES = new Set(['live', 'web', 'all']);
 const HIGH_WATER = 1024 * 1024; // link send buffer above which lane 2 is dropped and lanes 0/1 queue
@@ -178,7 +185,10 @@ class Mirror {
     this.state = this.enabled && this.role === 'live' ? 'syncing' : 'serving';
     this.startedAt = now();
     this.loopLagMs = 0; this.overloadSince = 0;
-    this.stats = { sent: 0, recv: 0, dupes: 0, dropped: 0, applied: 0, handedBack: 0, authFailed: 0 };
+    this.stats = { sent: 0, recv: 0, dupes: 0, dropped: 0, applied: 0, handedBack: 0, authFailed: 0, sosPendingSent: 0, sosPendingRecv: 0, sosPendingCleared: 0, sosContinued: 0 };
+    /** Round 8: alerts the peer announced (SP) but whose ALERT event has not arrived yet: alertId -> { g, a, at }. */
+    this.sosPend = new Map();
+    this.sosPendTtlMs = o.sosPendingTtlMs ?? (Number(process.env.MIRROR_SOS_PENDING_TTL_MS) || 10 * 60000);
     this.stopped = false;
     this.server = null; this.wss = null; this.port = 0;
     this.timers = [];
@@ -354,6 +364,8 @@ class Mirror {
     if (peer) { peer.rooms = new Set(); peer.live = new Set(); peer.online = new Set(); peer.servingSince = 0; peer.state = 'down'; }
     if (!this.stopped) {
       this.log.warn(`[mirror] ${this.node} lost the link to ${link.peerNode}`);
+      // Round 8: alerts the peer announced but never delivered: this node finishes them (see SP in the header).
+      this._drainSosPending().catch((e) => this.log.warn('[mirror] SOS continuation failed', e.message));
       // This node now runs every room alone: open alerts of mirrored rooms get their safety-network incident.
       for (const [gid, room] of this.convoys.rooms) {
         if ([...room.alerts.values()].some((a) => !a.resolved)) this.convoys.emit('roomLoaded', gid);
@@ -451,6 +463,71 @@ class Mirror {
     if (room && this.link && !this.link.sentRooms.has(gid)) { d.room = this.serialize(room); this.link.sentRooms.add(gid); }
     if (room && payload && payload.userId && payload.type === 'RIDER_BATTERY_SHUTDOWN' && room.riders.has(payload.userId)) d.riders = [room.riders.get(payload.userId)];
     this._sendEvent({ g: gid, d, w: payload }, { prio: CRITICAL.has(payload && payload.type) ? 0 : 1 });
+  }
+
+  /**
+   * Round 8: a new alert about to be stored and fanned out here: announced to the peer first (lane 0), so a crash
+   * between the store and the fan-out cannot lose it. False when there is no peer to tell.
+   */
+  sosPending(gid, alert) {
+    if (!this.enabled || !this.linked() || !alert || !alert.alertId) return false;
+    this.stats.sosPendingSent++;
+    return this._json(this.link, { t: 'SP', g: gid, a: alert, at: now() }, 0);
+  }
+
+  _onSosPending(m) {
+    const a = m && m.a;
+    if (typeof m.g !== 'string' || !m.g || m.g.length > 64 || !a || typeof a.alertId !== 'string' || a.alertId.length > 100) return;
+    const room = this.convoys.rooms.get(m.g);
+    if (room && room.alerts.has(a.alertId)) return; // the ALERT event already came
+    this.stats.sosPendingRecv++;
+    this.sosPend.set(a.alertId, { g: m.g, a, at: now() });
+  }
+
+  _clearPending(alerts) {
+    if (!this.sosPend.size || !alerts) return;
+    for (const a of alerts) if (a && a.alertId && this.sosPend.delete(a.alertId)) this.stats.sosPendingCleared++;
+  }
+
+  /** The link is gone: every announced, undelivered alert is delivered by this node. */
+  async _drainSosPending() {
+    if (!this.sosPend.size) return 0;
+    const list = [...this.sosPend.values()];
+    this.sosPend.clear();
+    let n = 0;
+    for (const p of list) { try { if (await this._continueSos(p)) n++; } catch (e) { this.log.warn('[mirror] SOS continuation failed', p.a.alertId, e.message); } }
+    return n;
+  }
+
+  async _continueSos(p) {
+    const C = this.convoys;
+    let room = C.rooms.get(p.g);
+    if (!room) { try { room = await C.getRoom(p.g); } catch { room = null; } }
+    if (!room || C.rooms.get(p.g) !== room || room.alerts.has(p.a.alertId)) return false;
+    let stored = false;
+    try {
+      const rows = await C.repo.listAlerts(p.g, { includeResolved: true });
+      stored = rows.some((x) => x.alertId === p.a.alertId);
+    } catch { /* unknown: stored below (a duplicate row beats a lost SOS) */ }
+    if (room.alerts.has(p.a.alertId) || C.rooms.get(p.g) !== room) return false; // delivered while we looked
+    const alert = { ...p.a };
+    room.alerts.set(alert.alertId, alert);
+    C._indexLiveLink(p.g, alert);
+    if (!stored) {
+      try { await C.repo.addAlert(p.g, alert); } catch (e) { C._setUnsaved(room, alert.alertId, true); this.log.warn('[mirror] continued SOS not stored', e.message); }
+    }
+    this.stats.sosContinued++;
+    this.log.warn(`[mirror] ${this.node} continued SOS ${alert.alertId} of ${p.g} (the peer died before its fan-out)`);
+    const summary = typeof C._summary === 'function' ? C._summary(p.g, alert.alertId) : undefined;
+    C.emit('event', p.g, { type: 'ALERT', ts: now(), alert: publicAlert(alert, { summary }) });
+    C.emit('fleet');
+    // The safety network incident and the server SMS round (the origin dispatches only after its fan-out).
+    try { C.emit('emergency', p.g, alert, 'RAISED', { owner: null }); } catch (e) { this.log.warn('[mirror] emergency hook failed', e.message); }
+    const gw = this.hub && this.hub.emergencyGateway;
+    if (C.listenerCount('emergency') === 0 && gw && typeof gw.dispatchForSos === 'function' && !alert.clientSentSms) {
+      gw.dispatchForSos({ groupId: p.g, user: { userId: alert.userId, name: alert.userName }, alert, msg: {} }).catch(() => {});
+    }
+    return true;
   }
 
   /** A personal message for a rider with no socket here. */
@@ -596,6 +673,7 @@ class Mirror {
         if (this.state === 'syncing') this._serving('snapshot applied');
         return;
       case 'EV': return this._onEvent(m);
+      case 'SP': return this._onSosPending(m);
       case 'EA': { const p = this.acks.get(m.s); if (p) { clearTimeout(p.timer); this.acks.delete(m.s); p.res(true); } return; }
       case 'P': return this._onPosition(m);
       case 'U': if (this.hub && typeof m.u === 'string') this.hub.sendToUser(m.u, m.p || {}, m.c || undefined, { local: true }); return;
@@ -682,6 +760,7 @@ class Mirror {
     const C = this.convoys;
     let room = gid ? C.rooms.get(gid) : null;
     if (d.room) room = this._mergeRoom(d.room);
+    this._clearPending(d.alerts);
     if (room) {
       if (d.meta && (Number(d.meta.updatedAt) || 0) >= (Number(room.meta.updatedAt) || 0)) room.meta = d.meta;
       for (const r of d.riders || []) { if (r && r.userId) { this._applyRider(room, r); this._markDirty(room, r.userId); } }
@@ -730,6 +809,7 @@ class Mirror {
     const C = this.convoys;
     const gid = remote && remote.g;
     if (!gid || !remote.meta) return null;
+    this._clearPending(remote.alerts);
     if (this.link) this.link.sentRooms.add(gid); // the peer has this room: our events can be deltas
     let room = C.rooms.get(gid);
     if (remote.meta.tripStatus === 'ENDED') { if (room) this._endLocal(gid); return null; }
@@ -848,6 +928,7 @@ class Mirror {
       this._dial();
     }
     const t = now();
+    if (this.sosPend.size) for (const [id, p] of this.sosPend) if (t - p.at > this.sosPendTtlMs) this.sosPend.delete(id);
     if (this.told.size > 5000) for (const [u, at] of this.told) if (t - at > HANDBACK_RETELL_MS) this.told.delete(u);
   }
 

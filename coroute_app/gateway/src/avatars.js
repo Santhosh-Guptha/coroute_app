@@ -126,8 +126,9 @@ async function saveAvatar(repo, user, buf, { objectStore, now = Date.now(), crop
   const previousOriginal = fresh?.avatarOriginalId || null;
   const keepOriginal = isOriginalId(originalId) ? originalId : null;
   await repo.updateUser(fresh.key, { avatarId, avatarAt: now, avatarOriginalId: keepOriginal, avatarCrop: keepOriginal ? crop : null });
-  if (previous && previous !== avatarId) await deleteAvatarDoc(repo.soda, previous, { objectStore: os }).catch(() => {});
-  if (previousOriginal && previousOriginal !== keepOriginal) await deleteAvatarDoc(repo.soda, previousOriginal, { objectStore: os }).catch(() => {});
+  // Round 8: removing the replaced pictures (Object Storage / database) is background work (photo.delete job).
+  const replaced = [previous && previous !== avatarId ? previous : null, previousOriginal && previousOriginal !== keepOriginal ? previousOriginal : null].filter(Boolean);
+  if (replaced.length) await deleteLater(repo.soda, replaced, objectStore, os);
   return { avatarId, avatarUrl: avatarUrlOf(avatarId), bytes: doc.bytes, mime: doc.mime, hasOriginal: !!keepOriginal, crop: keepOriginal ? crop : null };
 }
 
@@ -141,7 +142,7 @@ async function saveOriginal(repo, user, buf, { objectStore, now = Date.now() } =
   await ensureAvatarStore(repo.soda);
   const os = objectStore === undefined ? objectStoreFromConfig() : objectStore;
   const stale = await repo.soda.query(COLL, { userId: user.userId, kind: 'original', pending: true }, { limit: 20 });
-  for (const r of stale) await deleteAvatarDoc(repo.soda, r.value.avatarId, { objectStore: os }).catch(() => {});
+  if (stale.length) await deleteLater(repo.soda, stale.map((r) => r.value.avatarId), objectStore, os);
   const originalId = `avo_${crypto.randomBytes(12).toString('hex')}`;
   const doc = {
     avatarId: originalId, kind: 'original', pending: true, userId: user.userId, mime: p.mime, ext: p.ext,
@@ -201,6 +202,21 @@ async function deleteAvatarDoc(soda, avatarId, { objectStore } = {}) {
   return true;
 }
 
+/**
+ * Round 8 (src/jobs/producers.js): pictures that were replaced are removed by a photo.delete job when the job queue is
+ * on. The EXIF / GPS clean-up of an upload stays on the request on purpose: raw bytes with a GPS position are never
+ * stored anywhere, not even in a queue. An explicit objectStore (tests, scripts) is always handled inline.
+ */
+const photoJobs = new WeakMap();
+function attachPhotoJobs(soda, jobs) { if (soda && jobs) photoJobs.set(soda, jobs); }
+async function deleteLater(soda, ids, objectStore, resolvedStore) {
+  const jobs = photoJobs.get(soda);
+  if (jobs && jobs.enabled && objectStore === undefined && !require('./jobs/context').inJob()) {
+    try { await jobs.enqueue('photo.delete', { avatarIds: ids.slice(0, 20) }, { priority: 6 }); return; } catch { /* inline below */ }
+  }
+  for (const id of ids) await deleteAvatarDoc(soda, id, { objectStore: resolvedStore }).catch(() => {});
+}
+
 /** Removes the rider's picture (rider or admin moderation). True when there was one. */
 async function removeAvatar(repo, userId, { objectStore, by = null, now = Date.now() } = {}) {
   const u = await repo.findUserById(userId);
@@ -245,6 +261,6 @@ async function forgetAvatars(soda, userId, { objectStore } = {}) {
 module.exports = {
   COLL, MAX_BYTES, MAX_SIDE, ORIGINAL_MAX_BYTES, CROPPED_MAX_SIDE, MAX_ZOOM, AvatarError, isAvatarId, isOriginalId, avatarUrlOf,
   prepareAvatar, normaliseCrop, saveAvatar, saveOriginal, saveCrop, readOriginal, removeAvatar,
-  readAvatar, forgetAvatars, ensureAvatarStore,
+  readAvatar, forgetAvatars, ensureAvatarStore, deleteAvatarDoc, attachPhotoJobs,
   _resetForTests: () => { migrated = new WeakSet(); },
 };
