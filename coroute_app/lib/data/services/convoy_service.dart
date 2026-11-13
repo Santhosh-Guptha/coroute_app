@@ -7,6 +7,7 @@ import 'solo_fix_source.dart' show speedFixOf;
 import '../../domain/tracking/battery_performance_monitor.dart';
 import '../../domain/safety/accel_bucket.dart';
 import '../../domain/tracking/dead_reckoning_engine.dart';
+import '../../domain/tracking/fix_gate.dart';
 import 'accel_source.dart';
 import '../../domain/mesh/mesh_telemetry_packet.dart';
 import 'p2p_mesh_service.dart';
@@ -134,6 +135,13 @@ class ConvoyService extends ChangeNotifier {
   StreamSubscription<AccelBucket>? _deadReckoningAccelSub;
   Timer? _deadReckoningTimer;
   int _lastGpsFixTime = 0;
+
+  /// 3.56 audit: the gate in front of the live position (replays, stale, teleports, parked jitter).
+  final FixGate _fixGate = FixGate();
+  final GpsRestartBackoff _gpsBackoff = GpsRestartBackoff();
+  Timer? _gpsRestartTimer;
+  int _shownMovedAtMs = 0;
+  bool _mockFixLogged = false;
 
   AppLifecycleListener? _lifecycle;
   bool _compassPaused = false;
@@ -1141,8 +1149,13 @@ class ConvoyService extends ChangeNotifier {
         if (e['joined'] == true) {
           _refreshNotification();
           _scheduleRosterRefresh();
+          break;
         }
-        break;
+        // 3.56 audit P-01: positions arrive many per second in a big group (a RIDER_UPDATES frame is
+        // handed on as one event per rider). The state above is updated at once; listeners (the
+        // cockpit, the safety checks) are told ONCE for everything that arrived in this turn.
+        _notifyRidersSoon();
+        return;
       case 'RIDER_LEFT':
         if (convoy == null) return;
         final riders = Map<String, RiderModel>.from(convoy.riders)..remove(e['userId']?.toString());
@@ -1619,6 +1632,63 @@ class ConvoyService extends ChangeNotifier {
     PickedPlace? start,
     List<PickedPlace> stops = const [],
   }) async {
+    // 3.56 audit L-01: a second tap on "Start ride" while the first request is on its way gets the
+    // same ride (two requests could create two rides and leave the rider in both).
+    final running = _creatingConvoy;
+    if (running != null) return running.future;
+    final done = Completer<ConvoyModel>();
+    done.future.ignore(); // nobody may be waiting on it: an error is rethrown to the first caller below
+    _creatingConvoy = done;
+    try {
+      final convoy = await _createConvoyNow(
+        name: name, creatorId: creatorId, creatorName: creatorName, startPoint: startPoint, destination: destination,
+        destLat: destLat, destLng: destLng, vehicleType: vehicleType, vehicleNo: vehicleNo, phone: phone,
+        routeBreadcrumbs: routeBreadcrumbs, distanceThresholdMeters: distanceThresholdMeters,
+        stopThresholdSeconds: stopThresholdSeconds, voiceGuidanceEnabled: voiceGuidanceEnabled,
+        speedLimitKmh: speedLimitKmh, start: start, stops: stops,
+      );
+      done.complete(convoy);
+      return convoy;
+    } catch (e, st) {
+      done.completeError(e, st);
+      rethrow;
+    } finally {
+      _creatingConvoy = null;
+    }
+  }
+
+  bool _riderNotifyQueued = false;
+  void _notifyRidersSoon() {
+    if (_riderNotifyQueued) return;
+    _riderNotifyQueued = true;
+    scheduleMicrotask(() {
+      _riderNotifyQueued = false;
+      if (!_disposed) notifyListeners();
+    });
+  }
+
+  Completer<ConvoyModel>? _creatingConvoy;
+  Future<ConvoyModel?>? _joiningConvoy;
+
+  Future<ConvoyModel> _createConvoyNow({
+    required String name,
+    required String creatorId,
+    required String creatorName,
+    required String startPoint,
+    required String destination,
+    required double destLat,
+    required double destLng,
+    required String vehicleType,
+    required String vehicleNo,
+    required String phone,
+    required List<Map<String, double>> routeBreadcrumbs,
+    required double distanceThresholdMeters,
+    required int stopThresholdSeconds,
+    required bool voiceGuidanceEnabled,
+    required int speedLimitKmh,
+    required PickedPlace? start,
+    required List<PickedPlace> stops,
+  }) async {
     final pos = await _getCurrentPosition();
     await _refreshBatteryLevel();
     await _flushPendingLeaves();
@@ -1669,7 +1739,18 @@ class ConvoyService extends ChangeNotifier {
         return res is Map && res['convoy'] is Map ? res['convoy'] : res;
       });
 
-  Future<ConvoyModel?> _joinWith(RiderModel rider, Future<dynamic> Function(Map<String, dynamic> body) send) async {
+  /// 3.56 audit L-01: one join at a time (a double tap on "Join" gets the same answer).
+  Future<ConvoyModel?> _joinWith(RiderModel rider, Future<dynamic> Function(Map<String, dynamic> body) send) {
+    final running = _joiningConvoy;
+    if (running != null) return running;
+    final f = _joinNow(rider, send);
+    _joiningConvoy = f;
+    return f.whenComplete(() {
+      if (identical(_joiningConvoy, f)) _joiningConvoy = null;
+    });
+  }
+
+  Future<ConvoyModel?> _joinNow(RiderModel rider, Future<dynamic> Function(Map<String, dynamic> body) send) async {
     _lastError = null;
     _lastErrorIsServerBusy = false;
     try {
@@ -1914,6 +1995,9 @@ class ConvoyService extends ChangeNotifier {
     _stationarySince = null;
     _gpsBand.reset();
     _speedEst.reset();
+    _fixGate.reset();
+    _shownMovedAtMs = 0;
+    _mockFixLogged = false;
     _subscribeGps();
     _isRealGpsActive = true;
     _lastGpsFixTime = DateTime.now().millisecondsSinceEpoch;
@@ -1922,7 +2006,8 @@ class ConvoyService extends ChangeNotifier {
     final cName = activeConvoy?.name ?? 'Active Ride';
     final count = activeConvoy?.riders.length ?? 1;
     BackgroundService.start(convoyName: cName, riderCount: count).ignore();
-    BackgroundService.requestIgnoreBatteryOptimization().ignore();
+    // 3.56 audit B-01: asked at most once a week, and never when already allowed.
+    BackgroundService.requestIgnoreBatteryOptimizationIfDue().ignore();
 
     _deadReckoningTimer?.cancel();
     _deadReckoningTimer = Timer.periodic(const Duration(seconds: 1), (t) => _onDeadReckoningTick(t));
@@ -1942,11 +2027,41 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void _subscribeGps() {
+    _gpsRestartTimer?.cancel();
+    _gpsRestartTimer = null;
     _gpsSub?.cancel();
-    _gpsSub = Geolocator.getPositionStream(
-      locationSettings: _settingsFor(idle: _gpsIdleProfile, lowBattery: batterySaverActive),
-    ).listen(_onPosition, onError: (e) {
-      debugPrint('GPS stream note: $e');
+    try {
+      _gpsSub = Geolocator.getPositionStream(
+        locationSettings: _settingsFor(idle: _gpsIdleProfile, lowBattery: batterySaverActive),
+      ).listen(
+        (p) {
+          _gpsBackoff.reset();
+          _onPosition(p);
+        },
+        onError: (Object e) {
+          // 3.56 audit G-07: an error can leave the stream dead (provider restart, listener closed
+          // by the OS). Re-open it with growing waits; a revoked permission is handled by
+          // onLocationRevoked / onLocationRestored and is not retried here.
+          debugPrint('GPS stream note: $e');
+          DiagLog.warn(DiagCat.location, 'gps_stream_error', {'type': e.runtimeType.toString()});
+          _scheduleGpsRestart();
+        },
+        onDone: _scheduleGpsRestart,
+      );
+    } catch (e) {
+      DiagLog.warn(DiagCat.location, 'gps_stream_open_failed', {'type': e.runtimeType.toString()});
+      _scheduleGpsRestart();
+    }
+  }
+
+  void _scheduleGpsRestart() {
+    if (!_isRealGpsActive || _locationRevoked || _gpsRestartTimer != null) return;
+    final wait = _gpsBackoff.next();
+    _gpsRestartTimer = Timer(wait, () {
+      _gpsRestartTimer = null;
+      if (!_isRealGpsActive || _locationRevoked || activeConvoy == null) return;
+      DiagLog.info(DiagCat.location, 'gps_stream_reopen', {'attempt': _gpsBackoff.attempts});
+      _subscribeGps();
     });
   }
 
@@ -2163,6 +2278,21 @@ class ConvoyService extends ChangeNotifier {
     if (userId == null || convoy == null) return;
     final current = convoy.riders[userId];
     final now = position.timestamp.millisecondsSinceEpoch;
+    // 3.56 audit G-01/G-02 (lib/domain/tracking/fix_gate.dart): a replayed or cached fix (the stream
+    // is re-subscribed on every cadence change) must not move the marker back or run time backwards.
+    final verdict = _fixGate.check(lat: position.latitude, lng: position.longitude, tsMs: now, wallMs: _clock());
+    if (verdict != FixReject.none && verdict != FixReject.teleport) {
+      if (DiagLog.sampler.take('gps_fix_dropped', _clock())) {
+        DiagLog.info(DiagCat.location, 'gps_fix_dropped', {'why': verdict.name, 'acc': position.accuracy, 'outOfOrder': _fixGate.rejectedOutOfOrder, 'stale': _fixGate.rejectedStale});
+      }
+      return;
+    }
+    // G-05: a mock provider (developer option, or an external GNSS receiver app) is noted once per
+    // ride in the diagnostics log; the fix is still used (external receivers are legitimate).
+    if (position.isMocked && !_mockFixLogged) {
+      _mockFixLogged = true;
+      DiagLog.warn(DiagCat.location, 'gps_mock_provider', const {});
+    }
     // Every fix, even a degraded one, goes through the estimator (it weighs and rejects by itself).
     final est = _speedEst.update(speedFixOf(position));
     final speedKmh = est.kmh.clamp(0.0, 300.0).toDouble();
@@ -2177,6 +2307,14 @@ class ConvoyService extends ChangeNotifier {
     final accuracy = position.accuracy.isFinite ? position.accuracy : 999.0;
     final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
     final hasActiveRoute = convoy.routeLine.length >= 2;
+    // G-03: one wild fix (tunnel exit, tall buildings) does not teleport the marker. Its Doppler speed
+    // was still given to the estimator above; three fixes that agree re-anchor (FixGate).
+    if (verdict == FixReject.teleport) {
+      if (DiagLog.sampler.take('gps_teleport', _clock())) {
+        DiagLog.info(DiagCat.location, 'gps_teleport_dropped', {'acc': position.accuracy, 'n': _fixGate.rejectedTeleport});
+      }
+      return;
+    }
 
     if (convoy.routeLine.isNotEmpty) {
       _deadReckoning.setPlannedRoute(convoy.routeLine);
@@ -2196,7 +2334,7 @@ class ConvoyService extends ChangeNotifier {
           durationMs: 4000,
         );
         _unsubscribeAccelForDeadReckoning();
-        _lastGpsFixTime = now;
+        _lastGpsFixTime = _clock(); // G-06: fix age is measured on the phone's clock (see below)
         _lastFixAccuracyM = accuracy;
         final point = _deadReckoning.computeConvergence(now);
         final fix = TrackPoint(
@@ -2232,7 +2370,7 @@ class ConvoyService extends ChangeNotifier {
     // 2. If converging:
     if (_deadReckoning.isConverging) {
       if (accuracy <= 50.0) {
-        _lastGpsFixTime = now;
+        _lastGpsFixTime = _clock(); // G-06: fix age is measured on the phone's clock (see below)
         _lastFixAccuracyM = accuracy;
         _deadReckoning.updateConvergenceTarget(
           gpsLat: position.latitude,
@@ -2281,7 +2419,10 @@ class ConvoyService extends ChangeNotifier {
       return;
     }
 
-    _lastGpsFixTime = now;
+    // G-06: the age of the last fix is compared with the phone's clock every second
+    // (_onDeadReckoningTick), so it is stamped with that clock, not with GPS time: a phone whose
+    // clock was a few seconds off looked "without GPS" for ever (or never) and coasted wrongly.
+    _lastGpsFixTime = _clock();
     _lastFixAccuracyM = accuracy;
     final fix = TrackPoint(
       ts: now,
@@ -2330,14 +2471,31 @@ class ConvoyService extends ChangeNotifier {
       fusedHeading = gpsHeadingDeg;
     }
 
+    // G-04: a parked bike does not wander inside the GPS noise, and a coarse (network) fix does not
+    // replace a recent good position. Speed, battery and "last seen" are updated either way; the
+    // recorded track has its own filter (TrackFilter) and is not affected.
+    final wallNow = _clock();
+    final holdHere = current != null &&
+        _shownMovedAtMs > 0 &&
+        FixGate.holdPosition(
+          moving: isMoving,
+          accuracyM: accuracy,
+          distanceFromShownM: FixGate.distanceM(current.lat, current.lng, position.latitude, position.longitude),
+          msSinceShownMoved: wallNow - _shownMovedAtMs,
+        );
+    // A held coarse fix keeps the clock of the shown position; a held good fix (parked) confirms it.
+    if (!holdHere || accuracy <= FixGate.coarseM) _shownMovedAtMs = wallNow;
+    final shownLat = holdHere ? current.lat : position.latitude;
+    final shownLng = holdHere ? current.lng : position.longitude;
+
     final wasStopped = current?.statusReason.isNotEmpty == true;
     final base = current ??
         RiderModel(userId: userId, name: 'Rider', lat: position.latitude, lng: position.longitude, lastSeenEpochMs: now);
     final isLimpMode = base.statusReason == 'MECHANICAL' || base.statusReason == 'FLAT_TIRE';
     final shouldClearStatus = isMoving && wasStopped && (!isLimpMode || speedKmh >= 25.0);
     final updated = base.copyWith(
-      lat: position.latitude,
-      lng: position.longitude,
+      lat: shownLat,
+      lng: shownLng,
       speedKmh: speedKmh,
       heading: fusedHeading,
       batteryLevel: _currentBatteryLevel,
@@ -2353,7 +2511,7 @@ class ConvoyService extends ChangeNotifier {
     _setMyRiderLocally(updated);
     final since = DateTime.now().difference(_lastTelemetryPush);
     final movedFar = current == null ||
-        Geolocator.distanceBetween(current.lat, current.lng, position.latitude, position.longitude) > 40;
+        Geolocator.distanceBetween(current.lat, current.lng, shownLat, shownLng) > 40;
     final critical = convoy.activeAlerts.isNotEmpty || assistRequests.isNotEmpty || hazards.isNotEmpty;
     // Faster riders report more often (smooth markers for the group), never near the gateway's
     // 3 TELEMETRY/s limit, and slower in big groups (fan-out), data saver or battery saving.
@@ -2442,6 +2600,8 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void stopRealGpsTracking() {
+    _gpsRestartTimer?.cancel();
+    _gpsRestartTimer = null;
     _gpsSub?.cancel();
     _gpsSub = null;
     _idleHeartbeat?.cancel();
@@ -4369,6 +4529,7 @@ class ConvoyService extends ChangeNotifier {
     _batteryStateSub?.cancel();
     _batteryRefresh?.cancel();
     _compassSub?.cancel();
+    _gpsRestartTimer?.cancel();
     _gpsSub?.cancel();
     _idleHeartbeat?.cancel();
     _broadcastClear?.cancel();

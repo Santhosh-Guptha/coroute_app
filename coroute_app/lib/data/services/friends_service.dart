@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../domain/media/avatar_crop.dart';
 import '../../domain/notify/notice_dedupe.dart';
 import '../../domain/social/friends_models.dart';
 import '../../domain/social/people_models.dart';
@@ -57,6 +58,15 @@ class MyProfile {
   final String username;
   final String name;
   final String? avatarUrl;
+
+  /// 3.56 "Adjust picture": the gateway keeps the original, so the crop can be changed later.
+  final bool avatarAdjustable;
+
+  /// How the kept original is cropped now (null when there is none).
+  final AvatarCrop? avatarCrop;
+
+  /// Changes when another original is stored (the cached copy on this phone is then dropped).
+  final String? avatarOriginalTag;
   final bool publicLeaderboard;
 
   /// "Let riders find me": found by username prefix and suggested to riders I rode with (default on).
@@ -70,6 +80,9 @@ class MyProfile {
     required this.username,
     this.name = '',
     this.avatarUrl,
+    this.avatarAdjustable = false,
+    this.avatarCrop,
+    this.avatarOriginalTag,
     this.publicLeaderboard = true,
     this.discoverable = true,
     this.usernameChangedAt = 0,
@@ -83,6 +96,9 @@ class MyProfile {
         username: raw['username']?.toString() ?? '',
         name: raw['name']?.toString() ?? '',
         avatarUrl: _url(raw['avatarUrl']),
+        avatarAdjustable: raw['avatarAdjustable'] == true,
+        avatarCrop: AvatarCrop.fromJson(raw['avatarCrop']),
+        avatarOriginalTag: raw['avatarOriginalTag']?.toString(),
         publicLeaderboard: raw['publicLeaderboard'] != false,
         discoverable: raw['discoverable'] != false,
         usernameChangedAt: raw['usernameChangedAt'] is num ? (raw['usernameChangedAt'] as num).toInt() : 0,
@@ -300,6 +316,8 @@ class FriendsService extends ChangeNotifier {
 
   void _clear() {
     _profile = null;
+    _originalBytes = null;
+    _originalTag = null;
     _stats = const RideTotals();
     _score = null;
     _friends = const [];
@@ -440,6 +458,8 @@ class FriendsService extends ChangeNotifier {
   /// POST /me/avatar with already downsized bytes (JPEG/PNG/WebP).
   Future<String?> uploadAvatar(Uint8List bytes, String mime) async {
     if (bytes.length > 2 * 1024 * 1024) return 'This picture is too large (up to 2 MB).';
+    _originalBytes = null;
+    _originalTag = null;
     try {
       await _api.postBytes('/me/avatar', bytes, mime);
       await refreshProfile();
@@ -449,7 +469,73 @@ class FriendsService extends ChangeNotifier {
     }
   }
 
+  // ---- 3.56 "Adjust picture" (docs/features_355/profile_photo_adjust.md) ----
+  Uint8List? _originalBytes;
+  String? _originalTag;
+
+  /// The picture to adjust: the kept original (from this phone's memory, else downloaded), or, for
+  /// a picture uploaded before originals were kept, the current picture ([fromOriginal] false).
+  /// Null when there is no picture or it could not be loaded.
+  Future<({Uint8List bytes, AvatarCrop? crop, bool fromOriginal})?> adjustSource() async {
+    final p = _profile;
+    final url = p?.avatarUrl;
+    if (p == null || url == null) return null;
+    try {
+      if (p.avatarAdjustable) {
+        final cached = _originalBytes;
+        if (cached != null && _originalTag != null && _originalTag == p.avatarOriginalTag) {
+          return (bytes: cached, crop: p.avatarCrop, fromOriginal: true);
+        }
+        final bytes = await _api.getBytes('/me/avatar/original', timeout: const Duration(seconds: 30));
+        _originalBytes = bytes;
+        _originalTag = p.avatarOriginalTag;
+        return (bytes: bytes, crop: p.avatarCrop, fromOriginal: true);
+      }
+      final bytes = await _api.getBytes(url.substring(4), timeout: const Duration(seconds: 30));
+      return (bytes: bytes, crop: null, fromOriginal: false);
+    } on ApiException catch (e) {
+      debugPrint('Picture to adjust not loaded: ${e.statusCode}');
+      return null;
+    }
+  }
+
+  /// Saves an adjusted picture: [cropped] is the public square. With [original] (a new picture, or
+  /// the first adjust of an older one) the original is stored first and then cropped; without it
+  /// the kept original stays and only the crop changes. Returns null on success, else the message.
+  Future<String?> saveAdjustedAvatar({
+    required Uint8List cropped,
+    required String croppedMime,
+    required AvatarCrop crop,
+    Uint8List? original,
+    String? originalMime,
+  }) async {
+    if (cropped.length > 2 * 1024 * 1024) return 'This picture is too large (up to 2 MB).';
+    try {
+      var query = crop.toQuery();
+      if (original != null) {
+        if (original.length > 2 * 1024 * 1024) return 'This picture is too large (up to 2 MB).';
+        final res = await _api.postBytes('/me/avatar/original', original, originalMime ?? 'image/jpeg');
+        final id = res is Map ? res['originalId']?.toString() : null;
+        if (id == null || id.isEmpty) return 'The picture could not be saved. Please try again.';
+        query = '$query&original=${Uri.encodeQueryComponent(id)}';
+      }
+      await _api.postBytes('/me/avatar/crop?$query', cropped, croppedMime);
+      await refreshProfile();
+      if (original != null) {
+        _originalBytes = original;
+        _originalTag = _profile?.avatarOriginalTag;
+      }
+      return null;
+    } on ApiException catch (e) {
+      // A gateway from before 3.56 has no adjust routes: save the cropped picture the old way.
+      if (e.statusCode == 404 && original != null) return uploadAvatar(cropped, croppedMime);
+      return e.message;
+    }
+  }
+
   Future<String?> removeAvatar() async {
+    _originalBytes = null;
+    _originalTag = null;
     try {
       await _api.delete('/me/avatar');
       await refreshProfile();

@@ -7,13 +7,17 @@
 //  * smart regroup point (switch 'regroupSuggest'): a fuel / food / rest stop ahead in that card;
 //  * group break planner (switch 'groupBreak'): fatigue LEVEL 0..3 only, the lead sees a count;
 //  * buddy pairs (switch 'buddyPairs'): "Check on Kiran", one-tap "buddy ok?" ping;
-//  * risky-stretch heads-up (switch 'riskyStretch'): anonymous hard-brake cells, k >= 10.
+//  * risky-stretch heads-up (switch 'riskyStretch'): anonymous hard-brake cells, k >= 10;
+//  * round 4 falling-behind alert (switch 'fallingBehind'): the lead and sweep hear "Ravi is falling behind" when a
+//    rider's gap keeps growing, before the stretch alert, with a regroup point ahead (learned rider stops first).
 // Never speaks while an SOS / crash alarm is open; cards rank below SOS / crash / incidents in the
 // cockpit (group safety priority) and ask for taps only when the rider is slow.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../domain/intel/falling_behind.dart';
+import '../../domain/intel/hazard_ahead.dart';
 import '../../domain/places/place_poi.dart';
 import '../../domain/places/poi_category.dart';
 import '../../domain/ride/bike_markers.dart';
@@ -35,9 +39,10 @@ import 'convoy_service.dart';
 import 'geo_service.dart';
 import 'realtime_service.dart';
 import 'timeline_service.dart';
+import 'private_places_store.dart';
 
 /// Which card a [GroupSafetyNotice] is.
-enum GroupSafetyKind { missingRider, buddyAsked, buddyCheck, buddyOk, stretch, groupBreak, riskyStretch }
+enum GroupSafetyKind { missingRider, buddyAsked, buddyCheck, buddyOk, stretch, groupBreak, riskyStretch, fallingBehind }
 
 /// One card for the cockpit alert slot.
 class GroupSafetyNotice {
@@ -90,11 +95,19 @@ class GroupSafetyService extends ChangeNotifier {
   /// Hard brakes counted so far this ride (SafetyService.hardStops).
   int Function()? hardStops;
 
+  /// 3.56: the rider's "Help make roads safer" opt-in (IntelCareService.consentOn). Hard brakes are
+  /// only queued and sent while it is on; the risky-stretch WARNING is shown to everyone. Null (not
+  /// wired) counts as off.
+  bool Function()? roadDataConsent;
+
   /// A crash alarm (or anything like it) is open on this phone.
   bool Function()? alarmOpen;
 
   /// Speaks a line (important tier).
   void Function(String line, String key)? speaker;
+
+  /// Round 4: learned rider stops along the route (IntelCareService.learnedStops), for regroup points.
+  Iterable<IntelCell> Function()? learnedStops;
 
   /// Admin switches; null = on.
   bool Function(String id)? featureOn;
@@ -118,6 +131,12 @@ class GroupSafetyService extends ChangeNotifier {
   final BuddyWatch _buddyWatch = BuddyWatch();
   final BrakeReportQueue _brakes = BrakeReportQueue();
   final RiskyStretchAnnouncer _risk = RiskyStretchAnnouncer();
+  final FallingBehindPredictor _behind = FallingBehindPredictor();
+  GroupSafetyNotice? _behindNotice;
+  int _behindUntil = 0;
+
+  /// The regroup suggestion of the card showing now (the lead's group break nudge names it).
+  String? get currentRegroupName => (_stretchNotice ?? _behindNotice ?? _breakNotice)?.suggestion?.name;
   int _brakesSeen = 0;
   int _riskFetchedAt = 0;
   bool _riskFetching = false;
@@ -170,6 +189,7 @@ class GroupSafetyService extends ChangeNotifier {
       ?_buddyNotice,
       if (_buddyOkNotice != null && now < _buddyOkUntil) _buddyOkNotice!,
       ?_stretchNotice,
+      if (_behindNotice != null && now < _behindUntil) _behindNotice!,
       ?_breakNotice,
       if (_riskNotice != null && now < _riskUntil) _riskNotice!,
     ];
@@ -212,6 +232,8 @@ class GroupSafetyService extends ChangeNotifier {
     _break.reset();
     _buddyWatch.reset();
     _risk.reset();
+    _behind.reset();
+    _behindNotice = null;
     _brakesSeen = hardStops?.call() ?? 0;
     _riskFetchedAt = 0;
     _missingNotice = _askedNotice = _buddyNotice = _buddyOkNotice = _stretchNotice = _breakNotice = _riskNotice = null;
@@ -379,6 +401,7 @@ class GroupSafetyService extends ChangeNotifier {
     );
     if (ok) {
       _stretchNotice = null;
+      _behindNotice = null;
       notifyListeners();
     }
     return ok;
@@ -420,6 +443,8 @@ class GroupSafetyService extends ChangeNotifier {
         dismissBreak();
       case GroupSafetyKind.riskyStretch:
         _riskNotice = null;
+      case GroupSafetyKind.fallingBehind:
+        _behindNotice = null;
     }
     notifyListeners();
   }
@@ -474,6 +499,7 @@ class GroupSafetyService extends ChangeNotifier {
         spread = GroupSpread.compute(everyone, route, now);
       }
       changed |= _checkStretch(c, now, lead, spread, route);
+      changed |= _checkBehind(c, now, lead || c.sweeperId == uid, everyone, route, emergency);
       changed |= _checkBreak(c, now, lead, everyone, spread, me, route);
       changed |= _checkBuddy(c, now, me, route, emergency);
       changed |= _checkBrakesAndRisk(c, now, meModel, route);
@@ -481,6 +507,7 @@ class GroupSafetyService extends ChangeNotifier {
       if (_askedNotice != null && now >= _askedUntil) { _askedNotice = null; changed = true; }
       if (_buddyOkNotice != null && now >= _buddyOkUntil) { _buddyOkNotice = null; changed = true; }
       if (_riskNotice != null && now >= _riskUntil) { _riskNotice = null; changed = true; }
+      if (_behindNotice != null && now >= _behindUntil) { _behindNotice = null; changed = true; }
       if (changed) notifyListeners();
     } finally {
       _busyTick = false;
@@ -634,8 +661,50 @@ class GroupSafetyService extends ChangeNotifier {
 
   RegroupSuggestion? _pick(List<(double, double)> route, double lastAlong, double leadAlong) {
     final list = places?.call();
-    if (list == null) return null;
-    return RegroupPointPicker.pick(route: route, places: list, lastAlongM: lastAlong, leadAlongM: leadAlong);
+    final stops = learnedStops?.call() ?? const <IntelCell>[];
+    if (list == null && stops.isEmpty) return null;
+    // Round 4: learned rider stops (room to stop, matched to fuel / food) first, then the cached places.
+    return RegroupAdvisor.pick(route: route, places: list ?? const <PlacePoi>[], learnedStops: stops, lastAlongM: lastAlong, leadAlongM: leadAlong);
+  }
+
+  /// Round 4 (feature 12): the lead and the sweep hear about a rider whose gap keeps growing, before the stretch
+  /// alert. Quiet while an emergency is open; never about a rider stopped at the regroup / meeting points.
+  bool _checkBehind(ConvoyModel c, int now, bool leadOrSweep, List<GroupSafetyRider> everyone, List<(double, double)> route, bool emergency) {
+    if (!leadOrSweep || !_on('fallingBehind') || !c.hasGroupFeatures || route.length < 2) {
+      if (_behindNotice == null) return false;
+      _behindNotice = null;
+      _behind.reset();
+      return true;
+    }
+    final spread = GroupSpread.compute(everyone, route, now);
+    if (spread == null || emergency) return false;
+    final byId = {for (final r in everyone) r.userId: r};
+    // Known regroup places: the meeting point and every planned stop (a rider waiting there is not falling behind).
+    final meeting = [for (final st in c.plannedStops) (st.lat, st.lng)];
+    final hit = _behind.update(
+      nowMs: now,
+      along: spread.alongM,
+      speedKmh: {for (final e in byId.entries) e.key: e.value.speedKmh},
+      names: {for (final e in byId.entries) e.key: e.value.firstName},
+      pos: {for (final e in byId.entries) e.key: (e.value.lat, e.value.lng)},
+      regroupPoints: meeting,
+      selfId: _convoys.myUserId,
+    );
+    if (hit == null) return false;
+    final behindAlong = spread.alongM[hit.userId] ?? spread.lastAlongM;
+    final pick = _on('regroupSuggest') ? _pick(route, behindAlong, spread.frontAlongM) : null;
+    _behindNotice = GroupSafetyNotice(
+      key: 'BEHIND:${hit.userId}:$now',
+      kind: GroupSafetyKind.fallingBehind,
+      title: hit.text,
+      message: pick != null ? 'Send regroup at ${pick.name}, ${_km(pick.aheadOfLeadM)} ahead.' : 'Slow down a little so the group stays together.',
+      important: true,
+      suggestion: pick,
+      userId: hit.userId,
+    );
+    _behindUntil = now + 60000;
+    _say(hit.speech, 'BEHIND:${hit.userId}');
+    return true;
   }
 
   bool _checkBuddy(ConvoyModel c, int now, GroupSafetyRider me, List<(double, double)> route, bool emergency) {
@@ -673,15 +742,25 @@ class GroupSafetyService extends ChangeNotifier {
   bool _checkBrakesAndRisk(ConvoyModel c, int now, RiderModel me, List<(double, double)> route) {
     if (!_on('riskyStretch')) return false;
     // Hard brakes since the last tick: queued at the rounded cell (the exact spot is never kept).
+    // 3.56: only from riders who opted in to "Help make roads safer"; without it nothing is queued
+    // (and anything queued before the rider switched it off is dropped, not sent).
+    final consent = roadDataConsent?.call() ?? false;
     final count = hardStops?.call();
     if (count != null) {
       if (count < _brakesSeen) _brakesSeen = count; // a new ride on the counter
-      for (var i = _brakesSeen; i < count; i++) {
-        _brakes.add(lat: me.lat, lng: me.lng, heading: me.heading, nowMs: now);
+      // Private places (round 6): a hard brake within 300 m of one is never queued.
+      if (consent && !PrivatePlacesStore.shared.isNear(me.lat, me.lng)) {
+        for (var i = _brakesSeen; i < count; i++) {
+          _brakes.add(lat: me.lat, lng: me.lng, heading: me.heading, nowMs: now);
+        }
       }
       _brakesSeen = count;
     }
-    if (_brakes.due(now)) _flushBrakes();
+    if (!consent) {
+      if (!_brakes.isEmpty) _brakes.take();
+    } else if (_brakes.due(now)) {
+      _flushBrakes();
+    }
     if (!_riskFetching && (now - _riskFetchedAt >= riskRefreshEvery.inMilliseconds)) _fetchRisk(c.groupId, now);
     final cell = _risk.update(lat: me.lat, lng: me.lng, headingDeg: me.heading, speedKmh: me.speedKmh, route: route);
     if (cell == null) return false;
@@ -713,6 +792,10 @@ class GroupSafetyService extends ChangeNotifier {
 
   void _flushBrakes() {
     if (_brakes.isEmpty || !_on('riskyStretch')) return;
+    if (!(roadDataConsent?.call() ?? false)) {
+      _brakes.take(); // no opt-in: dropped, never sent
+      return;
+    }
     final body = _brakes.take();
     _api.post('/road-risk/brakes', body).catchError((Object e) {
       final code = e is ApiException ? e.statusCode : 0;

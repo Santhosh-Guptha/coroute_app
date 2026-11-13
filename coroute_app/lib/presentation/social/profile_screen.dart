@@ -10,12 +10,14 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/garage_service.dart';
+import '../../domain/media/avatar_crop.dart';
 import '../../domain/social/username_rules.dart';
 import '../account/change_password_screen.dart';
 import '../account/edit_profile_screen.dart';
 import '../score/leaderboard_screen.dart';
 import '../score/rider_score_card.dart';
 import '../widgets/feature_switch.dart';
+import 'avatar_crop_screen.dart';
 import 'people_screen.dart';
 import 'user_avatar.dart';
 
@@ -59,6 +61,8 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     return null;
   }
 
+  /// 3.56: "Adjust picture" (the uploaded picture again), a new picture (through the same cropper)
+  /// or Remove. docs/features_355/profile_photo_adjust.md
   Future<void> _pickPhoto(FriendsService svc) async {
     final hasPhoto = svc.profile?.avatarUrl != null;
     final choice = await showAppSheet<String>(
@@ -67,8 +71,9 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       builder: (ctx) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          DsListRow(icon: Icons.photo_camera_rounded, label: 'Take a photo', onTap: () => Navigator.pop(ctx, 'camera')),
-          DsListRow(icon: Icons.photo_library_rounded, label: 'Choose from photos', onTap: () => Navigator.pop(ctx, 'gallery'), divider: hasPhoto),
+          if (hasPhoto) DsListRow(icon: Icons.crop_rotate_rounded, label: 'Adjust picture', onTap: () => Navigator.pop(ctx, 'adjust')),
+          DsListRow(icon: Icons.photo_camera_rounded, label: 'Take a new photo', onTap: () => Navigator.pop(ctx, 'camera')),
+          DsListRow(icon: Icons.photo_library_rounded, label: 'Choose a new picture', onTap: () => Navigator.pop(ctx, 'gallery'), divider: hasPhoto),
           if (hasPhoto) DsListRow(icon: Icons.delete_outline_rounded, label: 'Remove picture', divider: false, onTap: () => Navigator.pop(ctx, 'remove')),
         ],
       ),
@@ -76,31 +81,74 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     if (choice == null || !mounted) return;
     setState(() => _busyPhoto = true);
     String? problem;
-    if (choice == 'remove') {
-      problem = await svc.removeAvatar();
-    } else {
-      try {
-        // Downsized and re-encoded on the phone (512 px, JPEG): small upload, camera metadata dropped.
-        final f = await ImagePicker().pickImage(
-          source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
-          maxWidth: 512,
-          maxHeight: 512,
-          imageQuality: 80,
-          requestFullMetadata: false,
-          preferredCameraDevice: CameraDevice.front,
-        );
-        if (f != null) {
-          final bytes = await f.readAsBytes();
-          final mime = mimeOf(bytes);
-          problem = mime == null ? 'Use a JPEG, PNG or WebP picture.' : await svc.uploadAvatar(bytes, mime);
+    try {
+      if (choice == 'remove') {
+        problem = await svc.removeAvatar();
+      } else if (choice == 'adjust') {
+        final src = await svc.adjustSource();
+        if (!mounted) return;
+        if (src == null) {
+          problem = 'Your picture could not be loaded. Check your connection and try again.';
+        } else {
+          final saved = await _openCropper(
+            svc,
+            src.bytes,
+            initialCrop: src.crop,
+            // An older picture has no kept original: the current one becomes the original now.
+            keepOriginal: !src.fromOriginal,
+            note: src.fromOriginal ? null : 'The original of this picture was not kept, so you are adjusting the current picture. Choose a new picture for full quality.',
+          );
+          if (saved && mounted) _say('Picture saved');
         }
-      } catch (_) {
-        problem = choice == 'camera' ? 'Could not open the camera.' : 'Could not open your photos.';
+      } else {
+        Uint8List? bytes;
+        try {
+          // Downsized on the phone (2048 px at most): the cropper works on it and it is kept as the
+          // original for later adjusting. Camera metadata is not asked for and is removed on save.
+          final f = await ImagePicker().pickImage(
+            source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
+            maxWidth: 2048,
+            maxHeight: 2048,
+            imageQuality: 90,
+            requestFullMetadata: false,
+            preferredCameraDevice: CameraDevice.front,
+          );
+          if (f != null) bytes = await f.readAsBytes();
+        } catch (_) {
+          problem = choice == 'camera' ? 'Could not open the camera.' : 'Could not open your photos.';
+        }
+        if (!mounted) return;
+        if (bytes != null) {
+          if (mimeOf(bytes) == null) {
+            problem = 'Use a JPEG, PNG or WebP picture.';
+          } else {
+            final saved = await _openCropper(svc, bytes);
+            if (saved && mounted) _say('Picture saved');
+          }
+        }
       }
+    } finally {
+      if (mounted) setState(() => _busyPhoto = false);
     }
     if (!mounted) return;
-    setState(() => _busyPhoto = false);
     if (problem != null) _say(problem);
+  }
+
+  Future<bool> _openCropper(FriendsService svc, Uint8List bytes, {AvatarCrop? initialCrop, bool keepOriginal = true, String? note}) {
+    return AvatarCropScreen.open(
+      context,
+      bytes: bytes,
+      initialCrop: initialCrop,
+      keepOriginal: keepOriginal,
+      note: note,
+      onSave: (r) => svc.saveAdjustedAvatar(
+        cropped: r.cropped.bytes,
+        croppedMime: r.cropped.mime,
+        crop: r.crop,
+        original: r.original?.bytes,
+        originalMime: r.original?.mime,
+      ),
+    );
   }
 
   Future<void> _editUsername(FriendsService svc) async {

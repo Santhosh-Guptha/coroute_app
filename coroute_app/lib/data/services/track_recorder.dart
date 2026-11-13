@@ -87,6 +87,12 @@ class TrackRecorder extends ChangeNotifier {
     }
   }
 
+  /// 3.56: true when a point must not be recorded (PrivatePlacesStore.isNear). Null = record all.
+  bool Function(double lat, double lng)? isPrivate;
+
+  /// Points left out near a private place since the app started (diagnostics; no positions).
+  int hiddenPoints = 0;
+
   /// Feeds one GPS fix. [estimated] positions (tunnel coasting along the
   /// planned route, the glide back to GPS after it, map smoothing) are never
   /// recorded: the trip summary must show only where the rider really was.
@@ -94,6 +100,13 @@ class TrackRecorder extends ChangeNotifier {
     final gid = _groupId;
     if (gid == null || estimated) return;
     if (!_filter.accept(p)) return;
+    // 3.56 (round 6) private places: within 300 m of one, the route is neither saved nor uploaded
+    // (so it is missing from trip reports, shared trip pages, route pictures and GPX for everyone).
+    // The live position of the ride is not affected (group map, guardian link, SOS).
+    if (isPrivate?.call(p.lat, p.lng) ?? false) {
+      hiddenPoints++;
+      return;
+    }
     _lastFix = p;
     _recorded++;
     _pendingPoints++;

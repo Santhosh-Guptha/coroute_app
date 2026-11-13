@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show WidgetsBinding, AppLifecycleState;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../domain/tracking/fix_gate.dart';
 import '../../core/constants/ride_notification_constants.dart';
 
 /// Keeps CoRoute alive while a convoy is active and the phone is in a pocket or
@@ -307,6 +309,26 @@ class BackgroundService {
   }
 
   static Future<bool> requestIgnoreBatteryOptimization() => requestIgnoreBatteryOptimizations();
+
+  static const String _keyBatteryAskedAt = 'battery_exempt_asked_at_v1';
+
+  /// 3.56 audit B-01: the system "Let the app run in the background?" question was opened at every
+  /// ride start (and every time GPS came back) for riders who had answered "Deny". Now: only when
+  /// the phone still restricts CoRoute and the question was not shown in the last 7 days
+  /// ([BatteryExemptionAsk]). The pre-ride phone check keeps its own button for asking at any time.
+  static Future<void> requestIgnoreBatteryOptimizationIfDue({int? nowMs}) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      final exempt = await isIgnoringBatteryOptimizations();
+      final prefs = await SharedPreferences.getInstance();
+      final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
+      if (!BatteryExemptionAsk.shouldAsk(nowMs: now, lastAskedMs: prefs.getInt(_keyBatteryAskedAt) ?? 0, alreadyExempt: exempt)) return;
+      await prefs.setInt(_keyBatteryAskedAt, now);
+      await requestIgnoreBatteryOptimizations();
+    } catch (_) {
+      // Never in the way of starting a ride.
+    }
+  }
 }
 
 /// Entry point for the service isolate. Keep it tiny: it only relays button taps.
