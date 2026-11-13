@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../core/permissions/nearby_access.dart';
+
 /// Status of an individual diagnostic check or category.
 class DiagnosticStatus {
   static const String supported = 'Supported';
@@ -93,7 +95,44 @@ class PhoneCheckFix {
 
   /// 3.57: the emergency texts disclosure, then the SEND_SMS prompt.
   static const String sms = 'sms';
+
+  /// Android 12+ "Nearby devices" (scan, advertise, connect) for the offline mesh and the crash rescue beacon.
+  static const String nearbyDevices = 'nearbyDevices';
   static const String retry = 'retry';
+}
+
+/// Pre-ride item "Nearby devices" (Android 12+ only). A warning, never a blocker: without it the offline mesh and
+/// the crash rescue beacon cannot use Bluetooth, but every other safety path still works.
+class NearbyDevicesCheck {
+  NearbyDevicesCheck._();
+
+  static const String key = 'nearby_devices';
+  static const String name = 'Nearby devices';
+  static const String okText = 'Allowed. Your phone can reach the group with no signal and be found after a crash.';
+  static const String warnText =
+      'Nearby devices: lets your phone talk to the group with no signal and lets riders find you after a crash.';
+
+  /// The item for [access], or null when the permission does not exist on this phone (shown only on Android 12+).
+  static DiagnosticCheckItem? item(NearbyAccess access) {
+    switch (access) {
+      case NearbyAccess.notNeeded:
+        return null;
+      case NearbyAccess.granted:
+        return const DiagnosticCheckItem(key: key, name: name, status: DiagnosticStatus.ready, detail: okText);
+      case NearbyAccess.denied:
+      case NearbyAccess.permanentlyDenied:
+        return DiagnosticCheckItem(
+          key: key,
+          name: name,
+          status: DiagnosticStatus.limited,
+          detail: warnText,
+          // Android will not ask again: the button opens CoRoute's app settings.
+          metadata: {
+            'fix': access == NearbyAccess.permanentlyDenied ? PhoneCheckFix.appSettings : PhoneCheckFix.nearbyDevices,
+          },
+        );
+    }
+  }
 }
 
 /// A single check within a diagnostic category.

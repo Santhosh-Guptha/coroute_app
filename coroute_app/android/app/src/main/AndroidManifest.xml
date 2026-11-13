@@ -34,6 +34,25 @@
     <!-- Route voice to a Bluetooth helmet headset (SCO). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- ==== Round 10 rescue beacon BEGIN (docs/features_355/rescue_beacon.md; shared with any other
+         CoRoute BLE use, e.g. the offline mesh: declare each permission ONCE in this file).
+         A down rider's phone advertises a 5-byte rescue id under CoRoute's rescue UUID (no name, no
+         position) and responders' phones scan for that UUID only, during an open SOS. Android 12+:
+         "Nearby devices" (BLUETOOTH_ADVERTISE / BLUETOOTH_SCAN), the scan never derives location.
+         Android 11 and older: the legacy BLUETOOTH / BLUETOOTH_ADMIN (install-time) and, for the
+         scan, the location permission CoRoute already has. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s"/>
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
+    <!-- ==== Round 10 rescue beacon END -->
+    <!-- ==== Round 10 offline link (docs/features_355/offline_long_range_link.md): uses the SAME Bluetooth entries
+         above (declared once): BLUETOOTH_ADVERTISE + BLUETOOTH_SCAN (neverForLocation: the scan only reads CoRoute's
+         own mesh beacons, RSSI is used for link quality, never to locate anyone) + BLUETOOTH_CONNECT for the
+         rider-to-rider links (GATT / L2CAP) on Android 12+; legacy BLUETOOTH / BLUETOOTH_ADMIN + the existing location
+         permission on Android 11 and older. Nothing new is declared for it. ==== -->
     <!-- flutter_local_notifications: re-schedules plan expiry reminders after a reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Rider safety: crash alarm over the lock screen. -->

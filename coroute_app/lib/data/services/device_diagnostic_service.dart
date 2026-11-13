@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/safety_constants.dart';
+import '../../core/permissions/nearby_permission.dart';
 import '../models/device_diagnostic_report.dart';
 import 'api_client.dart';
 import 'background_service.dart';
@@ -194,6 +195,7 @@ class DeviceDiagnosticService extends ChangeNotifier {
       final btGranted = await PermissionsService.isBluetoothGranted();
       final fullScreenAllowed = safetyInfo.sdkInt >= 34 ? await SafetyNative.canUseFullScreenIntent() : true;
       final crashOn = await _crashDetectionOn();
+      final nearby = await probe.nearbyAccess(safetyInfo.sdkInt);
 
       // Slow probes, all at once. None of them throws.
       final nativeF = probe.nativeProbe();
@@ -573,6 +575,14 @@ class DeviceDiagnosticService extends ChangeNotifier {
       }
       categories['background_execution'] =
           _category('background_execution', 'Background & battery', 'CoRoute keeps running during the ride.', bgChecks);
+
+      // ---- Nearby devices (Android 12+): the offline mesh and the crash rescue beacon. Asked before the ride,
+      // since a crashed rider cannot answer a prompt. A warning only, never a blocker.
+      final nearbyItem = NearbyDevicesCheck.item(nearby);
+      if (nearbyItem != null) {
+        categories['nearby_devices'] =
+            _category('nearby_devices', 'Nearby devices', 'Offline group link and crash locator can use Bluetooth.', [nearbyItem]);
+      }
 
       // ---- Offline maps storage
       final freeBytes = _num(nat['freeBytes']);
@@ -1040,6 +1050,17 @@ class PhoneProbe {
       return await canLaunchUrl(Uri(scheme: 'tel', path: SafetyConstants.emergencyNumber));
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Android 12+ "Nearby devices" (scan, advertise, connect); [NearbyAccess.notNeeded] elsewhere or when [sdk]
+  /// is unknown (0).
+  Future<NearbyAccess> nearbyAccess(int sdk) async {
+    if (!isAndroid) return NearbyAccess.notNeeded;
+    try {
+      return await NearbyPermission.status(sdk: sdk);
+    } catch (_) {
+      return NearbyAccess.notNeeded;
     }
   }
 

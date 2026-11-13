@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/permissions/nearby_permission.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/device_diagnostic_report.dart';
@@ -191,6 +192,12 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
         case PhoneCheckFix.sms:
           // 3.57: the one-screen disclosure, then the system prompt.
           await EmergencyTextsDisclosure.show(context);
+        case PhoneCheckFix.nearbyDevices:
+          // Shared with the offline mesh and the rescue finder (asked once). Blocked for good: app settings.
+          final sdk = (await SafetyNative.deviceInfo()).sdkInt;
+          final after = await NearbyPermission.request(sdk: sdk);
+          // App settings were opened: read it again when the rider comes back.
+          if (after == NearbyAccess.permanentlyDenied) _rerunOnResume = true;
         default:
           // location, notification, microphone, bluetooth, battery, fullScreen
           await PermissionsService.request(fix);

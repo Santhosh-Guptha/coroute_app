@@ -43,6 +43,7 @@ import 'presentation/widgets/emergency_sos_sheet.dart';
 import 'data/services/background_service.dart';
 import 'data/services/alarm_notifier.dart'; // 3.55 siren lock-screen heads-up
 import 'data/services/p2p_mesh_service.dart';
+import 'data/services/offline_link/offline_link_service.dart'; // Round 10 offline link
 import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
 import 'data/services/intercom_service.dart';
@@ -93,6 +94,11 @@ import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/trip_planner/share_in_opener.dart'; // 3.56 Share to CoRoute
 import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
+// ==== Round 10 rescue beacon (docs/features_355/rescue_beacon.md)
+import 'data/services/rescue_beacon_service.dart';
+import 'data/services/rescue_bindings.dart';
+import 'data/services/rescue_finder_service.dart';
+import 'presentation/rescue/rescue_beacon_host.dart';
 import 'presentation/splash/splash_screen.dart';
 import 'presentation/widgets/push_router_host.dart'; // 3.55 push notifications
 import 'presentation/widgets/startup_warmup.dart'; // round 7 idle precache
@@ -372,6 +378,21 @@ class CoRouteApp extends StatelessWidget {
           phoneCall.addListener(() => intercom.setPhoneCallActive(phoneCall.isCallActive));
           return intercom;
         }),
+        // ==== Round 10 offline link BEGIN (docs/features_355/offline_long_range_link.md): Bluetooth LE Long Range
+        // rider mesh + bridge + voice over the mesh, automatic. Advisories go through the round 7 scheduler gate.
+        ChangeNotifierProvider<OfflineLinkService>(
+          lazy: false,
+          create: (ctx) {
+            final link = OfflineLinkService(ctx.read<RealtimeService>(), ctx.read<ConvoyService>());
+            final intercom = ctx.read<IntercomService>();
+            intercom.offlineVoice = link;
+            link.onVoicePacket = intercom.deliverOfflineVoice;
+            link.advisoryGate = (key, text) => ctx.read<SafetyService>().roadCare.mayAdviseFallingBehind(key, text);
+            link.speaker = (text, key) => ctx.read<VoiceService>().speak(text, priority: VoicePriority.warning, key: key).ignore();
+            return link;
+          },
+        ),
+        // ==== Round 10 offline link END
         // Spoken alerts (phone text-to-speech). The engine is warmed up at ride start (the ride
         // listener in the sound awareness block below; else the first alert starts it) and is
         // released when the ride ends (nothing runs at idle). 3.55 fix: released only when a group
@@ -570,6 +591,67 @@ class CoRouteApp extends StatelessWidget {
           },
         ),
         // ==== 3.55 sound awareness (mic agent) END
+        // ==== Round 10 rescue beacon BEGIN (docs/features_355/rescue_beacon.md). Victim side: after an
+        // unanswered crash countdown or an unanswered "Still able to respond?" during an open SOS, an
+        // escalating siren + near-ultrasonic locator + BLE locator + light. Responder side: the finder
+        // (listens only during another rider's open SOS). Adds behaviour only; the countdown, SOS,
+        // emergency texts and Medical ID are untouched.
+        ChangeNotifierProvider<RescueBeaconService>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final rescue = RescueBeaconService(
+              AppRescueVictimPort(ctx.read<SafetyService>(), convoys),
+              screenWake: (on) => SafetyNative.alarmWindow(on).ignore(),
+            );
+            RescueBeaconService.instance = rescue;
+            RescueSpeakerCheck.storedMode().then((m) => rescue.bandMode = m).ignore();
+            rescue.attachRealtime(ctx.read<RealtimeService>().events);
+            // Speaker self-test (which locator band this phone plays): once a month, 20 s into a ride,
+            // only while the ride mic is already open for siren alerts and no SOS is open.
+            final hub = ctx.read<RideMicHub>();
+            final speakerCheck = RescueSpeakerCheck(hub: hub, onResult: (m) => rescue.bandMode = m);
+            var riding = false;
+            void rideChanged() {
+              final now = hub.rideActive();
+              if (now && !riding) {
+                Future<void>.delayed(const Duration(seconds: 20), () {
+                  if (hub.rideActive() && !rescue.sosOpen && !rescue.active) speakerCheck.maybeRun().ignore();
+                });
+              }
+              riding = now;
+            }
+            convoys.addListener(rideChanged);
+            ctx.read<SafetyService>().addListener(rideChanged);
+            return rescue;
+          },
+        ),
+        ChangeNotifierProvider<RescueFinderService>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final safety = ctx.read<SafetyService>();
+            final rt = ctx.read<RealtimeService>();
+            final finder = RescueFinderService(
+              hub: ctx.read<RideMicHub>(),
+              groupTargets: () => rescueGroupTargets(convoys),
+              myPosition: () {
+                final f = safety.lastFix;
+                if (f != null) return (f.lat, f.lng);
+                final uid = convoys.myUserId;
+                final me = uid == null ? null : convoys.activeConvoy?.riders[uid];
+                return (me?.lat ?? 0, me?.lng ?? 0);
+              },
+              sendMessage: rt.send,
+              online: () => rt.isConnected,
+              notify: (title, body) => AlarmNotifier.showCriticalAlert(title, body).ignore(),
+            );
+            finder.attachRealtime(rt.events);
+            convoys.addListener(finder.reevaluate);
+            return finder;
+          },
+        ),
+        // ==== Round 10 rescue beacon END
         // 3.55 solo check-in by ETA (text the emergency contact when a solo ride is overdue and the
         // rider does not answer) and no-signal ahead (coverage log of my own rides). Not lazy: the
         // timer must run with the screen off.
@@ -783,7 +865,10 @@ class _App extends StatelessWidget {
         final mq = MediaQuery.of(context);
         return MediaQuery(
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.3).toDouble())),
-          child: CrashAlarmHost(
+          // Round 10 rescue beacon: the victim's beacon screen over the lock screen + the screen flash.
+          child: RescueBeaconHost(
+            navigatorKey: appNavigatorKey,
+            child: CrashAlarmHost(
             navigatorKey: appNavigatorKey,
             // 3.55 friend request / accepted: snackbar in the foreground (system notification in the background).
             child: FriendNoticeHost(
@@ -817,6 +902,7 @@ class _App extends StatelessWidget {
               ),
             ),
           ),
+          ), // Round 10 RescueBeaconHost
         );
       },
     );

@@ -22,6 +22,8 @@ class MainActivity : FlutterActivity() {
     private var appSecurity: AppSecurityChannel? = null
     private var rideWindow: RideWindowChannel? = null
     private var voiceCodec: VoiceCodecChannel? = null // Round 8 intercom Opus (VoiceCodecChannel.kt)
+    private var rescueBeacon: RescueBeaconChannel? = null // Round 10 rescue beacon (RescueBeaconChannel.kt)
+    private var meshBle: MeshBleChannel? = null // Round 10 offline link (MeshBleChannel.kt, LongRangeBle.kt)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -95,6 +97,18 @@ class MainActivity : FlutterActivity() {
         val codec = VoiceCodecChannel()
         voiceCodec = codec
         MethodChannel(messenger, "coroute/voice_codec").setMethodCallHandler(codec)
+        // ==== Round 10 rescue beacon BEGIN: siren / locator audio, torch, BLE locator (RescueBeaconChannel.kt)
+        val rescueMethods = MethodChannel(messenger, "coroute/rescue")
+        val rescue = RescueBeaconChannel(applicationContext, rescueMethods)
+        rescueBeacon = rescue
+        rescueMethods.setMethodCallHandler(rescue)
+        // ==== Round 10 rescue beacon END
+        // ==== Round 10 offline link BEGIN: Bluetooth LE Long Range rider mesh (MeshBleChannel.kt / LongRangeBle.kt)
+        val mesh = MeshBleChannel(applicationContext)
+        meshBle = mesh
+        MethodChannel(messenger, "coroute/mesh_ble").setMethodCallHandler(mesh)
+        EventChannel(messenger, "coroute/mesh_ble_events").setStreamHandler(mesh)
+        // ==== Round 10 offline link END
     }
 
     // The screen-lock confirmation of the app lock on Android 6-8 (AppSecurityChannel); everything else as before.
@@ -178,6 +192,15 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, "coroute/voice_codec").setMethodCallHandler(null)
         voiceCodec?.dispose()
         voiceCodec = null
+        // Round 10 rescue beacon: nothing keeps sounding, flashing or advertising without the engine.
+        rescueBeacon?.dispose()
+        rescueBeacon = null
+        MethodChannel(messenger, "coroute/rescue").setMethodCallHandler(null)
+        // Round 10 offline link: radios off with the engine.
+        meshBle?.dispose()
+        meshBle = null
+        MethodChannel(messenger, "coroute/mesh_ble").setMethodCallHandler(null)
+        EventChannel(messenger, "coroute/mesh_ble_events").setStreamHandler(null)
         ShareIn.channel?.let { ShareIn.dispose(it) }
         super.cleanUpFlutterEngine(flutterEngine)
     }

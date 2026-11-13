@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:coroute_app/core/permissions/nearby_access.dart';
 import 'package:coroute_app/data/models/device_diagnostic_report.dart';
 import 'package:coroute_app/data/services/device_diagnostic_service.dart';
 import 'package:coroute_app/data/services/sms_sender.dart';
@@ -15,6 +16,7 @@ class FakeProbe extends PhoneProbe {
     this.level,
     this.charging = false,
     this.compose = true,
+    this.nearby = NearbyAccess.notNeeded,
   });
 
   final Map<String, dynamic> nat;
@@ -24,6 +26,7 @@ class FakeProbe extends PhoneProbe {
   final int? level;
   final bool charging;
   final bool compose;
+  final NearbyAccess nearby;
 
   @override
   bool get isMobile => true;
@@ -51,6 +54,8 @@ class FakeProbe extends PhoneProbe {
   Future<bool?> canDial() async => null;
   @override
   Future<bool?> compassAvailable() async => null;
+  @override
+  Future<NearbyAccess> nearbyAccess(int sdk) async => nearby;
 }
 
 const Map<String, dynamic> healthy = {
@@ -163,6 +168,41 @@ void main() {
     expect(item(r, 'crash_setting').fix, PhoneCheckFix.crashDetection);
     expect(item(r, 'crash_setting').verdict, CheckVerdict.warn);
     expect(r.allChecks.any((c) => c.key == 'mic_capture'), isFalse);
+  });
+
+  test('Nearby devices: hidden when not needed, a warning (never a blocker) when missing, after background', () async {
+    final none = await DeviceDiagnosticService(probe: FakeProbe(nat: healthy, level: 80)).runFullDiagnostic();
+    expect(none.allChecks.any((c) => c.key == NearbyDevicesCheck.key), isFalse);
+
+    final ok = await DeviceDiagnosticService(probe: FakeProbe(nat: healthy, level: 80, nearby: NearbyAccess.granted))
+        .runFullDiagnostic();
+    expect(item(ok, NearbyDevicesCheck.key).verdict, CheckVerdict.pass);
+
+    final missing = await DeviceDiagnosticService(
+      probe: FakeProbe(
+        nat: healthy,
+        gps: const GpsReading(accuracyM: 6, speedKmh: 0),
+        precise: true,
+        mic: true,
+        level: 80,
+        nearby: NearbyAccess.denied,
+      ),
+    ).runFullDiagnostic();
+    final n = item(missing, NearbyDevicesCheck.key);
+    expect(n.verdict, CheckVerdict.warn);
+    expect(n.isCritical, isFalse);
+    expect(n.fix, PhoneCheckFix.nearbyDevices);
+    expect(n.detail, NearbyDevicesCheck.warnText);
+    expect(missing.readiness, isNot(RideReadiness.notReady));
+    final keys = missing.categories.keys.toList();
+    expect(keys.indexOf('nearby_devices'), greaterThan(keys.indexOf('gps')));
+    expect(keys.indexOf('nearby_devices'), greaterThan(keys.indexOf('background_execution')));
+
+    final blocked = await DeviceDiagnosticService(
+      probe: FakeProbe(nat: healthy, level: 80, nearby: NearbyAccess.permanentlyDenied),
+    ).runFullDiagnostic();
+    expect(item(blocked, NearbyDevicesCheck.key).fix, PhoneCheckFix.appSettings);
+    expect(DeviceDiagnosticReport.validatePrivacySafety(blocked.toJson()), isTrue);
   });
 
   test('verdict mapping: critical problems fail, other problems warn', () {
