@@ -124,6 +124,12 @@ class IntelCareService extends ChangeNotifier {
   /// Applies the approved crash brain impact scale (SafetyService -> CrashDetector.setBrainImpactScale).
   void Function(double scale)? onBrainScale;
 
+  /// Round 7: places where riders brake hard or skid (hazard cells), for the curve predictor.
+  void Function(List<(double, double)> spots)? onHardBrakeSpots;
+
+  /// Round 7: the route line whose tiles are being fetched (road cells are fetched with it).
+  void Function(List<(double, double)> line)? onRouteLine;
+
   /// The phone mount the sensor hub found this ride.
   MountKind Function()? mount;
 
@@ -474,6 +480,9 @@ class IntelCareService extends ChangeNotifier {
   Future<void> prefetchAlong(List<(double, double)> line) async {
     final a = api;
     if (line.isEmpty) return;
+    try {
+      if (line.length >= 2) onRouteLine?.call(line);
+    } catch (_) {}
     final now = _now();
     final tiles = Geohash.tilesAlong(line);
     final stale = tiles.where((t) => !hazardTiles.fresh(t, now)).toList();
@@ -505,6 +514,12 @@ class IntelCareService extends ChangeNotifier {
   void _applyCells(List<(double, double)> line) {
     final now = _now();
     hazards.setCells(hazardTiles.cells(now));
+    try {
+      onHardBrakeSpots?.call([
+        for (final c in hazardTiles.cells(now))
+          if (c.kind == 'hard_brake' || c.kind == 'skid') (c.lat, c.lng)
+      ]);
+    } catch (_) {}
     rough.setCells(roughTiles.cells(now));
     final along = <({double alongM, bool ghat})>[];
     if (line.length >= 2) {

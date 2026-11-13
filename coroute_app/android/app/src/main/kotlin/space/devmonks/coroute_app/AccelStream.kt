@@ -300,7 +300,12 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
             maxDurationMs = max(maxDurationMs, currentDurationMs)
 
             val now = SystemClock.elapsedRealtime()
-            if (closed.isNotEmpty() && now - lastFlush >= 500L) {
+            // Round 7 (faster safety response): a closed bucket that holds an impact (peak of 3 g or
+            // more) is handed to Dart at once instead of waiting out the 500 ms flush spacing. The
+            // buckets themselves are unchanged (same one-second windows, same numbers), so the crash
+            // rule sees exactly what it saw before, up to half a second sooner.
+            val urgent = closed.size >= 10 && closed[closed.size - 9] >= 3.0
+            if (closed.isNotEmpty() && (urgent || now - lastFlush >= 500L)) {
                 lastFlush = now
                 flush()
             }

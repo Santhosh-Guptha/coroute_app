@@ -106,6 +106,11 @@ class GroupSafetyService extends ChangeNotifier {
   /// Speaks a line (important tier).
   void Function(String line, String key)? speaker;
 
+  /// Round 7: the ride's one advisory warning scheduler (RoadCareService.mayAdvise). When set, the
+  /// "falling behind" voice asks it first, so it never talks over a bend or hazard warning. Null =
+  /// spoken as before. Only the voice is gated: the card always shows.
+  bool Function(String key, String line)? advisoryGate;
+
   /// Round 4: learned rider stops along the route (IntelCareService.learnedStops), for regroup points.
   Iterable<IntelCell> Function()? learnedStops;
 
@@ -703,7 +708,7 @@ class GroupSafetyService extends ChangeNotifier {
       userId: hit.userId,
     );
     _behindUntil = now + 60000;
-    _say(hit.speech, 'BEHIND:${hit.userId}');
+    if (advisoryGate?.call('BEHIND:${hit.userId}', hit.speech) ?? true) _say(hit.speech, 'BEHIND:${hit.userId}');
     return true;
   }
 

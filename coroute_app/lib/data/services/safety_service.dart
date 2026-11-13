@@ -53,6 +53,8 @@ import '../../domain/safety/crash_incident.dart' show CrashScenario, MovementSta
 import 'sensor_safety_hub.dart';
 import 'sos_battery_reserve.dart';
 import 'road_care_service.dart';
+import 'road_data_service.dart';
+import '../../domain/road/road_ahead_engine.dart';
 import 'intel_care_service.dart';
 import '../../domain/safety/mount_classifier.dart' show MountKind;
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
@@ -574,7 +576,21 @@ class SafetyService extends ChangeNotifier {
       if (!_disposed) notifyListeners();
     },
     now: _now,
-  );
+  )
+    // Round 7: curve and speed-limit prediction (route line or road cells; advisory only).
+    ..roadAhead = _roadAhead
+    ..roadCells = roadData
+    ..roadPrefs = (() => RoadAheadPrefs(
+          curveWarnings: _settings.curveWarnings,
+          limitDisplay: _settings.roadLimitDisplay,
+          overspeedWarning: _settings.roadOverspeedWarning,
+          tolerancePct: _settings.roadOverspeedTolerancePct,
+          voice: _settings.voiceWarnings,
+        ));
+  final RoadAheadEngine _roadAhead = RoadAheadEngine();
+
+  /// Round 7: road cells on the phone (disk LRU + polite fetch); shares the matcher with [_roadAhead].
+  late final RoadDataService roadData = RoadDataService(api: () => intel.api, matcher: _roadAhead.matcher, now: _now, persist: _native);
   EngineCareAdvice? _engineNotice;
   Timer? _engineNoticeClear;
 
@@ -589,6 +605,9 @@ class SafetyService extends ChangeNotifier {
     now: _now,
     persist: _native,
   )
+    // Round 7: bends where riders brake hard are raised a class; road cells are fetched along the route.
+    ..onHardBrakeSpots = _roadAhead.setHardBrakeSpots
+    ..onRouteLine = ((line) => roadData.prefetchRoute(line).ignore())
     ..onBrainScale = _detector.setBrainImpactScale
     ..mount = (() => MountKind.fromWire(sensorSafety.summary.mount));
 
@@ -1120,6 +1139,7 @@ class SafetyService extends ChangeNotifier {
       _resetRide();
       if (active && gid != null) {
         _intel(intel.startRide); // round 4: tiles along the route (offline after that), crash brain params
+        roadData.startRide(); // round 7: the "limits on your last ride" list starts again (kept after the ride ends)
         _restoreFuel(gid).ignore();
         fuelEconomy.ensureLoaded(reload: true).ignore();
       }
