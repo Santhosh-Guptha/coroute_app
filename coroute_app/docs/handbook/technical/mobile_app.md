@@ -10,7 +10,7 @@ release).
 |---|---|
 | Package | `space.devmonks.coroute_app` |
 | Flutter / Dart | 3.47.1 / 3.13.1 (`sdk: ^3.13.1`) |
-| Android | minSdk `max(flutter.minSdkVersion, 23)`, **targetSdk 36** (Play: API 36 for updates from 31 Aug 2026), compileSdk 37 |
+| Android | minSdk `max(flutter.minSdkVersion, 24)` = API 24 (Android 7.0; Flutter's minimum), **targetSdk 36** (Play: API 36 for updates from 31 Aug 2026), compileSdk 37 |
 | Key packages | `provider`, `flutter_map`, `geolocator`, `web_socket_channel`, `record` (mic), `flutter_pcm_sound`, `flutter_foreground_task`, `flutter_local_notifications`, `permission_handler`, `flutter_secure_storage`, `sqflite`, `shared_preferences`, `google_sign_in`, `app_links`, `battery_plus`, `wakelock_plus`, `share_plus`, `url_launcher`, `image_picker`, `flutter_compass` |
 | Native deps (Gradle) | `firebase-bom:33.7.0` + `firebase-messaging` (no Analytics, no google-services plugin), `com.google.android.play:review:2.0.2` |
 | Build-time values | `COROUTE_API` (optional override; disables the DuckDNS fallback, so **not** used for release), `GOOGLE_WEB_CLIENT_ID` (public id, has a default), Gradle properties `COROUTE_FCM_APP_ID`, `COROUTE_FCM_API_KEY`, `COROUTE_FCM_PROJECT_ID`, `COROUTE_FCM_SENDER_ID` (without them push is simply off) |

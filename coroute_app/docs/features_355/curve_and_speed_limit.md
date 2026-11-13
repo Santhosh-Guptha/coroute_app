@@ -1,5 +1,9 @@
 # Curve prediction and road speed limits (round 7, build 3.55.0+10026)
 
+> Round 9 (Nov 13): the rider choices described here were reduced to fixed defaults (Ride AOD when idle, screen on
+> only while moving, lock-screen cockpit under Settings › Advanced; bends / limit sign / overspeed always on with an
+> automatic +10 % margin; Strong noise reduction with automatic wind-noise mode). See docs/quality/ROUND9_SETTINGS_NOTES.md.
+
 Advisory features for the ride cockpit. They never replace the signs on the road, and they never show or speak
 while an SOS or a crash alarm is open.
 

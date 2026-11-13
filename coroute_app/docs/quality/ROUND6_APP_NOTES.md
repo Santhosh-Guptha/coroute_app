@@ -118,7 +118,7 @@ already registered. `config.js` was not edited: `WEATHER_PROVIDER` and `WEATHER_
 | Regression, pure Dart | crash detector 32, false-positive guards 6, sensor safety 34, lock-screen cockpit policy 13, Ride AOD 16, screen awake 6, intel (5 files) 40, group safety 18, speed estimator 11, location cadence 6: all pass |
 | Gateway, files touched | avatar_adjust 6, avatar_adjust_web 4, weather_met 6, weather 4, group_safety 12, usernames_friends 19, qa316: all pass |
 | Widget tests | written, **not run** (no Flutter SDK): `avatar_crop_screen_356_test.dart`, the changed `ride316_ui_test.dart` and `l10n_test.dart` |
-| Kotlin | not compiled here; `ImageEncodeChannel.kt` uses `android.graphics.Bitmap` and Flutter's `MethodChannel` only (minSdk 23 safe) |
+| Kotlin | not compiled here; `ImageEncodeChannel.kt` uses `android.graphics.Bitmap` and Flutter's `MethodChannel` only (minSdk 24 safe) |
 
 ## 5. Weather: what the terms say (read on 2026-11-12)
 

@@ -1,5 +1,9 @@
 # Minimal settings (v3.55)
 
+> Round 9 (Nov 13) reduced the settings further and fixed more defaults: see
+> `docs/quality/ROUND9_SETTINGS_NOTES.md` (it supersedes the rows below for voice alerts, battery saver, the Ride
+> screen choices, the music choices, the road safety switches and voice clarity).
+
 Owner direction: "Make the user's settings minimal and make most of them default, for the security
 and safety of users." Also: "simple, understandable. Less text, more understanding."
 

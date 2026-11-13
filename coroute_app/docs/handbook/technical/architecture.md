@@ -16,7 +16,7 @@ CoRoute is a motorcycle group and solo riding **safety** platform for India. It 
 
 | Part | Technology | Where | Purpose |
 |---|---|---|---|
-| Android app | Flutter 3.47.1 / Dart 3.13.1, Kotlin platform code, package `space.devmonks.coroute_app`, minSdk 23, targetSdk 36, compileSdk 37 | `lib/`, `android/app/` | Riding cockpit, live group map, SOS, crash detection, intercom, siren alerts, social. **Consumption-only** (no prices or payments: Google Play policy). |
+| Android app | Flutter 3.47.1 / Dart 3.13.1, Kotlin platform code, package `space.devmonks.coroute_app`, minSdk 24 (Android 7.0, Flutter's minimum), targetSdk 36, compileSdk 37 | `lib/`, `android/app/` | Riding cockpit, live group map, SOS, crash detection, intercom, siren alerts, social. **Consumption-only** (no prices or payments: Google Play policy). |
 | Gateway | Node.js 22 (engines `>=20`), Express 4, `ws` 8 | `gateway/src/` | REST API, WebSocket realtime hub, safety engine (timeline, safety network), jobs, push/mail/SMS, website and web consoles. |
 | Website and web consoles | Static HTML + vanilla JS served by the gateway | `gateway/public/` | Public site, rider shop (`/signin`, `/plans`, `/account`, `/receipt`), web admin (`/admin`), operator console (`/operator`), live emergency pages (`/e/:token`), Ride Guardian (`/watch`). |
 | Database | Oracle Autonomous Database (Always Free), JSON collections through ORDS **SODA** REST | OCI Hyderabad | All persistent state. Reached **only from the gateway**, schema user `COROUTE` (never ADMIN). |

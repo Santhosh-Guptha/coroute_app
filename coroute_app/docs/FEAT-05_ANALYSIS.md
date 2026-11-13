@@ -29,7 +29,7 @@ When a severe crash occurs or a rider is incapacitated in these dead zones:
 
 | Subsystem / Requirement | Files Inspected in Repository | Current Capability & Status |
 | :--- | :--- | :--- |
-| **Android SDK Baseline** | [`coroute_app/android/app/build.gradle.kts`](android/app/build.gradle.kts) | `compileSdk = 37`, `minSdk = 23` (Android 6.0 Marshmallow). Target SDK tracks modern Android. |
+| **Android SDK Baseline** | [`coroute_app/android/app/build.gradle.kts`](android/app/build.gradle.kts) | `compileSdk = 37`, `minSdk = maxOf(flutter.minSdkVersion, 24)`, effective API 24 (Android 7.0; Flutter's minimum). Target SDK tracks modern Android. |
 | **iOS Baseline** | [`coroute_app/ios/Runner/Info.plist`](ios/Runner/Info.plist) | Background audio and location enabled. iOS deployment target $\ge 12.0$. |
 | **SOS & Crash Detection** | [`coroute_app/lib/data/services/safety_service.dart`](lib/data/services/safety_service.dart), [`convoy_service.dart`](lib/data/services/convoy_service.dart) | 15-second crash countdown, `CrashAlarmState`, bystander siren, and `raiseSosFrom`. |
 | **FEAT-04 Biometrics** | [`coroute_app/lib/data/services/biometric_safety_bridge.dart`](lib/data/services/biometric_safety_bridge.dart) | Provides `BiometricTraumaLevel` (`stableTrauma`, `elevatedTrauma`, `criticalTraumaLevel1`, `unverified`), resting baseline, and 5-min history. |

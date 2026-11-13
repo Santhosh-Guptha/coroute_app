@@ -98,6 +98,9 @@ maps providers act as service providers.
   keystore are missing; it never signs with the debug key.
 - 3.54: `<queries>` declares `android.media.action.IMAGE_CAPTURE` for the image_picker camera (no
   CAMERA permission). Full checklist: [PLAYSTORE_RELEASE_CHECKLIST_v3.54.md](PLAYSTORE_RELEASE_CHECKLIST_v3.54.md).
+- v3.57 (build 10027): the manifest removes, with `tools:node="remove"`, permissions a library might add that
+  CoRoute never uses: `AD_ID`, `READ_PHONE_STATE`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `CAMERA`.
+  Reasons: [release/R8_KEEP_RULES_v3.57.md](release/R8_KEEP_RULES_v3.57.md) section 3.
 
 ## 6. Must be tested on a real device before release
 

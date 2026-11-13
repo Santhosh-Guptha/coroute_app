@@ -1,5 +1,9 @@
 # Voice clarity: RNNoise, Opus and the voice relay (Round 8, on 3.55.0+10027)
 
+> Round 9 (Nov 13): the rider choices described here were reduced to fixed defaults (Ride AOD when idle, screen on
+> only while moving, lock-screen cockpit under Settings › Advanced; bends / limit sign / overspeed always on with an
+> automatic +10 % margin; Strong noise reduction with automatic wind-noise mode). See docs/quality/ROUND9_SETTINGS_NOTES.md.
+
 The owner asked for this: "voice should be very clear, and suppressing noise and background noises should work excellent". It is also step 1 and step 2 of the high-traffic plan (docs/infra/HIGH_TRAFFIC_PLAN_v3.57.md, section 7).
 
 Voice rules do not change. Voice is never recorded: the gateway keeps only a session log line (who, when, how long). It goes to the group only.

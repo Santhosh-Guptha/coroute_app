@@ -119,7 +119,7 @@ D) COCKPIT ON THE LOCK SCREEN + RIDE AOD (app only; docs/features_355/lock_scree
  4. dart tool/play_policy_scan.dart -> 0 hits.
  5. flutter build appbundle --release and flutter build apk --release --split-per-abi (no COROUTE_API; COROUTE_FCM_*
     gradle properties). FIRST compile of the new Kotlin: AppSecurityChannel.kt, RideWindowChannel.kt, changed
-    MainActivity.kt, SafetyChannel.kt, RideNotification.kt (compileSdk 37, minSdk 23). Resource linking must pass with
+    MainActivity.kt, SafetyChannel.kt, RideNotification.kt (compileSdk 37, minSdk 24). Resource linking must pass with
     data_extraction_rules.xml and network_security_config.xml.
 
 === 4. ENV AND KEYS (both VMs, SAME values) ===

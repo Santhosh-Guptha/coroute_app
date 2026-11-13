@@ -155,7 +155,7 @@ The alert comes about 3 seconds after the siren starts, so short chirps, horns a
 
 | Warning | What you hear or see |
 |---|---|
-| Over the speed limit | A warning line. Far over: "Slow down. 95 km/h, limit 65." Music gets quieter, then pauses (see section 4). |
+| Over the speed limit | "Over limit. 72 km/h, limit 60." Far over: "Slow down. 95 km/h, limit 65." Music gets quieter, then pauses (see section 4). If you (or your lead) change the limit during the ride, the next warning uses the new limit within a second or two, and the ride screen, the Ride AOD and the lock-screen notification show it. |
 | Road hazard ahead (pothole, speed breaker, rough road) | "ROAD HAZARD AHEAD" card, "300 m ahead", and a spoken line |
 | Rider accident ahead on your road | A short caution with the distance |
 | Sharp bend, school or hospital zone, high altitude, night riding | Short spoken tips and cards |
@@ -168,17 +168,22 @@ The alert comes about 3 seconds after the siren starts, so short chirps, horns a
 Gentle warnings that come from many riders' rides. Everyone gets them, whether or not you share your own signals.
 They never speak or show over an SOS or crash alarm, and they also appear on the lock-screen cockpit.
 
-| Warning | What you hear or see | Switch (Settings > Road safety) |
+These warnings are always on (no switches since round 9). Each speaks at most once in a while and never over a
+more urgent one.
+
+| Warning | What you hear or see | Can I quiet it? |
 |---|---|---|
-| Hazard ahead | "Hazard ahead in 400 meters. Riders brake hard here. Ride carefully." 300-500 m before a spot where many riders braked hard, swerved, crashed or raised SOS, in your direction of travel. At most one every 2 km. | Hazard warnings (on) |
-| Rough road ahead | "Pothole ahead." or "Rough road ahead." At most one every 5 km, lowest priority. | Rough road ahead (on) |
-| Twisty section | "Ghat section for the next 8 kilometers. Slow down." about 1 km before twisty roads on your planned route. | Twisty section ahead (on) |
-| Long ride and night | A stronger nudge after 4 hours without a real break; a notice after 30 minutes of riding between 23:00 and 05:00, then a break reminder an hour later. Tap Snooze for 20 minutes of quiet. The 2-hour break reminder is always on. | Long ride and night nudges (on) |
+| Hazard ahead | "Hazard ahead in 400 meters. Riders brake hard here. Ride carefully." 300-500 m before a spot where many riders braked hard, swerved, crashed or raised SOS, in your direction of travel. At most one every 2 km. | No |
+| Rough road ahead | "Pothole ahead." or "Rough road ahead." At most one every 5 km, lowest priority. | Tap **Mute this ride** on its card |
+| Twisty section | "Ghat section for the next 8 kilometers. Slow down." about 1 km before twisty roads on your planned route. | Tap **Mute this ride** on its card |
+| Long ride and night | A stronger nudge after 4 hours without a real break; a notice after 30 minutes of riding between 23:00 and 05:00, then a break reminder an hour later. Tap Snooze for 20 minutes of quiet. The 2-hour break reminder is always on. | Snooze, or **Mute this ride** on its card |
 | Group break (lead) | "Group riding 2 h 10 min. Suggest a break at Indian Oil." | same |
-| Falling behind (lead and sweep) | "Ravi is falling behind (1.2 km, growing)", with "Send regroup at ..." when you are stopped. | admin switch |
-| Pre-ride tip | Once a day at most: "Evening rides here see more hard braking. Ride safe." | Hazard warnings |
+| Falling behind (lead and sweep) | "Ravi is falling behind (1.2 km, growing)", with "Send regroup at ..." when you are stopped. | No |
+| Pre-ride tip | Once a day at most: "Evening rides here see more hard braking. Ride safe." | No |
 | No known fuel (planning) | "No known fuel for 110 km after HP Highway" under the route in Plan a ride. | — |
 | ETA based on riders | The planner shows "Time (riders)" when the time comes from how fast riders really ride those roads. | — |
+
+**Mute this ride** quiets that kind of warning until the ride ends; the next ride starts with it on again.
 
 The warnings are downloaded for your route when the ride starts and kept on the phone for 14 days, so they work
 without signal.
@@ -218,15 +223,14 @@ When something needs the unlock, your phone's fingerprint or PIN sheet opens; on
 
 - The ride map shows on the lock screen **only during a ride** and only while it is the screen in front. After the ride ends, or after you sign out, the normal lock screen is back. If you unlocked and opened, say, the chat, locking the phone there shows the normal lock screen.
 - **Lock CoRoute with fingerprint** (if you use it) never covers the ride map during a ride, and works again after the ride.
-- Turn it off in **Settings › Ride screen › Show cockpit on lock screen while riding** (on by default). The ride notification with its **SOS** button stays on the lock screen either way.
+- Turn it off in **Settings › Advanced › Show cockpit on lock screen while riding** (on by default). The ride notification with its **SOS** button stays on the lock screen either way.
 
-**Ride AOD (resting screen).** After 30 seconds without a touch, the ride screen switches to a black "Ride AOD": big speed, the next turn and its distance, how far the leader is (or how many riders are moving), the time, your battery and **Hold SOS**. Tap anywhere for the full map. Everything moves a few pixels once a minute so nothing burns into the screen. Alerts (another rider's SOS, a crash countdown, a siren, leaving the route, regroup) bring the full map back at once.
+**Ride AOD (resting screen).** After 30 seconds without a touch, the ride screen switches to a black "Ride AOD": big speed, your speed limit (red when you are over it), the next turn and its distance, how far the leader is (or how many riders are moving), the time, your battery and **Hold SOS**. Tap anywhere for the full map. Everything moves a few pixels once a minute so nothing burns into the screen. Alerts (another rider's SOS, a crash countdown, a siren, leaving the route, regroup) bring the full map back at once.
 
-- **Settings › Ride screen › When idle**: **Ride AOD** (default), **Dim** or **Let the screen sleep**.
-- **Settings › Ride screen › Keep screen on**: **Only while moving** (default: the screen may sleep after 2 minutes stopped; press power to see your ride) or **Always during a ride**.
+- No settings to choose: the resting screen is always the Ride AOD, and the screen stays on **only while moving** (it may sleep after 2 minutes stopped; press power to see your ride).
 - Battery: about 6–10 % per hour with the screen on; the Ride AOD costs about 2–4 % per hour on OLED screens. Below 15 % battery (not charging), after 5 minutes parked, or when the phone gets too hot, the screen may sleep and a line says why; the ride keeps running. When the phone is hot, the Ride AOD comes sooner to cool it down.
 
-**Android 16:** the ride also shows as a **Live Update**: the next turn or your group in the status bar chip and at the top of the lock screen (and on the always-on display on phones that show it). You can turn Live Updates off for CoRoute in Android settings; the ride notification then looks as before.
+**Android 16:** the ride also shows as a **Live Update**: the next turn or your group (and your speed limit) in the status bar chip and at the top of the lock screen (and on the always-on display on phones that show it). You can turn Live Updates off for CoRoute in Android settings; the ride notification then looks as before.
 
 ---
 
@@ -290,7 +294,7 @@ Only the trip owner can end the trip for everyone (**End Ride**). Any rider can 
 - **Hold to talk:** hold the button and speak. Or switch to **Hands-free** and just speak.
 - **Talk to:** everyone, or one rider.
 - **Mute** stops you hearing the group. On the lock screen the ride notification has **Talk** / **Talk off** and **Mute** / **Unmute**, usable without unlocking.
-- CoRoute cleans up your voice (breathing, wind and engine noise) before the group hears it. A rider who talks very loudly is levelled so they do not blast your ears.
+- CoRoute cleans up your voice (breathing, wind and engine noise) before the group hears it: strong noise reduction, and wind gusts are cut automatically. There is nothing to set. A rider who talks very loudly is levelled so they do not blast your ears.
 - Voice is relayed live and never stored.
 
 ![Intercom](assets/intercom.jpg) ![Lock screen](assets/lock_screen.jpg)
@@ -305,7 +309,7 @@ The ride notification shows one line such as "55 km/h · limit 60 · Warning in 
 
 Tap the **Chat** button on the map (group rides). A red badge shows unread messages.
 
-- **Quick replies**, one tap each: **Fuel**, **Break**, **Wait for me**, **I'm OK**, **Slow down**, **Regroup here**, **On my way**, **Arrived**. Change the order in **Settings › More settings › Chat quick replies**.
+- **Quick replies**, one tap each: **Fuel**, **Break**, **Wait for me**, **I'm OK**, **Slow down**, **Regroup here**, **On my way**, **Arrived**. Change the order in **Settings › Advanced › Chat quick replies**.
 - **Typing** is possible only when you are stopped (or riding pillion). While moving: "Riding: one-tap replies only. Stop to type."
 - Incoming quick replies are spoken in one short line ("Kiran: fuel stop"). Short texts are read out; long ones show as a banner.
 - During an SOS, chat is never spoken.
@@ -316,12 +320,12 @@ Tap the **Chat** button on the map (group rides). A red badge shows unread messa
 
 | Situation | What happens |
 |---|---|
-| Music playing, ordinary alert (hazard, directions, group) | Music gets quieter for the line, then comes back. With **Pause music for alerts** on, it pauses instead. |
+| Music playing, ordinary alert (hazard, directions, group) | Music gets quieter for the line, then comes back. |
 | Emergency or critical alert (SOS, crash countdown, "Bike down?", siren close, "Are you OK?", far over the limit) | Music pauses. With a headset the line plays in your helmet or earbuds, loud enough to hear. On the speaker it plays as an alarm, heard even at media volume 0. |
-| Over the limit (**Lower music when speeding**, on by default) | About 10 % over: music to 60 %. 25 % over: 30 %. 40 % over: music paused. It comes back when you are back under the limit. If you change the volume yourself, CoRoute stops touching it. |
+| Over the limit (**lower music when speeding**, always on) | About 10 % over: music to 60 %. 25 % over: 30 %. 40 % over: music paused. It comes back when you are back under the limit. If you change the volume yourself, CoRoute stops touching it. |
 | Phone rings | Ordinary lines wait. Critical lines still play. |
 | On a call | Ordinary lines are held. A critical alert plays a short tone and phrase in your call audio (the caller does not hear it). After the call: "Safety alert during your call: …" then "While you were on the call: 2 road warnings, Asha fell behind." |
-| Voice alerts off | Ordinary lines are silent. **Emergencies are always spoken.** |
+| Voice muted (ride map › quick settings › **Voice**) | Ordinary lines are silent. **Emergencies are always spoken.** |
 
 ---
 
@@ -336,7 +340,7 @@ Tap the **Chat** button on the map (group rides). A red badge shows unread messa
 
 ### Navigate in Google Maps or Mappls
 
-Tap **Navigate** on a stop, the destination or a place. CoRoute opens turn-by-turn directions in your navigation app and keeps running in the background: your group, crash detection, alerts and talk all continue. Choose the app in **Settings › More settings › Navigation app**: Automatic (Google Maps, else Mappls, else any map app), Google Maps, Mappls, or any map app.
+Tap **Navigate** on a stop, the destination or a place. CoRoute opens turn-by-turn directions in your navigation app and keeps running in the background: your group, crash detection, alerts and talk all continue. Choose the app in **Settings › Advanced › Navigation app**: Automatic (Google Maps, else Mappls, else any map app), Google Maps, Mappls, or any map app.
 
 CoRoute also re-routes you automatically if you leave the route.
 
@@ -457,33 +461,39 @@ Turn push messages on or off in **Settings › Push notifications**. Safety and 
 
 ## 9. Settings
 
-Open **Profile ›** gear. Settings are short on purpose: safety features have no switch.
+Open **Profile ›** gear. CoRoute works without changing anything: safety features and warnings have no switch,
+and the few rows left are choices only you can make (privacy, consent, language, data use).
 
 | Group | Row | What it does |
 |---|---|---|
-| Safety | **Safety is always on** | The list of features that are always on |
+| Safety | **Safety is always on** | The list of features that are always on (crash detection, SOS, emergency texts, check-ins, break reminder, road and bend warnings, speed limits, nudges, Ride AOD...). It also says where the two quick controls are. |
 | | **Safety health** | "Check your phone is ready" |
 | | **Emergency contact & Medical ID** | Your contact and medical info |
-| | **Speed warning** | Your own limit (the group's limit, or 50 to 120 km/h). The stricter limit always applies. |
-| Ride | **Voice alerts** | "Emergencies are always spoken" |
-| | **Siren alerts** | "Listens on your phone during rides. Nothing is recorded." On by default. Off releases the microphone at once. |
+| | **Speed warning** | Your own limit (the group's limit, or 50 to 120 km/h). The line under it says which limit warns you right now: the stricter of yours and the group's always applies. A change during a ride applies on the next position update. |
+| | **Road safety** | **Help make roads safer** (off until you turn it on), private places, road data on the phone, wrong limits |
+| Ride | **Siren alerts** | "Listens on your phone during rides. Nothing is recorded." On by default. Off releases the microphone at once. |
 | | **Language** | System, English, Hindi or Telugu (safety screens and spoken alerts) |
-| | **Battery saver** | "Turns on by itself when low" (at 20 %). Never reduces SOS or crash detection. |
 | | **Data saver** | Uses less mobile data |
-| Ride screen | **Show cockpit on lock screen while riding** | On by default. "Your ride screen comes back when you wake the phone, without unlocking. Private things need your fingerprint or PIN." |
-| | **When idle** | Ride AOD (default), Dim or Let the screen sleep, with a battery estimate |
-| | **Keep screen on** | Only while moving (default) or Always during a ride |
-| App & privacy | **Appearance** | Light, dark or automatic |
-| | **Push notifications** | Plus a switch for each kind of message |
+| App & privacy | **Lock CoRoute with fingerprint or screen lock** | Off by default; **Lock after** appears when it is on |
+| | **Appearance** | Light, dark or automatic |
+| | **Push notifications** | Plus a switch for each kind of message (news, events, safety tips, community, partner perks) |
 | | **Show me on leaderboards** | Your username on public boards |
-| **More settings** | **Pause music for alerts** | Off: music only gets quieter |
-| | **Lower music when speeding** | On by default |
+| **Advanced** (tap to open) | **Show cockpit on lock screen while riding** | On by default. Turn off if you do not want the ride map shown on a locked phone. |
 | | **Fuel** | Tank range |
 | | **Navigation app** | Which app **Navigate** opens |
 | | **Chat quick replies** | The order of the quick replies |
 | | **Permissions**, **Features guide** | Tools and help |
 
-**Quick settings** on the ride map: three big tiles, **Voice**, **Night map** and **Battery saver**. "Emergencies are always spoken."
+**Quick settings** on the ride map: three big tiles, **Voice** (mute spoken alerts), **Night map** and **Battery
+saver** (on, or automatic at 20 %). "Emergencies are always spoken."
+
+**What changed in round 9 (you do not need to do anything):** these choices were removed and are now always on or
+automatic: curve warnings, speed limit display, overspeed warning and its margin (now about 10 %, at least 5 km/h),
+hazard / rough road / twisty warnings, long ride and night nudges, the break interval, When idle (Ride AOD), Keep
+screen on (only while moving), Pause music for alerts (music gets quieter), Lower music when speeding (on), noise
+reduction (strong) and wind-noise mode (automatic). Voice alerts and battery saver moved to the ride map's quick
+settings. Your consent for "Help make roads safer", your notification choices, app lock, leaderboards and the
+lock-screen cockpit choice are unchanged.
 
 ---
 
@@ -544,8 +554,9 @@ you have signal).
 safety > Limits on your last ride. When three riders agree, the limit changes for everyone. This needs "Help make
 roads safer" to be on.
 
-**Settings > Road safety > Bends and speed limits:** Curve warnings, Speed limit display, Overspeed warning and
-its margin (5 to 20 %), "About estimated limits", and how much road data is stored on your phone (with Clear).
+**Settings > Road safety > Bends and speed limits:** bend warnings, the limit sign and the overspeed warning are
+always on, with a margin of about 10 % (at least 5 km/h; none near schools and hospitals). The card explains
+estimated limits and shows how much road data is stored on your phone (with Clear).
 
 **Please remember:** this is advice. Maps can be wrong or old, and CoRoute does not know about rain, gravel,
 traffic or road works. Always follow the signs and ride at a speed you can stop from.

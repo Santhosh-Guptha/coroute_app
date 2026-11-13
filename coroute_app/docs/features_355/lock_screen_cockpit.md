@@ -1,5 +1,9 @@
 # Cockpit on the lock screen + Ride AOD (app build 3.55.0+10025, not released)
 
+> Round 9 (Nov 13): the rider choices described here were reduced to fixed defaults (Ride AOD when idle, screen on
+> only while moving, lock-screen cockpit under Settings › Advanced; bends / limit sign / overspeed always on with an
+> automatic +10 % margin; Strong noise reduction with automatic wind-noise mode). See docs/quality/ROUND9_SETTINGS_NOTES.md.
+
 Owner request: "what about the always on display and even if screen was locked also we should show our cockpit
 screen".
 
