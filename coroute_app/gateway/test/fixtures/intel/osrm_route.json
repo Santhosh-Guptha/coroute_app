@@ -1,0 +1,73 @@
+{
+ "code": "Ok",
+ "routes": [
+  {
+   "distance": 4980.4,
+   "duration": 398.1,
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      77.5946,
+      12.9716
+     ],
+     [
+      77.601,
+      12.975
+     ],
+     [
+      77.6105,
+      12.9802
+     ],
+     [
+      77.6201,
+      12.9901
+     ],
+     [
+      77.63,
+      13.0012
+     ]
+    ]
+   },
+   "legs": [
+    {
+     "distance": 1960.2,
+     "duration": 180,
+     "steps": [
+      {
+       "name": "MG Road",
+       "ref": "",
+       "distance": 810,
+       "duration": 80
+      },
+      {
+       "name": "Old Airport Road",
+       "ref": "",
+       "distance": 1150.2,
+       "duration": 100
+      },
+      {
+       "name": "",
+       "ref": "",
+       "distance": 0,
+       "duration": 0
+      }
+     ]
+    },
+    {
+     "distance": 3020.2,
+     "duration": 218.1,
+     "steps": [
+      {
+       "name": "Outer Ring Road",
+       "ref": "NH 44",
+       "distance": 3020.2,
+       "duration": 218.1
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "waypoints": []
+}

@@ -1,0 +1,88 @@
+{
+ "trip": {
+  "locations": [
+   {
+    "type": "break",
+    "lat": 12.9716,
+    "lon": 77.5946
+   },
+   {
+    "type": "through",
+    "lat": 12.9802,
+    "lon": 77.6105
+   },
+   {
+    "type": "break",
+    "lat": 13.0012,
+    "lon": 77.63
+   }
+  ],
+  "legs": [
+   {
+    "maneuvers": [
+     {
+      "type": 1,
+      "instruction": "Drive east on MG Road.",
+      "street_names": [
+       "MG Road"
+      ],
+      "time": 95.2,
+      "length": 0.81
+     },
+     {
+      "type": 10,
+      "instruction": "Turn right onto Old Airport Road.",
+      "street_names": [
+       "Old Airport Road"
+      ],
+      "time": 110,
+      "length": 1.15
+     },
+     {
+      "type": 4,
+      "instruction": "You have arrived.",
+      "time": 0,
+      "length": 0
+     }
+    ],
+    "summary": {
+     "time": 205.2,
+     "length": 1.96
+    },
+    "shape": "_dvvWo}~~rCosE_oK_dIwpQ"
+   },
+   {
+    "maneuvers": [
+     {
+      "type": 1,
+      "instruction": "Continue.",
+      "street_names": [
+       "Outer Ring Road"
+      ],
+      "time": 240.4,
+      "length": 3.02
+     },
+     {
+      "type": 4,
+      "instruction": "You have arrived.",
+      "time": 0,
+      "length": 0
+     }
+    ],
+    "summary": {
+     "time": 240.4,
+     "length": 3.02
+    },
+    "shape": "o}fwWg_~_sCwiR_wQwtTwiR"
+   }
+  ],
+  "summary": {
+   "time": 445.6,
+   "length": 4.98
+  },
+  "status_message": "Found route between points",
+  "status": 0,
+  "units": "kilometers",
+  "language": "en-US"
+ }
+}
