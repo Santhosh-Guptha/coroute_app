@@ -4,7 +4,7 @@
  * Used by the test-suite and by `npm run dev` when ORACLE_SODA_URL=memory,
  * so the gateway can be exercised with no database at all.
  */
-const { SodaClient } = require('./soda');
+const { SodaClient, REV_FIELD, newRev, casTestsPass } = require('./soda');
 const { isDeepStrictEqual } = require('node:util');
 
 function matches(doc, filter) {
@@ -49,9 +49,22 @@ class MemorySoda extends SodaClient {
     const indexes = this.indexes.get(collection) || new Map();
     indexes.set(spec.name, spec.fields.map(f => f.path)); this.indexes.set(collection, indexes);
   }
-  async compareAndReplace(collection, key, expected, replacement) {
-    if (!isDeepStrictEqual(this._coll(collection).get(key), expected)) return false;
-    this._coll(collection).set(key, structuredClone(replacement)); return true;
+  /**
+   * The same precondition the database applies (round 6): the JSON Patch built by SodaClient._casPatch, i.e. a test
+   * of every top-level scalar of the observed document (casRev among them), NOT a deep comparison. A race that the
+   * real patch would miss is therefore missed here too, and a test can show it. compareAndReplace itself (and its
+   * path for documents without a casRev) is SodaClient's.
+   */
+  async _casApply(collection, key, patch) {
+    const stored = this._coll(collection).get(key);
+    if (!casTestsPass(stored, patch.filter((op) => op.op === 'test'))) return false;
+    this._coll(collection).set(key, structuredClone(patch[patch.length - 1].value)); return true;
+  }
+  async seedRev(collection, key) {
+    const stored = this._coll(collection).get(key);
+    if (!stored) return null;
+    stored[REV_FIELD] = newRev();
+    return stored[REV_FIELD];
   }
   async insert(collection, doc) {
     for (const fields of this.indexes.get(collection)?.values() || []) {
@@ -61,6 +74,7 @@ class MemorySoda extends SodaClient {
       }
     }
     const key = `K${++this.seq}`;
+    this._stampNew(collection, doc);
     this._coll(collection).set(key, structuredClone(doc));
     return key;
   }
@@ -80,6 +94,7 @@ class MemorySoda extends SodaClient {
     const keys = [];
     for (const doc of docs) {
       const key = `K${++this.seq}`;
+      this._stampNew(collection, doc);
       this._coll(collection).set(key, structuredClone(doc));
       keys.push(key);
     }
@@ -93,6 +108,7 @@ class MemorySoda extends SodaClient {
   }
   async replace(collection, key, doc) {
     if (!this._coll(collection).has(key)) throw Object.assign(new Error('not found'), { status: 404 });
+    this._stamp(collection, doc);
     this._coll(collection).set(key, structuredClone(doc));
     return key;
   }
