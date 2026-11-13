@@ -1,0 +1,15 @@
+# /etc/systemd/system/coroute-restore-drill.service (v3.56): weekly restore drill, run by coroute-restore-drill.timer.
+# vm3: ExecStart as below (local backups). vm4 (owner decision, needs the backup key there): add "--source par".
+[Unit]
+Description=CoRoute weekly backup restore drill
+Wants=network-online.target coroute-secrets.service
+After=network-online.target coroute-secrets.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/coroute/gateway/deploy/backup/restore_drill.sh --source local
+Nice=10
+TimeoutStartSec=1h
+MemoryMax=700M
+PrivateTmp=true
+NoNewPrivileges=true

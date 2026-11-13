@@ -1,0 +1,38 @@
+# /etc/caddy/Caddyfile on vm5 (A1.Flex worker, tenancy 2), v3.56. TLS by the default HTTP-01 challenge: point
+# routing.coroute.devmonks.space and tiles.coroute.devmonks.space at vm5 first (owner decision: names).
+#
+# routing.*  Valhalla (127.0.0.1:8002 in docker) for the gateways only: vm1/vm2 reach vm5 over the internet (another
+#            tenancy, no shared VCN), so the allow list is their PUBLIC egress addresses, set in
+#            /etc/caddy/coroute-worker.env as GATEWAY_EGRESS_IPS="a.b.c.d e.f.g.h" (never in git).
+# tiles.*    Protomaps PMTiles (one India .pmtiles file) as static range requests, cached hard (the file name carries
+#            the build date); only if the owner chooses self-hosted vector tiles (plan section 7).
+{
+	email {$ACME_EMAIL:ops@coroute.invalid}
+}
+
+{$ROUTING_HOST:routing.coroute.devmonks.space} {
+	encode zstd gzip
+	@gateways remote_ip {$GATEWAY_EGRESS_IPS:127.0.0.1}
+	handle @gateways {
+		reverse_proxy 127.0.0.1:8002 {
+			transport http {
+				keepalive 60s
+			}
+		}
+	}
+	handle {
+		respond 403
+	}
+}
+
+{$TILES_HOST:tiles.coroute.devmonks.space} {
+	@pmtiles path *.pmtiles
+	header @pmtiles {
+		Cache-Control "public, max-age=31536000, immutable"
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Headers "Range, If-Match"
+		Access-Control-Expose-Headers "ETag, Content-Length, Content-Range"
+	}
+	root * /var/lib/coroute/tiles
+	file_server
+}

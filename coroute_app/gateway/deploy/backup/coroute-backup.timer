@@ -1,0 +1,12 @@
+# /etc/systemd/system/coroute-backup.timer (vm3, v3.56): 22:40 UTC = 04:10 IST, after the gateway's own nightly
+# backup (BACKUP_FULL_HOUR_UTC=21) and outside riding hours. Persistent: a missed run (vm3 down) runs at boot.
+[Unit]
+Description=Nightly CoRoute offsite backup
+
+[Timer]
+OnCalendar=*-*-* 22:40:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

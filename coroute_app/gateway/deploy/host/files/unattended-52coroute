@@ -1,0 +1,6 @@
+// /etc/apt/apt.conf.d/52coroute-unattended (deploy/host/apply.sh, v3.56; same policy as setup_node.sh)
+// Security updates every day, never an automatic reboot (reboot one VM at a time: RUNBOOK), Node.js and Caddy
+// upgraded deliberately through a release, never in the background.
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Package-Blacklist { "nodejs"; "caddy"; };

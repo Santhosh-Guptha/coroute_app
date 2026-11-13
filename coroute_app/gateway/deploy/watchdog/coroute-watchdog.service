@@ -1,0 +1,23 @@
+# /etc/systemd/system/coroute-watchdog.service (vm3, v3.56). ~30 MB RSS; no dependencies beyond Node.
+[Unit]
+Description=CoRoute uptime watchdog (deploy/watchdog/coroute_watchdog.js)
+Wants=network-online.target
+After=network-online.target coroute-secrets.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/node /opt/coroute/watchdog/coroute_watchdog.js
+Environment=NODE_OPTIONS=--max-old-space-size=64
+Restart=always
+RestartSec=5
+MemoryMax=96M
+StateDirectory=coroute-watchdog
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=journal
+SyslogIdentifier=coroute-watchdog
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# /etc/systemd/system/coroute-backup.service (vm3, v3.56): encrypted offsite backup, run by coroute-backup.timer.
+[Unit]
+Description=CoRoute offsite encrypted database backup (deploy/nightly_backup.py)
+Wants=network-online.target coroute-secrets.service
+After=network-online.target coroute-secrets.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/coroute/nightly_backup.py
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+# Exports run node (the gateway exporter) and keep the heap small on the 1 GB micro.
+Environment=NODE_OPTIONS=--max-old-space-size=256
+MemoryMax=450M
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+UMask=0077

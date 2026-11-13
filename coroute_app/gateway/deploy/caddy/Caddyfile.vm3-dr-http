@@ -1,0 +1,109 @@
+# /etc/caddy/Caddyfile on vm3 AFTER a promotion, when Caddy has no DuckDNS module (TLS by the default HTTP-01 / TLS-ALPN
+# challenge: certificates are issued only once DNS points at vm3, about 30-60 s after the switch). Installed by
+# deploy/dr/promote_vm3.sh --tls http.
+#
+# Serves both production names from this VM's own gateway (127.0.0.1:3000). While vm3 is a standby, DNS points at the
+# tenancy-1 NLB, so no rider reaches it; the DNS-01 challenge (DuckDNS) still issues and renews both certificates here,
+# so a promotion (deploy/dr/promote_vm3.sh) only switches DNS: no certificate wait. Needs the caddy-dns/duckdns build
+# and DUCKDNS_TOKEN in /run/coroute/caddy.env (same as vm1/vm2). Without them use Caddyfile.vm3-dr-http at promotion.
+# DuckDNS holds ONE TXT record: issue here at a quiet time, not while vm1/vm2 renew (Caddy retries anyway).
+{
+	default_sni coroute.duckdns.org
+}
+
+(coroute_tls) {
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+		# coroute.devmonks.space: its ACME challenge is delegated to DuckDNS with the DNS record
+		#   _acme-challenge.coroute.devmonks.space. CNAME _acme-challenge.coroute.duckdns.org.
+		# so the same token issues both certificates (no new secret; docs/DOMAIN_MIGRATION_devmonks.md).
+		# For coroute.duckdns.org this is its own challenge name, so nothing changes there.
+		dns_challenge_override_domain _acme-challenge.coroute.duckdns.org
+		resolvers 1.1.1.1 8.8.8.8
+		protocols tls1.2 tls1.3
+	}
+}
+
+(coroute_common) {
+	encode zstd gzip
+	header {
+		defer
+		?X-Content-Type-Options nosniff
+		?X-Frame-Options DENY
+		?Referrer-Policy no-referrer
+		-Server
+		-X-Powered-By
+	}
+	# HSTS: one year on the DuckDNS name (as before). The new domain starts at 5 minutes; raise it to
+	# "max-age=31536000" once https://coroute.devmonks.space is verified (docs/DOMAIN_MIGRATION_devmonks.md
+	# step 4). Never set HSTS with includeSubDomains on devmonks.space itself (other sites live there).
+	@coroute_new_domain host coroute.devmonks.space
+	@coroute_old_domain not host coroute.devmonks.space
+	header @coroute_new_domain {
+		defer
+		Strict-Transport-Security "max-age=300"
+	}
+	header @coroute_old_domain {
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+}
+
+# v3.56 performance (docs/infra/INFRASTRUCTURE_PLAN_v3.56.md): website assets, icons and APKs straight from this
+# node's disk when the file exists (Node never sees them); hashed assets (?v=<hash>, added by src/pages.js) are
+# immutable for a year, the rest cached 7 days, APKs always revalidated. Precompressed .gz/.zst files written by
+# deploy/release.sh are sent as they are (no per-request compression). Pages, /admin and /operator assets (own CSP),
+# partials (_*.html) and anything missing go on to the gateway as before.
+(coroute_static) {
+	@coroute_static {
+		path /assets/* /fonts/* /favicon.svg /favicon-32.png /apple-touch-icon.png /icon-512.png /og-image.png /site.webmanifest /watch.webmanifest /coroute.apk /coroute-32bit.apk
+		not path *.html
+		not path_regexp /_[^/]*$
+		file {
+			root {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		}
+	}
+	handle @coroute_static {
+		root * {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		@versioned query v=*
+		header @versioned Cache-Control "public, max-age=31536000, immutable"
+		@apk path *.apk
+		header @apk Cache-Control "no-cache"
+		header @apk Content-Type "application/vnd.android.package-archive"
+		header /fonts/* Access-Control-Allow-Origin "*"
+		header ?Cache-Control "public, max-age=604800"
+		file_server {
+			precompressed zstd gzip
+		}
+	}
+	# Prometheus metrics never leave the VM (the gateway also refuses non-loopback clients).
+	handle /metrics {
+		respond 404
+	}
+}
+
+# Both names during the domain move: installed apps have coroute.duckdns.org built in (keep it >= 6 months).
+coroute.devmonks.space, coroute.duckdns.org {
+	import coroute_common
+	import coroute_static
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			stream_close_delay 5m
+			flush_interval -1
+			transport http {
+				# Below the gateway's HTTP_KEEPALIVE_MS (75 s): Caddy never reuses a connection Node just closed.
+				keepalive 60s
+				keepalive_idle_conns 64
+			}
+		}
+	}
+}
+
+:443 {
+	handle /api/health/live {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle {
+		respond 404
+	}
+}

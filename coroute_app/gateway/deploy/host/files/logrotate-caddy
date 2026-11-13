@@ -1,0 +1,13 @@
+# /etc/logrotate.d/coroute-caddy (deploy/host/apply.sh, v3.56). Our Caddyfiles write no access log; this only
+# bounds any log file someone adds (see RUNBOOK "WebSocket tokens and access logs" for the redaction filter).
+/var/log/caddy/*.log {
+	daily
+	rotate 14
+	maxsize 50M
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+	su caddy caddy
+}

@@ -1,0 +1,60 @@
+# /etc/caddy/Caddyfile on vm4 (staging / canary, tenancy 2). v3.56: same performance settings as production.
+# TLS: the default HTTP-01 challenge (staging.coroute.devmonks.space points at vm4). Never serves production names.
+{
+	# Staging should look like production to the gateway: client IPs from X-Forwarded-For set by this Caddy only.
+}
+
+(coroute_common) {
+	encode zstd gzip
+	header {
+		defer
+		?X-Content-Type-Options nosniff
+		?X-Frame-Options DENY
+		?Referrer-Policy no-referrer
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+		-X-Powered-By
+	}
+}
+
+(coroute_static) {
+	@coroute_static {
+		path /assets/* /fonts/* /favicon.svg /favicon-32.png /apple-touch-icon.png /icon-512.png /og-image.png /site.webmanifest /watch.webmanifest /coroute.apk /coroute-32bit.apk
+		not path *.html
+		not path_regexp /_[^/]*$
+		file {
+			root {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		}
+	}
+	handle @coroute_static {
+		root * {$COROUTE_PUBLIC_DIR:/opt/coroute/gateway/public}
+		@versioned query v=*
+		header @versioned Cache-Control "public, max-age=31536000, immutable"
+		@apk path *.apk
+		header @apk Cache-Control "no-cache"
+		header @apk Content-Type "application/vnd.android.package-archive"
+		header /fonts/* Access-Control-Allow-Origin "*"
+		header ?Cache-Control "public, max-age=604800"
+		file_server {
+			precompressed zstd gzip
+		}
+	}
+	handle /metrics {
+		respond 404
+	}
+}
+
+{$STAGING_HOST:staging.coroute.devmonks.space} {
+	import coroute_common
+	import coroute_static
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			stream_close_delay 5m
+			flush_interval -1
+			transport http {
+				keepalive 60s
+				keepalive_idle_conns 64
+			}
+		}
+	}
+}
