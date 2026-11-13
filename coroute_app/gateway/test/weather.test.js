@@ -6,6 +6,7 @@
  */
 process.env.NODE_ENV = 'test';
 process.env.WEATHER_URL = 'http://wx.test';
+process.env.WEATHER_PROVIDER = 'open-meteo'; // 3.56: MET Norway is the default (test/weather_met_356.test.js)
 process.env.WEATHER_PER_MIN = '2';
 process.env.GEO_MIN_INTERVAL_MS = '0';
 

@@ -1,0 +1,185 @@
+{
+ "type": "Feature",
+ "geometry": {
+  "type": "Point",
+  "coordinates": [
+   78.5,
+   17.4,
+   542
+  ]
+ },
+ "properties": {
+  "meta": {
+   "updated_at": "2026-11-12T05:14:07Z",
+   "units": {
+    "air_temperature": "celsius",
+    "precipitation_amount": "mm",
+    "probability_of_precipitation": "%"
+   }
+  },
+  "timeseries": [
+   {
+    "time": "2026-11-12T06:00:00Z",
+    "data": {
+     "instant": {
+      "details": {
+       "air_pressure_at_sea_level": 1009.2,
+       "air_temperature": 27.4,
+       "cloud_area_fraction": 40.0,
+       "relative_humidity": 61.0,
+       "wind_from_direction": 120.0,
+       "wind_speed": 3.1
+      }
+     },
+     "next_1_hours": {
+      "summary": {
+       "symbol_code": "partlycloudy_day"
+      },
+      "details": {
+       "precipitation_amount": 0.0
+      }
+     },
+     "next_6_hours": {
+      "summary": {
+       "symbol_code": "lightrain"
+      },
+      "details": {
+       "precipitation_amount": 1.9,
+       "probability_of_precipitation": 12.0,
+       "air_temperature_max": 29.4,
+       "air_temperature_min": 25.4
+      }
+     }
+    }
+   },
+   {
+    "time": "2026-11-12T07:00:00Z",
+    "data": {
+     "instant": {
+      "details": {
+       "air_pressure_at_sea_level": 1009.2,
+       "air_temperature": 28.1,
+       "cloud_area_fraction": 40.0,
+       "relative_humidity": 61.0,
+       "wind_from_direction": 120.0,
+       "wind_speed": 3.1
+      }
+     },
+     "next_1_hours": {
+      "summary": {
+       "symbol_code": "cloudy"
+      },
+      "details": {
+       "precipitation_amount": 0.0
+      }
+     },
+     "next_6_hours": {
+      "summary": {
+       "symbol_code": "lightrain"
+      },
+      "details": {
+       "precipitation_amount": 1.9,
+       "probability_of_precipitation": 40.0,
+       "air_temperature_max": 30.1,
+       "air_temperature_min": 26.1
+      }
+     }
+    }
+   },
+   {
+    "time": "2026-11-12T08:00:00Z",
+    "data": {
+     "instant": {
+      "details": {
+       "air_pressure_at_sea_level": 1009.2,
+       "air_temperature": 27.0,
+       "cloud_area_fraction": 40.0,
+       "relative_humidity": 61.0,
+       "wind_from_direction": 120.0,
+       "wind_speed": 3.1
+      }
+     },
+     "next_1_hours": {
+      "summary": {
+       "symbol_code": "lightrain"
+      },
+      "details": {
+       "precipitation_amount": 0.3
+      }
+     },
+     "next_6_hours": {
+      "summary": {
+       "symbol_code": "rain"
+      },
+      "details": {
+       "precipitation_amount": 2.5,
+       "probability_of_precipitation": 64.0,
+       "air_temperature_max": 29.0,
+       "air_temperature_min": 25.0
+      }
+     }
+    }
+   },
+   {
+    "time": "2026-11-12T09:00:00Z",
+    "data": {
+     "instant": {
+      "details": {
+       "air_pressure_at_sea_level": 1009.2,
+       "air_temperature": 25.5,
+       "cloud_area_fraction": 40.0,
+       "relative_humidity": 61.0,
+       "wind_from_direction": 120.0,
+       "wind_speed": 3.1
+      }
+     },
+     "next_1_hours": {
+      "summary": {
+       "symbol_code": "heavyrainandthunder"
+      },
+      "details": {
+       "precipitation_amount": 1.6
+      }
+     },
+     "next_6_hours": {
+      "summary": {
+       "symbol_code": "rain"
+      },
+      "details": {
+       "precipitation_amount": 2.5,
+       "probability_of_precipitation": 70.0,
+       "air_temperature_max": 27.5,
+       "air_temperature_min": 23.5
+      }
+     }
+    }
+   },
+   {
+    "time": "2026-11-12T12:00:00Z",
+    "data": {
+     "instant": {
+      "details": {
+       "air_pressure_at_sea_level": 1009.2,
+       "air_temperature": 24.0,
+       "cloud_area_fraction": 40.0,
+       "relative_humidity": 61.0,
+       "wind_from_direction": 120.0,
+       "wind_speed": 3.1
+      }
+     },
+     "next_6_hours": {
+      "summary": {
+       "symbol_code": "rain"
+      },
+      "details": {
+       "precipitation_amount": 3.0,
+       "probability_of_precipitation": 75.0,
+       "air_temperature_max": 26.0,
+       "air_temperature_min": 22.0
+      }
+     }
+    }
+   }
+  ]
+ }
+}
