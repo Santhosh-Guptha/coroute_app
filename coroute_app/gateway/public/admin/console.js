@@ -90,12 +90,12 @@
 
   // ==================================================================== settings
   var SETTINGS_TABS = [['', 'Access mode', 'Paid, free for everyone, or free up to limits'], ['pricing', 'Pricing & payments', 'Plan prices, offers and Razorpay keys'],
-    ['templates', 'Templates', 'Words of receipts, welcome, plan assigned, coupon for you, SMS and push notices'], ['sms', 'SMS', 'SOS SMS provider'], ['email', 'E-mail', 'Weekly limit, quiet hours, sender, blocked addresses']];
+    ['templates', 'Templates', 'Words of receipts, welcome, plan assigned, coupon for you, SMS and push notices'], ['sms', 'SMS', 'SOS SMS provider'], ['email', 'E-mail', 'Weekly limit, quiet hours, sender, blocked addresses'], ['summary', 'Weekly summary', 'The Monday e-mail to the administrators']];
   CR.sections.settings = {
     title: 'Settings',
     render: function (view, arg) {
       var sub = arg || '';
-      view.appendChild(ui.pageHead('Settings', 'Access mode, pricing, message words, SMS and e-mail.'));
+      view.appendChild(ui.pageHead('Settings', 'Access mode, pricing, message words, SMS, e-mail and the weekly summary.'));
       var nav = h('div.row.eng-tabs.es-tabs', { role: 'tablist', 'aria-label': 'Settings' });
       SETTINGS_TABS.forEach(function (t) {
         nav.appendChild(h('button.btn.btn--sm', { type: 'button', role: 'tab', title: t[2], 'aria-selected': String(sub === t[0]), 'aria-pressed': String(sub === t[0]), text: t[1],
@@ -108,6 +108,7 @@
       if (sub === 'templates') { if (CR.sections.templates) CR.sections.templates.render(inner, ''); return; }
       if (sub === 'sms') { if (CR.renderSms) CR.renderSms(inner); return; }
       if (sub === 'email') { if (CR.emailStudio) CR.emailStudio.renderSettings(inner); return; }
+      if (sub === 'summary') { if (CR.renderWeeklySummary) CR.renderWeeklySummary(inner); return; }
       inner.appendChild(h('p.muted', { text: 'Who may host group rides, and whether it needs a plan. The app gets only the result, never prices.' }));
       if (CR.accessModeCard) inner.appendChild(CR.accessModeCard());
     },

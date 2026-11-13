@@ -423,3 +423,71 @@ details.es-more[open] summary { margin-bottom: 6px; }
 .wz-done__icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: var(--c-green-soft); color: var(--c-success); font: 800 1.6rem var(--font); }
 .wz-done__icon.is-bad { background: var(--c-red-soft); color: var(--c-sos-ink); }
 .es-pv .es-frame { height: 640px; }
+
+/* Round 4: Road & safety intelligence (intel.js) */
+.intel-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
+.intel-filters .field { min-width: 180px; margin: 0; }
+.intel-mapcard { padding: 8px; margin-bottom: 14px; }
+.intel-map { height: 440px; width: 100%; border-radius: var(--r-md); overflow: hidden; background: var(--c-surface-2, #e8eef2); }
+.intel-attr { margin: 6px 4px 0; }
+.intel-insights { margin: 8px 0 14px; padding-left: 18px; line-height: 1.6; }
+.table tbody tr { cursor: default; }
+.leaflet-container { font: inherit; }
+.leaflet-popup-content { font-size: 0.85rem; line-height: 1.4; }
+@media (max-width: 700px) { .intel-map { height: 300px; } }
+
+/* ---- Round 6: Business pages and Servers (business.js) ---- */
+.biz-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -4px 0 14px; }
+.biz-funnel { display: flex; flex-direction: column; gap: 10px; }
+.biz-bar { display: grid; grid-template-columns: minmax(150px, 34%) minmax(0, 1fr) 64px; gap: 12px; align-items: center; }
+.biz-bar__label { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.biz-bar__track { height: 14px; border-radius: 4px; background: var(--c-surface-2); overflow: hidden; }
+.biz-bar__fill { height: 100%; border-radius: 4px; background: var(--c-chart); min-width: 0; }
+.biz-bar__value { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .biz-bar { grid-template-columns: minmax(0, 1fr) 56px; } .biz-bar__track { grid-column: 1 / -1; order: 3; } }
+/* One-hue sequential scale (light to dark = low to high); the number is always printed in the cell. */
+.heat { text-align: center; font-variant-numeric: tabular-nums; font-size: 0.8rem; font-weight: 700; white-space: nowrap; }
+.table td.heat { padding: 8px 6px; border-left: 2px solid var(--c-surface); border-bottom: 2px solid var(--c-surface); border-radius: 6px; }
+.heat-0 { background: var(--c-surface-2); color: var(--c-text-3); font-weight: 600; }
+.heat-1 { background: color-mix(in srgb, var(--c-chart) 16%, var(--c-surface)); color: var(--c-text); }
+.heat-2 { background: color-mix(in srgb, var(--c-chart) 32%, var(--c-surface)); color: var(--c-text); }
+.heat-3 { background: color-mix(in srgb, var(--c-chart) 52%, var(--c-surface)); color: var(--c-text); }
+.heat-4 { background: color-mix(in srgb, var(--c-chart) 78%, var(--c-surface)); color: #fff; }
+.heat-5 { background: #1D5C6A; color: #fff; }
+/* Dark: the same steps run from the surface up to the bright chart colour (more = brighter). */
+:root[data-theme="dark"] .heat-3 { color: #fff; }
+:root[data-theme="dark"] .heat-4 { color: #0E2227; }
+:root[data-theme="dark"] .heat-5 { background: #8FD3E0; color: #0E2227; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .heat-3 { color: #fff; }
+  :root:not([data-theme="light"]) .heat-4 { color: #0E2227; }
+  :root:not([data-theme="light"]) .heat-5 { background: #8FD3E0; color: #0E2227; }
+}
+.heat-na { background: transparent; }
+.biz-cohort th[scope="row"] { font-weight: 700; text-transform: none; letter-spacing: 0; font-size: 0.86rem; color: var(--c-text); padding: 8px 12px; text-align: left; }
+.biz-cohort td.heat { min-width: 52px; }
+.biz-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.biz-legend .heat { padding: 3px 8px; border-radius: 6px; }
+.biz-hours th[scope="row"] { text-transform: none; letter-spacing: 0; font-size: 0.82rem; color: var(--c-text-2); padding: 4px 10px; }
+.biz-hours thead th { padding: 6px 2px; text-align: center; }
+.table.biz-hours td.heat-cell { padding: 0; height: 30px; min-width: 26px; font-size: 0.72rem; }
+.biz-factors { margin: 0; padding-left: 18px; font-size: 0.86rem; color: var(--c-text-2); }
+.biz-risk td { vertical-align: top; }
+.biz-act { margin-top: 6px; }
+.biz-how summary { cursor: pointer; font-weight: 700; color: var(--c-text-2); }
+.biz-how p { margin-top: 10px; color: var(--c-text-2); font-size: 0.9rem; max-width: 80ch; }
+.biz-who { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.88rem; }
+.biz-review tr.is-done td { opacity: 0.6; }
+.biz-switch { font-weight: 700; margin-bottom: 12px; }
+.biz-switch input { width: 18px; height: 18px; }
+.biz-preview { margin: 0; white-space: pre-wrap; font: 0.88rem/1.55 var(--font); color: var(--c-text-2); background: var(--c-surface-2); border-radius: var(--r-sm); padding: 14px; overflow-wrap: anywhere; }
+.srv-node .card__head { margin-bottom: 12px; }
+.srv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.srv-metric { border: 1px solid var(--c-border); border-left-width: 4px; border-left-color: var(--c-success); border-radius: var(--r-sm); padding: 10px 12px; min-width: 0; }
+.srv-metric.is-warn { border-left-color: var(--c-safety); background: var(--c-safety-light); }
+.srv-metric.is-bad { border-left-color: var(--c-sos); background: var(--c-red-soft); }
+.srv-metric__label { font-size: 0.72rem; font-weight: 700; color: var(--c-text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.srv-metric__value { font-size: 1.2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.srv-metric__hint { font-size: 0.78rem; color: var(--c-text-3); }
+.srv-notes { margin: 12px 0 0; padding-left: 18px; font-size: 0.9rem; color: var(--c-text-2); }
+.chart-grid + .card { margin-top: 16px; }

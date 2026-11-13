@@ -332,15 +332,16 @@
     var payload = function () { return { design: design(), category: cat, uniqueCoupon: uniquePayload() }; };
     // Controls: when (campaigns), service message (one rider, offer, no consent).
     if (wz.who !== 'one') {
-      var when = ui.select([['now', 'Send now'], ['later', 'Schedule (India time)']], wz.when, { 'aria-label': 'When' });
+      var when = ui.select([['now', 'Send now'], ['best', 'At each rider\'s best time (within 24 hours)'], ['later', 'Schedule (India time)']], wz.when, { 'aria-label': 'When' });
+      var bestNote = h('p.small.muted', { text: 'Each rider gets it at the hour they usually open the app or their e-mail (Business > Best send time), never in the quiet hours. Riders without a known hour get it now.' });
       var at = h('input', { type: 'datetime-local', value: wz.at, 'aria-label': 'Date and time (IST)' });
       var atField = ui.field('Date and time (IST)', at);
       var nm = h('input', { type: 'text', maxlength: '80', value: wz.name, placeholder: 'Diwali 2026 offer', 'aria-label': 'Name for History' });
-      var syncWhen = function () { atField.hidden = when.value !== 'later'; send.textContent = when.value === 'later' ? 'Schedule' : 'Send now'; };
+      var syncWhen = function () { atField.hidden = when.value !== 'later'; bestNote.hidden = when.value !== 'best'; send.textContent = when.value === 'later' ? 'Schedule' : when.value === 'best' ? 'Send at best times' : 'Send now'; };
       when.addEventListener('change', function () { wz.when = when.value; syncWhen(); });
       at.addEventListener('input', function () { wz.at = at.value; });
       nm.addEventListener('input', function () { wz.name = nm.value; });
-      whenBox.appendChild(h('div.stack', h('div.es-row2', ui.field('When', when), atField), ui.field('Name in History', nm, 'optional')));
+      whenBox.appendChild(h('div.stack', h('div.es-row2', ui.field('When', when), atField), bestNote, ui.field('Name in History', nm, 'optional')));
       syncWhen();
     }
     var run = function () {
@@ -428,12 +429,13 @@
       var body = Object.assign({ audience: audience(), name: wz.name || (wz.pick && wz.pick.name) || d.design.subject, templateId: wz.draft && wz.draft.templateId || undefined }, d);
       body.sendAt = wz.when === 'later' ? CR.util.fromLocalInput(wz.at) : 0;
       if (wz.when === 'later' && !body.sendAt) { ui.toast('Choose the date and time.', true); return; }
-      var what = wz.when === 'later' ? 'Schedule this e-mail for ' + CR.util.date(body.sendAt, true) + ' (IST)?' : 'Send this e-mail now?';
+      if (wz.when === 'best') body.bestTime = true;
+      var what = wz.when === 'later' ? 'Schedule this e-mail for ' + CR.util.date(body.sendAt, true) + ' (IST)?' : wz.when === 'best' ? 'Send this e-mail to each rider at their best time in the next 24 hours?' : 'Send this e-mail now?';
       ui.confirm(wz.when === 'later' ? 'Schedule e-mail' : 'Send e-mail', what + ' ' + (cat === 'marketing' ? 'Only riders who agreed to offers get it.' : 'An account message.'), wz.when === 'later' ? 'Schedule' : 'Send').then(function (ok) {
         if (!ok) return;
         send.disabled = true;
         api('POST', BASE + '/campaigns', body).then(function (r) {
-          ui.toast(wz.when === 'later' ? 'Scheduled.' : r.quietNow ? 'Queued: quiet hours now; it goes out when they end.' : 'Sending.');
+          ui.toast(wz.when === 'later' ? 'Scheduled.' : wz.when === 'best' ? 'Queued: each rider gets it at their best time.' : r.quietNow ? 'Queued: quiet hours now; it goes out when they end.' : 'Sending.');
           wz = fresh();
           CR.go('#/email/status/' + r.campaign.campaignId);
         }).catch(function (e) { send.disabled = false; clear(problems).appendChild(ES.errorList(e)); ui.toast(e.message, true); });
@@ -524,6 +526,8 @@
     var pre = CR.state.wizardPrefill; CR.state.wizardPrefill = null;
     if (!pre) return Promise.resolve();
     wz = fresh();
+    // Round 6 (Business > At risk): a list of riders, already limited to those who agreed to offer e-mails.
+    if (Array.isArray(pre.usernames) && pre.usernames.length) { wz.who = 'several'; wz.usernames = pre.usernames.join(', '); wz.step = 2; if (pre.name) wz.name = pre.name; }
     if (pre.template) {
       wz.mode = 'template'; wz.pick = pre.template; wz.draft = ES.draftFrom(pre.template); if (pre.dirty) wz.draft.dirty = true;
       return Promise.resolve();
