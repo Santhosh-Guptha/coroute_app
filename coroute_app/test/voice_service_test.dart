@@ -296,13 +296,23 @@ void main() {
       expect(engine.spokenCalls.first.isEmergency, isFalse);
     });
 
-    test('pauseOtherAudio is true: warnings pause music (pauseOthers: true)', () async {
+    // Round 9: "Pause music for alerts" was removed; warnings always lower the music.
+    test('pause music cannot be switched on any more: warnings still duck music', () async {
       await settings.setPauseOtherAudio(true);
-      expect(settings.pauseOtherAudio, isTrue);
-      expect(await voice.speakOverspeed(currentSpeedKmh: 110, limitKmh: 80), isTrue);
+      expect(settings.pauseOtherAudio, isFalse);
+      expect(await voice.speakOverspeed(currentSpeedKmh: 90, limitKmh: 80), isTrue);
       expect(engine.spokenCalls, hasLength(1));
-      expect(engine.spokenCalls.first.pauseOthers, isTrue);
+      expect(engine.spokenCalls.first.pauseOthers, isFalse);
       expect(engine.spokenCalls.first.isEmergency, isFalse);
+    });
+
+    // Round 9 regression: a warning for a limit changed in the same minute used to be dropped as a
+    // duplicate ('overspeed_<minute>' with the 10-minute window) and the line never said the limit.
+    test('a changed limit right after a warning is spoken, and names the new limit', () async {
+      expect(await voice.speakOverspeed(currentSpeedKmh: 90, limitKmh: 80), isTrue);
+      expect(engine.spokenCalls.last.text, contains('limit 80'));
+      expect(await voice.speakOverspeed(currentSpeedKmh: 72, limitKmh: 60), isTrue, reason: 'new limit, same minute');
+      expect(engine.spokenCalls.last.text, contains('limit 60'));
     });
 
     test('emergency alerts always pause others and set isEmergency true', () async {

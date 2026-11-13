@@ -768,6 +768,11 @@ class SafetyService extends ChangeNotifier {
     if (!_port.rideActive) {
       _detector.reset();
       _lastFix = null;
+      // Round 9: the solo ride's own speed warning ends with it.
+      _overspeed.reset();
+      _isOverspeedActive = false;
+      _lastCheckedLimit = 0;
+      _removePrompt(SafetyConstants.promptOverspeed, notify: false);
       if (stopService && _native) BackgroundService.stop().ignore();
     }
     _updateSensor();
@@ -1235,7 +1240,9 @@ class SafetyService extends ChangeNotifier {
     sensorSafety.onFix(p, stretchStart: _fatigue.stretchStart, limitKmh: _lastCheckedLimit, dark: _dark);
     sensorSafety.summary.onReserve(SosBatteryReserve.isActive, p.ts);
     if (_soloOnly) {
-      // Offline solo ride: crash detection only (no convoy for check-ins, fuel or route data).
+      // Offline solo ride: crash detection, plus (round 9 fix) my own speed warning from Settings,
+      // which needs no convoy; before, the limit set in Settings never applied in an offline solo ride.
+      _checkSpeedLimit(p);
       _updateSensor();
       return;
     }
@@ -1484,6 +1491,7 @@ class SafetyService extends ChangeNotifier {
     _darkFix = null;
     _overspeed.reset();
     _isOverspeedActive = false;
+    _lastCheckedLimit = 0; // round 9: never carry one ride's limit into the next
     if (_dark) {
       _dark = false;
       _voice?.setNight(false);
@@ -2139,7 +2147,7 @@ class SafetyService extends ChangeNotifier {
   /// instead of waiting for the next one (3.55 fix: a change mid-ride used to look ignored).
   void _recheckSpeedLimit() {
     final f = _lastFix;
-    if (f == null || !_port.rideActive) return;
+    if (f == null || !_rideOn) return;
     final limit = effectiveSpeedLimit(groupKmh: _groupLimitAt(_port.activeConvoy, f), personalKmh: _settings.speedLimitWarningKmh);
     if (limit != _lastCheckedLimit) _checkSpeedLimit(f);
   }
@@ -2162,14 +2170,19 @@ class SafetyService extends ChangeNotifier {
   }
 
   void _checkSpeedLimit(TrackPoint p) {
-    if (_disposed || !_port.rideActive) return;
-    final convoy = _port.activeConvoy;
+    if (_disposed || !_rideOn) return;
+    final convoy = _port.rideActive ? _port.activeConvoy : null;
     final convoyLimit = _groupLimitAt(convoy, p);
     final personalLimit = _settings.speedLimitWarningKmh;
     // The stricter of the group and personal limits; read on every fix, so a change in Settings
     // or by the lead applies on the next GPS fix (the gate starts the hold again on a new limit).
     final limit = effectiveSpeedLimit(groupKmh: convoyLimit, personalKmh: personalLimit);
+    final limitChanged = limit != _lastCheckedLimit;
     _lastCheckedLimit = limit;
+    // Round 9 fix: a new limit is told to listeners at once (ride notification and its Android 16
+    // Live Update, Ride AOD, lock-screen cockpit). Before, only a prompt change notified, so the
+    // notification kept the old limit until its next 10-20 s refresh.
+    if (limitChanged) notifyListeners();
     final speed = p.speedKmh;
     // Judged on the fix itself, with nothing awaited before the warning (alert first).
     final step = _overspeed.update(speedKmh: speed, limitKmh: limit, nowMs: _now());

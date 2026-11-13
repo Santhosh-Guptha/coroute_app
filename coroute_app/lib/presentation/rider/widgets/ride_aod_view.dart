@@ -19,6 +19,7 @@ class RideAodView extends StatefulWidget {
   const RideAodView({
     super.key,
     required this.speedKmh,
+    this.limitKmh = 0,
     this.turn,
     this.leaderDistanceM,
     this.leaderRelativeBearing,
@@ -31,6 +32,9 @@ class RideAodView extends StatefulWidget {
   });
 
   final double speedKmh;
+
+  /// Round 9: the limit I am warned at (0 = none), so a limit changed mid-ride shows here too.
+  final int limitKmh;
   final NextTurn? turn;
   final double? leaderDistanceM;
 
@@ -149,6 +153,20 @@ class _RideAodViewState extends State<RideAodView> {
                       style: const TextStyle(color: RideAodView._fg, fontSize: 112, fontWeight: FontWeight.w300, height: 1.0, decoration: TextDecoration.none),
                     ),
                     const Text('km/h'),
+                    if (w.limitKmh > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          speed > w.limitKmh ? 'Over limit ${w.limitKmh}' : 'Limit ${w.limitKmh}',
+                          key: const Key('ride_aod_limit'),
+                          style: TextStyle(
+                            color: speed > w.limitKmh ? RideAodView._sos : RideAodView._dim,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 28),
                     if (turn != null)
                       Row(

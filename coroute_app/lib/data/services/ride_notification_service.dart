@@ -389,8 +389,20 @@ class RideNotificationService {
       _pushNow();
       return;
     }
+    // Round 9 fix: a new speed limit (mine from Settings, the lead's group limit) is shown at once
+    // on the lock screen and in the Android 16 Live Update, not at the next 10-20 s refresh.
+    if (_limitChanged) {
+      _pushNow();
+      return;
+    }
     _schedule();
   }
+
+  /// The speed limit in the last notification built (round 9); -1 = none built yet in this ride.
+  int _pushedLimit = -1;
+
+  /// Round 9: the limit I am warned at differs from the one the notification shows.
+  bool get _limitChanged => (safety?.currentSpeedLimit ?? 0) != _pushedLimit && _pushedLimit != -1;
 
   void _startRide(String gid) {
     _rideGroup = gid;
@@ -399,6 +411,7 @@ class RideNotificationService {
     _gaveUp = false;
     _lastKey = null;
     _lastQuick = null;
+    _pushedLimit = -1;
     _lastPushMs = -1 << 40;
   }
 
@@ -481,8 +494,8 @@ class RideNotificationService {
     if (_disposed) return;
     if (_dirty && _rideActive && !_gaveUp) {
       final q = _quick();
-      if (q != null && _quickKey(q) != _lastQuick) {
-        _pushNow();
+      if (q != null && (_quickKey(q) != _lastQuick || _limitChanged)) {
+        _pushNow(); // round 9: a limit changed while a push was on its way is shown now too
       } else {
         _schedule();
       }
@@ -564,9 +577,11 @@ class RideNotificationService {
         if (fuel.warning && snap.tone == NotifTone.normal) args['tone'] = 'WARNING';
       }
     }
+    _pushedLimit = safety?.currentSpeedLimit ?? 0;
     _addRideAudioArgs(args, snap.mode == NotifMode.ride);
     // Android 16 Live Update (promoted ongoing notification): next turn or group status. Ignored before API 36.
-    final live = LiveUpdateContent.build(mode: snap.mode, turn: _nextTurn(), ahead: snap.ahead, behind: snap.behind, progress01: _routeProgress());
+    final live = LiveUpdateContent.build(mode: snap.mode, turn: _nextTurn(), ahead: snap.ahead, behind: snap.behind, progress01: _routeProgress(),
+        limitKmh: _pushedLimit);
     if (live != null) args['live'] = live;
     final key = jsonEncode(args);
     if (!force && key == _lastKey && _richActive) {

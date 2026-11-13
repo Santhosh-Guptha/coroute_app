@@ -539,7 +539,7 @@ class MinimalSpeedAlert extends StatelessWidget {
     final bg = over ? AppTheme.sos.withOpacity(0.12) : AppTheme.warnTint;
     final border = over ? AppTheme.sos.withOpacity(0.5) : AppTheme.warnBorder;
     return Semantics(
-      label: '${speedKmh.round()} km/h, group limit $limitKmh km/h',
+      label: '${speedKmh.round()} km/h, limit $limitKmh km/h',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(

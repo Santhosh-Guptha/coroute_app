@@ -4,6 +4,7 @@ import '../../core/constants/ride_notification_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../domain/audio/audio_diag_log.dart';
 import '../../domain/audio/sound_alert_policy.dart';
+import '../../domain/safety/overspeed_voice.dart';
 import 'audio_priority_manager.dart';
 import 'phone_call_service.dart';
 import 'settings_service.dart';
@@ -392,6 +393,7 @@ class VoiceService extends ChangeNotifier {
     Duration? ttl,
     bool isRecoverable = true,
     bool? pauseOthers,
+    Duration? dedupeWindow,
   }) async {
     final t = text.trim();
     if (t.isEmpty || !_allowed(priority)) return false;
@@ -412,7 +414,7 @@ class VoiceService extends ChangeNotifier {
       priority: audioPriority,
       dedupeKey: key ?? t,
       ttl: ttl,
-      dedupeWindow: NotifConstants.voiceDedupe,
+      dedupeWindow: dedupeWindow ?? NotifConstants.voiceDedupe,
       isRecoverable: isRecoverable,
       pauseOthers: pauseOthers ?? (priority == VoicePriority.critical || _settings.pauseOtherAudio),
     );
@@ -549,9 +551,15 @@ class VoiceService extends ChangeNotifier {
   ///
   /// 3.55: far over the limit ([farOverFraction], 40 %) it is a critical line: music paused, alarm
   /// stream (clear even with the media volume down or lowered by "Lower music when speeding").
+  ///
+  /// Round 9 fix (docs/quality/ROUND9_SETTINGS_NOTES.md): the key names the limit and the second
+  /// ([OverspeedVoice.key]) with a 5 s dedupe window, and the line says the limit. Before, the key was
+  /// the wall-clock minute with the 10-minute window, so a warning for a limit changed in the same
+  /// minute (and the 25 s reminder) was dropped as a duplicate. [OverspeedGate] spaces the warnings.
   Future<bool> speakOverspeed({required int currentSpeedKmh, required int limitKmh}) {
-    if (limitKmh > 0 && currentSpeedKmh >= limitKmh * (1 + farOverFraction)) {
-      final t = 'Slow down. $currentSpeedKmh km/h, limit $limitKmh.';
+    final now = _clock();
+    final t = OverspeedVoice.text(currentSpeedKmh: currentSpeedKmh, limitKmh: limitKmh);
+    if (OverspeedVoice.farOver(currentSpeedKmh: currentSpeedKmh, limitKmh: limitKmh)) {
       if (_failed) {
         _priorityManager.alertWithoutVoice(AudioPriority.p1SafetyConfirmation, t);
         return Future.value(false);
@@ -559,23 +567,24 @@ class VoiceService extends ChangeNotifier {
       return _priorityManager.submit(
         text: t,
         priority: AudioPriority.p1SafetyConfirmation,
-        dedupeKey: 'overspeed_far_${_clock() ~/ 60000}',
-        dedupeWindow: const Duration(seconds: 30),
+        dedupeKey: OverspeedVoice.key(limitKmh: limitKmh, nowMs: now, far: true),
+        dedupeWindow: OverspeedVoice.dedupeWindow,
         ttl: const Duration(seconds: 10),
         pauseOthers: true,
         metadata: const {'kind': 'overspeed'},
       );
     }
     return speak(
-      'Over limit. $currentSpeedKmh km/h.',
+      t,
       priority: VoicePriority.warning,
-      key: 'overspeed_${DateTime.now().millisecondsSinceEpoch ~/ 60000}',
+      key: OverspeedVoice.key(limitKmh: limitKmh, nowMs: now),
+      dedupeWindow: OverspeedVoice.dedupeWindow,
       pauseOthers: _settings.pauseOtherAudio,
     );
   }
 
   /// Over the limit by this fraction or more, the overspeed line is critical (see [speakOverspeed]).
-  static const double farOverFraction = 0.40;
+  static const double farOverFraction = OverspeedVoice.farOverFraction;
 
   /// 3.55: whether a line of [priority] would be spoken now (settings, engine not failed, not held
   /// for a phone call). AlertService posts its notification silently when the voice speaks it, so

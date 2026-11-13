@@ -11,6 +11,33 @@ int effectiveSpeedLimit({required int groupKmh, required int personalKmh}) {
   return g < p ? g : p;
 }
 
+/// Which limit the rider is warned at (round 9: shown in Settings so a change visibly applies).
+enum SpeedLimitSource { none, group, personal }
+
+/// The source of [effectiveSpeedLimit] for [groupKmh] / [personalKmh] (personal wins a tie).
+SpeedLimitSource speedLimitSource({required int groupKmh, required int personalKmh}) {
+  final limit = effectiveSpeedLimit(groupKmh: groupKmh, personalKmh: personalKmh);
+  if (limit <= 0) return SpeedLimitSource.none;
+  return personalKmh > 0 && limit == personalKmh ? SpeedLimitSource.personal : SpeedLimitSource.group;
+}
+
+/// Round 9 (docs/quality/ROUND9_SETTINGS_NOTES.md): the one line under Settings › Speed warning that
+/// says which limit warns now. The stricter limit always wins (safety), so a rider who raises their own
+/// limit above the group's, or a lead who raises the group limit above a rider's own, changes nothing on
+/// that phone; this line says so instead of looking ignored. [inRide] false: no group limit applies.
+String speedWarningLine({required int groupKmh, required int personalKmh, required bool inRide}) {
+  final g = inRide && groupKmh > 0 ? groupKmh : 0;
+  final p = personalKmh > 0 ? personalKmh : 0;
+  final limit = effectiveSpeedLimit(groupKmh: g, personalKmh: p);
+  if (limit <= 0) return inRide ? 'No limit set for this ride. Road limits still warn.' : 'Uses the group limit in a ride. Road limits always warn.';
+  if (!inRide) return 'Warns above $p km/h. A stricter group limit wins in a ride.';
+  if (p == 0) return 'Now: group limit $g km/h.';
+  if (g == 0) return 'Now: your limit $p km/h.';
+  if (p < g) return 'Now: your limit $p km/h (stricter than the group\'s $g).';
+  if (p > g) return 'Now: group limit $g km/h (stricter than yours).';
+  return 'Now: $limit km/h.';
+}
+
 /// 3.55 fix: the lead's town limit on the rider's phone. The group limit at ([lat], [lng]), lowered
 /// to [townKmh] within [radiusM] of the start, the destination or a planned stop ([places]); the
 /// same rule the gateway's timeline uses (_activeLimit, TOWN_RADIUS_M 1000). Before, only the server

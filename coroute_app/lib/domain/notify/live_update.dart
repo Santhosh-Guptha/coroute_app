@@ -25,13 +25,16 @@ class LiveUpdateContent {
     List<RiderLine> ahead = const [],
     List<RiderLine> behind = const [],
     double? progress01,
+    int limitKmh = 0,
   }) {
     if (mode != NotifMode.ride) return null;
     final progress = progress01 == null || !progress01.isFinite ? -1 : (progress01.clamp(0.0, 1.0) * 100).round();
+    // Round 9: the speed limit I am warned at rides in the text, so a limit changed mid-ride shows here too.
+    String withLimit(String text) => limitKmh <= 0 ? text : (text.isEmpty ? 'Limit $limitKmh' : '$text · Limit $limitKmh');
     if (turn != null) {
       return {
         'title': turn.line,
-        'text': turn.road.isNotEmpty ? turn.road : _groupLine(ahead, behind) ?? '',
+        'text': withLimit(turn.road.isNotEmpty ? turn.road : _groupLine(ahead, behind) ?? ''),
         'chip': _chip(turn.distanceText),
         'progress': progress,
       };
@@ -40,7 +43,7 @@ class LiveUpdateContent {
       final lead = ahead.first;
       return {
         'title': '${lead.name} ${lead.detail}',
-        'text': _groupLine(ahead, behind) ?? '',
+        'text': withLimit(_groupLine(ahead, behind) ?? ''),
         'chip': _chip(StatusText.roundedDistance(lead.distanceM)),
         'progress': progress,
       };
@@ -49,10 +52,13 @@ class LiveUpdateContent {
       final last = behind.last;
       return {
         'title': 'You lead · ${ahead.length + behind.length + 1} riders',
-        'text': '${last.name} ${last.detail}',
+        'text': withLimit('${last.name} ${last.detail}'),
         'chip': 'Lead',
         'progress': progress,
       };
+    }
+    if (limitKmh > 0) {
+      return {'title': 'Speed limit $limitKmh km/h', 'text': '', 'chip': _chip('$limitKmh'), 'progress': progress};
     }
     return null;
   }

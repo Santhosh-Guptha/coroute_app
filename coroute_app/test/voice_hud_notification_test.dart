@@ -359,7 +359,8 @@ void main() {
   });
 
   group('Configuration UI widgets', () {
-    testWidgets('Settings has one spoken alerts switch and no alert duration chooser', (tester) async {
+    // Round 9: voice alerts are a quick control in the ride screen (Voice tile); Settings says where.
+    testWidgets('Settings has no spoken alerts switch and no alert duration chooser', (tester) async {
       final s = SettingsService();
       await s.load();
 
@@ -378,14 +379,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('settings_spoken_alerts')), findsOneWidget);
+      expect(find.byKey(const ValueKey('settings_spoken_alerts')), findsNothing);
       expect(find.text('Announce all alerts'), findsNothing);
       expect(find.text('Map alert banner duration'), findsNothing);
-
-      await tester.ensureVisible(find.byKey(const ValueKey('settings_spoken_alerts')));
-      await tester.tap(find.byKey(const ValueKey('settings_spoken_alerts')));
-      await tester.pumpAndSettle();
-      expect(s.voiceWarnings, isFalse);
+      expect(SettingsScreen.quickControlsNote, contains('Mute voice'));
+      expect(s.voiceWarnings, isTrue, reason: 'still on by default, changed from the quick settings');
     });
 
     testWidgets('AppearanceSheet only chooses the look', (tester) async {
