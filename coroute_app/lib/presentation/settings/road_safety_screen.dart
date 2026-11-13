@@ -13,13 +13,20 @@ import 'private_places_card.dart';
 
 /// Round 4 Settings > "Road safety" (docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md):
 ///  * "Help make roads safer" (opt-in, off by default, stored on the server with the time);
-///  * Hazard warnings (on), Rough road ahead (on, low priority), Twisty section ahead (on), Long ride and night
-///    nudges (on), break reminder interval (the 2 h reminder is always on);
-///  * Download / Delete my contributions, with an honest note on what can be deleted.
+///  * Download / Delete my contributions, with an honest note on what can be deleted;
+///  * private places (round 6) and the round 7 road data card (estimated limits explained, storage, wrong limits).
+/// Round 9 (docs/quality/ROUND9_SETTINGS_NOTES.md): hazard, rough road, twisty, long ride / night nudges,
+/// bend and speed-limit warnings are always on (rate-limited by the warning scheduler), so their switches
+/// and the break interval picker are gone; one line lists them. Rough road, twisty and nudges can be
+/// muted for one ride from their card in the ride screen.
 class RoadSafetyScreen extends StatefulWidget {
   const RoadSafetyScreen({super.key});
 
   static const String title = 'Road safety';
+  static const String rowSubtitle = 'Help make roads safer, private places';
+  static const String warningsAlwaysOn =
+      'Always on: hazard, rough road and twisty road warnings, bend warnings, road speed limits, long ride and night nudges. '
+      'Each speaks at most once in a while. To quiet rough road, twisty road or nudges for one ride, tap "Mute this ride" on its card.';
   static const String consentTitle = 'Help make roads safer';
   static const String consentSubtitle = 'Share anonymous road and safety signals from your rides. Off by default.';
   static const String deleteNote =
@@ -149,33 +156,9 @@ class _RoadSafetyScreenState extends State<RoadSafetyScreen> {
                   const DsSectionHeader('Warnings while riding'),
                   const SizedBox(height: Space.s8),
                   DsCard(
-                    padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
-                    child: Column(children: [
-                      sw('road_safety_hazards', 'Hazard warnings', 'A gentle "Hazard ahead" before spots where many riders braked hard or crashed', s.hazardWarnings,
-                          (v) => i.update((x) => x.hazardWarnings = v)),
-                      sw('road_safety_rough', 'Rough road ahead', 'Before potholes and rough stretches, at most once every 5 km', s.roughRoadWarnings,
-                          (v) => i.update((x) => x.roughRoadWarnings = v)),
-                      sw('road_safety_twisty', 'Twisty section ahead', 'Before twisty roads and ghats on your route: slow down', s.twistyWarnings,
-                          (v) => i.update((x) => x.twistyWarnings = v)),
-                      sw('road_safety_nudges', 'Long ride and night nudges', 'A stronger nudge after 4 hours, and a notice when riding between 23:00 and 05:00', s.longRideNudges,
-                          (v) => i.update((x) => x.longRideNudges = v)),
-                      ListTile(
-                        key: const ValueKey('road_safety_interval'),
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('Break reminder', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                        subtitle: Text(
-                            s.breakIntervalMin < 120 ? 'Every ${_hm(s.breakIntervalMin)} without a 10-minute stop' : 'Every 2 h without a 10-minute stop (always on)',
-                            style: AppText.caption),
-                        trailing: DropdownButton<int>(
-                          value: s.breakIntervalMin < 120 ? s.breakIntervalMin : 120,
-                          items: const [
-                            DropdownMenuItem(value: 90, child: Text('1 h 30')),
-                            DropdownMenuItem(value: 105, child: Text('1 h 45')),
-                            DropdownMenuItem(value: 120, child: Text('2 h')),
-                          ],
-                          onChanged: (v) => i.update((x) => x.breakIntervalMin = v ?? 120),
-                        ),
-                      ),
+                    padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      Text(RoadSafetyScreen.warningsAlwaysOn, key: const ValueKey('road_safety_always_on'), style: AppText.caption.copyWith(color: AppTheme.text2)),
                       if (kDebugMode)
                         ListTile(
                           key: const ValueKey('road_safety_debug_interval'),
@@ -211,5 +194,4 @@ class _RoadSafetyScreenState extends State<RoadSafetyScreen> {
     );
   }
 
-  static String _hm(int min) => min % 60 == 0 ? '${min ~/ 60} h' : '${min ~/ 60} h ${min % 60} min';
 }

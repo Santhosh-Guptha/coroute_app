@@ -36,25 +36,35 @@ import 'api_client.dart';
 import 'road_care_service.dart';
 import 'private_places_store.dart';
 
-/// The rider's choices for road safety warnings (kept on the phone; consent itself lives on the server).
+/// Road safety warnings kept on the phone (consent itself lives on the server).
+///
+/// Round 9 (docs/quality/ROUND9_SETTINGS_NOTES.md): hazard, rough road, twisty and long ride / night
+/// warnings are always on (no switches; the warning scheduler rate-limits them, and rough road, twisty
+/// and nudges can be muted for one ride from their card). A stored "off" from an older build is ignored
+/// and written back as on; the setters are kept for callers and do nothing. The break interval has no
+/// picker any more: a shorter interval a rider chose before (90 or 105 min, the safer side) is kept,
+/// anything else is the always-on 2 h.
 class IntelSettings {
-  IntelSettings({this.hazardWarnings = true, this.roughRoadWarnings = true, this.twistyWarnings = true, this.longRideNudges = true,
-      this.breakIntervalMin = 120, this.consentAnswered = false, this.completedRides = 0, this.tipDay, this.debugBreakMin = 0, this.consentOn = false, this.consentAt});
+  IntelSettings({int breakIntervalMin = 120, this.consentAnswered = false, this.completedRides = 0, this.tipDay, this.debugBreakMin = 0, this.consentOn = false, this.consentAt})
+      : breakIntervalMin = breakIntervalMin.clamp(90, 120);
 
-  /// "Hazard warnings" (on by default).
-  bool hazardWarnings;
+  /// Hazard warnings: always on (round 9).
+  bool get hazardWarnings => true;
+  set hazardWarnings(bool _) {}
 
-  /// "Rough road ahead" (on by default, low priority, max one per 5 km): potholes injure riders, so the safe default
-  /// is on; it is quiet enough (rare, short, never over other warnings) not to annoy.
-  bool roughRoadWarnings;
+  /// Rough road ahead: always on (round 9; low priority, max one per 5 km, mutable for one ride).
+  bool get roughRoadWarnings => true;
+  set roughRoadWarnings(bool _) {}
 
-  /// "Twisty section ahead: slow down" (on by default, safety framing).
-  bool twistyWarnings;
+  /// Twisty section ahead: always on (round 9; mutable for one ride).
+  bool get twistyWarnings => true;
+  set twistyWarnings(bool _) {}
 
-  /// Long ride (4 h) and night riding nudges (on by default). The 2 h break reminder is always on.
-  bool longRideNudges;
+  /// Long ride (4 h) and night riding nudges: always on (round 9; mutable for one ride).
+  bool get longRideNudges => true;
+  set longRideNudges(bool _) {}
 
-  /// Break reminder interval, 90-180 min (the always-on 2 h prompt covers 120 and above).
+  /// Break reminder interval, 90-120 min (no picker since round 9; the always-on 2 h prompt is 120).
   int breakIntervalMin;
   bool consentAnswered;
   int completedRides;
@@ -74,12 +84,9 @@ class IntelSettings {
     if (j is! Map) return IntelSettings();
     bool b(String k, bool d) => j[k] is bool ? j[k] as bool : d;
     int i(String k, int d) => j[k] is num ? (j[k] as num).toInt() : d;
+    // Round 9: 'hw' / 'rr' / 'tw' / 'ln' are ignored (always on); toJson writes them back as true.
     return IntelSettings(
-      hazardWarnings: b('hw', true),
-      roughRoadWarnings: b('rr', true),
-      twistyWarnings: b('tw', true),
-      longRideNudges: b('ln', true),
-      breakIntervalMin: i('bi', 120).clamp(90, 180),
+      breakIntervalMin: i('bi', 120),
       consentAnswered: b('ans', false),
       completedRides: i('rides', 0),
       tipDay: j['tip'] is String ? j['tip'] as String : null,
@@ -233,7 +240,7 @@ class IntelCareService extends ChangeNotifier {
   // ---------------------------------------------------------------- settings and consent
   Future<void> update(void Function(IntelSettings s) change) async {
     change(settings);
-    settings.breakIntervalMin = settings.breakIntervalMin.clamp(90, 180);
+    settings.breakIntervalMin = settings.breakIntervalMin.clamp(90, 120);
     _applyInterval();
     notifyListeners();
     await _save();

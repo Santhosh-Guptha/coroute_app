@@ -86,18 +86,14 @@ void main() {
     final (auth, patches) = authWithPatches();
     await host(tester, const SettingsScreen(), settings: settings, auth: auth);
     expect(tester.takeException(), isNull);
-    // Main screen: voice alerts, siren alerts, battery saver, data saver and "Show cockpit on lock screen while
-    // riding" (push and leaderboard need their services). Safety switches are gone: they are always on.
-    expect(find.byType(Switch), findsNWidgets(5));
+    // Main screen (round 9): siren alerts and data saver (push and leaderboard need their services; voice
+    // alerts and battery saver are quick controls in the ride screen; the lock-screen cockpit is under
+    // Advanced). Safety switches are gone: they are always on.
+    expect(find.byType(Switch), findsNWidgets(2));
     expect(find.text(SafetyTexts.hazardTitle), findsNothing);
     expect(find.text(SafetyTexts.lockTitle), findsNothing);
     expect(find.text(SafetyTexts.crashTitle), findsNothing);
-    final list = find.byType(Scrollable).first;
-
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_spoken_alerts')), 80, scrollable: list);
-    await tester.tap(find.byKey(const ValueKey('settings_spoken_alerts')));
-    await tester.pump();
-    expect(settings.voiceWarnings, isFalse);
+    expect(find.byKey(const ValueKey('settings_spoken_alerts')), findsNothing, reason: 'round 9: a quick control in the ride screen');
 
     await openMore(tester);
     expect(find.text(SafetyTexts.helpTitle), findsNothing);

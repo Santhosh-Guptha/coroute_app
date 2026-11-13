@@ -8,6 +8,7 @@ import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../domain/audio/voice_clarity.dart';
 import '../../domain/tracking/screen_awake_policy.dart';
+import '../../domain/safety/settings_round9.dart';
 import 'rider_score_service.dart';
 
 /// Rider settings kept on the phone: only the choices a rider really makes.
@@ -36,6 +37,14 @@ import 'rider_score_service.dart';
 /// Nov 11 (owner decision, migration v2): the give-way side is fixed to Automatic and the rider
 /// score always uses the safety report; help / ask nearby riders are always on (server profile,
 /// kept on by AuthService). Offline maps are automatic (OfflineMapRetentionService).
+///
+/// Round 9 (owner request "remove unnecessary setting options, make them on by default", migration v3,
+/// docs/quality/ROUND9_SETTINGS_NOTES.md, [SettingsRound9]): bend warnings, the road speed limit sign,
+/// the road overspeed warning, lowering music when speeding and wind-noise mode are always on; the
+/// overspeed margin is automatic (+10 %, at least 5 km/h); when idle = Ride AOD; keep screen on = only
+/// while moving; music is lowered (not paused) for warnings; noise reduction = Strong. Their getters
+/// return the fixed value whatever is stored, their setters do nothing, and step 3 rewrites / deletes
+/// the old keys once. Voice alerts and battery saver stay the rider's (quick controls in the ride screen).
 class SettingsService extends ChangeNotifier {
   SettingsService([this._prefs]);
 
@@ -53,11 +62,8 @@ class SettingsService extends ChangeNotifier {
 
   // 3.15: voice, accident warnings, lock screen, nearby riders consent.
   bool _voiceWarnings = true;
-  bool _pauseOtherAudio = false;
   bool _hazardAlerts = true;
   bool _rideOnLockScreen = true;
-  RideIdleMode _rideIdleMode = RideIdleMode.aod;
-  KeepScreenOnMode _keepScreenOnMode = KeepScreenOnMode.whileMoving;
   bool _netConsentSeen = false;
   int _netConsentPrompts = 0;
 
@@ -145,11 +151,6 @@ class SettingsService extends ChangeNotifier {
   bool _batterySaver = false;
   bool _hardwarePtt = false;
   int _speedLimitWarningKmh = 0;
-  // Round 7 (curve and speed-limit prediction; docs/features_355/curve_and_speed_limit.md).
-  bool _curveWarnings = true;
-  bool _roadLimitDisplay = true;
-  bool _roadOverspeedWarning = true;
-  int _roadOverspeedTolerancePct = 10;
   bool _autoReroute = true;
 
   bool get lowData => _lowData;
@@ -180,9 +181,9 @@ class SettingsService extends ChangeNotifier {
   /// the group's voice switch). Emergency alerts are always spoken.
   bool get voiceWarnings => _voiceWarnings;
 
-  /// Whether other audio (Spotify, music, podcasts) should pause completely during alerts
-  /// instead of ducking (lowering volume).
-  bool get pauseOtherAudio => _pauseOtherAudio;
+  /// Whether other audio (Spotify, music, podcasts) pauses for ordinary warnings instead of being
+  /// lowered. Fixed off since round 9 (lowered); critical lines always pause it.
+  bool get pauseOtherAudio => false;
 
   /// Accident warnings on my route (always on, 3.55).
   bool get hazardAlerts => _hazardAlerts;
@@ -192,11 +193,12 @@ class SettingsService extends ChangeNotifier {
   /// notification and its SOS button stay on the lock screen either way (always, since 3.55).
   bool get rideOnLockScreen => _rideOnLockScreen;
 
-  /// Settings › Ride screen › When idle (Ride AOD by default).
-  RideIdleMode get rideIdleMode => _rideIdleMode;
+  /// When idle: always the Ride AOD since round 9 (battery and heat fall back by themselves, see
+  /// ScreenAwakePolicy). A stored Dim / Sleep from an older build is ignored.
+  RideIdleMode get rideIdleMode => RideIdleMode.aod;
 
-  /// Settings › Ride screen › Keep screen on (only while moving by default).
-  KeepScreenOnMode get keepScreenOnMode => _keepScreenOnMode;
+  /// Keep screen on: always "only while moving" since round 9. A stored "always" is ignored.
+  KeepScreenOnMode get keepScreenOnMode => KeepScreenOnMode.whileMoving;
 
   /// The nearby riders consent sheet was answered with Continue.
   bool get netConsentSeen => _netConsentSeen;
@@ -219,61 +221,35 @@ class SettingsService extends ChangeNotifier {
   /// My own speed warning in km/h (0 = use the group limit, off if none).
   int get speedLimitWarningKmh => _speedLimitWarningKmh;
 
-  /// Round 7: "Sharp bend ahead" voice + chip (advisory; on by default).
-  bool get curveWarnings => _curveWarnings;
+  /// Round 7: "Sharp bend ahead" voice + chip (advisory). Always on since round 9.
+  bool get curveWarnings => true;
 
-  /// Round 7: the road's speed limit sign in the cockpit (from the map, or estimated "~").
-  bool get roadLimitDisplay => _roadLimitDisplay;
+  /// Round 7: the road's speed limit sign in the cockpit (from the map, or estimated "~"). Always on since round 9.
+  bool get roadLimitDisplay => true;
 
-  /// Round 7: warn when over the road's limit (voice once, then the sign only).
-  bool get roadOverspeedWarning => _roadOverspeedWarning;
+  /// Round 7: warn when over the road's limit (voice once, then the sign only). Always on since round 9.
+  bool get roadOverspeedWarning => true;
 
-  /// Round 7: how far over the limit before the warning, in percent (5, 10, 15 or 20; never less than 5 km/h).
-  int get roadOverspeedTolerancePct => _roadOverspeedTolerancePct;
+  /// Round 7: how far over the limit before the warning: automatic since round 9 (+10 %, never less
+  /// than 5 km/h; no margin near schools and hospitals). A stored 5 / 15 / 20 is ignored.
+  int get roadOverspeedTolerancePct => SettingsRound9.overspeedTolerancePct;
 
-  static const String keyCurveWarnings = 'road_curve_warnings';
-  static const String keyRoadLimitDisplay = 'road_limit_display';
-  static const String keyRoadOverspeedWarning = 'road_overspeed_warning';
-  static const String keyRoadOverspeedTolerancePct = 'road_overspeed_tolerance_pct';
+  static const String keyCurveWarnings = SettingsRound9.keyCurveWarnings;
+  static const String keyRoadLimitDisplay = SettingsRound9.keyRoadLimitDisplay;
+  static const String keyRoadOverspeedWarning = SettingsRound9.keyRoadOverspeedWarning;
+  static const String keyRoadOverspeedTolerancePct = SettingsRound9.keyRoadOverspeedTolerancePct;
 
-  Future<void> _saveRoadPref(String key, Object value) async {
-    notifyListeners();
-    try {
-      final prefs = await _p();
-      if (value is bool) {
-        await prefs.setBool(key, value);
-      } else if (value is int) {
-        await prefs.setInt(key, value);
-      }
-    } catch (e) {
-      debugPrint('settings save $key note: $e');
-    }
-  }
+  /// Kept for callers (round 9): always on, nothing is stored.
+  Future<void> setCurveWarnings(bool value) async {}
 
-  Future<void> setCurveWarnings(bool value) async {
-    if (value == _curveWarnings) return;
-    _curveWarnings = value;
-    await _saveRoadPref(keyCurveWarnings, value);
-  }
+  /// Kept for callers (round 9): always on, nothing is stored.
+  Future<void> setRoadLimitDisplay(bool value) async {}
 
-  Future<void> setRoadLimitDisplay(bool value) async {
-    if (value == _roadLimitDisplay) return;
-    _roadLimitDisplay = value;
-    await _saveRoadPref(keyRoadLimitDisplay, value);
-  }
+  /// Kept for callers (round 9): always on, nothing is stored.
+  Future<void> setRoadOverspeedWarning(bool value) async {}
 
-  Future<void> setRoadOverspeedWarning(bool value) async {
-    if (value == _roadOverspeedWarning) return;
-    _roadOverspeedWarning = value;
-    await _saveRoadPref(keyRoadOverspeedWarning, value);
-  }
-
-  Future<void> setRoadOverspeedTolerancePct(int pct) async {
-    final v = pct.clamp(5, 20);
-    if (v == _roadOverspeedTolerancePct) return;
-    _roadOverspeedTolerancePct = v;
-    await _saveRoadPref(keyRoadOverspeedTolerancePct, v);
-  }
+  /// Kept for callers (round 9): the margin is automatic, nothing is stored.
+  Future<void> setRoadOverspeedTolerancePct(int pct) async {}
 
   /// Auto re-route: a new route from where I am when I leave the planned one (always on, 3.55).
   bool get autoReroute => _autoReroute;
@@ -294,11 +270,8 @@ class SettingsService extends ChangeNotifier {
       _noSignalAhead = true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
-      _pauseOtherAudio = prefs.getBool(NetworkConstants.keyPauseOtherAudio) ?? false;
       _hazardAlerts = true;
       _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
-      _rideIdleMode = RideIdleMode.fromId(prefs.getString(keyRideIdleMode));
-      _keepScreenOnMode = KeepScreenOnMode.fromId(prefs.getString(keyKeepScreenOnMode));
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
@@ -314,11 +287,9 @@ class SettingsService extends ChangeNotifier {
       }
       _batterySaver = prefs.getBool(keyBatterySaver) ?? false;
       _hardwarePtt = prefs.getBool(keyHardwarePtt) ?? false;
-      _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
-      _curveWarnings = prefs.getBool(keyCurveWarnings) ?? true;
-      _roadLimitDisplay = prefs.getBool(keyRoadLimitDisplay) ?? true;
-      _roadOverspeedWarning = prefs.getBool(keyRoadOverspeedWarning) ?? true;
-      _roadOverspeedTolerancePct = (prefs.getInt(keyRoadOverspeedTolerancePct) ?? 10).clamp(5, 20);
+      // Round 9: a corrupt value (wrong type from an old build or a restored backup) never breaks loading.
+      final speed = prefs.get(SafetyConstants.keySpeedLimitWarningKmh);
+      _speedLimitWarningKmh = speed is int ? speed.clamp(0, SafetyConstants.speedWarningMaxKmh) : 0;
       _autoReroute = true;
       await _migrateSafetyDefaults(prefs);
     } catch (e) {
@@ -387,13 +358,17 @@ class SettingsService extends ChangeNotifier {
   static const List<String> safetyDefaultsV1Keys = [...alwaysOnKeys, keySirenAlerts];
 
   /// Version of the safety defaults written by [load]; bumped when a setting joins the fixed list.
+  ///  * 3 (round 9, owner request): [SettingsRound9.plan]: bend warnings, road limit sign, road
+  ///    overspeed warning, lower music when speeding and wind-noise mode written back as on; the
+  ///    retired choice keys (overspeed margin, when idle, keep screen on, pause music, noise
+  ///    reduction) deleted. Nothing consent-based is written.
   ///  * 1: [safetyDefaultsV1Keys] written to true.
   ///  * 2 (owner decision, Nov 11): give-way side fixed to Automatic ([keyGiveWaySide] = 'auto') and
   ///    "Use my safety report in my score" fixed on ([RiderScoreService.prefsUseReport] = true). Help
   ///    nearby riders / Ask nearby riders are always on too; they live on the server profile, so
   ///    AuthService writes them (PATCH /me) when the gateway still reports them off.
   static const String keySafetyDefaultsVersion = 'settings_safety_defaults_version';
-  static const int safetyDefaultsVersion = 2;
+  static const int safetyDefaultsVersion = 3;
 
   /// One time per step of [safetyDefaultsVersion]: only ever turns settings on (or back to their
   /// fixed default). A rider who upgrades several versions at once runs every missing step once.
@@ -408,6 +383,16 @@ class SettingsService extends ChangeNotifier {
     if (from < 2) {
       await prefs.setString(keyGiveWaySide, 'auto');
       await RiderScoreService.adoptAlwaysOn(prefs);
+    }
+    if (from < 3) {
+      final step = SettingsRound9.plan({for (final k in [...SettingsRound9.alwaysOnKeys, ...SettingsRound9.retiredKeys]) k: prefs.get(k)}
+        ..removeWhere((_, v) => v == null));
+      for (final e in step.writes.entries) {
+        await prefs.setBool(e.key, e.value);
+      }
+      for (final k in step.deletes) {
+        await prefs.remove(k);
+      }
     }
     await prefs.setInt(keySafetyDefaultsVersion, safetyDefaultsVersion);
   }
@@ -454,12 +439,8 @@ class SettingsService extends ChangeNotifier {
     await _save(NetworkConstants.keyVoiceWarnings, value);
   }
 
-  Future<void> setPauseOtherAudio(bool value) async {
-    if (value == _pauseOtherAudio) return;
-    _pauseOtherAudio = value;
-    notifyListeners();
-    await _save(NetworkConstants.keyPauseOtherAudio, value);
-  }
+  /// Kept for callers (round 9): music is always lowered for warnings, nothing is stored.
+  Future<void> setPauseOtherAudio(bool value) async {}
 
   /// Always on (3.55): "off" is ignored.
   Future<void> setHazardAlerts(bool value) async {
@@ -478,31 +459,14 @@ class SettingsService extends ChangeNotifier {
     await _save(NetworkConstants.keyRideOnLockScreen, value);
   }
 
-  static const String keyRideIdleMode = 'ride_idle_mode_v1';
-  static const String keyKeepScreenOnMode = 'ride_keep_screen_on_v1';
+  static const String keyRideIdleMode = SettingsRound9.keyRideIdleMode;
+  static const String keyKeepScreenOnMode = SettingsRound9.keyKeepScreenOnMode;
 
-  Future<void> setRideIdleMode(RideIdleMode value) async {
-    if (value == _rideIdleMode) return;
-    _rideIdleMode = value;
-    notifyListeners();
-    await _saveString(keyRideIdleMode, value.id);
-  }
+  /// Kept for callers (round 9): always the Ride AOD, nothing is stored.
+  Future<void> setRideIdleMode(RideIdleMode value) async {}
 
-  Future<void> setKeepScreenOnMode(KeepScreenOnMode value) async {
-    if (value == _keepScreenOnMode) return;
-    _keepScreenOnMode = value;
-    notifyListeners();
-    await _saveString(keyKeepScreenOnMode, value.id);
-  }
-
-  Future<void> _saveString(String key, String value) async {
-    try {
-      final prefs = await _p();
-      await prefs.setString(key, value);
-    } catch (e) {
-      debugPrint('settings save note: $e');
-    }
-  }
+  /// Kept for callers (round 9): always "only while moving", nothing is stored.
+  Future<void> setKeepScreenOnMode(KeepScreenOnMode value) async {}
 
   Future<void> markNetConsentSeen() async {
     if (_netConsentSeen) return;
@@ -623,19 +587,15 @@ class SettingsService extends ChangeNotifier {
 
   // 3.55 audio (docs/features_355/audio_and_calls.md). Read lazily from the prefs that load() opened,
   // so load() itself is unchanged.
-  static const String keyLowerMusicWhenSpeeding = 'lower_music_when_speeding_v1';
-  bool? _lowerMusicWhenSpeeding;
+  static const String keyLowerMusicWhenSpeeding = SettingsRound9.keyLowerMusicWhenSpeeding;
 
   /// "Lower music when speeding": other apps' music is lowered step by step (then paused) while I ride
-  /// well over the speed limit, and restored after. On by default (admin switch `speedAudio` too).
-  bool get lowerMusicWhenSpeeding => _lowerMusicWhenSpeeding ?? _prefs?.getBool(keyLowerMusicWhenSpeeding) ?? true;
+  /// well over the speed limit, and restored after. Always on since round 9 (the admin switch
+  /// `speedAudio` still applies).
+  bool get lowerMusicWhenSpeeding => true;
 
-  Future<void> setLowerMusicWhenSpeeding(bool value) async {
-    if (value == lowerMusicWhenSpeeding && _lowerMusicWhenSpeeding != null) return;
-    _lowerMusicWhenSpeeding = value;
-    notifyListeners();
-    await _save(keyLowerMusicWhenSpeeding, value);
-  }
+  /// Kept for callers (round 9): always on, nothing is stored.
+  Future<void> setLowerMusicWhenSpeeding(bool value) async {}
 
   // ---- 3.55 sound awareness & intercom voice (docs/features_355/sound_awareness_and_intercom.md).
   // Loaded by [loadSoundSettings] (main.dart calls it after [load]); defaults until then.
@@ -690,35 +650,21 @@ class SettingsService extends ChangeNotifier {
   /// Fixed to 'auto' (Nov 11): kept for callers; any side is ignored and nothing is stored.
   Future<void> setGiveWaySide(String value) async {}
 
-  // ---- Round 8 voice clarity (docs/features_355/voice_clarity.md). Intercom options sheet > Voice clarity.
-  static const String keyNoiseReduction = 'noise_reduction_v1';
-  static const String keyWindNoiseMode = 'wind_noise_mode_v1';
-  NoiseReduction? _noiseReduction;
-  bool? _windNoiseMode;
+  // ---- Round 8 voice clarity (docs/features_355/voice_clarity.md). Round 9: fixed, no choices.
+  static const String keyNoiseReduction = SettingsRound9.keyNoiseReduction;
+  static const String keyWindNoiseMode = SettingsRound9.keyWindNoiseMode;
 
-  /// "Noise reduction": Strong (default) / Normal / Off. Off still keeps the voice gate and level control
-  /// ("Clean up my voice" stays always on).
-  NoiseReduction get noiseReduction => _noiseReduction ?? NoiseReduction.parse(_prefs?.getString(keyNoiseReduction));
+  /// "Noise reduction": always Strong since round 9 (a stored Normal / Off is ignored). The voice gate
+  /// and level control run as before ("Clean up my voice" stays always on).
+  NoiseReduction get noiseReduction => NoiseReduction.strong;
 
-  Future<void> setNoiseReduction(NoiseReduction value) async {
-    if (value == noiseReduction && _noiseReduction != null) return;
-    _noiseReduction = value;
-    notifyListeners();
-    try {
-      final prefs = await _p();
-      await prefs.setString(keyNoiseReduction, value.storage);
-    } catch (e) {
-      debugPrint('settings save $keyNoiseReduction note: $e');
-    }
-  }
+  /// Kept for callers (round 9): always Strong, nothing is stored.
+  Future<void> setNoiseReduction(NoiseReduction value) async {}
 
-  /// "Wind-noise mode" (default on): wind gusts are ducked fast (10 ms detector) while nobody speaks.
-  bool get windNoiseMode => _windNoiseMode ?? _prefs?.getBool(keyWindNoiseMode) ?? true;
+  /// "Wind-noise mode": automatic since round 9 (always on): wind gusts are ducked fast (10 ms
+  /// detector) while nobody speaks.
+  bool get windNoiseMode => true;
 
-  Future<void> setWindNoiseMode(bool value) async {
-    if (value == windNoiseMode && _windNoiseMode != null) return;
-    _windNoiseMode = value;
-    notifyListeners();
-    await _save(keyWindNoiseMode, value);
-  }
+  /// Kept for callers (round 9): always on, nothing is stored.
+  Future<void> setWindNoiseMode(bool value) async {}
 }

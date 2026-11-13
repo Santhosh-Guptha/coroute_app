@@ -4,7 +4,8 @@ import 'package:provider/provider.dart';
 import '../../data/services/app_lock_service.dart';
 import '../../domain/security/app_lock_policy.dart';
 import '../../domain/security/lock_screen_cockpit_policy.dart';
-import '../../domain/tracking/screen_awake_policy.dart';
+import '../../domain/safety/effective_speed_limit.dart';
+import '../../data/services/convoy_service.dart';
 
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
@@ -30,19 +31,21 @@ import 'features_guide_screen.dart';
 import 'push_notifications_tile.dart';
 import 'road_safety_screen.dart';
 
-/// The one Settings screen, minimal by design (3.55, docs/SETTINGS_MINIMAL_v3.55.md).
+/// The one Settings screen, minimal by design (3.55, docs/SETTINGS_MINIMAL_v3.55.md; round 9,
+/// docs/quality/ROUND9_SETTINGS_NOTES.md: the app works with zero configuration).
 ///
 /// Safety features are always on and have no switch (crash detection, SOS, emergency texts,
-/// break reminder, helping and asking nearby riders...): one row says so and lists them.
+/// break reminder, helping and asking nearby riders, bend / speed-limit / hazard / rough-road
+/// warnings, nudges, Ride AOD...): one row says so and lists them.
 /// What is left:
 ///  * Safety: safety health (the phone check), emergency contact & Medical ID (data, not a
-///    setting) and my speed warning.
-///  * Ride: voice alerts, siren alerts (on by default), language, battery saver, data saver.
-///  * Ride screen: "Show cockpit on lock screen while riding" (default on), when idle (Ride AOD / Dim / Let the
-///    screen sleep) and keep screen on (only while moving / always during a ride), with battery estimates.
-///  * App & privacy: appearance, push notifications, my username on leaderboards.
-///  * More (collapsed): audio fine-tuning, fuel, navigation app, quick replies, permissions and
-///    the features guide.
+///    setting), my speed warning (with the limit that applies now) and Road safety (consent).
+///  * Ride: siren alerts (on by default, uses the microphone), language, data saver.
+///  * App & privacy: app lock, appearance, push notifications, my username on leaderboards.
+///  * Advanced (collapsed): "Show cockpit on lock screen while riding" (default on; privacy escape
+///    hatch), fuel, navigation app, quick replies, permissions and the features guide.
+/// Round 9: voice alerts and battery saver are quick controls in the ride screen's quick settings
+/// (no Settings row); When idle, Keep screen on and the music choices are fixed.
 /// Fixed since Nov 11 (owner decision), no row: help / ask nearby riders (on), give-way side
 /// (Automatic), safety report in my score (on), offline maps (automatic, kept 7 days after a trip).
 /// Send feedback, Rate CoRoute and Diagnostics live once, in Profile › Help.
@@ -79,7 +82,8 @@ class SettingsScreen extends StatefulWidget {
   static const String appLockTitle = 'Lock CoRoute with fingerprint or screen lock';
   static const String appLockSubtitle = 'Never during a ride or SOS. SOS, Call 112 and Medical ID work while locked.';
   static String appLockDelayLabel(int minutes) => minutes <= 0 ? 'Every time I leave the app' : 'After $minutes min in the background';
-  static const String moreTitle = 'More settings';
+  static const String moreTitle = 'Advanced';
+  static const String quickControlsNote = 'Mute voice or turn battery saver on from the ride screen\'s quick settings.';
   static const String pauseMusicTitle = 'Pause music for alerts';
   static const String lowerMusicTitle = 'Lower music when speeding';
   static const String safetyHealthTitle = 'Safety health';
@@ -101,6 +105,13 @@ class SettingsScreen extends StatefulWidget {
     'settings_rate_coroute',
     'settings_send_feedback',
     'settings_diagnostics',
+    // Round 9 (docs/quality/ROUND9_SETTINGS_NOTES.md): fixed defaults or quick controls.
+    'settings_spoken_alerts',
+    'batterySaver',
+    'settings_ride_idle',
+    'settings_keep_screen_on',
+    'settings_pause_music',
+    'settings_lower_music_speeding',
   ];
 
   /// The always-on list shown by the "Safety is always on" row (icon, short label).
@@ -119,6 +130,13 @@ class SettingsScreen extends StatefulWidget {
     (Icons.emergency_share_rounded, SafetyTexts.askTitle),
     (Icons.graphic_eq_rounded, 'Clear voice in group talk'),
     (Icons.stay_current_portrait_rounded, 'Screen stays on while riding'),
+    // Round 9: fixed on, no switch.
+    (Icons.turn_sharp_right_rounded, 'Bend warnings'),
+    (Icons.speed_rounded, 'Road speed limits and overspeed warning'),
+    (Icons.add_road_rounded, 'Hazard, rough road and twisty road warnings'),
+    (Icons.bedtime_rounded, 'Long ride and night nudges'),
+    (Icons.nightlight_round, 'Ride AOD when idle'),
+    (Icons.volume_down_rounded, 'Music lowered when speeding'),
   ];
 
   @override
@@ -158,52 +176,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _pickIdle(SettingsService s) {
-    showAppSheet<void>(
-      context,
-      title: SettingsScreen.idleTitle,
-      builder: (ctx) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final m in RideIdleMode.values)
-            ListTile(
-              key: ValueKey('settings_ride_idle_${m.id}'),
-              title: Text(m == RideIdleMode.aod ? '${m.label} (default)' : m.label),
-              subtitle: Text(RideScreenBattery.forIdle(m)),
-              trailing: m == s.rideIdleMode ? Icon(Icons.check_rounded, color: AppTheme.accentText) : null,
-              onTap: () {
-                s.setRideIdleMode(m).ignore();
-                Navigator.of(ctx).pop();
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  void _pickKeepOn(SettingsService s) {
-    showAppSheet<void>(
-      context,
-      title: SettingsScreen.keepOnTitle,
-      builder: (ctx) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final m in KeepScreenOnMode.values)
-            ListTile(
-              key: ValueKey('settings_keep_screen_on_${m.id}'),
-              title: Text(m == KeepScreenOnMode.whileMoving ? '${m.label} (default)' : m.label),
-              subtitle: Text(RideScreenBattery.keepOnHint(m)),
-              trailing: m == s.keepScreenOnMode ? Icon(Icons.check_rounded, color: AppTheme.accentText) : null,
-              onTap: () {
-                s.setKeepScreenOnMode(m).ignore();
-                Navigator.of(ctx).pop();
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
   void _showAlwaysOn() {
     showAppSheet<void>(
       context,
@@ -213,6 +185,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         key: const ValueKey('settings_always_on_list'),
         shrinkWrap: true,
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(SettingsScreen.quickControlsNote, key: const ValueKey('settings_quick_controls_note'), style: AppText.caption),
+          ),
           for (final (icon, label) in SettingsScreen.alwaysOn)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
@@ -279,24 +255,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       if (auth != null) _EmergencyRow(auth: auth, onTap: () => _push(const EditProfileScreen())),
                       _SpeedWarning(settings: s),
-                      // Round 4: hazard / rough road / twisty warnings, nudges, "Help make roads safer" (no switch here).
+                      // "Help make roads safer" (opt-in consent), private places and road data. Round 9: the
+                      // warnings themselves are always on (no switches there any more).
                       _Row(
                         key: const ValueKey('settings_road_safety'),
                         icon: Icons.add_road_rounded,
                         title: RoadSafetyScreen.title,
-                        subtitle: 'Hazard warnings, break nudges, help make roads safer',
+                        subtitle: RoadSafetyScreen.rowSubtitle,
                         onTap: () => _push(const RoadSafetyScreen()),
                       ),
                     ]),
                     _Section('Ride', [
-                      _Row(
-                        key: const ValueKey('settings_spoken_alerts'),
-                        icon: Icons.record_voice_over_rounded,
-                        title: SettingsScreen.voiceTitle,
-                        subtitle: SettingsScreen.voiceSubtitle,
-                        value: s.voiceWarnings,
-                        onChanged: s.setVoiceWarnings,
-                      ),
                       // Admin switch 'sirenDetector'. Off releases the microphone at once.
                       if (context.featureOn('sirenDetector'))
                         _Row(
@@ -309,44 +278,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       _LanguageRow(settings: s),
                       _Row(
-                        key: const ValueKey('batterySaver'),
-                        icon: Icons.battery_saver_rounded,
-                        title: SettingsScreen.batteryTitle,
-                        subtitle: SettingsScreen.batterySubtitle,
-                        value: s.batterySaver,
-                        onChanged: s.setBatterySaver,
-                      ),
-                      _Row(
                         key: const ValueKey('settings_data_saver'),
                         icon: Icons.data_saver_on_rounded,
                         title: SettingsScreen.dataTitle,
                         value: s.lowData,
                         onChanged: s.setLowData,
-                      ),
-                    ]),
-                    _Section(SettingsScreen.rideScreenSection, [
-                      // Default on; the same stored key as 3.54's "Show ride on lock screen".
-                      _Row(
-                        key: const ValueKey('settings_lock_screen_cockpit'),
-                        icon: Icons.screen_lock_portrait_rounded,
-                        title: SettingsScreen.lockScreenCockpitTitle,
-                        subtitle: SettingsScreen.lockScreenCockpitSubtitle,
-                        value: s.rideOnLockScreen,
-                        onChanged: s.setRideOnLockScreen,
-                      ),
-                      _Row(
-                        key: const ValueKey('settings_ride_idle'),
-                        icon: Icons.nightlight_round,
-                        title: SettingsScreen.idleTitle,
-                        subtitle: RideScreenBattery.idleHint(s.rideIdleMode),
-                        onTap: () => _pickIdle(s),
-                      ),
-                      _Row(
-                        key: const ValueKey('settings_keep_screen_on'),
-                        icon: Icons.stay_current_portrait_rounded,
-                        title: SettingsScreen.keepOnTitle,
-                        subtitle: '${s.keepScreenOnMode.label}. ${RideScreenBattery.keepOnHint(s.keepScreenOnMode)}',
-                        onTap: () => _pickKeepOn(s),
                       ),
                     ]),
                     _Section('App & privacy', [
@@ -439,30 +375,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Two cards: the less-used switches, then links to tools.
+  /// Advanced: the one privacy escape hatch (lock-screen cockpit), then data and links to tools.
   Widget _moreSection(BuildContext context, SettingsService? s) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Default on; the same stored key as 3.54's "Show ride on lock screen". A choice for privacy: the
+        // cockpit shows the group's positions and names to whoever holds the locked phone.
         if (s != null)
           _Section(null, [
             _Row(
-              key: const ValueKey('settings_pause_music'),
-              icon: Icons.music_off_rounded,
-              title: SettingsScreen.pauseMusicTitle,
-              subtitle: 'Off: music only gets quieter',
-              value: s.pauseOtherAudio,
-              onChanged: s.setPauseOtherAudio,
+              key: const ValueKey('settings_lock_screen_cockpit'),
+              icon: Icons.screen_lock_portrait_rounded,
+              title: SettingsScreen.lockScreenCockpitTitle,
+              subtitle: SettingsScreen.lockScreenCockpitSubtitle,
+              value: s.rideOnLockScreen,
+              onChanged: s.setRideOnLockScreen,
             ),
-            // Admin switch 'speedAudio'.
-            if (context.featureOn('speedAudio'))
-              _Row(
-                key: const ValueKey('settings_lower_music_speeding'),
-                icon: Icons.speed_rounded,
-                title: SettingsScreen.lowerMusicTitle,
-                value: s.lowerMusicWhenSpeeding,
-                onChanged: s.setLowerMusicWhenSpeeding,
-              ),
           ]),
         _Section(null, [
           if (s != null)
@@ -531,7 +460,7 @@ class _NavAppRowState extends State<_NavAppRow> {
   }
 }
 
-/// "More settings": one tap opens or closes the less-used rows.
+/// "Advanced" (round 9; was "More settings"): one tap opens or closes the less-used rows.
 class _MoreToggle extends StatelessWidget {
   final bool open;
   final VoidCallback onTap;
@@ -757,16 +686,24 @@ class _EmergencyRow extends StatelessWidget {
 }
 
 /// My own speed warning: the group limit, or one of a few speeds. Always on; the value is mine.
+/// Round 9: one line says which limit warns now (the stricter of mine and the group's), so a change
+/// made during a ride visibly applies, or says why it does not (a stricter group limit).
 class _SpeedWarning extends StatelessWidget {
   final SettingsService settings;
   const _SpeedWarning({required this.settings});
 
   @override
   Widget build(BuildContext context) {
+    final (inRide, groupKmh) = context.select<ConvoyService?, (bool, int)>((c) {
+      final convoy = c?.activeConvoy;
+      final on = convoy != null && convoy.tripStatus != 'ENDED';
+      return (on, on ? convoy.speedLimitKmh : 0);
+    });
     return _ChoiceRow<int>(
       key: const ValueKey('settings_speed_warning'),
       icon: Icons.speed_rounded,
       title: SettingsScreen.speedTitle,
+      subtitle: speedWarningLine(groupKmh: groupKmh, personalKmh: settings.speedLimitWarningKmh, inRide: inRide),
       value: settings.speedLimitWarningKmh,
       choices: {for (final v in SafetyConstants.speedWarningChoices) v: v == 0 ? 'Group limit' : '$v'},
       onChanged: settings.setSpeedLimitWarningKmh,

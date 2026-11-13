@@ -13,7 +13,7 @@ import '../../ride/guardian_sheet.dart';
 /// (tiles >= 96 dp tall; the whole tile toggles). Everything else is in Settings.
 ///   1. Voice: mute or unmute spoken alerts and the intercom (emergencies always speak).
 ///   2. Night map: dark map now, or back to automatic.
-///   3. Battery saver: the same switch as in Settings.
+///   3. Battery saver: on, or automatic at 20 % (round 9: its only switch; no Settings row).
 /// 3.55 minimal settings: the screen always stays on while riding (battery saver may dim it),
 /// so it has no toggle here; [keepScreenOn] / [onToggleKeepScreenOn] are kept for callers.
 /// Quick actions: Guardian link, Fuel and (when given) offline voice navigation.
@@ -132,7 +132,7 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
     // 2. Night map: dark now, or automatic (by sunrise and sunset).
     final isNightMap = themeCtrl?.preference == ThemePreference.dark;
 
-    // 3. Battery saver (the Settings switch).
+    // 3. Battery saver (round 9: the only switch for it).
     final batterySaverOn = settings?.batterySaver ?? false;
 
     final toggles = [

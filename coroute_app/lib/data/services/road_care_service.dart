@@ -8,6 +8,7 @@ import '../../domain/route/bend_advisor.dart';
 import '../../domain/route/route_progress.dart';
 import '../../domain/safety/altitude_care.dart';
 import '../../domain/safety/night_care.dart';
+import '../../domain/safety/ride_warning_mute.dart';
 import '../../domain/safety/speed_limit_advisor.dart';
 import '../../domain/safety/warning_scheduler.dart';
 import '../../domain/tracking/geo_math.dart';
@@ -77,7 +78,7 @@ class RoadCareService {
   /// Road cells on the phone (prefetch + disk); null = no free-riding prediction.
   RoadDataService? roadCells;
 
-  /// The rider's switches (Settings > Road safety). Null = defaults.
+  /// Bend / limit / overspeed prefs (fixed on since round 9; the tolerance is automatic). Null = defaults.
   RoadAheadPrefs Function()? roadPrefs;
 
   /// What the cockpit's limit sign and bend chip show. Changes only when something visible
@@ -96,6 +97,19 @@ class RoadCareService {
     WarnKind.fatigue: WarnRule(priority: 20, minGapMs: 10000, ttlMs: 60000),
     WarnKind.twisty: WarnRule(priority: 10, minGapMs: 10000, ttlMs: 30000),
   });
+
+  /// Round 9: rough road, twisty road and nudges muted for this ride from their card ("Mute this ride").
+  final RideWarningMute mute = RideWarningMute();
+
+  /// Round 9: the card [noticeKey] can be muted for this ride (rough road, twisty road, nudges).
+  bool canMute(String noticeKey) => RideWarningMute.kindOf(noticeKey) != null;
+
+  /// Round 9: mutes the kind of the card [noticeKey] for this ride and hides the card.
+  void muteForRide(String noticeKey) {
+    if (!mute.muteKindOf(noticeKey)) return;
+    if (_notice?.key == noticeKey) _notice = null;
+    onChanged();
+  }
 
   final BendAdvisor bends = BendAdvisor();
   final SpeedLimitAdvisor limits = SpeedLimitAdvisor();
@@ -133,6 +147,7 @@ class RoadCareService {
   }
 
   void reset() {
+    mute.reset();
     bends.reset();
     roadAhead?.reset();
     scheduler.reset();
@@ -349,7 +364,7 @@ class RoadCareService {
   /// this same cockpit slot (also on the lock-screen cockpit), with the same rules: never over an emergency, a
   /// more urgent road notice is not replaced. Returns false when it was not shown.
   bool showExternal(RoadCareNotice n, Duration forTime) {
-    if (emergency()) return false;
+    if (emergency() || mute.blocks(n.key)) return false;
     final cur = notice;
     if (cur != null && cur.rank > n.rank) return false;
     _show(n, forTime);
@@ -358,7 +373,7 @@ class RoadCareService {
 
   /// Speaks [text] at warning priority unless an emergency is open.
   void sayExternal(String text, {required String key, bool hazard = false}) {
-    if (emergency()) return;
+    if (emergency() || mute.blocks(key)) return;
     if (!_schedule(_kindOf(key, hazard: hazard), key, text, hazard: hazard)) return;
     if (hazard) {
       voice?.speakHazard(text, dedupeKey: key);

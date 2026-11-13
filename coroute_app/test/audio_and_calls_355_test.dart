@@ -157,13 +157,14 @@ void main() {
   });
 
   group('settings', () {
-    test('Lower music when speeding is on by default and saved', () async {
+    // Round 9 (docs/quality/ROUND9_SETTINGS_NOTES.md): no switch any more; always on.
+    test('Lower music when speeding is always on; "off" is ignored and nothing is stored', () async {
       expect(settings.lowerMusicWhenSpeeding, isTrue);
       await settings.setLowerMusicWhenSpeeding(false);
-      expect(settings.lowerMusicWhenSpeeding, isFalse);
+      expect(settings.lowerMusicWhenSpeeding, isTrue);
       final again = SettingsService();
       await again.load();
-      expect(again.lowerMusicWhenSpeeding, isFalse);
+      expect(again.lowerMusicWhenSpeeding, isTrue);
     });
   });
 }

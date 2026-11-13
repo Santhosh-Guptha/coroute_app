@@ -47,6 +47,7 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/tile_cache_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../../data/services/weather_service.dart';
+import '../../domain/safety/ride_warning_mute.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../../domain/notify/alert_priority.dart';
 import '../../domain/ride/ride_facts.dart';
@@ -2654,6 +2655,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         priority: AlertPriority.routeInfo,
         dismissible: true,
         onDismiss: safetyForEngine.roadCare.dismissNotice,
+        // Round 9: rough road, twisty road and nudges have no Settings switch; they can be quieted
+        // for this ride from their card (the next ride starts with them on again).
+        actionLabel: safetyForEngine.roadCare.canMute(roadNotice.key) ? RideWarningMute.actionLabel : null,
+        onAction: safetyForEngine.roadCare.canMute(roadNotice.key) ? () => safetyForEngine.roadCare.muteForRide(roadNotice.key) : null,
       ));
     }
     // 3.55 SOS battery reserve (below 10%): "Battery saver for SOS is on" (informational).
@@ -3459,13 +3464,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       fit: StackFit.expand,
       children: [
         TickerMode(enabled: !_aodOn, child: Offstage(offstage: _aodOn, child: cockpit)),
-        if (_aodOn) Positioned.fill(child: _aodView(convoy, me, uid, snap, service, now)),
+        if (_aodOn) Positioned.fill(child: _aodView(convoy, me, uid, snap, service, now, speedLimit)),
       ],
     );
   }
 
   /// The Ride AOD content: speed, next turn, the leader (or the group), time, battery and the SOS hint.
-  Widget _aodView(ConvoyModel convoy, RiderModel me, String uid, RideSnapshot snap, ConvoyService service, int now) {
+  Widget _aodView(ConvoyModel convoy, RiderModel me, String uid, RideSnapshot snap, ConvoyService service, int now, int limitKmh) {
     NextTurn? turn;
     try {
       final line = _guide.active;
@@ -3496,6 +3501,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     } catch (_) {}
     return RideAodView(
       speedKmh: me.speedKmh,
+      limitKmh: limitKmh, // round 9: a limit changed mid-ride shows on the Ride AOD too
       turn: turn,
       leaderDistanceM: leaderM,
       leaderRelativeBearing: leaderRel,

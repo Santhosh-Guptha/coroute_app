@@ -4,7 +4,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/intercom_service.dart';
 import '../../data/services/settings_service.dart';
-import '../../domain/audio/voice_clarity.dart';
 
 /// Talk mode and "hear the group", shown in a sheet from the ride sheet.
 /// Styled like the canvas settings group: a `bg` filled block with switch
@@ -86,36 +85,20 @@ class IntercomOptions extends StatelessWidget {
               ],
             ),
           ),
-          // Round 8 voice clarity (docs/features_355/voice_clarity.md).
-          const SizedBox(height: 18),
-          const DsSectionHeader('Noise reduction'),
-          const SizedBox(height: 10),
-          DsSegment<NoiseReduction>(
-            values: NoiseReduction.values,
-            selected: settings.noiseReduction,
-            label: (m) => m.label,
-            onChanged: settings.setNoiseReduction,
-          ),
-          const SizedBox(height: 8),
-          Text(settings.noiseReduction.hint, style: AppText.caption),
-          if (settings.noiseReduction != NoiseReduction.off) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(Radii.lg)),
-              child: DsSwitchRow(
-                label: 'Wind-noise mode',
-                subtitle: settings.windNoiseMode ? 'Gusts are cut while nobody speaks.' : 'Off. Gusts are only reduced.',
-                value: settings.windNoiseMode,
-                onChanged: settings.setWindNoiseMode,
-                divider: false,
-              ),
-            ),
-          ],
+          // Round 8 voice clarity (docs/features_355/voice_clarity.md). Round 9: fixed to Strong noise
+          // reduction with the automatic wind-noise ducker (no choices; docs/quality/ROUND9_SETTINGS_NOTES.md).
+          const SizedBox(height: 12),
+          Text(IntercomOptionsNotes.voiceClarity, key: const ValueKey('intercom_voice_clarity_note'), style: AppText.caption),
         ],
       ),
     );
   }
+}
+
+/// Round 9: the one line that replaced the voice clarity choices in the intercom options.
+class IntercomOptionsNotes {
+  IntercomOptionsNotes._();
+  static const String voiceClarity = 'Voice clarity: strong noise reduction, wind gusts cut automatically.';
 }
 
 /// What TalkBack reads for the SOS button on the ride map.

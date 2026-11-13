@@ -1,5 +1,5 @@
 // "Show cockpit on lock screen while riding" keeps the 3.54 key ("Show ride on lock screen"), so the rider's
-// choice stays; the Ride screen choices (when idle, keep screen on) are saved and read back.
+// choice stays. Round 9: "When idle" (Ride AOD) and "Keep screen on" (only while moving) are fixed.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -69,18 +69,22 @@ void main() {
     expect(n, 1);
   });
 
-  test('when idle and keep screen on are saved and read back', () async {
-    SharedPreferences.setMockInitialValues({});
+  test('round 9: when idle and keep screen on are fixed; old choices are ignored and deleted once', () async {
+    SharedPreferences.setMockInitialValues({
+      SettingsService.keySafetyDefaultsVersion: 2,
+      SettingsService.keyRideIdleMode: 'sleep',
+      SettingsService.keyKeepScreenOnMode: 'always',
+    });
     final s = SettingsService();
     await s.load();
+    expect(s.rideIdleMode, RideIdleMode.aod);
+    expect(s.keepScreenOnMode, KeepScreenOnMode.whileMoving);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.containsKey(SettingsService.keyRideIdleMode), isFalse);
+    expect(prefs.containsKey(SettingsService.keyKeepScreenOnMode), isFalse);
     await s.setRideIdleMode(RideIdleMode.sleep);
     await s.setKeepScreenOnMode(KeepScreenOnMode.always);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString(SettingsService.keyRideIdleMode), 'sleep');
-    expect(prefs.getString(SettingsService.keyKeepScreenOnMode), 'always');
-    final t = SettingsService();
-    await t.load();
-    expect(t.rideIdleMode, RideIdleMode.sleep);
-    expect(t.keepScreenOnMode, KeepScreenOnMode.always);
+    expect(s.rideIdleMode, RideIdleMode.aod);
+    expect(prefs.containsKey(SettingsService.keyRideIdleMode), isFalse, reason: 'nothing is stored');
   });
 }

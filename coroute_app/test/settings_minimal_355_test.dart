@@ -85,7 +85,6 @@ void main() {
         for (final k in SettingsService.alwaysOnKeys) k: false,
         // User choices are left alone, whichever way they were set.
         NetworkConstants.keyVoiceWarnings: false,
-        NetworkConstants.keyPauseOtherAudio: true,
         SettingsService.keyBatterySaver: true,
         SafetyConstants.keySpeedLimitWarningKmh: 80,
       });
@@ -100,7 +99,6 @@ void main() {
       expect(prefs.getInt(SettingsService.keySafetyDefaultsVersion), SettingsService.safetyDefaultsVersion);
       // Never turns a rider's choice off (or on).
       expect(s.voiceWarnings, isFalse);
-      expect(s.pauseOtherAudio, isTrue);
       expect(s.batterySaver, isTrue);
       expect(s.speedLimitWarningKmh, 80);
 
@@ -125,7 +123,7 @@ void main() {
       await s.load();
       await s.loadSoundSettings();
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getInt(SettingsService.keySafetyDefaultsVersion), 2);
+      expect(prefs.getInt(SettingsService.keySafetyDefaultsVersion), SettingsService.safetyDefaultsVersion);
       expect(prefs.getString(SettingsService.keyGiveWaySide), 'auto');
       expect(s.giveWaySide, 'auto');
       expect(prefs.getBool(RiderScoreService.prefsUseReport), isTrue);
@@ -204,7 +202,9 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('few rows, no safety switches, More is collapsed and opens with one tap', (tester) async {
+    // Round 9 (docs/quality/ROUND9_SETTINGS_NOTES.md): two switches on the main screen; the lock-screen
+    // cockpit (a privacy choice) is the only switch under Advanced.
+    testWidgets('few rows, no safety switches, Advanced is collapsed and opens with one tap', (tester) async {
       SharedPreferences.setMockInitialValues({});
       final s = SettingsService();
       await s.load();
@@ -212,23 +212,48 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byKey(const ValueKey('settings_always_on')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings_speed_warning')), findsOneWidget);
-      expect(find.byType(Switch), findsNWidgets(5),
-          reason: 'voice alerts, siren alerts, battery saver, data saver, show cockpit on lock screen while riding');
-      expect(find.byKey(const ValueKey('settings_lock_screen_cockpit')), findsOneWidget);
+      expect(find.byType(Switch), findsNWidgets(2), reason: 'siren alerts, data saver');
       expect(find.byKey(const ValueKey('settings_siren_alerts')), findsOneWidget);
-      for (final gone in ['settings_crash', 'settings_sms', 'settings_auto_reroute', 'settings_voice_cleanup']) {
+      for (final gone in ['settings_crash', 'settings_sms', 'settings_auto_reroute', 'settings_voice_cleanup', 'settings_spoken_alerts', 'batterySaver',
+        'settings_ride_idle', 'settings_keep_screen_on']) {
         expect(find.byKey(ValueKey(gone)), findsNothing, reason: gone);
       }
-      expect(find.byKey(const ValueKey('settings_pause_music')), findsNothing, reason: 'collapsed');
+      expect(find.byKey(const ValueKey('settings_lock_screen_cockpit')), findsNothing, reason: 'collapsed');
+      expect(find.text(SettingsScreen.moreTitle), findsOneWidget);
 
       final list = find.byType(Scrollable).first;
       await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_more')), 120, scrollable: list);
       await tester.tap(find.byKey(const ValueKey('settings_more')));
       await tester.pump();
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_pause_music')), 120, scrollable: list);
-      await tester.tap(find.byKey(const ValueKey('settings_pause_music')));
+      for (final gone in ['settings_pause_music', 'settings_lower_music_speeding']) {
+        expect(find.byKey(ValueKey(gone)), findsNothing, reason: gone);
+      }
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_lock_screen_cockpit')), 120, scrollable: list);
+      await tester.tap(find.byKey(const ValueKey('settings_lock_screen_cockpit')));
       await tester.pump();
-      expect(s.pauseOtherAudio, isTrue);
+      expect(s.rideOnLockScreen, isFalse, reason: 'still the rider\'s choice (privacy)');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('round 9: fits a small phone (320 x 568) with no overflow, Advanced open', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = SettingsService();
+      await s.load();
+      AppTheme.use(AppPalette.light);
+      addTearDown(() => AppTheme.use(AppPalette.dark));
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(ChangeNotifierProvider<SettingsService>.value(
+        value: s,
+        child: MaterialApp(theme: AppTheme.themeFor(AppPalette.light), home: const SettingsScreen()),
+      ));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      final list = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_more')), 120, scrollable: list);
+      await tester.tap(find.byKey(const ValueKey('settings_more')));
+      await tester.pump();
       expect(tester.takeException(), isNull);
     });
 
@@ -273,7 +298,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.byType(PreRidePhoneCheckScreen), findsOneWidget);
-      expect(find.byType(SettingsScreen), findsOneWidget, reason: 'covered by the phone check, not a second Settings');
+      expect(find.byType(SettingsScreen, skipOffstage: false), findsOneWidget, reason: 'covered by the phone check, not a second Settings');
     });
 
     test('the "Safety is always on" list names helping and asking nearby riders', () {
