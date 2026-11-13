@@ -16,6 +16,9 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/geo_service.dart';
 import '../../data/services/map_places_service.dart';
+import '../../data/services/safety_service.dart';
+import '../../domain/intel/intel_policies.dart';
+import '../../domain/places/poi_category.dart';
 import '../map_places/map_places_layer.dart';
 import '../map_places/place_chips.dart';
 import '../map_picker/map_picker_screen.dart';
@@ -144,6 +147,13 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       _routing = false;
     });
     _fit();
+    // Round 4: road intelligence tiles along the planned route (learned rider stops for the map layer and the fuel
+    // gap check; hazards for the ride, kept offline). Never in the way of planning.
+    if (r != null && SafetyService.hasInstance) {
+      SafetyService.instance.intel.prefetchAlong(r.points).then((_) {
+        if (mounted && req == _routeRequest) setState(() => _gapKey = null);
+      }).catchError((Object _) {});
+    }
   }
 
   void _fit() {
@@ -577,6 +587,24 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     );
   }
 
+  String? _gapKey;
+  List<FuelGap> _gapList = const [];
+
+  /// No-fuel gaps over 80 km on the planned route (known fuel from the cached map places and learned rider stops).
+  List<FuelGap> _fuelGaps(RouteModel r) {
+    final key = '${r.polyline.hashCode}:${SafetyService.hasInstance ? SafetyService.instance.intel.learnedStops.length : 0}';
+    if (key == _gapKey) return _gapList;
+    _gapKey = key;
+    try {
+      final places = _placesService()?.all ?? const [];
+      final fuel = [for (final p in places) if (p.category == PoiCategory.fuel) (lat: p.lat, lng: p.lng, name: p.displayName)];
+      _gapList = SafetyService.hasInstance ? SafetyService.instance.intel.fuelGaps(r.points, fuel) : FuelGapFinder.gaps(r.points, fuel);
+    } catch (_) {
+      _gapList = const [];
+    }
+    return _gapList;
+  }
+
   MapPlacesService? _placesService() {
     final api = context.read<ApiClient?>();
     return api == null ? null : MapPlacesService.shared(api);
@@ -601,6 +629,23 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 6, color: AppTheme.brand)]),
         // Map places along the planned route and on screen (zoom 12+), from the phone's cache first.
         if (_placesService() case final places?) MapPlacesLayer(service: places, routeLine: _route?.points, browse: true),
+        // Round 4 (feature 9): "Where riders stop" (learned, k-anonymous rider stops along the route).
+        if (_route != null && SafetyService.hasInstance)
+          MarkerLayer(markers: [
+            for (final st in SafetyService.instance.intel.learnedStops.take(60))
+              Marker(
+                point: LatLng(st.lat, st.lng),
+                width: 26,
+                height: 26,
+                child: Semantics(
+                  label: 'Where riders stop${st.name.isEmpty ? '' : ': ${st.name}'}',
+                  child: Container(
+                    decoration: BoxDecoration(color: AppTheme.card, shape: BoxShape.circle, border: Border.all(color: AppTheme.accent, width: 2)),
+                    child: Icon(st.fuel ? Icons.local_gas_station_rounded : Icons.coffee_rounded, size: 14, color: AppTheme.accent),
+                  ),
+                ),
+              ),
+          ]),
         MarkerLayer(markers: [
           if (_start != null)
             Marker(
@@ -723,7 +768,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             children: [
               Expanded(child: DsStatCell(label: 'Distance', value: formatDistance(r.distanceM))),
               const SizedBox(width: 10),
-              Expanded(child: DsStatCell(label: 'Time', value: formatDuration(Duration(seconds: r.durationS)))),
+              Expanded(child: DsStatCell(label: r.etaFromRiders ? 'Time (riders)' : 'Time', value: formatDuration(Duration(seconds: r.durationS)))),
               const SizedBox(width: 10),
               Expanded(child: DsStatCell(label: 'Stops', value: '${_stops.length}')),
             ],
@@ -732,6 +777,26 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text('Straight-line estimate: the road route is not available right now.', style: AppText.caption),
+            ),
+          // Round 4 (feature 10): the time comes from how fast riders really ride these roads.
+          if (r.etaFromRiders)
+            Padding(
+              key: const ValueKey('planner_eta_riders'),
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('ETA based on riders', style: AppText.caption),
+            ),
+          // Round 4 (feature 9): long stretches without known fuel.
+          for (final g in _fuelGaps(r).take(2))
+            Padding(
+              key: ValueKey('planner_fuel_gap_${g.fromKm.round()}'),
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.local_gas_station_rounded, size: 18, color: AppTheme.warning),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(g.text, style: AppText.caption.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600))),
+                ],
+              ),
             ),
         ],
         const SizedBox(height: 16),

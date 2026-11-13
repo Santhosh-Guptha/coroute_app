@@ -6,6 +6,7 @@ import '../../core/ui/ride_alert.dart';
 import '../../core/ui/ui_tokens.dart';
 import '../../data/services/group_safety_service.dart';
 import '../safety/hold_sos_pill.dart';
+import '../security/locked_cockpit_gate.dart';
 
 /// 3.55 group safety cards in the cockpit alert slot (see GroupSafetyService). Taps are offered
 /// only while the rider is slow ([GroupSafetyService.canTap]); at speed the cards are information
@@ -54,7 +55,8 @@ class GroupSafetyCard extends StatelessWidget {
           final phone = n.phone;
           if (phone != null) {
             action = 'Call';
-            onAction = () => launchUrl(Uri(scheme: 'tel', path: phone.replaceAll(' ', ''))).ignore();
+            // 3.56: a buddy's number waits for the phone's unlock on the locked cockpit.
+            onAction = () => callFromCockpit(context, phone, () => launchUrl(Uri(scheme: 'tel', path: phone.replaceAll(' ', '')))).ignore();
           }
           more = [
             ('Send a check', () => service.checkBuddy()),
@@ -74,10 +76,19 @@ class GroupSafetyCard extends StatelessWidget {
           action = 'Plan stop';
           onAction = () => service.planBreakStop(s);
         }
+      case GroupSafetyKind.fallingBehind:
+        // Round 4: "Send regroup at <place>" uses the existing regroup (meeting point) flow.
+        final s = n.suggestion;
+        if (tap && s != null) {
+          action = 'Send regroup at ${s.name}';
+          onAction = () => service.setRegroupPoint(s);
+        }
       case GroupSafetyKind.buddyOk || GroupSafetyKind.riskyStretch:
         break;
     }
-    final slowNote = !tap && (n.kind == GroupSafetyKind.buddyCheck || ((n.kind == GroupSafetyKind.stretch || n.kind == GroupSafetyKind.groupBreak) && n.suggestion != null));
+    final slowNote = !tap &&
+        (n.kind == GroupSafetyKind.buddyCheck ||
+            ((n.kind == GroupSafetyKind.stretch || n.kind == GroupSafetyKind.groupBreak || n.kind == GroupSafetyKind.fallingBehind) && n.suggestion != null));
     return RideAlert(
       tier: tierOf(n),
       title: n.title,

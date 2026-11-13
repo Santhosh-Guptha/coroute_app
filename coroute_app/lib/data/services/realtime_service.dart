@@ -502,6 +502,20 @@ class RealtimeService extends ChangeNotifier {
         _onServerMove(d is num ? d.toInt() : int.tryParse('${d ?? ''}'));
         return;
       }
+      // v3.56: several riders' positions in one frame (the gateway sends it only
+      // because JOIN announced 'posbatch1'). Handed on as ordinary RIDER_UPDATE
+      // events, so every listener stays as it was.
+      if (type == 'RIDER_UPDATES') {
+        if (_groupId == null) return;
+        final list = msg['riders'];
+        if (list is! List) return;
+        for (final r in list) {
+          if (r is Map) {
+            _events.add(<String, dynamic>{'type': 'RIDER_UPDATE', 'rider': Map<String, dynamic>.from(r), 'ts': msg['ts']});
+          }
+        }
+        return;
+      }
       // Room-scoped events carry no groupId by design (the socket is bound to a
       // room server-side). Drop them if we have since left the room.
       const roomScoped = {

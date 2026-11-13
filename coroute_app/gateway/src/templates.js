@@ -196,6 +196,21 @@ const DEFINITIONS = Object.freeze({
     variables: [v('date', '12 Dec', 'End date')],
     defaults: { title: 'Your plan', body: 'Your plan ends on {{date}}.' },
   },
+  // Round 6 business brain (src/business/summary.js): the Monday e-mail to the MASTER_ADMIN addresses. The numbers
+  // (riders, rides, SOS / crash, revenue, at-risk list, servers) are added below the intro by the server.
+  owner_weekly_summary: {
+    label: 'Weekly owner summary e-mail', channel: 'email',
+    description: 'Sent every Monday at 09:00 India time to the administrators (Settings > Weekly summary). The week\'s numbers are added below the intro by the server: riders active and new, rides, SOS and crash alerts with how they ended, revenue, riders at risk, server health.',
+    fields: EMAIL_FIELDS,
+    variables: [v('week', '2 Nov to 8 Nov 2026', 'The week the numbers are for'), v('activeRiders', '412', 'Riders who opened the app'), v('newRiders', '38', 'New sign-ups'),
+      v('revenue', '\u20b912,480', 'Net revenue of the week'), v('atRisk', '17', 'Riders on the at-risk list'), v('adminUrl', 'https://coroute.example/admin#/business', 'Business pages link')],
+    defaults: {
+      subject: 'CoRoute last week: {{activeRiders}} riders active, {{revenue}}',
+      heading: 'Your week on CoRoute',
+      intro: 'Here is how CoRoute did in the week of {{week}}.',
+      footer: 'Details, charts and the list of riders at risk are in the web admin: {{adminUrl}}. You get this e-mail because you are a CoRoute administrator. Turn it off under Settings > Weekly summary.',
+    },
+  },
   guardian_arrival: {
     label: 'Guardian: arrived safely', channel: 'webpush',
     description: 'Browser notification to Ride Guardian watchers when the rider arrives. No names or places are sent.',

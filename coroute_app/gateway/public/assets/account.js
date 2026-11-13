@@ -37,6 +37,7 @@
   if (!S.token()) { S.toSignIn('/account'); return; }
   loadSessions();
   initEmailChange();
+  initRoads();
 
   var STATUS = {
     PAID: ['Paid', 'ok'], CREATED: ['Not completed', 'muted'], FAILED: ['Failed', 'bad'], SIGNATURE_MISMATCH: ['Failed', 'bad'],
@@ -167,8 +168,11 @@
     var av = S.$('ac-avatar');
     if (av) {
       S.clear(av);
-      if (me.avatarUrl) { var img = el('img'); img.setAttribute('src', me.avatarUrl); img.setAttribute('alt', ''); img.setAttribute('width', '64'); img.setAttribute('height', '64'); av.appendChild(img); }
-      else av.textContent = String(me.username || me.name || '?').slice(0, 2).toUpperCase();
+      // 3.56: the picture needs the Bearer header, so it is fetched and drawn by the picture section below
+      // (window.CoAvatar); until then, and when there is none, the initials.
+      av.textContent = String(me.username || me.name || '?').slice(0, 2).toUpperCase();
+      av.setAttribute('data-initials', av.textContent);
+      if (window.CoAvatar) window.CoAvatar.show(me.avatarUrl || null);
     }
     var who = me.username ? '@' + me.username : (me.name || 'Rider');
     S.$('ac-title').textContent = who;
@@ -386,6 +390,52 @@
     });
   }
 
+  /* Round 4 "Help make roads safer" (GET / PUT /api/intel/consent): opt-in, off until the rider turns it on.
+   * Download (GET /api/intel/me/contributions) and delete (DELETE /api/intel/me/contributions) my contributions. */
+  function initRoads() {
+    var box = S.$('ac-roads-on');
+    var note = S.$('ac-roads-note');
+    var status = S.$('ac-roads-status');
+    if (!box || !note) return;
+    function say(on, at) {
+      note.textContent = on ? 'Thank you. Sharing is on' + (at ? ' since ' + new Date(at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '') + '. Turn it off at any time.'
+        : 'Sharing is off. Nothing from your rides is used for road statistics.';
+    }
+    S.api('GET', '/intel/consent').then(function (r) {
+      if (!r.ok) { note.textContent = 'Could not load this setting. Refresh to try again.'; return; }
+      box.checked = r.json.on === true;
+      box.disabled = false;
+      say(box.checked, r.json.at);
+    });
+    box.addEventListener('change', function () {
+      var want = box.checked;
+      box.disabled = true;
+      S.api('PUT', '/intel/consent', { on: want, source: 'web' }).then(function (r) {
+        box.disabled = false;
+        if (!r.ok) { box.checked = !want; note.textContent = (r.json && r.json.error) || 'Could not save. Try again.'; return; }
+        say(r.json.on, r.json.at);
+      });
+    });
+    S.$('ac-roads-export').addEventListener('click', function () {
+      S.api('GET', '/intel/me/contributions').then(function (r) {
+        if (!r.ok) { status.textContent = 'Could not download. Try again.'; return; }
+        var blob = new Blob([JSON.stringify(r.json, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'coroute-road-contributions.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+        status.textContent = (r.json.rows || []).length + ' contributions from the last 90 days downloaded.';
+      });
+    });
+    S.$('ac-roads-delete').addEventListener('click', function () {
+      if (!window.confirm('Delete your road and safety contributions?\n\nEverything from the last 90 days is removed, including its share of the totals. Older contributions exist only inside anonymous totals that cannot be traced back to you, so they cannot be split out.')) return;
+      S.api('DELETE', '/intel/me/contributions').then(function (r) {
+        status.textContent = r.ok ? (r.json.message || 'Deleted.') : 'Could not delete. Try again.';
+      });
+    });
+  }
+
   /** Round 4: one clear confirmation step for the e-mailed deletion link. */
   function confirmDelete(token) {
     var main = document.getElementById('main') || document.body;
@@ -415,4 +465,381 @@
       });
     });
   }
+})();
+
+
+/* ---------------------------------------------------------------------------------------------------------
+ * 3.56 "Adjust your profile picture" (docs/features_355/profile_photo_adjust.md).
+ *   GET  /api/me/profile            avatarUrl, avatarAdjustable, avatarCrop
+ *   GET  /api/me/avatar/original    my original picture (only I can read it)
+ *   POST /api/me/avatar/original    a new original (at most 2048 px, drawn on a canvas first: no EXIF, no GPS)
+ *   POST /api/me/avatar/crop        the round 512 px picture + cx, cy, zoom, rot (+ original=<id> for a new one)
+ *   DELETE /api/me/avatar           removes both
+ * Canvas only, no library, no inline script. The crop numbers are the same as in the app
+ * (lib/domain/media/avatar_crop.dart): rot = quarter turns clockwise; zoom 1..8; cx, cy = centre of the square,
+ * 0..1 of the picture after turning. Keyboard on the preview: arrows move, + - zoom, [ ] turn, 0 resets.
+ * --------------------------------------------------------------------------------------------------------- */
+(function () {
+  'use strict';
+  var MAX_ZOOM = 8, OUT = 512, MIN_SIDE = 32, ORIGINAL_MAX = 2048, MAX_BYTES = 2 * 1024 * 1024;
+
+  // ---- numbers (no DOM; also read by gateway/test/avatar_adjust_web_356.test.js) ----
+  var M = {
+    MAX_ZOOM: MAX_ZOOM, OUT: OUT, ORIGINAL_MAX: ORIGINAL_MAX,
+    normRot: function (r) { return ((Math.round(r) % 4) + 4) % 4; },
+    rotatedSize: function (w, h, rot) { return M.normRot(rot) % 2 ? [h, w] : [w, h]; },
+    maxZoomFor: function (w, h) { var s = Math.min(w, h); return s > 0 ? Math.max(1, Math.min(MAX_ZOOM, s / MIN_SIDE)) : 1; },
+    clamp: function (w, h, c) {
+      if (!(w > 0) || !(h > 0)) return { cx: 0.5, cy: 0.5, zoom: 1, rot: 0 };
+      var rot = M.normRot(isFinite(c.rot) ? c.rot : 0);
+      var zoom = isFinite(c.zoom) ? Math.min(M.maxZoomFor(w, h), Math.max(1, c.zoom)) : 1;
+      var rs = M.rotatedSize(w, h, rot), side = Math.min(w, h) / zoom;
+      var fit = function (v, extent) {
+        var half = side / 2 / extent;
+        if (half >= 0.5) return 0.5;
+        return Math.min(1 - half, Math.max(half, isFinite(v) ? v : 0.5));
+      };
+      return { cx: fit(c.cx, rs[0]), cy: fit(c.cy, rs[1]), zoom: zoom, rot: rot };
+    },
+    /** The square in the turned picture's pixels: { left, top, side }. */
+    rotatedSquare: function (w, h, crop) {
+      var c = M.clamp(w, h, crop), rs = M.rotatedSize(w, h, c.rot), side = Math.min(w, h) / c.zoom;
+      return { left: c.cx * rs[0] - side / 2, top: c.cy * rs[1] - side / 2, side: side };
+    },
+    /** The same square in the file's own (unturned) pixels. */
+    sourceSquare: function (w, h, crop) {
+      var c = M.clamp(w, h, crop), s = M.rotatedSquare(w, h, c);
+      if (c.rot === 1) return { left: s.top, top: h - (s.left + s.side), side: s.side };
+      if (c.rot === 2) return { left: w - (s.left + s.side), top: h - (s.top + s.side), side: s.side };
+      if (c.rot === 3) return { left: w - (s.top + s.side), top: s.left, side: s.side };
+      return s;
+    },
+    outputSize: function (w, h, crop) { var c = M.clamp(w, h, crop); return Math.max(1, Math.min(OUT, Math.round(Math.min(w, h) / c.zoom))); },
+    pan: function (w, h, crop, dx, dy, viewSide) {
+      var c = M.clamp(w, h, crop);
+      if (!(viewSide > 0)) return c;
+      var rs = M.rotatedSize(w, h, c.rot), per = Math.min(w, h) / c.zoom / viewSide;
+      return M.clamp(w, h, { cx: c.cx - dx * per / rs[0], cy: c.cy - dy * per / rs[1], zoom: c.zoom, rot: c.rot });
+    },
+    zoomTo: function (w, h, crop, zoom, fx, fy) {
+      var c = M.clamp(w, h, crop);
+      fx = fx === undefined ? 0.5 : fx; fy = fy === undefined ? 0.5 : fy;
+      var z = Math.min(M.maxZoomFor(w, h), Math.max(1, isFinite(zoom) ? zoom : c.zoom));
+      var rs = M.rotatedSize(w, h, c.rot), before = Math.min(w, h) / c.zoom, after = Math.min(w, h) / z;
+      var px = c.cx * rs[0] + (fx - 0.5) * before, py = c.cy * rs[1] + (fy - 0.5) * before;
+      return M.clamp(w, h, { cx: (px - (fx - 0.5) * after) / rs[0], cy: (py - (fy - 0.5) * after) / rs[1], zoom: z, rot: c.rot });
+    },
+    rotate: function (w, h, crop, turns) {
+      var c = M.clamp(w, h, crop), n = M.normRot(turns);
+      for (var i = 0; i < n; i++) c = { cx: 1 - c.cy, cy: c.cx, zoom: c.zoom, rot: M.normRot(c.rot + 1) };
+      return M.clamp(w, h, c);
+    },
+    originalSize: function (w, h) {
+      if (!(w > 0) || !(h > 0)) return [0, 0];
+      var long = Math.max(w, h);
+      if (long <= ORIGINAL_MAX) return [w, h];
+      var k = ORIGINAL_MAX / long;
+      return [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))];
+    },
+    query: function (c) {
+      var r4 = function (v) { return String(Math.round(v * 10000) / 10000); };
+      return 'cx=' + r4(c.cx) + '&cy=' + r4(c.cy) + '&zoom=' + r4(c.zoom) + '&rot=' + c.rot;
+    },
+    /** A crop from the server, or null when it is not usable. */
+    parse: function (raw) {
+      if (!raw || typeof raw !== 'object') return null;
+      var ok = function (v, lo, hi) { return typeof v === 'number' && isFinite(v) && v >= lo && v <= hi; };
+      if (!ok(raw.cx, 0, 1) || !ok(raw.cy, 0, 1) || !ok(raw.zoom, 1, MAX_ZOOM) || !ok(raw.rot, 0, 3) || raw.rot !== Math.round(raw.rot)) return null;
+      return { cx: raw.cx, cy: raw.cy, zoom: raw.zoom, rot: raw.rot };
+    }
+  };
+  if (typeof window === 'undefined') return;
+  window.CoAvatarCrop = M;
+
+  var S = window.CoShop;
+  var avatarBox = S && S.$ ? S.$('ac-avatar') : null;
+  var dialog = S && S.$ ? S.$('ac-crop') : null;
+  if (!S || !avatarBox) return;
+
+  /** fetch with the session's Bearer header; one refresh on 401. Resolves the Response (or null offline). */
+  function authed(method, path, body, type) {
+    function send() {
+      var headers = { 'X-CoRoute-Client': 'web' };
+      if (S.token()) headers.Authorization = 'Bearer ' + S.token();
+      if (type) headers['Content-Type'] = type;
+      return fetch('/api' + path, { method: method, headers: headers, body: body, credentials: 'same-origin', cache: 'no-store', referrerPolicy: 'no-referrer' });
+    }
+    return send().then(function (r) {
+      if (r.status !== 401 || !S.refresh) return r;
+      return S.refresh().then(function (ok) { return ok ? send() : r; });
+    }).catch(function () { return null; });
+  }
+  function bitmapOf(blob) {
+    if (!window.createImageBitmap) return Promise.reject(new Error('unsupported'));
+    return window.createImageBitmap(blob, { imageOrientation: 'from-image' }).catch(function () { return window.createImageBitmap(blob); });
+  }
+  /** Draws the crop of `img` (bitmap or canvas, w x h) so that the square fills `side` pixels of ctx. */
+  function paintCrop(ctx, img, w, h, crop, side) {
+    var c = M.clamp(w, h, crop), sq = M.rotatedSquare(w, h, c), rs = M.rotatedSize(w, h, c.rot), k = side / sq.side;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, side, side); ctx.clip();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.scale(k, k);
+    ctx.translate(-sq.left, -sq.top);
+    ctx.translate(rs[0] / 2, rs[1] / 2);
+    ctx.rotate(c.rot * Math.PI / 2);
+    ctx.translate(-w / 2, -h / 2);
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+  }
+  function toBlob(canvas, quality) {
+    return new Promise(function (resolve) { canvas.toBlob(function (b) { resolve(b); }, 'image/jpeg', quality); });
+  }
+
+  // ---- the picture in the page header (needs the Bearer header, so it is fetched and drawn) ----
+  var profile = null;
+  function showAvatar(url) {
+    var initials = avatarBox.getAttribute('data-initials') || avatarBox.textContent || '';
+    if (!url) { S.clear(avatarBox); avatarBox.textContent = initials; return Promise.resolve(); }
+    return authed('GET', url.replace(/^\/api/, '')).then(function (r) {
+      if (!r || !r.ok) return null;
+      return r.blob().then(bitmapOf);
+    }).then(function (bmp) {
+      if (!bmp) return;
+      var c = document.createElement('canvas');
+      c.width = 192; c.height = 192;
+      var side = Math.min(bmp.width, bmp.height);
+      c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 192, 192);
+      S.clear(avatarBox);
+      avatarBox.appendChild(c);
+    }).catch(function () { /* the initials stay */ });
+  }
+  window.CoAvatar = { show: showAvatar };
+
+  var editBtn = S.$('ac-photo-edit');
+  if (!dialog || !editBtn || typeof dialog.showModal !== 'function' || !window.createImageBitmap) return;
+  var canvas = S.$('ac-crop-canvas'), ctx = canvas.getContext('2d');
+  var zoomInput = S.$('ac-crop-zoom'), fileInput = S.$('ac-crop-file'), msg = S.$('ac-crop-msg'), help = S.$('ac-crop-help');
+  var saveBtn = S.$('ac-crop-save'), removeBtn = S.$('ac-crop-remove'), emptyNote = S.$('ac-crop-empty');
+  var tools = [S.$('ac-crop-left'), S.$('ac-crop-right'), S.$('ac-crop-reset')];
+  var HELP = help.textContent;
+  var st = { img: null, w: 0, h: 0, crop: { cx: 0.5, cy: 0.5, zoom: 1, rot: 0 }, keepOriginal: false, busy: false };
+
+  function say(text, kind) {
+    msg.textContent = text || '';
+    msg.className = 'sh-notice' + (kind === 'warn' ? ' sh-notice--warn' : kind === 'ok' ? ' sh-notice--ok' : '');
+    msg.hidden = !text;
+  }
+  function draw() {
+    var side = canvas.width;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#15181c';
+    ctx.fillRect(0, 0, side, side);
+    if (st.img) paintCrop(ctx, st.img, st.w, st.h, st.crop, side);
+    // Dim everything outside the circle, then its ring.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, side, side);
+    ctx.arc(side / 2, side / 2, side / 2 - 4, 0, Math.PI * 2, true);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    ctx.fill('evenodd');
+    ctx.beginPath();
+    ctx.arc(side / 2, side / 2, side / 2 - 4, 0, Math.PI * 2);
+    ctx.lineWidth = 5; ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.restore();
+  }
+  function sync() {
+    var has = !!st.img, maxZ = has ? M.maxZoomFor(st.w, st.h) : 1;
+    zoomInput.max = String(Math.max(1.01, maxZ));
+    zoomInput.value = String(st.crop.zoom);
+    zoomInput.disabled = !has || st.busy || maxZ <= 1;
+    zoomInput.setAttribute('aria-valuetext', 'Zoom ' + st.crop.zoom.toFixed(1) + ' times');
+    tools.forEach(function (b) { b.disabled = !has || st.busy; });
+    saveBtn.disabled = !has || st.busy;
+    saveBtn.textContent = st.busy ? 'Saving…' : 'Save';
+    emptyNote.hidden = has;
+    removeBtn.hidden = !(profile && profile.avatarUrl);
+    removeBtn.disabled = st.busy;
+    draw();
+  }
+  function setCrop(c) { if (!st.img || st.busy) return; st.crop = M.clamp(st.w, st.h, c); sync(); }
+  function setImage(img, w, h, crop, keepOriginal, note) {
+    st.img = img; st.w = w; st.h = h; st.keepOriginal = keepOriginal;
+    st.crop = M.clamp(w, h, crop || { cx: 0.5, cy: 0.5, zoom: 1, rot: 0 });
+    help.textContent = note || HELP;
+    say('');
+    sync();
+  }
+  /** A file or downloaded picture -> a canvas at most 2048 px on its long side (orientation applied, no metadata). */
+  function workingCopy(blob) {
+    return bitmapOf(blob).then(function (bmp) {
+      var size = M.originalSize(bmp.width, bmp.height);
+      var c = document.createElement('canvas');
+      c.width = size[0]; c.height = size[1];
+      var g = c.getContext('2d');
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(bmp, 0, 0, size[0], size[1]);
+      if (bmp.close) bmp.close();
+      return c;
+    });
+  }
+
+  function open() {
+    st.img = null; st.busy = false;
+    help.textContent = HELP;
+    say('Loading your picture…');
+    sync();
+    dialog.showModal();
+    canvas.focus();
+    S.api('GET', '/me/profile').then(function (res) {
+      if (!res.ok) { say(res.json.error || 'Your picture could not be loaded.', 'warn'); return null; }
+      profile = res.json.profile || {};
+      sync();
+      if (!profile.avatarUrl) { say('Choose a picture to start.'); return null; }
+      var fromOriginal = !!profile.avatarAdjustable;
+      return authed('GET', fromOriginal ? '/me/avatar/original' : profile.avatarUrl.replace(/^\/api/, '')).then(function (r) {
+        if (!r || !r.ok) { say('Your picture could not be loaded. Choose a new picture, or try again later.', 'warn'); return null; }
+        return r.blob().then(workingCopy).then(function (c) {
+          setImage(c, c.width, c.height, fromOriginal ? M.parse(profile.avatarCrop) : null, !fromOriginal,
+            fromOriginal ? null : 'The original of this picture was not kept, so you are adjusting the current picture. Choose a new picture for full quality.');
+        });
+      });
+    }).catch(function () { say('Your picture could not be loaded.', 'warn'); });
+  }
+  function close() { if (dialog.open) dialog.close(); editBtn.focus(); }
+
+  function pickFile() {
+    var f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!f) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { say('Use a JPEG, PNG or WebP picture.', 'warn'); return; }
+    if (f.size > 25 * 1024 * 1024) { say('This picture is too large. Choose one under 25 MB.', 'warn'); return; }
+    workingCopy(f).then(function (c) { setImage(c, c.width, c.height, null, true, null); canvas.focus(); })
+      .catch(function () { say('This picture could not be opened. Please choose another one.', 'warn'); });
+  }
+
+  /** The original as JPEG under 2 MB (lower quality when needed), or null. */
+  function encodeOriginal(src) {
+    var qualities = [0.88, 0.75, 0.6], i = 0;
+    function next() {
+      if (i >= qualities.length) return Promise.resolve(null);
+      return toBlob(src, qualities[i++]).then(function (b) { return b && b.size <= MAX_BYTES ? b : next(); });
+    }
+    return next();
+  }
+  function fail(r, fallback) {
+    if (!r) return Promise.resolve('Could not reach CoRoute. Check your connection and try again.');
+    return r.json().catch(function () { return {}; }).then(function (j) { return (j && j.error) || fallback; });
+  }
+  function save() {
+    if (!st.img || st.busy) return;
+    st.busy = true; say(''); sync();
+    var out = M.outputSize(st.w, st.h, st.crop);
+    var c = document.createElement('canvas');
+    c.width = out; c.height = out;
+    var g = c.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, out, out);
+    paintCrop(g, st.img, st.w, st.h, st.crop, out);
+    var query = M.query(st.crop);
+    var step = st.keepOriginal
+      ? encodeOriginal(st.img).then(function (blob) {
+        if (!blob) return { error: 'This picture is too large. Please choose a smaller one.' };
+        return authed('POST', '/me/avatar/original', blob, 'image/jpeg').then(function (r) {
+          if (!r || !r.ok) return fail(r, 'The picture could not be saved.').then(function (e) { return { error: e }; });
+          return r.json().then(function (j) { return { id: j.originalId }; });
+        });
+      })
+      : Promise.resolve({});
+    step.then(function (o) {
+      if (o.error) return o.error;
+      return toBlob(c, 0.88).then(function (blob) {
+        if (!blob) return 'The picture could not be saved.';
+        return authed('POST', '/me/avatar/crop?' + query + (o.id ? '&original=' + encodeURIComponent(o.id) : ''), blob, 'image/jpeg').then(function (r) {
+          if (!r || !r.ok) return fail(r, 'The picture could not be saved.');
+          return r.json().then(function (j) {
+            if (profile) { profile.avatarUrl = j.avatarUrl; profile.avatarAdjustable = true; profile.avatarCrop = j.avatarCrop; }
+            st.keepOriginal = false;
+            return showAvatar(j.avatarUrl).then(function () { return null; });
+          });
+        });
+      });
+    }).catch(function () { return 'The picture could not be saved.'; }).then(function (problem) {
+      st.busy = false;
+      if (problem) { say(problem, 'warn'); sync(); return; }
+      sync();
+      close();
+    });
+  }
+  function remove() {
+    if (st.busy) return;
+    st.busy = true; sync();
+    S.api('DELETE', '/me/avatar').then(function (res) {
+      st.busy = false;
+      if (!res.ok) { say(res.json.error || 'The picture could not be removed.', 'warn'); sync(); return; }
+      if (profile) { profile.avatarUrl = null; profile.avatarAdjustable = false; profile.avatarCrop = null; }
+      st.img = null;
+      showAvatar(null);
+      sync();
+      close();
+    });
+  }
+
+  // ---- pointer, wheel and keyboard on the preview ----
+  var pointers = {}, pinch = null;
+  var viewSide = function () { return canvas.getBoundingClientRect().width || 1; };
+  function count() { return Object.keys(pointers).length; }
+  function spread() { var k = Object.keys(pointers); var a = pointers[k[0]], b = pointers[k[1]]; return Math.hypot(a.x - b.x, a.y - b.y); }
+  canvas.addEventListener('pointerdown', function (e) {
+    if (!st.img) return;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+    pinch = count() === 2 ? { d: spread(), zoom: st.crop.zoom } : null;
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    var p = pointers[e.pointerId];
+    if (!p || !st.img) return;
+    var dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    var n = count();
+    var c = M.pan(st.w, st.h, st.crop, dx / n, dy / n, viewSide());
+    if (pinch && n === 2 && pinch.d > 0) c = M.zoomTo(st.w, st.h, c, pinch.zoom * spread() / pinch.d);
+    setCrop(c);
+  });
+  var up = function (e) { delete pointers[e.pointerId]; pinch = null; };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('wheel', function (e) {
+    if (!st.img) return;
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    setCrop(M.zoomTo(st.w, st.h, st.crop, st.crop.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height));
+  }, { passive: false });
+  canvas.addEventListener('keydown', function (e) {
+    if (!st.img) return;
+    var step = (e.shiftKey ? 40 : 10), v = viewSide(), done = true;
+    if (e.key === 'ArrowLeft') setCrop(M.pan(st.w, st.h, st.crop, step, 0, v));
+    else if (e.key === 'ArrowRight') setCrop(M.pan(st.w, st.h, st.crop, -step, 0, v));
+    else if (e.key === 'ArrowUp') setCrop(M.pan(st.w, st.h, st.crop, 0, step, v));
+    else if (e.key === 'ArrowDown') setCrop(M.pan(st.w, st.h, st.crop, 0, -step, v));
+    else if (e.key === '+' || e.key === '=') setCrop(M.zoomTo(st.w, st.h, st.crop, st.crop.zoom * 1.1));
+    else if (e.key === '-' || e.key === '_') setCrop(M.zoomTo(st.w, st.h, st.crop, st.crop.zoom / 1.1));
+    else if (e.key === '[') setCrop(M.rotate(st.w, st.h, st.crop, -1));
+    else if (e.key === ']') setCrop(M.rotate(st.w, st.h, st.crop, 1));
+    else if (e.key === '0') setCrop({ cx: 0.5, cy: 0.5, zoom: 1, rot: 0 });
+    else done = false;
+    if (done) e.preventDefault();
+  });
+  zoomInput.addEventListener('input', function () { setCrop(M.zoomTo(st.w, st.h, st.crop, Number(zoomInput.value))); });
+  tools[0].addEventListener('click', function () { setCrop(M.rotate(st.w, st.h, st.crop, -1)); });
+  tools[1].addEventListener('click', function () { setCrop(M.rotate(st.w, st.h, st.crop, 1)); });
+  tools[2].addEventListener('click', function () { setCrop({ cx: 0.5, cy: 0.5, zoom: 1, rot: 0 }); });
+  fileInput.addEventListener('change', pickFile);
+  saveBtn.addEventListener('click', save);
+  removeBtn.addEventListener('click', remove);
+  S.$('ac-crop-cancel').addEventListener('click', close);
+  S.$('ac-crop-form').addEventListener('submit', function (e) { e.preventDefault(); });
+  dialog.addEventListener('cancel', function (e) { if (st.busy) e.preventDefault(); });
+  editBtn.addEventListener('click', open);
+  editBtn.hidden = false;
 })();

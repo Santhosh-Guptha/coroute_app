@@ -142,6 +142,8 @@ class Mirror {
     this.convoys = o.convoys; this.log = o.logger || console; this.hub = null;
     this.node = String(o.node || c.nodeName || process.env.NODE_NAME || os.hostname()).slice(0, 64);
     this.role = ROLES.has(o.role) ? o.role : (ROLES.has(c.gatewayRole) ? c.gatewayRole : 'all');
+    // v3.56 DR standby: /api/health/live answers 503 'standby' so no balancer ever sends riders here by mistake.
+    this.standby = (o.role ?? c.gatewayRole) === 'standby';
     this.listenHost = o.listenHost ?? c.mirrorListenHost ?? '';
     this.listenPort = o.listenPort ?? c.mirrorListenPort ?? 3101;
     this.peerUrl = o.peerUrl ?? c.mirrorPeerUrl ?? '';
@@ -924,7 +926,7 @@ class Mirror {
 
   /** GET /api/health/live: { status, body }. */
   health() {
-    let state = this.state;
+    let state = this.standby && this.state === 'serving' ? 'standby' : this.state;
     if (state === 'serving' && this.overloadSince && now() - this.overloadSince > OVERLOAD_FOR_MS) state = 'overloaded';
     const ok = state === 'serving';
     return {
@@ -942,6 +944,9 @@ class Mirror {
    * Graceful stop (SIGTERM): 503 at once, the final state of rooms with local sockets to the peer (acknowledged,
    * bounded), then RECONNECT {reason 'shutdown'} to every socket in batches of 100 with 0-3 s jitter.
    */
+  /** v3.56: 503 on /api/health/live from now on (the balancer stops sending new riders), sockets stay served. */
+  beginDrain() { if (!this.stopped) this.state = 'shutdown'; }
+
   async shutdown({ drain = true } = {}) {
     if (this.stopped) return;
     this.state = 'shutdown';

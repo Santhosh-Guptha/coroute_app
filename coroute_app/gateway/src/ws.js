@@ -47,6 +47,31 @@ const POS_DROP_BYTES = envInt('WS_POSITION_DROP_BYTES', 256 * 1024);
 const MAX_BUFFERED_BYTES = Math.max(POS_DROP_BYTES * 2, envInt('WS_MAX_BUFFERED_BYTES', 4 * 1024 * 1024));
 /** Open sockets one account may hold at a time. */
 const MAX_SOCKETS_PER_USER = Math.max(2, envInt('WS_MAX_SOCKETS_PER_USER', 8));
+/** v3.56: positions of one rider go out at most once per WS_POS_MIN_MS in rooms of any size (the first at once,
+ * later ones coalesced, latest wins, flushed when the window ends; 800 ms lets a 1 Hz sender through untouched).
+ * 0 = small rooms relay every fix at once. The app
+ * sends a fix every 2.5 s (5 s with low data), so this only bites clients that send faster. Never SOS / alerts. */
+const POS_MIN_MS = envInt('WS_POS_MIN_MS', 800);
+/** v3.56: a coalesced flush goes to a socket that announced 'posbatch1' in its JOIN as ONE frame
+ * { type: 'RIDER_UPDATES', riders: [...], ts } instead of one RIDER_UPDATE per rider (fewer frames, syscalls and TLS
+ * records). Only to sockets with no backlog; others get the per-rider messages. WS_POS_BATCH=off disables it. */
+const POS_BATCH = String(process.env.WS_POS_BATCH || 'on').toLowerCase() !== 'off';
+const BATCH_CAP = 'posbatch1';
+/** v3.56: in rooms above WS_COALESCE_ABOVE every position waits for the room's flush (every WS_COALESCE_MS) instead
+ * of the first one going out at once, so a batch-capable socket gets one frame per window for the whole room
+ * (a 50-rider room: ~2 frames/s per phone instead of ~20). Positions only. WS_BATCH_LARGE=off restores the
+ * leading edge. */
+const POS_BATCH_LARGE = POS_BATCH && String(process.env.WS_BATCH_LARGE || 'on').toLowerCase() !== 'off';
+/** v3.56: telemetry and keep-alives re-check the account through the cached gate with this older bound (default
+ * 120 s, stale-while-revalidate up to twice that) instead of USER_GATE_TTL_MS: a position never waits for the
+ * database. Holds, blocks, deletions and sign-outs still act at once (invalidate + socket kick, both nodes). */
+const GATE_HOT_TTL_MS = envInt('WS_GATE_TTL_MS', 120000);
+const HOT_TYPES = new Set(['TELEMETRY', 'PING']);
+/** v3.56: ping interval (a socket missing one pong is closed at the next tick). */
+const HEARTBEAT_MS = Math.max(5000, envInt('WS_HEARTBEAT_MS', 30000));
+/** v3.56: permessage-deflate. Off by default: on the 1/8-OCPU micro the CPU costs more than the bytes saved
+ * (positions are ~300 B; measured in tool/load). WS_DEFLATE=on enables it with a 1 KB threshold. */
+const DEFLATE = String(process.env.WS_DEFLATE || 'off').toLowerCase() === 'on';
 /** Voice frames per second a single stream may relay (20 ms frames are 50/s). */
 const VOICE_MAX_FPS = envInt('VOICE_MAX_FPS', 100);
 
@@ -163,7 +188,7 @@ class Hub {
     this.posPending = new Map(); // groupId -> Map<userId, RIDER_UPDATE json> (large rooms, coalesced)
     this.posTimers = new Map(); // groupId -> flush timer
     this.posSentAt = new Map(); // groupId -> Map<userId, last fan-out time> (large rooms)
-    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0, queued: 0 };
+    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0, queued: 0, batchFrames: 0, connections: 0 };
     this.outPending = new Set(); // sockets with queued outbound messages (see OUT_SOFT_BYTES)
     this.outTimer = null;
     /** Two-node live mirror (src/mirror.js), set by app.js; null on a single node. */
@@ -173,6 +198,7 @@ class Hub {
     /** Round 4 ride lock (src/ride_lock.js), set by app.js; null in unit tests. */
     this.rideLock = null;
     this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024, verifyClient: (info) => this._originAllowed(info.req),
+      perMessageDeflate: DEFLATE ? { threshold: 1024, concurrencyLimit: 4, serverNoContextTakeover: true, clientNoContextTakeover: true, zlibDeflateOptions: { level: 1, memLevel: 7 } } : false,
       // Round 4: echo only the plain protocol name (never the bearer entry, which carries the token).
       handleProtocols: (protocols) => (protocols && protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false) });
     this.wss.on('connection', (ws, req) => this._onConnection(ws, req));
@@ -197,7 +223,7 @@ class Hub {
         if (ws.revokedPending && !this._rideKeepsSocket(ws)) { this._kick(ws, 4401, 'SIGNED_OUT'); continue; }
         ws.isAlive = false; ws.ping();
       }
-    }, 30000);
+    }, HEARTBEAT_MS);
     if (this.heartbeat.unref) this.heartbeat.unref();
     this.fleetTimer = setInterval(() => this._pushFleet().catch(() => {}), 15000);
     if (this.fleetTimer.unref) this.fleetTimer.unref();
@@ -238,28 +264,31 @@ class Hub {
     const set = this.rooms.get(gid);
     this.stats.posIn++;
     if (!set || !rider) return;
-    const msg = JSON.stringify({ type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() });
-    if (set.size > POS_COALESCE_ABOVE) {
-      const t = Date.now();
-      let sentAt = this.posSentAt.get(gid);
-      if (!sentAt) { sentAt = new Map(); this.posSentAt.set(gid, sentAt); }
-      let pending = this.posPending.get(gid);
-      if (!pending) { pending = new Map(); this.posPending.set(gid, pending); }
-      if (!pending.has(rider.userId) && t - (sentAt.get(rider.userId) || 0) >= POS_COALESCE_MS) {
-        sentAt.set(rider.userId, t);
-        return this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
-      }
-      if (pending.has(rider.userId)) this.stats.posCoalesced++;
-      pending.set(rider.userId, msg);
-      if (!this.posTimers.has(gid)) {
-        const timer = setTimeout(() => this._flushPositions(gid), POS_COALESCE_MS);
-        if (timer.unref) timer.unref();
-        this.posTimers.set(gid, timer);
-      }
-      return;
-    }
+    const rj = JSON.stringify(publicRider(rider));
+    const msg = `{"type":"RIDER_UPDATE","rider":${rj},"ts":${Date.now()}}`;
+    const big = set.size > POS_COALESCE_ABOVE;
+    const windowMs = big ? POS_COALESCE_MS : POS_MIN_MS;
     // A position relayed from the peer gateway (no local sender socket) never goes back to its own rider.
-    this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
+    if (!(windowMs > 0)) return this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
+    const t = Date.now();
+    let sentAt = this.posSentAt.get(gid);
+    if (!sentAt) { sentAt = new Map(); this.posSentAt.set(gid, sentAt); }
+    let pending = this.posPending.get(gid);
+    const last = sentAt.get(rider.userId) || 0;
+    if (!(big && POS_BATCH_LARGE) && !(pending && pending.has(rider.userId)) && t - last >= windowMs) {
+      sentAt.set(rider.userId, t);
+      return this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
+    }
+    if (!pending) { pending = new Map(); this.posPending.set(gid, pending); }
+    if (pending.has(rider.userId)) this.stats.posCoalesced++;
+    pending.set(rider.userId, { msg, rj });
+    if (!this.posTimers.has(gid)) {
+      // Large rooms: one flush per window for everyone. Small rooms: when this rider's window ends.
+      const delay = big ? POS_COALESCE_MS : Math.max(25, last + windowMs - t);
+      const timer = setTimeout(() => this._flushPositions(gid), delay);
+      if (timer.unref) timer.unref();
+      this.posTimers.set(gid, timer);
+    }
   }
 
   _flushPositions(gid) {
@@ -271,11 +300,47 @@ class Hub {
     if (!pending || !set || !room) return;
     const sentAt = this.posSentAt.get(gid);
     const t = Date.now();
+    const entries = [];
     // A rider who left while queued is never brought back by a late position.
-    for (const [uid, msg] of pending) {
+    for (const [uid, p] of pending) {
       if (!room.riders.has(uid)) { if (sentAt) sentAt.delete(uid); continue; }
       if (sentAt) sentAt.set(uid, t);
-      this._sendPosition(set, msg, uid, null, uid);
+      entries.push([uid, p]);
+    }
+    if (!entries.length) return;
+    if (!POS_BATCH || entries.length < 2) {
+      for (const [uid, p] of entries) this._sendPosition(set, p.msg, uid, null, uid);
+      return;
+    }
+    let all = null; // the full batch, shared by every peer whose own rider is not in it
+    const inBatch = new Set(entries.map(([uid]) => uid));
+    for (const peer of set) {
+      if (peer.readyState !== WebSocket.OPEN || peer.safetyOnly) continue;
+      if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
+      if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped += entries.length; continue; }
+      const puid = peer.user && peer.user.userId;
+      if (peer.caps && peer.caps.has(BATCH_CAP) && !peer.outq && !(peer.bufferedAmount > OUT_SOFT_BYTES)) {
+        let frame; let n;
+        if (!inBatch.has(puid)) {
+          if (!all) all = `{"type":"RIDER_UPDATES","riders":[${entries.map(([, p]) => p.rj).join(',')}],"ts":${t}}`;
+          frame = all; n = entries.length;
+        } else {
+          const parts = [];
+          for (const [uid, p] of entries) if (uid !== puid) parts.push(p.rj);
+          if (!parts.length) continue;
+          frame = parts.length === 1 ? null : `{"type":"RIDER_UPDATES","riders":[${parts.join(',')}],"ts":${t}}`;
+          n = parts.length;
+          if (!frame) { for (const [uid, p] of entries) if (uid !== puid) this._out(peer, p.msg, 2, uid); this.stats.posOut += n; continue; }
+        }
+        peer.send(frame);
+        this.stats.posOut += n; this.stats.batchFrames++;
+        continue;
+      }
+      for (const [uid, p] of entries) {
+        if (uid === puid) continue;
+        this._out(peer, p.msg, 2, uid);
+        this.stats.posOut++;
+      }
     }
   }
 
@@ -540,6 +605,7 @@ class Hub {
   }
 
   _onConnection(ws, req) {
+    this.stats.connections++;
     const found = Hub.upgradeToken(req);
     if (found) return this._startSession(ws, found.token);
     // Round 4: no token in the request: the first message authenticates, within WS_AUTH_TIMEOUT_MS (5 s).
@@ -606,7 +672,7 @@ class Hub {
     ws.on('error', () => { /* close handler runs */ });
     ws.ready = this._gateCheck(ws).then((ok) => {
       if (ok && ws.readyState === WebSocket.OPEN) this._index(ws);
-      if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30, protocol: 2, features: FEATURES });
+      if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: Math.round(HEARTBEAT_MS / 1000), protocol: 2, features: FEATURES });
       if (ok && ws.safetyOnly) this.send(ws, { type: 'SAFETY_ONLY', message: SAFETY_ONLY_MESSAGE, ts: Date.now() });
       // 3.55: an app that missed a switch change while offline catches up on (re)connect.
       const ff = this.convoys.featureFlags;
@@ -621,11 +687,13 @@ class Hub {
   }
 
   /** Runs the account gate for a socket; refreshes its identity or closes it. Resolves to true when allowed. */
-  async _gateCheck(ws) {
+  async _gateCheck(ws, { hot = false } = {}) {
     if (!this.gate) { ws.allowed = true; return true; }
     try {
       // 3.57: the session too (signed out, revoked, idle): checkDetailed also keeps an app session's last-seen fresh.
-      const { user } = typeof this.gate.checkDetailed === 'function' ? await this.gate.checkDetailed(ws.claims) : { user: await this.gate.check(ws.claims) };
+      // v3.56: positions and keep-alives (hot) accept an older cached entry and refresh it in the background.
+      const opts = hot && GATE_HOT_TTL_MS > 0 ? { maxAgeMs: GATE_HOT_TTL_MS, swr: true } : undefined;
+      const { user } = typeof this.gate.checkDetailed === 'function' ? await this.gate.checkDetailed(ws.claims, opts) : { user: await this.gate.check(ws.claims) };
       ws.user = identityOf(user);
       if (ws.user.role !== ROLE_ADMIN) this.admins.delete(ws);
       ws.allowed = true;
@@ -768,7 +836,7 @@ class Hub {
   async _onBinaryTelemetry(ws, buf) {
     if (!Buffer.isBuffer(buf) || buf.length < 24) return;
     if (!(await ws.ready)) return;
-    if (!(await this._gateCheck(ws))) return;
+    if (!(await this._gateCheck(ws, { hot: true }))) return;
     const gid = ws.groupId;
     if (!gid) return;
     if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
@@ -815,11 +883,13 @@ class Hub {
 
   async _onJson(ws, data) {
     if (!(await ws.ready)) return;
+    let msg; let bad = false;
+    try { msg = JSON.parse(data.toString()); } catch { bad = true; }
     // Re-check the account through the cached gate (no DB read inside the TTL): a hold, block,
-    // delete, demotion or password change applies to an open socket too.
-    if (!(await this._gateCheck(ws))) return;
-    let msg;
-    try { msg = JSON.parse(data.toString()); } catch { return this.sendError(ws, 400, 'Malformed JSON'); }
+    // delete, demotion or password change applies to an open socket too. v3.56: positions and pings use the
+    // longer hot-path bound (WS_GATE_TTL_MS) and never wait for the database.
+    if (!(await this._gateCheck(ws, { hot: !bad && !!msg && HOT_TYPES.has(msg.type) }))) return;
+    if (bad) return this.sendError(ws, 400, 'Malformed JSON');
     if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return this.sendError(ws, 400, 'Malformed JSON');
     // Outbox messages (3.14): a valid clientId makes the message idempotent and earns an ACK.
     // An invalid clientId is treated as absent (old behaviour).

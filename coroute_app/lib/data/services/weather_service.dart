@@ -24,7 +24,7 @@ class WeatherPoint {
   String get cacheKey => '${(lat * 10).round()},${(lng * 10).round()},${atS ~/ 3600}';
 }
 
-/// What the gateway said for one point (Open-Meteo hour containing [atS]).
+/// What the gateway said for one point (the forecast hour containing [atS]; MET Norway by default).
 class WeatherReading {
   final int precipProb;
   final double precipMm;
@@ -74,7 +74,7 @@ class WeatherSummary {
 }
 
 /// Weather along the route through the gateway (`POST /api/geo/weather`,
-/// Open-Meteo behind it). Two calls per ride at most: the review sheet and the
+/// MET Norway behind it since 3.56, see gateway/src/weather_met.js). Two calls per ride at most: the review sheet and the
 /// ride start. Nothing in data saver, no timer, never two requests at once,
 /// answers cached for [SafetyConstants.weatherCacheFor].
 class WeatherService extends ChangeNotifier {

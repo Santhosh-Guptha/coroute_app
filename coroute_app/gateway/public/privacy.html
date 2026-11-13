@@ -139,9 +139,11 @@
             <li><a class="legal-toc__link" href="#ride-alerts">Sweeper, battery and update gaps</a></li>
             <li><a class="legal-toc__link" href="#emergency-services">Indian emergency services</a></li>
             <li><a class="legal-toc__link" href="#hard-braking">Hard braking count</a></li>
+            <li><a class="legal-toc__link" href="#road-safety">Road safety warnings and "Help make roads safer"</a></li>
             <li><a class="legal-toc__link" href="#medical-id-lock-screen">Medical ID on the lock screen</a></li>
             <li><a class="legal-toc__link" href="#bluetooth">Bluetooth</a></li>
             <li><a class="legal-toc__link" href="#trip-reviews">Trip reviews and group photos</a></li>
+            <li><a class="legal-toc__link" href="#profile-picture">Profile picture</a></li>
             <li><a class="legal-toc__link" href="#website-numbers">Numbers on our website</a></li>
             <li><a class="legal-toc__link" href="#leaderboards">Public leaderboards</a></li>
             <li><a class="legal-toc__link" href="#diagnostics-log">App diagnostics log</a></li>
@@ -504,11 +506,13 @@
             as
             "Rain likely after Warangal around 3 PM". To do this it sends up to 5 points along your planned route,
             rounded to about
-            10 km, to Open-Meteo (open-meteo.com) through our server. Our server does not send your name, your account
-            or your exact
-            position, and it keeps the answer for 30 minutes so that other riders at the same places get the same answer
-            without a new
-            request. Nothing is sent when data saver is on. Weather data by Open-Meteo.com.</p>
+            10 km, to MET Norway (the Norwegian Meteorological Institute, api.met.no) through our server. Our server
+            does not send your name, your account or your exact position, and it keeps the answer for at least
+            30 minutes so that other riders at the same places get the same answer without a new request. Nothing is
+            sent when data saver is on. Weather: based on data from MET Norway, licence
+            <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a> / NLOD 2.0; we turn
+            their hourly forecast into the short rain line you see. If a server is set to use Open-Meteo instead, the
+            same rounded points go to open-meteo.com and the credit reads "Weather data by Open-Meteo.com".</p>
         </section>
 
         <section class="legal-section" id="nearest-hospital" aria-labelledby="nearest-hospital-h">
@@ -584,6 +588,34 @@
             only to you; the public leaderboards follow the rules below.</p>
         </section>
 
+        <section class="legal-section" id="road-safety" aria-labelledby="road-safety-h">
+          <h2 id="road-safety-h">Road safety warnings and "Help make roads safer"</h2>
+          <p><b>Warnings for everyone.</b> Every rider can get gentle warnings about hazard spots, rough road, twisty
+            stretches and long gaps without fuel, a break reminder, and a pre-ride tip for busy hours in a region. These
+            come from anonymous totals of many riders; using them sends nothing about you beyond the map area your phone
+            downloads (rounded to areas of about 40 by 20 km).</p>
+          <p><b>Sharing is your choice (off by default).</b> If you turn on "Help make roads safer" (app Settings, or
+            <a href="/account#roads">your account</a> on this website), CoRoute uses these signals from your rides to build
+            those totals: hard braking, sudden swerves and skids, potholes and rough road (each as a cell of about 150 m,
+            its direction, a speed band and the hour), the SOS and crash alerts you raise (cell only), per-ride road
+            counters in cells of about 1 km (distance, moving time, how much the road turns, stops of 4 to 90 minutes),
+            and, for crash alarms, the sensor numbers and how the alarm ended (no position), so that future alarms raise
+            fewer false alarms. We record the time you turned it on or off.</p>
+          <p><b>What we never use.</b> Your full route, your name, rider id, phone number or medical details. The first
+            and last 300 m of every ride are left out, and nothing near saved home or work places. Instead of your id,
+            stored rows carry a one-way code that changes every month and cannot be turned back into your id; it is used
+            only to count how many different riders passed a spot. A spot is shown only once at least 5 different
+            riders contributed to it.</p>
+          <p><b>How long.</b> The raw signals are deleted after 90 days. The totals fade over time (a half-life of 90
+            days) and hold no link to any rider. Crash alarm training rows keep only sensor numbers, the phone maker,
+            the month and the outcome.</p>
+          <p><b>Your controls.</b> Turn sharing off at any time; collection stops at once. "Download my contributions"
+            and "Delete my contributions" are in the app Settings and on your account page. Deleting removes everything
+            from the last 90 days, including its share of the totals; older contributions exist only inside anonymous
+            totals that cannot be traced back to you, so they cannot be split out. Deleting your account does the same.
+            Weather is not used for these warnings.</p>
+        </section>
+
         <section class="legal-section" id="medical-id-lock-screen" aria-labelledby="medical-id-lock-screen-h">
           <h2 id="medical-id-lock-screen-h">Medical ID on the lock screen</h2>
           <p>This is always on. Only
@@ -615,6 +647,18 @@
             photos an admin picks, appear on the website, with a "Rider #" label instead of your name. Your e-mail
             address and phone number are never shown. Editing your review takes it off the website until it is checked
             again. You can withdraw it at any time from the trip report; it and its photos leave the website at once.</p>
+        </section>
+
+        <section class="legal-section" id="profile-picture" aria-labelledby="profile-picture-h">
+          <h2 id="profile-picture-h">Profile picture</h2>
+          <p>A profile picture is optional. When you add one, the app or the website lets you move, zoom and turn
+            it under a round frame. Two files are then stored: the round picture other signed-in riders see (512
+            pixels at most), and the picture you chose, made smaller (2,048 pixels at most), so that you can adjust
+            the round picture later without choosing it again. Only you can open that original; other riders,
+            guardians and the public website never get it. Both files are written again before they are sent, and
+            the server removes location and camera details (EXIF and similar data) once more, keeping only which
+            way up the picture is. Removing your picture, an admin removing it for breaking the rules, and deleting
+            your account each delete both files.</p>
         </section>
 
         <section class="legal-section" id="website-numbers" aria-labelledby="website-numbers-h">
@@ -663,6 +707,16 @@
             next to rounded totals. Never your real name, e-mail, phone number, bike, photo, routes, places, or the dates
             and times of your rides. Riders can opt out: hide your name from the leaderboards in the app and your
             username is left off every board.</p>
+        </section>
+
+        <section class="legal-section" id="usage-counts" aria-labelledby="usage-counts-h">
+          <h2 id="usage-counts-h">Understanding how CoRoute is used</h2>
+          <p>Once a day we count things like how many riders signed up, rode and bought a plan, and which riders have
+            not ridden for a while. We use ride dates, plan dates and the hour you usually open the app. We do not use
+            your position, speed or messages for this. If you agreed to offer e-mails, we may send them at the hour you
+            usually open the app; you can unsubscribe at any time. We also look for signs of misuse, such as many
+            accounts on one phone or repeated failed payments. A person reviews these; nothing is blocked
+            automatically. These counts are deleted with your account.</p>
         </section>
 
         <section class="legal-section" id="diagnostics-log" aria-labelledby="diagnostics-log-h">
@@ -830,7 +884,7 @@
                   <td data-label="What it receives">The viewer's IP address and the map area, as with any website</td>
                 </tr>
                 <tr>
-                  <td data-label="Service"><b>Open-Meteo</b></td>
+                  <td data-label="Service"><b>MET Norway</b> (api.met.no; Open-Meteo only if the server is set to it)</td>
                   <td data-label="What it does">Weather on the route, asked by our server</td>
                   <td data-label="What it receives">Up to 5 route points rounded to about 10 km</td>
                 </tr>
@@ -849,6 +903,7 @@
           <p>Crash detection, emergency texts, the lock screen ride view, Medical ID during an alert and help from nearby
             riders are always on, because they are how CoRoute keeps riders safe. You choose the rest: voice alerts,
             siren alerts, appearing on the leaderboards, news notifications, ride summary, tips and offer e-mails, sharing your fuel range,
+            sharing anonymous road and safety signals ("Help make roads safer", off by default),
             receiving emergency texts from your ride group, and which Ride Guardian links you create. You can revoke
             location and microphone permissions at any time in your phone's settings; the app then works in a limited
             mode, and safety features that need them cannot work.</p>

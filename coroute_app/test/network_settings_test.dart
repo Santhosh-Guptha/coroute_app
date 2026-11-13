@@ -117,7 +117,7 @@ void main() {
   });
 
   test('constants of the contract', () {
-    expect(NetworkConstants.clientCaps, ['net1', 'pubride1']);
+    expect(NetworkConstants.clientCaps, ['net1', 'pubride1', 'posbatch1']);
     expect(NetworkConstants.assistTakenShowFor, const Duration(minutes: 2));
     expect(NetworkConstants.waveShowFor, const Duration(seconds: 5));
     expect(NetworkConstants.netConsentMaxPrompts, 3);

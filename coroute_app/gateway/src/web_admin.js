@@ -23,7 +23,9 @@ const ADMIN_CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data: blob:",
+  // Round 4: the Road & safety intelligence maps use OpenStreetMap's standard tiles (the website's tile source;
+  // admin only, low volume, attribution shown; docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md §Tiles).
+  "img-src 'self' data: blob: https://tile.openstreetmap.org",
   "font-src 'self'",
   "connect-src 'self'",
   // 3.57 e-mail studio: the preview frame is /email/preview/<token> (same origin, sandboxed, its own CSP).

@@ -165,10 +165,16 @@ class SessionStore {
     return { session: stored, refreshToken };
   }
 
-  async _read(sessionId, { fresh = false } = {}) {
+  async _read(sessionId, { fresh = false, maxAgeMs = this.ttlMs, swr = false } = {}) {
     if (!SID_RE.test(String(sessionId || ''))) return null;
     const hit = this.cache.get(sessionId);
-    if (!fresh && hit && this.clock() - hit.at < this.ttlMs) return hit.s;
+    const age = hit ? this.clock() - hit.at : Infinity;
+    if (!fresh && hit && age < maxAgeMs) return hit.s;
+    // v3.56 hot path (socket telemetry): an entry up to 2 x maxAgeMs old answers now, one refresh runs behind it.
+    if (!fresh && hit && swr && age < 2 * maxAgeMs) {
+      if (!this.inflight.has(sessionId)) this._read(sessionId).catch(() => {});
+      return hit.s;
+    }
     let p = this.inflight.get(sessionId);
     if (!p) {
       this.reads++;
@@ -216,8 +222,8 @@ class SessionStore {
    * absolute limit. Updates lastSeenAt now and then (never awaited by the caller's response path for long).
    * Throws SessionError (401 SESSION_INVALID) otherwise.
    */
-  async validate(sessionId, userId, { touch = true } = {}) {
-    const s = await this._read(sessionId);
+  async validate(sessionId, userId, { touch = true, maxAgeMs, swr = false } = {}) {
+    const s = await this._read(sessionId, { ...(maxAgeMs ? { maxAgeMs } : {}), swr });
     if (!s || s.userId !== userId) throw new SessionError(MSG_SIGNED_OUT);
     if (s.revokedAt) throw new SessionError(s.revokeReason === 'IDLE' || s.revokeReason === 'EXPIRED' ? MSG_EXPIRED : MSG_SIGNED_OUT);
     const pol = policyOf(s.kind);

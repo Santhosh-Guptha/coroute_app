@@ -233,7 +233,8 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                 if (!_checking && _weather != null)
                   Padding(
                     padding: const EdgeInsets.only(top: Space.s4, left: 32),
-                    child: Text(L10n.t('weather.by'), style: AppText.caption),
+                    // The credit the gateway sent for its provider (MET Norway by default), else the built-in line.
+                    child: Text(_weather?.attribution.isNotEmpty == true ? _weather!.attribution : L10n.t('weather.by'), style: AppText.caption),
                   ),
               ],
               if (dark != null) ...[

@@ -202,6 +202,9 @@ class FieldCrypto {
  */
 function encryptingSoda(soda, fc, { logger = console, lazy = true } = {}) {
   if (!soda || !fc || soda.__fieldCrypto) return soda;
+  const carryRev = (from, to) => {
+    if (from && to && from !== to && typeof to === 'object' && from.casRev !== undefined && !Object.isFrozen(to)) to.casRev = from.casRev;
+  };
   const spec = (c) => FIELD_SPEC[c];
   const pending = new Set();
   const migrate = (collection, key, raw) => {
@@ -224,16 +227,45 @@ function encryptingSoda(soda, fc, { logger = console, lazy = true } = {}) {
   Object.assign(wrapped, {
     __fieldCrypto: fc,
     __raw: soda,
-    insert: (c, doc) => soda.insert(c, spec(c) ? fc.encryptDoc(c, doc) : doc),
-    insertMany: (c, docs) => soda.insertMany(c, spec(c) && Array.isArray(docs) ? docs.map((d) => fc.encryptDoc(c, d)) : docs),
-    replace: (c, key, doc) => soda.replace(c, key, spec(c) ? fc.encryptDoc(c, doc) : doc),
-    upsertBy: (c, filter, doc) => soda.upsertBy(c, filter, spec(c) ? fc.encryptDoc(c, doc) : doc),
+    // Round 6: the client stamps a casRev on the (encrypted) copy it stores; the caller's own object gets the same
+    // token, so its cached copy still equals the stored document (src/oracle/soda.js REV_FIELD).
+    async insert(c, doc) {
+      if (!spec(c)) return soda.insert(c, doc);
+      const enc = fc.encryptDoc(c, doc);
+      const key = await soda.insert(c, enc);
+      carryRev(enc, doc);
+      return key;
+    },
+    async insertMany(c, docs) {
+      if (!spec(c) || !Array.isArray(docs)) return soda.insertMany(c, docs);
+      const encs = docs.map((d) => fc.encryptDoc(c, d));
+      const keys = await soda.insertMany(c, encs);
+      encs.forEach((e, i) => carryRev(e, docs[i]));
+      return keys;
+    },
+    async replace(c, key, doc) {
+      if (!spec(c)) return soda.replace(c, key, doc);
+      const enc = fc.encryptDoc(c, doc);
+      const out = await soda.replace(c, key, enc);
+      carryRev(enc, doc);
+      return out;
+    },
+    async upsertBy(c, filter, doc) {
+      if (!spec(c)) return soda.upsertBy(c, filter, doc);
+      const enc = fc.encryptDoc(c, doc);
+      const out = await soda.upsertBy(c, filter, enc);
+      carryRev(enc, doc);
+      return out;
+    },
     async compareAndReplace(c, key, expected, replacement) {
       if (!spec(c)) return soda.compareAndReplace(c, key, expected, replacement);
       // Values are encrypted with a random IV: compare the decrypted views, then swap the raw document atomically.
       const raw = await soda.get(c, key);
       if (!raw || !require('util').isDeepStrictEqual(fc.decryptDoc(c, raw), expected)) return false;
-      return soda.compareAndReplace(c, key, raw, fc.encryptDoc(c, replacement));
+      const enc = fc.encryptDoc(c, replacement);
+      const ok = await soda.compareAndReplace(c, key, raw, enc);
+      if (ok) carryRev(enc, replacement);
+      return ok;
     },
     async get(c, key) {
       const d = await soda.get(c, key);

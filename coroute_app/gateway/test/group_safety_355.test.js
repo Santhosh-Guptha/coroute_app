@@ -280,8 +280,24 @@ test('road risk REST: POST brakes (auth), GET near a ride\'s route returns only 
   for (let i = 0; i < K_MIN; i++) {
     n++;
     const u = await register(`Brake ${n}`, `gsbrake${n}@coroute.test`);
-    const res = await t.api('POST', '/road-risk/brakes', { events: [{ ...on, h: 0 }, { ...off, h: 0 }, ...(i < 5 ? [{ lat: 17.41, lng: 78.45, h: 0 }] : [])] }, u.token);
+    const events = [{ ...on, h: 0 }, { ...off, h: 0 }, ...(i < 5 ? [{ lat: 17.41, lng: 78.45, h: 0 }] : [])];
+    if (i === 0) {
+      // 3.56: nothing is collected from a rider who has not opted in ("Help make roads safer").
+      const no = await t.api('POST', '/road-risk/brakes', { events }, u.token);
+      assert.equal(no.status, 200);
+      assert.deepEqual(no.json, { ok: true, cells: 0, reason: 'NO_CONSENT' });
+      assert.equal((await t.soda.query(require('../src/road_risk').COLLECTION, {}, { limit: 10 }).catch(() => [])).filter((d) => d.value.lat === 17.4).length, 0);
+    }
+    assert.equal((await t.api('PUT', '/intel/consent', { on: true }, u.token)).status, 200);
+    const res = await t.api('POST', '/road-risk/brakes', { events }, u.token);
     assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.ok(res.json.cells >= 2);
+    if (i === 1) {
+      // Switched off again: collection stops (within the 15 s cache; a fresh reader sees it at once).
+      await t.api('PUT', '/intel/consent', { on: false }, u.token);
+      assert.equal(await require('../src/road_risk').consentReader(t.soda)(u.user.userId), false);
+      await t.api('PUT', '/intel/consent', { on: true }, u.token);
+    }
   }
   const near = await t.api('GET', `/road-risk/near?groupId=${R.gid}`, null, R.lead.token);
   assert.equal(near.status, 200);

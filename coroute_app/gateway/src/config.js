@@ -174,7 +174,21 @@ const config = {
   // Two-VM production: what this node is for. 'live' (VM1: rides, sockets), 'web' (VM2: website, payments,
   // admin), 'all' (single VM, default). Caddy decides routing; the role only decides which node prefers
   // to run scheduled jobs (src/job_lease.js).
-  gatewayRole: oneOf('GATEWAY_ROLE', ['live', 'web', 'all'], 'all'),
+  // v3.56 'standby' (DR node, vm3): boots and answers /api/health, never runs scheduled jobs, /api/health/live 503.
+  // Promote it by setting GATEWAY_ROLE=all (single node) and restarting (deploy/dr/promote_vm3.sh).
+  gatewayRole: oneOf('GATEWAY_ROLE', ['live', 'web', 'all', 'standby'], 'all'),
+  // v3.56 performance and operations (docs/infra/INFRASTRUCTURE_PLAN_v3.56.md).
+  metricsAllow: list('METRICS_ALLOW', ['loopback']),
+  metricsToken: (process.env.METRICS_TOKEN || '').trim(),
+  // Above Caddy's upstream keep-alive (60 s in deploy/caddy/*): Node never closes an idle connection Caddy reuses.
+  httpKeepAliveMs: int('HTTP_KEEPALIVE_MS', 75000),
+  // Graceful stop: answer 503 on /api/health/live for this long before telling sockets to reconnect, so the load
+  // balancer has already moved new connections to the other node (0 = at once, the old behaviour).
+  shutdownDrainMs: int('SHUTDOWN_DRAIN_MS', 0),
+  // /api/health caches a good database ping this long (Caddy, the NLB and watchdogs poll it).
+  healthDbCacheMs: int('HEALTH_DB_CACHE_MS', isTest ? 0 : 2000),
+  // off behind Caddy (it compresses with zstd/gzip off the event loop); on for a bare node.
+  nodeCompression: String(process.env.NODE_COMPRESSION || 'on').toLowerCase() !== 'off',
   // Two-node live mirror (src/mirror.js): off unless MIRROR_LISTEN_HOST or MIRROR_PEER_URL is set. MIRROR_KEY
   // (32+ chars, same on both nodes) authenticates and encrypts the link. LIVE_RIDER_CAP: distinct riders with a
   // live socket on both nodes before new riders get 503 SERVER_BUSY (0 = off).

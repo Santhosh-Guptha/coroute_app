@@ -225,6 +225,28 @@ class RoadCareService {
         const Duration(seconds: 60));
   }
 
+  // ------------------------------------------------------------------ round 4 road & safety intelligence
+  /// IntelCareService shows its notices (hazard ahead, rough road, twisty section, long ride / night nudges) in
+  /// this same cockpit slot (also on the lock-screen cockpit), with the same rules: never over an emergency, a
+  /// more urgent road notice is not replaced. Returns false when it was not shown.
+  bool showExternal(RoadCareNotice n, Duration forTime) {
+    if (emergency()) return false;
+    final cur = notice;
+    if (cur != null && cur.rank > n.rank) return false;
+    _show(n, forTime);
+    return true;
+  }
+
+  /// Speaks [text] at warning priority unless an emergency is open.
+  void sayExternal(String text, {required String key, bool hazard = false}) {
+    if (emergency()) return;
+    if (hazard) {
+      voice?.speakHazard(text, dedupeKey: key);
+    } else {
+      voice?.speak(text, priority: VoicePriority.warning, key: key);
+    }
+  }
+
   // ------------------------------------------------------------------ output
   void _say(String text, {required String key}) {
     if (emergency()) return;

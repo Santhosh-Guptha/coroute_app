@@ -1058,7 +1058,7 @@ class EmailStudio {
   // ------------------------------------------------------------ campaigns
   _campPublic(doc) {
     if (!doc) return null;
-    const { recipients, leaseUntil, worker, key, ...rest } = doc; // eslint-disable-line no-unused-vars
+    const { recipients, dueAts, leaseUntil, worker, key, ...rest } = doc; // eslint-disable-line no-unused-vars
     return { ...rest, recipients: Array.isArray(recipients) ? recipients.length : 0 };
   }
 
@@ -1084,6 +1084,9 @@ class EmailStudio {
     const doc = {
       campaignId: `ec_${hex(10)}`, name: oneLine(b.name).slice(0, 80) || prep.design.subject.slice(0, 80), category: prep.category, design: prep.design,
       template: templateRef, couponCode: prep.coupon ? prep.coupon.code : null, uniqueCoupon: prep.unique, audience, sendAt,
+      // Round 6: "Send at each rider's best time" (src/business/): each rider gets it at their preferred India-time
+      // hour within 24 hours of sendAt, never inside the quiet hours; riders without a known hour get it at sendAt.
+      bestTime: b.bestTime === true,
       trackClicks: b.trackClicks === false ? false : !!s.clickTracking, status: 'SCHEDULED', createdAt: now, createdBy: String(by).slice(0, 120), updatedAt: now,
       stats: { targeted: 0, sent: 0, failed: 0, skipped: 0, capped: 0 }, cursor: 0, recipients: null, leaseUntil: 0, worker: null, error: null, startedAt: null, finishedAt: null,
     };
@@ -1319,11 +1322,24 @@ class EmailStudio {
       try { list = (await this.resolveAudience(state.doc.audience, state.doc.category)).map((x) => x.userId); } catch (e) { return fail(`Audience could not be read: ${e.message}`); }
       if (!(await this._save(state, { recipients: list, cursor: 0, stats: { ...state.doc.stats, targeted: list.length } }))) return;
     }
+    if (state.doc.bestTime && !Array.isArray(state.doc.dueAts)) {
+      const plan = await this._bestTimePlan(state.doc.recipients, state.doc.startedAt || this.clock(), settings);
+      if (!(await this._save(state, { recipients: plan.recipients, dueAts: plan.dueAts, cursor: 0, stats: { ...state.doc.stats, timed: plan.timed } }))) return;
+    }
     while (state.doc.cursor < state.doc.recipients.length) {
       if (this.isQuiet(settings)) { await this._save(state, { status: 'SCHEDULED', sendAt: this.clock(), leaseUntil: 0, worker: null }); return; }
       const started = this.clock();
+      let batch = this.batchSize;
+      if (Array.isArray(state.doc.dueAts)) {
+        // Best-time campaign: only the riders whose hour has come; the rest wait (the campaign goes back to SCHEDULED).
+        const nextDue = Number(state.doc.dueAts[state.doc.cursor]) || 0;
+        if (nextDue > started) { await this._save(state, { status: 'SCHEDULED', sendAt: nextDue, leaseUntil: 0, worker: null }); return; }
+        let n = 0;
+        while (n < this.batchSize && state.doc.cursor + n < state.doc.recipients.length && (Number(state.doc.dueAts[state.doc.cursor + n]) || 0) <= started) n++;
+        batch = Math.max(1, n);
+      }
       const prices = await this._catalogPrices();
-      const slice = state.doc.recipients.slice(state.doc.cursor, state.doc.cursor + this.batchSize);
+      const slice = state.doc.recipients.slice(state.doc.cursor, state.doc.cursor + batch);
       const stats = { ...state.doc.stats };
       let mailed = 0;
       for (const uid of slice) {
@@ -1336,7 +1352,32 @@ class EmailStudio {
       const spent = this.clock() - started;
       if (state.doc.cursor < state.doc.recipients.length && wantMs > spent) await this.sleep(wantMs - spent);
     }
-    await this._save(state, { status: 'SENT', finishedAt: this.clock(), recipients: [], leaseUntil: 0 });
+    await this._save(state, { status: 'SENT', finishedAt: this.clock(), recipients: [], dueAts: null, leaseUntil: 0 });
+  }
+
+  /**
+   * Round 6: when each recipient of a best-time campaign is due. `this.sendTimes.bestHours(userIds)` (the business
+   * brain) gives the riders' preferred India-time hour; the due time is the next occurrence of that hour within 24 h
+   * of `start`, moved out of the quiet hours (to the hour they end). Riders without a known hour are due at `start`.
+   * Returns the recipients ordered by due time with the parallel dueAts list.
+   */
+  async _bestTimePlan(recipients, start, settings) {
+    let best = new Map();
+    try { if (this.sendTimes && typeof this.sendTimes.bestHours === 'function') best = await this.sendTimes.bestHours(recipients); } catch { best = new Map(); }
+    const HOUR = 3600000;
+    const startHour = Math.floor((start + IST) / HOUR);
+    const rows = recipients.map((uid, i) => {
+      let due = start;
+      const h = best.get(uid);
+      if (Number.isInteger(h) && h >= 0 && h < 24) {
+        const ahead = (h - (startHour % 24) + 24) % 24;
+        due = ahead === 0 ? start : (startHour + ahead) * HOUR - IST;
+        for (let guard = 0; guard < 24 && this.isQuiet(settings, due); guard++) due += HOUR;
+      }
+      return { uid, due, i };
+    });
+    rows.sort((a, b) => a.due - b.due || a.i - b.i);
+    return { recipients: rows.map((x) => x.uid), dueAts: rows.map((x) => x.due), timed: rows.filter((x) => x.due > start).length };
   }
 
   /** Every enabled rule: its segment now, once per rider per occurrence / cooldown, frequency cap. */

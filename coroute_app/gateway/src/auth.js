@@ -240,9 +240,19 @@ class UserGate {
     this.inflight.delete(userId);
   }
 
-  async _load(userId) {
+  /**
+   * v3.56: `maxAgeMs` lets a hot path (socket telemetry) accept an older entry than ttlMs; with `swr` an entry up to
+   * twice that old is answered at once while one refresh runs in the background (stale-while-revalidate), so a
+   * position never waits for the database. invalidate() still removes the entry at once (holds, blocks, deletes).
+   */
+  async _load(userId, { maxAgeMs = this.ttlMs, swr = false } = {}) {
     const hit = this.cache.get(userId);
-    if (hit && this.clock() - hit.at < this.ttlMs) return hit.user;
+    const age = hit ? this.clock() - hit.at : Infinity;
+    if (hit && age < maxAgeMs) return hit.user;
+    if (hit && swr && age < 2 * maxAgeMs) {
+      if (!this.inflight.has(userId)) this._load(userId).catch(() => {});
+      return hit.user;
+    }
     let p = this.inflight.get(userId);
     if (!p) {
       this.reads++;
@@ -280,12 +290,12 @@ class UserGate {
    * not signed out, revoked, idle or expired); a token without one (issued before 3.57) must not predate the
    * account's last "sign out of all devices" (users.tokensValidAfter).
    */
-  async checkDetailed(claims, { touch = true } = {}) {
-    const user = await this._checkUser(claims);
+  async checkDetailed(claims, { touch = true, maxAgeMs, swr = false } = {}) {
+    const user = await this._checkUser(claims, { maxAgeMs, swr });
     let session = null;
     if (claims.sid && this.sessions) {
       try {
-        session = await this.sessions.validate(String(claims.sid), user.userId, { touch });
+        session = await this.sessions.validate(String(claims.sid), user.userId, { touch, maxAgeMs, swr });
       } catch (e) {
         if (e && e.name === 'SessionError') throw revokedError(e.message);
         throw e;
@@ -297,10 +307,10 @@ class UserGate {
     return { user, session };
   }
 
-  async _checkUser(claims) {
+  async _checkUser(claims, { maxAgeMs, swr = false } = {}) {
     const userId = claims && claims.sub;
     if (!userId) throw new AuthError(MSG_SESSION, 401, 'SESSION_INVALID');
-    const user = await this._load(String(userId));
+    const user = await this._load(String(userId), { ...(maxAgeMs ? { maxAgeMs } : {}), swr });
     // 404 keeps what GET /me has always answered for a deleted account; the app signs out on the code.
     if (!user) throw new AuthError(MSG_GONE, 404, 'ACCOUNT_GONE');
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');

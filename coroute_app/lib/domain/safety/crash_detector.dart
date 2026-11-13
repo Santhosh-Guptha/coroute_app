@@ -264,6 +264,17 @@ class CrashDetector {
     _lowFallScale = c(lowFall);
   }
 
+  /// Round 4 crash brain (docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md §Crash brain): a MASTER_ADMIN-approved
+  /// multiplier of the plain high-impact thresholds only, clamped to [minBrainScale]..[maxBrainScale] (never above the
+  /// default x 1.15). 1.0 (the default, and on any error) is exactly the rule above. The severe-impact fast path, the
+  /// high-side, slide and low-speed paths and the countdown never read it.
+  static const double minBrainScale = 0.9;
+  static const double maxBrainScale = 1.15;
+  double _brainScale = 1.0;
+  double get brainImpactScale => _brainScale;
+
+  void setBrainImpactScale(double v) => _brainScale = v.isFinite ? v.clamp(minBrainScale, maxBrainScale).toDouble() : 1.0;
+
   /// When true, operates purely on device accelerometer and gyroscope streams
   /// without requiring prior GPS fixes (ISSUE-6C).
   bool standaloneOfflineMode;
@@ -449,7 +460,7 @@ class CrashDetector {
           (b.effectiveDynG >= 2.5 || b.peakG >= 3.0);
 
       // 2. High impact collision (gravity compensated dynamic peak or total peak)
-      final isHighImpact = isArmed && (b.effectiveDynG >= t.dynamicImpactG || b.peakG >= t.impactG);
+      final isHighImpact = isArmed && (b.effectiveDynG >= t.dynamicImpactG * _brainScale || b.peakG >= t.impactG * _brainScale);
 
       // 3. Lowside / motorcycle slide (moderate dynamic impact + rotation/tilt)
       final slideG = t.slideImpactG * _slideScale; // learned (1.0 unless false alarms on this bike)

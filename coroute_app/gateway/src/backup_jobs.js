@@ -241,9 +241,18 @@ function startBackupJobs({ soda, repo, lease = null, runner = null, logger = con
     try { await fn(); } catch (e) { logger.warn?.(`[backup] ${name} failed: ${e.message}`); } finally { running.delete(name); }
   };
   let warnedList = false;
+  // Round 6: a small status document per backup set (`ops_status`), read by the web admin "Servers" page.
+  const report = async (set, at, ok, extra = {}) => {
+    try { await db.upsertBy('ops_status', { kind: 'backup', set }, { kind: 'backup', set, at, ok, ...extra }); } catch { /* the page then shows "no report" */ }
+  };
   const runNow = async (set) => {
     const now = clock();
-    const manifest = await runBackup({ soda: db, store: objectStore, key, set, now, log: logger });
+    let manifest;
+    try { manifest = await runBackup({ soda: db, store: objectStore, key, set, now, log: logger }); } catch (e) {
+      await report(set, now, false, { error: String((e && (e.code || e.message)) || 'failed').slice(0, 80) });
+      throw e;
+    }
+    await report(set, now, true, { documents: Object.values((manifest && manifest.counts) || {}).reduce((a, n) => a + (Number(n) || 0), 0) });
     if (set === 'full') {
       await objectStore.put(STATE_FULL, Buffer.from(JSON.stringify({ day: dayOf(now), object: manifest.object })), 'application/json');
       const pr = await pruneBackups({ store: objectStore, now, retentionDays: cfg.retentionDays, log: logger });

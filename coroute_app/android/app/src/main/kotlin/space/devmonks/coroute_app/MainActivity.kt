@@ -77,6 +77,8 @@ class MainActivity : FlutterActivity() {
         // 3.55 "Navigate in Google Maps / Mappls": installed check and package-targeted links.
         MethodChannel(messenger, "coroute/nav_handoff").setMethodCallHandler(NavHandoffChannel(this))
 
+        // 3.56 profile-picture cropper: JPEG encoding of the app's own canvas (ImageEncodeChannel.kt).
+        MethodChannel(messenger, "coroute/image").setMethodCallHandler(ImageEncodeChannel())
         // Round 4: FLAG_SECURE on sensitive screens, fingerprint / screen-lock app lock, Medical ID (AppSecurityChannel.kt).
         val security = AppSecurityChannel(this)
         appSecurity = security
@@ -161,6 +163,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, "coroute/nav_handoff").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/install_referrer").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/in_app_review").setMethodCallHandler(null)
+        MethodChannel(messenger, "coroute/image").setMethodCallHandler(null)
         appSecurity?.dispose()
         appSecurity = null
         MethodChannel(messenger, "coroute/app_security").setMethodCallHandler(null)

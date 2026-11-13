@@ -94,6 +94,8 @@ import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
 import 'presentation/splash/splash_screen.dart';
 import 'presentation/widgets/push_router_host.dart'; // 3.55 push notifications
+import 'presentation/settings/intel_prompt_host.dart';
+import 'data/services/private_places_store.dart';
 
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -185,41 +187,66 @@ class CoRouteApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<ThemeController>.value(value: theme),
-        ChangeNotifierProvider<SettingsService>(create: (_) => settings ?? (SettingsService()..load())),
-        ChangeNotifierProvider(create: (_) {
-          final api = ApiClient();
-          // Round 4: an admin call answered MFA_REQUIRED: ask for the 2-step code (step-up), then the call repeats once.
-          api.onMfaRequired = (body) async {
-            final ctx = appNavigatorKey.currentContext;
-            if (ctx == null) return false;
-            Future<String?> submit({String? code, String? recoveryCode, String? emailCode}) async {
-              try {
-                await api.post('/auth/mfa/step-up', {'code': ?code, 'recoveryCode': ?recoveryCode, 'emailCode': ?emailCode});
-                return null;
-              } on ApiException catch (e) {
-                return e.message;
-              } catch (_) {
-                return 'Could not check the code. Try again.';
+        ChangeNotifierProvider<SettingsService>(
+          create: (_) => settings ?? (SettingsService()..load()),
+        ),
+        ChangeNotifierProvider(
+          create: (_) {
+            final api = ApiClient();
+            // Round 4: an admin call answered MFA_REQUIRED: ask for the 2-step code (step-up), then the call repeats once.
+            api.onMfaRequired = (body) async {
+              final ctx = appNavigatorKey.currentContext;
+              if (ctx == null) return false;
+              Future<String?> submit({
+                String? code,
+                String? recoveryCode,
+                String? emailCode,
+              }) async {
+                try {
+                  await api.post('/auth/mfa/step-up', {
+                    'code': ?code,
+                    'recoveryCode': ?recoveryCode,
+                    'emailCode': ?emailCode,
+                  });
+                  return null;
+                } on ApiException catch (e) {
+                  return e.message;
+                } catch (_) {
+                  return 'Could not check the code. Try again.';
+                }
               }
-            }
-            Future<String?> sendEmail() async {
-              try {
-                await api.post('/auth/mfa/step-up/email-code', const {});
-                return null;
-              } on ApiException catch (e) {
-                return e.message;
+
+              Future<String?> sendEmail() async {
+                try {
+                  await api.post('/auth/mfa/step-up/email-code', const {});
+                  return null;
+                } on ApiException catch (e) {
+                  return e.message;
+                }
               }
-            }
-            return MfaPromptDialog.show(ctx, challenge: MfaChallenge.fromBody(body), submit: submit, sendEmailCode: sendEmail);
-          };
-          return api;
-        }),
+
+              return MfaPromptDialog.show(
+                ctx,
+                challenge: MfaChallenge.fromBody(body),
+                submit: submit,
+                sendEmailCode: sendEmail,
+              );
+            };
+            return api;
+          },
+        ),
         // Round 4: "Lock CoRoute with fingerprint or screen lock" (off by default; never during a ride or SOS).
         // Started by _SessionBinder once the saved session is read (a cold start locks only a signed-in phone).
-        ChangeNotifierProvider<AppLockService>(lazy: false, create: (_) => AppLockService()),
+        ChangeNotifierProvider<AppLockService>(
+          lazy: false,
+          create: (_) => AppLockService(),
+        ),
         // Cockpit on the lock screen while riding (docs/features_355/lock_screen_cockpit.md): wired and started by
         // _SessionBinder (sign-in, the setting, the ride state). Never over the keyguard without a ride.
-        ChangeNotifierProvider<LockScreenCockpitService>(lazy: false, create: (_) => LockScreenCockpitService()),
+        ChangeNotifierProvider<LockScreenCockpitService>(
+          lazy: false,
+          create: (_) => LockScreenCockpitService(),
+        ),
         // 3.55 diagnostics log (Settings › More › Diagnostics, the post-ride safety prompt).
         ChangeNotifierProvider<DiagLogService>.value(value: DiagLogService.instance),
         ChangeNotifierProvider<DeviceDiagnosticService>(create: (ctx) => DeviceDiagnosticService(apiClient: ctx.read<ApiClient>())..loadCachedReport()),
@@ -290,7 +317,9 @@ class CoRouteApp extends StatelessWidget {
         }),
         ChangeNotifierProvider(create: (ctx) {
           final queue = SqfliteTrackQueue();
-          return TrackRecorder(queue, TrackUploader(ctx.read<ApiClient>(), queue));
+          // 3.56 (round 6): nothing is recorded within 300 m of a private place (phone-only list).
+          PrivatePlacesStore.shared.load().ignore();
+          return TrackRecorder(queue, TrackUploader(ctx.read<ApiClient>(), queue))..isPrivate = PrivatePlacesStore.shared.isNear;
         }),
         ChangeNotifierProvider<P2pMeshService>(create: (_) => P2pMeshService()),
         ChangeNotifierProvider(
@@ -380,6 +409,28 @@ class CoRouteApp extends StatelessWidget {
             safety.onTripEnded = (gid) => OfflineMapRetentionService.tripEnded(gid).ignore();
             // 3.57 phone-first emergency texts: an SOS closed anywhere sends "I'm safe now".
             convoys.onMySosClosed = safety.noteMySosClosed;
+            // Round 4 road & safety intelligence: consent, warnings, uploads (docs/intelligence/).
+            var deviceModel = '';
+            SafetyNative.deviceInfo()
+                .then(
+                  (i) => deviceModel = '${i.manufacturer} ${i.model}'.trim(),
+                )
+                .ignore();
+            safety.intel
+              ..api = scoreApi
+              ..deviceModel = (() => deviceModel)
+              ..isLead = (() {
+                final c = convoys.activeConvoy;
+                final me = convoys.myUserId;
+                return c != null &&
+                    me != null &&
+                    c.riders.length > 1 &&
+                    (c.ridingLeadId == me || c.createdByUserId == me);
+              });
+            safety.intel
+                .load()
+                .then((_) => safety.intel.refreshConsent())
+                .ignore();
             return safety;
           },
         ),
@@ -529,13 +580,28 @@ class CoRouteApp extends StatelessWidget {
             final api = ctx.read<ApiClient>();
             final convoys = ctx.read<ConvoyService>();
             final safety = ctx.read<SafetyService>();
-            final gs = GroupSafetyService(convoys, ctx.read<RealtimeService>(), api,
-                timeline: ctx.read<TimelineService>(), places: () => MapPlacesService.shared(api).all)
-              ..fatigueScore = (() => safety.fatigueLevel) // 0-100 on the phone; only a level 0..3 is shared
-              ..hardStops = (() => safety.hardStops)
-              ..alarmOpen = (() => safety.alarm != null || convoys.myOpenSosAlertId != null)
-              ..featureOn = FeatureFlagsService.on
-              ..speaker = (line, key) => ctx.read<VoiceService>().speak(line, priority: VoicePriority.important, key: key).ignore();
+            final gs =
+                GroupSafetyService(
+                    convoys,
+                    ctx.read<RealtimeService>(),
+                    api,
+                    timeline: ctx.read<TimelineService>(),
+                    places: () => MapPlacesService.shared(api).all,
+                  )
+                  ..fatigueScore =
+                      (() => safety.fatigueLevel) // 0-100 on the phone; only a level 0..3 is shared
+                  ..hardStops = (() => safety.hardStops)
+                  // 3.56: hard brakes feed the risky-stretch map only with the rider's road-data opt-in.
+                  ..roadDataConsent = (() => safety.intel.consentOn)
+                  ..alarmOpen = (() =>
+                      safety.alarm != null || convoys.myOpenSosAlertId != null)
+                  ..featureOn = FeatureFlagsService.on
+                  ..speaker = ((line, key) => ctx
+                      .read<VoiceService>()
+                      .speak(line, priority: VoicePriority.important, key: key)
+                      .ignore())
+                  ..learnedStops = (() => safety.intel.learnedStops); // round 4: learned rider stops for regroup points
+            safety.intel.regroupName = () => gs.currentRegroupName;
             return gs;
           },
         ),
@@ -683,7 +749,11 @@ class _App extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: appNavigatorKey,
-      navigatorObservers: [appRouteObserver, PushRouterHost.observer, context.read<LockScreenCockpitService>().guard],
+      navigatorObservers: [
+        appRouteObserver,
+        PushRouterHost.observer,
+        context.read<LockScreenCockpitService>().guard,
+      ],
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeFor(theme.palette),
@@ -709,10 +779,20 @@ class _App extends StatelessWidget {
                   // 3.55 diagnostics: "send the log of this ride?" after a safety moment; support's log request.
                   child: DiagPromptHost(
                     navigatorKey: appNavigatorKey,
-                    // Locked cockpit (padlock chip, private screens covered until the unlock) over the round 4 app
-                    // lock (above the screens, below the crash alarm and the SOS flows). They never show together.
-                    child: LockedCockpitGate(
-                      child: AppLockGate(navigatorKey: appNavigatorKey, child: _UpdateGate(child: child ?? const SizedBox.shrink())),
+                    // Round 4: "Help make roads safer?" once after the first ride; "Was this a real crash?" after a
+                    // cancelled alarm. Never during a ride or an alarm.
+                    child: IntelPromptHost(
+                      navigatorKey: appNavigatorKey,
+                      // Locked cockpit (padlock chip, private screens covered until the unlock) over the round 4 app
+                      // lock (above the screens, below the crash alarm and the SOS flows). They never show together.
+                      child: LockedCockpitGate(
+                        child: AppLockGate(
+                          navigatorKey: appNavigatorKey,
+                          child: _UpdateGate(
+                            child: child ?? const SizedBox.shrink(),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -805,7 +885,8 @@ class _SessionBinderState extends State<_SessionBinder> {
       return RideSafetyState(
         inConvoy: convoys.activeConvoy != null,
         rideActive: safety?.rideOn ?? false,
-        sosOrCountdown: (safety?.emergencyOpen ?? false) || convoys.pendingSos != null,
+        sosOrCountdown:
+            (safety?.emergencyOpen ?? false) || convoys.pendingSos != null,
         pendingEmergencyTexts: safety?.emergencyTextsPending ?? false,
       );
     };
@@ -820,6 +901,7 @@ class _SessionBinderState extends State<_SessionBinder> {
         auth.removeListener(waitLoaded);
         lock.start().ignore();
       }
+
       auth.addListener(waitLoaded);
     }
     // Cockpit on the lock screen: re-checked whenever the ride, the sign-in or the setting changes.
@@ -829,8 +911,16 @@ class _SessionBinderState extends State<_SessionBinder> {
       ..signedIn = (() => auth.isAuthenticated)
       ..settingOn = (() => settings.rideOnLockScreen)
       ..safetyFlowOpen = (() =>
-          SosHoldScreen.isOpen || EmergencySosSheet.isShowing || (SafetyService.hasInstance && SafetyService.instance.alarm != null));
-    _lockCockpitSources = [auth, settings, convoys, context.read<SafetyService>(), SessionGuard.instance];
+          SosHoldScreen.isOpen ||
+          EmergencySosSheet.isShowing ||
+          (SafetyService.hasInstance && SafetyService.instance.alarm != null));
+    _lockCockpitSources = [
+      auth,
+      settings,
+      convoys,
+      context.read<SafetyService>(),
+      SessionGuard.instance,
+    ];
     _lockCockpitRefresh = lockCockpit.refresh;
     for (final l in _lockCockpitSources) {
       l.addListener(lockCockpit.refresh);
@@ -850,7 +940,9 @@ class _SessionBinderState extends State<_SessionBinder> {
     _shownNotice = msg;
     final ctx = appNavigatorKey.currentContext;
     if (ctx == null) return;
-    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 8)));
+    ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 8)),
+    );
   }
 
   @override

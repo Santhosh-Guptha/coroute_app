@@ -68,6 +68,8 @@ const PUBLIC = Object.freeze({
   'POST /api/membership/webhook': 'Razorpay webhook: HMAC signature + replay protection',
   'POST /api/sms/receipts/:provider/:token': 'SMS provider delivery receipts (secret path token)',
   // guardian pilot (GUARDIAN_ENABLED): public watch endpoints use their own signed links
+  // round 4 road & safety intelligence: what is collected, k-min and retention (no data; the privacy page links it)
+  'GET /api/intel/info': 'road & safety intelligence: public description of what is collected and kept',
 });
 
 /** Non-API routes that are not plain GET pages. */

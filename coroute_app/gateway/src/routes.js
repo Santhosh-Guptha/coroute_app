@@ -21,7 +21,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null, requireRecentAuth = null, fieldCrypto = null, rideLock = null, securityMail = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null, publicStats = null, diagLogs = null, requireRecentAuth = null, fieldCrypto = null, rideLock = null, securityMail = null, intel = null }) {
   const { sendSession, ctxOf, isLegacyClient } = require('./security_routes');
   const r = express.Router();
   r.use((req, res, next) => {
@@ -82,9 +82,15 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   }
 
   // ---- public ----
+  // v3.56: a good ping is reused for HEALTH_DB_CACHE_MS (balancers and watchdogs poll this); a failure never is.
+  let lastPing = { at: 0, db: null };
   r.get('/health', wrap(async (req, res) => {
     let db = 'DOWN';
-    try { db = (await soda.ping()) ? 'UP' : 'DEGRADED'; } catch { db = 'DOWN'; }
+    if (lastPing.db === 'UP' && Date.now() - lastPing.at < config.healthDbCacheMs) db = 'UP';
+    else {
+      try { db = (await soda.ping()) ? 'UP' : 'DEGRADED'; } catch { db = 'DOWN'; }
+      lastPing = { at: Date.now(), db };
+    }
     res.status(db === 'UP' ? 200 : 503).json({
       status: db === 'UP' ? 'HEALTHY' : 'DEGRADED',
       uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
@@ -98,6 +104,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       leases: lease ? Object.entries(lease.status()).filter(([, v]) => v.holding).map(([k]) => k) : [],
       // 3.57: field encryption at rest: ON, OFF (no DATA_ENC_KEY) or KEY_MISSING (stored values use a key this node lacks).
       dataEncryption: fieldCrypto ? (fieldCrypto.missingKids.size ? 'KEY_MISSING' : fieldCrypto.enabled ? 'ON' : 'OFF') : 'OFF',
+      // Round 4: road & safety intelligence job last runs and aggregate sizes (src/intel/engine.js health()).
+      intel: intel ? await intel.health().catch(() => null) : null,
     });
   }));
 
@@ -782,7 +790,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       const [status, error] = ROUTE_ERRORS[out.error] || ROUTE_ERRORS.UPSTREAM;
       return res.status(status).json({ error, code: out.error || 'UPSTREAM' });
     }
-    res.json(out.route);
+    // Round 4 (feature 10): leg durations scaled by riders' learned speeds when enough riders rode there (0.6-1.6x);
+    // the plain router answer otherwise. The cached route is never changed.
+    const route = intel ? await intel.etaAdjust(out.route).catch(() => out.route) : out.route;
+    res.json(route);
   }));
   // Weather on the route (3.16): 1 to 5 points with their ETA, answered from a 0.1 degree grid cache (Open-Meteo).
   const weatherLimiter = rateLimit({

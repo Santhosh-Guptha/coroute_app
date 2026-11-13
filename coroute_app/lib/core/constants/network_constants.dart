@@ -6,7 +6,9 @@ class NetworkConstants {
 
   /// Capabilities this app announces in every JOIN (only to a gateway that supports `net1`).
   /// `pubride1`: Public ride, safe contact and road warnings (data/services/public_ride_service.dart).
-  static const List<String> clientCaps = ['net1', 'pubride1'];
+  /// `posbatch1` (v3.56): the gateway may send several riders' positions as one RIDER_UPDATES frame
+  /// (realtime_service.dart splits it into RIDER_UPDATE events). Older gateways ignore unknown caps.
+  static const List<String> clientCaps = ['net1', 'pubride1', 'posbatch1'];
 
   /// "Another nearby rider is responding" stays visible this long.
   static const Duration assistTakenShowFor = Duration(minutes: 2);

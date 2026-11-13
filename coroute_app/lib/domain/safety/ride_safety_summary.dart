@@ -3,6 +3,7 @@
 // entries simply have no summary). Pure Dart.
 import 'dart:math' as math;
 
+import '../intel/intel_policies.dart';
 import '../tracking/geo_math.dart';
 import '../tracking/track_point.dart';
 
@@ -29,6 +30,9 @@ class RideSafetySummary {
   /// Minutes in the SOS battery reserve.
   final int sosReserveMin;
 
+  /// Round 4: kilometres of twisty road in this ride (from my own fixes; TwistyMeter).
+  final int twistyKm;
+
   const RideSafetySummary({
     this.hardBrakes = 0,
     this.overLimitMin = 0,
@@ -41,6 +45,7 @@ class RideSafetySummary {
     this.crashAlarms = 0,
     this.mount = '',
     this.sosReserveMin = 0,
+    this.twistyKm = 0,
   });
 
   bool get isEmpty =>
@@ -53,7 +58,8 @@ class RideSafetySummary {
       bikeDownChecks == 0 &&
       roadHazards == 0 &&
       crashAlarms == 0 &&
-      sosReserveMin == 0;
+      sosReserveMin == 0 &&
+      twistyKm == 0;
 
   Map<String, Object> toJson() => {
         if (hardBrakes > 0) 'hb': hardBrakes,
@@ -67,6 +73,7 @@ class RideSafetySummary {
         if (crashAlarms > 0) 'ca': crashAlarms,
         if (mount.isNotEmpty) 'm': mount,
         if (sosReserveMin > 0) 'sr': sosReserveMin,
+        if (twistyKm > 0) 'tw': twistyKm,
       };
 
   static RideSafetySummary? fromJson(Object? j) {
@@ -90,6 +97,7 @@ class RideSafetySummary {
       crashAlarms: n('ca'),
       mount: m is String && m.length <= 16 ? m : '',
       sosReserveMin: n('sr'),
+      twistyKm: n('tw'),
     );
   }
 
@@ -108,6 +116,7 @@ class RideSafetySummary {
       if (crashAlarms > 0) ('Crash alarms', '$crashAlarms'),
       ('Road hazards felt', roadHazards == 0 ? 'None' : '$roadHazards'),
       if (sosReserveMin > 0) ('Battery saver for SOS', plural(sosReserveMin, 'minute', 'minutes')),
+      if (twistyKm > 0) ('Twisty roads', '$twistyKm km'),
     ];
   }
 }
@@ -126,6 +135,9 @@ class RideSafetyAccumulator {
   int? _reserveSince;
   String mount = '';
 
+  /// Round 4: twisty kilometres of this ride ("This ride: 34 km of twisty roads").
+  final TwistyMeter twisty = TwistyMeter();
+
   int get overLimitMin => _overMs ~/ 60000;
   double get nightKm => _nightM / 1000;
 
@@ -134,6 +146,7 @@ class RideSafetyAccumulator {
     final last = _last;
     if (last != null && p.ts < last.ts) return;
     _last = p;
+    twisty.onFix(p);
     if (last == null) return;
     final gap = p.ts - last.ts;
     if (gap <= 0 || gap > 30000) return; // a GPS gap: nothing is assumed
@@ -173,6 +186,7 @@ class RideSafetyAccumulator {
       crashAlarms: crashAlarms,
       mount: mount,
       sosReserveMin: reserve ~/ 60000,
+      twistyKm: twisty.twistyKm,
     );
   }
 
@@ -188,5 +202,6 @@ class RideSafetyAccumulator {
     _reserveMs = 0;
     _reserveSince = null;
     mount = '';
+    twisty.reset();
   }
 }

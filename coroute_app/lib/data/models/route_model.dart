@@ -43,6 +43,12 @@ class RouteModel {
   final int computedAt;
   final RouteBounds? bounds;
 
+  /// Round 4: 'riders' when the gateway scaled the router's time by riders' learned speeds (shown as
+  /// "ETA based on riders"); '' for the plain router time.
+  final String etaSource;
+
+  bool get etaFromRiders => etaSource == 'riders';
+
   RouteModel({
     required this.distanceM,
     required this.durationS,
@@ -54,6 +60,7 @@ class RouteModel {
     List<(double, double)>? precomputedPoints,
     List<(double, double)>? precomputedDisplayPoints,
     this.bounds,
+    this.etaSource = '',
   })  : _points = precomputedPoints,
         _displayPoints = precomputedDisplayPoints;
 
@@ -129,6 +136,7 @@ class RouteModel {
       approximate: j['approximate'] == true,
       computedAt: (j['computedAt'] as num?)?.toInt() ?? 0,
       bounds: parsedBounds,
+      etaSource: j['etaSource'] == 'riders' ? 'riders' : '',
     );
   }
 
@@ -173,6 +181,7 @@ class RouteModel {
         'steps': steps.map((s) => s.toJson()).toList(),
         'approximate': approximate,
         'computedAt': computedAt,
+        if (etaSource.isNotEmpty) 'etaSource': etaSource,
         if (bounds != null) 'bounds': bounds!.toJson(),
       };
 }
@@ -211,6 +220,7 @@ RouteModel _parseRouteInIsolate(Map<String, dynamic> j) {
     steps: base.steps,
     approximate: base.approximate,
     computedAt: base.computedAt,
+    etaSource: base.etaSource,
     precomputedPoints: pts,
     precomputedDisplayPoints: displayPts,
     bounds: b,

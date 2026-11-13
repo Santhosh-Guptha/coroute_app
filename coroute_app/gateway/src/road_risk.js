@@ -14,6 +14,12 @@
  *                                      least K_MIN distinct riders reported, rounded cell centres.
  * Cells with no new event for RETENTION_DAYS are removed by the retention job (purgeOld).
  * Switch id: riskyStretch (403 FEATURE_OFF while off).
+ *
+ * 3.56 consent: hard brakes are COLLECTED only from riders who turned on "Help make roads safer"
+ * (the opt-in of the road hazard layer, collection `intel_consent`). Without it the batch is
+ * answered `{ ok: true, cells: 0, reason: 'NO_CONSENT' }` and nothing is stored (older apps keep
+ * working). The WARNINGS (GET /road-risk/near) are still shown to every rider. Cells counted before
+ * 3.56 hold no rider id and age out after RETENTION_DAYS.
  */
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
@@ -136,8 +142,32 @@ function nearLine(list, line, sideM = ROUTE_SIDE_M) {
   });
 }
 
-function registerRoadRiskRoutes({ r, repo, convoys, wrap, store }) {
+/** The opt-in of the hazard layer (src/intel/privacy.js CONSENT collection); cached for a minute. */
+const CONSENT_COLLECTION = 'intel_consent';
+function consentReader(soda, { ttlMs = 60000, max = 5000, clock = Date.now } = {}) {
+  const cache = new Map(); // userId -> { on, at }
+  return async (userId) => {
+    if (!userId) return false;
+    const hit = cache.get(userId);
+    if (hit && clock() - hit.at < ttlMs) return hit.on;
+    let on = false;
+    try {
+      const row = await soda.findOne(CONSENT_COLLECTION, { userId: String(userId) });
+      on = !!(row && row.value && row.value.on === true);
+    } catch { on = false; } // no collection yet = nobody opted in
+    cache.delete(userId);
+    if (!on) return false; // "no" is never cached: an opt-in counts from the next batch
+    cache.set(userId, { on, at: clock() });
+    while (cache.size > max) cache.delete(cache.keys().next().value);
+    return on;
+  };
+}
+
+function registerRoadRiskRoutes({ r, repo, convoys, wrap, store, consentOf }) {
   const risk = store || new RoadRiskStore(repo.soda);
+  // 3.56: collection needs the rider's "Help make roads safer" opt-in (short cache: a rider who
+  // just switched it on is counted within seconds, one who switched it off within a minute).
+  const hasConsent = consentOf || consentReader(repo.soda, { ttlMs: 15000 });
   let ready = null;
   const ensure = () => (ready ||= risk.ensure().catch((e) => { ready = null; throw e; }));
   const limit = (windowMs, n) => rateLimit({ windowMs, limit: n, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => req.user?.userId || req.ip, validate: false, message: { error: 'Too many requests. Try again later.', code: 'RATE_LIMITED' } });
@@ -156,6 +186,7 @@ function registerRoadRiskRoutes({ r, repo, convoys, wrap, store }) {
     if (off(res)) return;
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     if (!Array.isArray(b.events)) return res.status(400).json({ error: 'Send events.', code: 'BAD_REQUEST' });
+    if (!(await hasConsent(req.user.userId))) return res.json({ ok: true, cells: 0, reason: 'NO_CONSENT' });
     await ensure();
     const cells = await risk.record(req.user.userId, b.events);
     res.json({ ok: true, cells });
@@ -186,4 +217,4 @@ function registerRoadRiskRoutes({ r, repo, convoys, wrap, store }) {
   return risk;
 }
 
-module.exports = { RoadRiskStore, registerRoadRiskRoutes, cellOf, groupEvents, reporterHash, publicCell, K_MIN, STEP, RETENTION_DAYS, COLLECTION };
+module.exports = { RoadRiskStore, registerRoadRiskRoutes, consentReader, cellOf, groupEvents, reporterHash, publicCell, K_MIN, STEP, RETENTION_DAYS, COLLECTION };

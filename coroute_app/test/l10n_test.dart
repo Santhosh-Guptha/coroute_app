@@ -5,7 +5,7 @@ import 'package:coroute_app/core/l10n/strings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// English words allowed inside Hindi and Telugu strings (plus the weather attribution name).
-const allowedWords = ['CoRoute', 'SOS', 'OK', 'km', 'min', '112', 'Open-Meteo.com'];
+const allowedWords = ['CoRoute', 'SOS', 'OK', 'km', 'min', '112', 'Open-Meteo.com', 'MET Norway', 'CC BY 4.0'];
 
 final placeholder = RegExp(r'\{[A-Za-z0-9_]+\}');
 final latin = RegExp(r'[A-Za-z]');

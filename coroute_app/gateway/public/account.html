@@ -35,7 +35,10 @@
     <div class="container">
       <div class="sh-acc-head">
         <div class="ac-profile">
-          <span class="ac-avatar" id="ac-avatar" aria-hidden="true"></span>
+          <div class="ac-photo">
+            <span class="ac-avatar" id="ac-avatar" aria-hidden="true"></span>
+            <button class="ac-photo__edit" type="button" id="ac-photo-edit" hidden>Edit picture</button>
+          </div>
           <div class="page-hero__inner">
             <p class="eyebrow">Your account</p>
             <h1 id="ac-title">Your account.</h1>
@@ -136,6 +139,32 @@
     </div>
   </section>
 
+  <!-- Round 4 road & safety intelligence (src/intel/): "Help make roads safer" (opt-in), export and delete my
+       contributions. GET / PUT /api/intel/consent, GET / DELETE /api/intel/me/contributions. -->
+  <section class="section section--tight" id="roads" aria-labelledby="ac-roads-title">
+    <div class="container">
+      <div class="sh-sec-head">
+        <h2 class="t-h3" id="ac-roads-title">Help make roads safer</h2>
+        <p class="t-small t-muted">Share anonymous road and safety signals from your rides. Everyone gets the hazard warnings either way.</p>
+      </div>
+      <div class="sh-card" id="ac-roads" aria-live="polite">
+        <label class="sh-check"><input type="checkbox" id="ac-roads-on" disabled> <span>Share anonymous road and safety signals (hard braking, potholes, where riders stop, how fast roads really are)</span></label>
+        <p class="t-small t-muted" id="ac-roads-note">Loading&hellip;</p>
+        <ul class="t-small t-muted ac-roads-list">
+          <li>Never your full route, name, phone number or medical details.</li>
+          <li>The first and last 300 m of every ride are left out.</li>
+          <li>A spot is only shown once at least 5 different riders passed on it.</li>
+          <li>Raw signals are deleted after 90 days; only anonymous totals stay.</li>
+        </ul>
+        <div class="sh-actions">
+          <button class="btn btn--secondary" type="button" id="ac-roads-export">Download my contributions</button>
+          <button class="btn btn--ghost ac-danger" type="button" id="ac-roads-delete">Delete my contributions&hellip;</button>
+        </div>
+        <p class="sh-status" id="ac-roads-status" role="status"></p>
+      </div>
+    </div>
+  </section>
+
   <section class="section section--tight" id="security" aria-labelledby="ac-sec-title">
     <div class="container">
       <div class="sh-card ac-security">
@@ -174,6 +203,40 @@
     </div>
   </section>
 
+
+  <!-- 3.56 "Adjust your profile picture" (assets/account.js, docs/features_355/profile_photo_adjust.md).
+       A canvas, no library, no inline script. Keyboard: arrows move, + and - zoom, [ and ] turn, 0 resets. -->
+  <dialog class="ac-crop" id="ac-crop" aria-labelledby="ac-crop-title">
+    <form method="dialog" class="ac-crop__form" id="ac-crop-form">
+      <h2 class="ac-crop__title" id="ac-crop-title">Adjust your picture</h2>
+      <p class="t-small t-muted" id="ac-crop-help">Drag the picture to move it. Other riders see the part inside the circle.</p>
+      <div class="ac-crop__stage">
+        <canvas class="ac-crop__canvas" id="ac-crop-canvas" width="640" height="640" tabindex="0" role="img"
+          aria-label="Picture preview. Arrow keys move the picture, plus and minus zoom, the bracket keys turn it, zero resets."></canvas>
+        <p class="ac-crop__empty" id="ac-crop-empty" hidden>Choose a picture to start.</p>
+      </div>
+      <div class="ac-crop__row">
+        <label class="ac-crop__zoom" for="ac-crop-zoom">Zoom</label>
+        <input type="range" id="ac-crop-zoom" min="1" max="8" step="0.01" value="1" disabled>
+      </div>
+      <div class="ac-crop__tools">
+        <button class="btn btn--ghost btn--sm" type="button" id="ac-crop-left" disabled>Turn left</button>
+        <button class="btn btn--ghost btn--sm" type="button" id="ac-crop-right" disabled>Turn right</button>
+        <button class="btn btn--ghost btn--sm" type="button" id="ac-crop-reset" disabled>Reset</button>
+      </div>
+      <div class="ac-crop__row">
+        <input class="ac-crop__fileinput" type="file" id="ac-crop-file" accept="image/jpeg,image/png,image/webp">
+        <label class="btn btn--secondary btn--sm ac-crop__file" for="ac-crop-file">Choose a new picture</label>
+        <button class="btn btn--ghost btn--sm ac-danger" type="button" id="ac-crop-remove" hidden>Remove picture</button>
+      </div>
+      <p class="sh-notice" id="ac-crop-msg" role="status" aria-live="polite" hidden></p>
+      <div class="sh-actions ac-crop__actions">
+        <button class="btn btn--primary" type="button" id="ac-crop-save" disabled>Save</button>
+        <button class="btn btn--ghost" type="button" id="ac-crop-cancel">Cancel</button>
+      </div>
+      <p class="t-small t-muted">JPEG, PNG or WebP. Location and camera details in the file are never uploaded. Only you can open the original; other riders see the round picture.</p>
+    </form>
+  </dialog>
 </main>
 <!--#include footer-->
 </body>

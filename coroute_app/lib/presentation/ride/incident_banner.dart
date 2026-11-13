@@ -9,6 +9,7 @@ import '../../data/models/safety_wire.dart';
 import '../../domain/notify/relation.dart';
 import '../../domain/tracking/bearing.dart';
 import '../../domain/tracking/geo_math.dart';
+import '../security/locked_cockpit_gate.dart';
 import 'emergency_guidance.dart';
 import 'incident_view.dart';
 import 'navigate_to.dart';
@@ -18,9 +19,14 @@ Future<void> dialNumber(BuildContext context, String phone) async {
   final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
   if (clean.isEmpty) return;
   var ok = false;
-  try {
-    ok = await launchUrl(Uri(scheme: 'tel', path: clean));
-  } catch (_) {}
+  // 3.56: on the locked cockpit only emergency lines (and the rider's own emergency contact during
+  // their own SOS / crash alarm) dial without the phone's unlock (callFromCockpit).
+  final ran = await callFromCockpit(context, clean, () async {
+    try {
+      ok = await launchUrl(Uri(scheme: 'tel', path: clean));
+    } catch (_) {}
+  });
+  if (!ran) return; // still locked: the cockpit said so
   if (!ok && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the phone app.')));
   }

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const figmaDir = path.join(__dirname);
-const outDir = 'C:\\Users\\santhosh\\.gemini\\antigravity\\brain\\6a63fc9f-a4ad-4ee4-bb81-a612ccdc100b';
+const outDir = process.env.SHOWCASE_OUT_DIR || require('path').join(__dirname, 'out');
 
 const screens = [
   {

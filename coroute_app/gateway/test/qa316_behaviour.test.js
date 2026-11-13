@@ -11,6 +11,7 @@ process.env.NET_TICK_MS = '3600000';
 process.env.RIDER_PERSIST_INTERVAL_MS = '20';
 process.env.GEO_SEARCH_URL = 'http://nominatim.test';
 process.env.WEATHER_URL = 'http://wx.test';
+process.env.WEATHER_PROVIDER = 'open-meteo'; // 3.56: this file's fake upstream speaks Open-Meteo (MET Norway: test/weather_met_356.test.js)
 process.env.GEO_MIN_INTERVAL_MS = '0';
 
 const { test, before, after, mock } = require('node:test');

@@ -374,7 +374,8 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(weather.checks, 1);
       expect(find.text('Rain likely after Warangal around 3 PM.'), findsOneWidget);
-      expect(find.text(L10n.t('weather.by')), findsOneWidget);
+      // 3.56: the credit the gateway sent for its provider is shown as is.
+      expect(find.text('Weather data by Open-Meteo.com'), findsOneWidget);
       expect(find.text(TripReviewSheet.checkingWeather), findsNothing);
       expect(find.text('Download Route Map Pack'), findsNothing);
     });

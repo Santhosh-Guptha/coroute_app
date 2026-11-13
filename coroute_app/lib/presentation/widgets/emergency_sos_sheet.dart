@@ -227,6 +227,10 @@ class EmergencySosSheet extends StatelessWidget {
     if (clean.isEmpty) return;
     final uri = buildEmergencyCallUri(clean);
     if (await canLaunchUrl(uri)) {
+      // 3.56 (round 6) lock-screen call rule: this sheet IS the rider's own emergency (it opens over
+      // the lock screen as a safety flow), so its calls (112 / 108 / 100 and the rider's own emergency
+      // contact) are never held back by the locked cockpit. Other "Call" buttons go through
+      // callFromCockpit (LockScreenCockpitPolicy.callNeedsUnlock).
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (context.mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();

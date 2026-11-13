@@ -53,6 +53,8 @@ import '../../domain/safety/crash_incident.dart' show CrashScenario, MovementSta
 import 'sensor_safety_hub.dart';
 import 'sos_battery_reserve.dart';
 import 'road_care_service.dart';
+import 'intel_care_service.dart';
+import '../../domain/safety/mount_classifier.dart' show MountKind;
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'diag_log_service.dart';
 
@@ -576,6 +578,28 @@ class SafetyService extends ChangeNotifier {
   EngineCareAdvice? _engineNotice;
   Timer? _engineNoticeClear;
 
+  /// Round 4 road & safety intelligence (lib/data/services/intel_care_service.dart): hazard / rough road / twisty
+  /// warnings, long ride and night nudges, consented road signals and crash brain data. Shows through [roadCare].
+  /// Every hook below is wrapped so it can never get in the way of crash detection, SOS or emergency texts.
+  late final IntelCareService intel = IntelCareService(
+    roadCare: roadCare,
+    emergency: () => _alarm != null || _hasOpenSos || (_port.activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false),
+    routeLine: () => _port.activeConvoy?.route?.points,
+    featureOn: (id) => featureOn?.call(id) ?? true,
+    now: _now,
+    persist: _native,
+  )
+    ..onBrainScale = _detector.setBrainImpactScale
+    ..mount = (() => MountKind.fromWire(sensorSafety.summary.mount));
+
+  void _intel(void Function() f) {
+    try {
+      f();
+    } catch (e) {
+      debugPrint('intel hook: ${e.runtimeType}');
+    }
+  }
+
   /// "Give your engine a rest" for 60 s after it is advised (the cockpit shows it as a card).
   EngineCareAdvice? get engineNotice => _engineNotice;
 
@@ -908,6 +932,11 @@ class SafetyService extends ChangeNotifier {
     final riderDown = _alarmRiderDown;
     _alarmRiderDown = false;
     if (e != null && !riderDown && _alarmExternal == null) sensorSafety.onFalseAlarm(e.scenario);
+    // Round 4 crash brain: the alarm's numbers and outcome (consented riders; never blocks anything).
+    if (e != null) {
+      final external = _alarmExternal != null;
+      _intel(() => intel.onCrashAlarm(e, sent: false, riderDown: riderDown, external: external, stillS: ((a.startedAtMs - e.impactAtMs) / 1000).clamp(0, 600).toDouble()));
+    }
     // A real impact answered with "I'm OK": ask once more at the next stop or in 20 min.
     if (e != null && !riderDown && _alarmExternal != ExternalImpactSource.developer) {
       _lastImpactG = e.impactG;
@@ -1090,10 +1119,12 @@ class SafetyService extends ChangeNotifier {
       _rideActive = active;
       _resetRide();
       if (active && gid != null) {
+        _intel(intel.startRide); // round 4: tiles along the route (offline after that), crash brain params
         _restoreFuel(gid).ignore();
         fuelEconomy.ensureLoaded(reload: true).ignore();
       }
     }
+    _intel(intel.routeChanged); // round 4: a new plan or re-route gets its tiles (no-op when unchanged)
     final status = convoy?.tripStatus;
     if (status != _tripStatus) {
       _tripStatus = status;
@@ -1211,6 +1242,7 @@ class SafetyService extends ChangeNotifier {
     _evalFollowUp(_port.activeConvoy);
     _checkSpeedLimit(p);
     roadCare.onFix(p, dark: _dark, otherLimitKmh: _lastCheckedLimit, otherActive: _isOverspeedActive); // 3.55
+    _intel(() => intel.onFix(p, stretchStartMs: _fatigue.stretchStart)); // round 4
     _updateSensor();
   }
 
@@ -1378,6 +1410,7 @@ class SafetyService extends ChangeNotifier {
       if (sink != null && f != null && !_soloOnly && (b.tMs - f.ts).abs() <= 5000) {
         final rev = _surface.onBucket(b, speedKmh: f.speedKmh, lat: f.lat, lng: f.lng);
         if (rev != null) {
+          _intel(() => intel.onRoadSurface(rev)); // round 4 road quality (consented, mount aware)
           sensorSafety.onRoadHazard(); // 3.55 ride safety report
           try {
             sink(rev);
@@ -1385,6 +1418,8 @@ class SafetyService extends ChangeNotifier {
         }
       }
     }
+    // Round 4: consented hard brakes / swerves / skids (after the crash detector, never while it weighs an impact).
+    if (armed && !_soloOnly) _intel(() => intel.onAccel(b, busy: _alarm != null || _hasOpenSos || _detector.evaluating, hardStops: _brakes.count));
     _updateSensor();
   }
 
@@ -1572,6 +1607,10 @@ class SafetyService extends ChangeNotifier {
     _alarmTimer = null;
     if (a == null || e == null) return;
     if (!_alarmRiderDown && _alarmExternal == null) sensorSafety.onRealAlarm(e.scenario); // 3.55 learning
+    {
+      final rd = _alarmRiderDown, ext = _alarmExternal != null;
+      _intel(() => intel.onCrashAlarm(e, sent: true, riderDown: rd, external: ext, stillS: ((a.startedAtMs - e.impactAtMs) / 1000).clamp(0, 600).toDouble())); // round 4
+    }
     // An impact from outside the phone (wearable hook) is sent as such, whatever the answer.
     final external = _alarmExternal != null;
     // 3.57: the hidden developer impact is a test alarm: it never texts anyone.
@@ -1996,6 +2035,7 @@ class SafetyService extends ChangeNotifier {
 
   void _endRideStats() {
     if (_groupId == null || !_rideActive) return;
+    _intel(intel.endRide); // round 4: trims the last 300 m, queues and uploads consented signals
     final saved = _saveRideStats(endedAt: _now());
     sensorSafety.endRide();
     final hook = onRideStatsEnded;

@@ -13,6 +13,7 @@ const config = require('./config');
 const { encodePolyline, haversine } = require('./geo_math');
 
 const UA = () => config.providerUserAgent;
+const wxMet = require('./weather_met');
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 24);
 
@@ -207,6 +208,10 @@ class GeoProxy {
       wp[0] = { lat: round(wp[0].lat, 4), lng: round(wp[0].lng, 4) };
     }
     const coords = wp.map((p) => `${p.lng},${p.lat}`).join(';');
+    // Round 4 (feature 13): ROUTER_KIND=valhalla routes through Valhalla's motorcycle costing (owner-gated, A1 only;
+    // src/intel/router_adapter.js). Its answers get their own cache keys. The default OSRM path below is unchanged.
+    const routerKind = require('./intel/config').intelConfig().routerKind;
+    if (routerKind === 'valhalla') return this._routeValhalla(wp, coords, bearing);
     const key = `r:${hash(bearing === null ? coords : `${coords}|b${bearing}`)}`;
     const miss = this.noRouteCache?.get(key);
     if (miss && Date.now() - miss < 60000) return { error: 'NO_ROUTE' };
@@ -264,6 +269,45 @@ class GeoProxy {
     return { error: failure };
   }
 
+  /** Valhalla (costing=motorcycle) through the router adapter; same answer shape and caching rules as OSRM. */
+  async _routeValhalla(wp, coords, bearing) {
+    const adapter = require('./intel/router_adapter');
+    const key = `rv:${hash(bearing === null ? coords : `${coords}|b${bearing}`)}`;
+    const miss = this.noRouteCache?.get(key);
+    if (miss && Date.now() - miss < 60000) return { error: 'NO_ROUTE' };
+    let failure = 'UPSTREAM';
+    const route = await this._cached(key, 7, async () => {
+      try {
+        const fetchOne = async (b) => {
+          const { url } = adapter.buildRequest('valhalla', config.geoRouteUrl, wp, { bearing: b });
+          const res = await this.fetch(url, { headers: { 'User-Agent': UA(), Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+          let j = null;
+          try { j = await res.json(); } catch { j = null; }
+          const code = adapter.errorCode('valhalla', j);
+          if (code) { const e = new Error(`valhalla ${code}`); e.osrmCode = code; throw e; }
+          return j;
+        };
+        let j = null;
+        if (bearing !== null) j = await this._queued(() => fetchOne(bearing)).catch((e) => { if (e.osrmCode) return null; throw e; });
+        if (!j) j = await this._queued(() => fetchOne(null));
+        const n = adapter.normalise('valhalla', j);
+        if (!n) { failure = 'NO_ROUTE'; return null; }
+        return { distanceM: n.distanceM, durationS: n.durationS, polyline: encodePolyline(n.line), legs: n.legs, steps: n.steps, router: 'valhalla' };
+      } catch (e) {
+        if (e.osrmCode === 'NoRoute' || e.osrmCode === 'NoSegment') failure = 'NO_ROUTE';
+        else this.log.warn('[geo] valhalla route failed', e.message);
+        return null;
+      }
+    });
+    if (route) return { route };
+    if (failure === 'NO_ROUTE') {
+      if (!this.noRouteCache) this.noRouteCache = new Map();
+      if (this.noRouteCache.size > 500) this.noRouteCache.clear();
+      this.noRouteCache.set(key, Date.now());
+    }
+    return { error: failure };
+  }
+
   /** OSRM JSON; throws with `osrmCode` set when OSRM answered with an error code (NoRoute, NoSegment, ...). */
   async _getOsrm(url) {
     const res = await this.fetch(url, { headers: { 'User-Agent': UA(), Accept: 'application/json', 'Accept-Language': 'en' }, signal: AbortSignal.timeout(8000) });
@@ -307,7 +351,12 @@ class GeoProxy {
     if (!missing.length) return out;
     const pts = [...missing.map((i) => sources[i]), dest].map((p) => `${round(Number(p.lng), 5)},${round(Number(p.lat), 5)}`).join(';');
     const srcIdx = missing.map((_, i) => i).join(';');
-    const url = `${config.geoRouteUrl}/table/v1/driving/${pts}?sources=${srcIdx}&destinations=${missing.length}&annotations=distance,duration`;
+    // Round 4: with ROUTER_KIND=valhalla, GEO_ROUTE_URL points at Valhalla, which has no OSRM table service: the safety
+    // network's "can they get there" check keeps using OSRM (OSRM_TABLE_URL, default the public OSRM server).
+    const tableBase = require('./intel/config').intelConfig().routerKind === 'valhalla'
+      ? String(process.env.OSRM_TABLE_URL || 'https://router.project-osrm.org').trim().replace(/\/+$/, '')
+      : config.geoRouteUrl;
+    const url = `${tableBase}/table/v1/driving/${pts}?sources=${srcIdx}&destinations=${missing.length}&annotations=distance,duration`;
     let j = null;
     try {
       j = await this._queued(async () => {
@@ -332,37 +381,55 @@ class GeoProxy {
     return out.map((v) => (v === undefined ? null : v));
   }
 
-  // ---------------------------------------------------------------- 3.16 weather (Open-Meteo)
+  // ---------------------------------------------------------------- 3.16 weather
   /**
    * Hourly rain forecast for 1 to 5 route points ({lat, lng, at}: `at` in epoch seconds). Points
    * are rounded to a 0.1 degree grid (about 10 km) and cached for WEATHER_CACHE_MIN (memory LRU of
    * 500 cells in front of geo_cache), so every rider on the same road shares one forecast. Missing
-   * cells go upstream in ONE call, within a global budget of WEATHER_PER_MIN calls a minute; over
-   * budget, cached cells are answered and the rest are null. Returns
+   * cells go upstream within a global budget of WEATHER_PER_MIN calls a minute; over budget, cached
+   * cells are answered and the rest are null. Returns
    * { points: [{lat, lng, at, precipProb, precipMm, code, tempC} | null], source, attribution }
    * or null when disabled. Nothing about the points is logged.
+   *
+   * 3.56 provider (WEATHER_PROVIDER, src/weather_met.js): 'metno' (default; MET Norway, free for
+   * commercial use with credit; one call per cell, kept until its Expires time and revalidated with
+   * If-Modified-Since) or 'open-meteo' (free tier is non-commercial; one call for all cells).
    */
   async weather(points) {
     if (!this.weatherEnabled || !Array.isArray(points) || !points.length) return null;
     const now = Date.now();
     const ttl = config.weatherCacheMin * 60000;
-    const keys = points.map((p) => ({ la: round(p.lat, 1), ln: round(p.lng, 1) })).map((g) => ({ ...g, k: `wx:${g.la},${g.ln}` }));
+    const provider = wxMet.providerOf();
+    const pk = provider === 'metno' ? 'wxm' : 'wx'; // a provider switch never reads the other's cells
+    const fresh = (at, value) => now - (at || 0) < ttl || (value && Number(value.exp) > now);
+    const keys = points.map((p) => ({ la: round(p.lat, 1), ln: round(p.lng, 1) })).map((g) => ({ ...g, k: `${pk}:${g.la},${g.ln}` }));
     const cells = new Map(); // k -> stored forecast
     const missing = new Map(); // k -> grid
+    const stale = new Map(); // k -> expired forecast (for If-Modified-Since)
     for (const g of keys) {
       if (cells.has(g.k) || missing.has(g.k)) continue;
       const mem = this.weatherCache.get(g.k);
-      if (mem && now - mem.at < ttl) { this.weatherCache.delete(g.k); this.weatherCache.set(g.k, mem); cells.set(g.k, mem.value); continue; }
+      if (mem && fresh(mem.at, mem.value)) { this.weatherCache.delete(g.k); this.weatherCache.set(g.k, mem); cells.set(g.k, mem.value); continue; }
       const hit = await this.repo.geoCacheGet(g.k).catch(() => null);
-      if (hit && hit.value && now - (hit.createdAt || 0) < ttl) { this._wxRemember(g.k, hit.value, hit.createdAt); cells.set(g.k, hit.value); continue; }
+      if (hit && hit.value && fresh(hit.createdAt, hit.value)) { this._wxRemember(g.k, hit.value, hit.createdAt); cells.set(g.k, hit.value); continue; }
+      const old = (mem && mem.value) || (hit && hit.value) || null;
+      if (old) stale.set(g.k, old);
       missing.set(g.k, g);
     }
     if (missing.size) {
       this.weatherTimes = this.weatherTimes.filter((x) => now - x < 60000);
-      if (this.weatherTimes.length < config.weatherPerMin) {
+      let list = [...missing.values()];
+      if (provider === 'metno') {
+        // One upstream call per cell: each one counts against the minute budget.
+        list = list.slice(0, Math.max(0, config.weatherPerMin - this.weatherTimes.length));
+        for (let i = 0; i < list.length; i++) this.weatherTimes.push(now);
+      } else if (this.weatherTimes.length < config.weatherPerMin) {
         this.weatherTimes.push(now);
-        const list = [...missing.values()];
-        const fetched = await this._weatherFetch(list);
+      } else {
+        list = [];
+      }
+      if (list.length) {
+        const fetched = provider === 'metno' ? await this._weatherFetchMet(list, stale) : await this._weatherFetch(list);
         if (fetched) {
           list.forEach((g, i) => {
             const v = fetched[i];
@@ -380,9 +447,40 @@ class GeoProxy {
       const idx = Math.floor((p.at - f.hourlyFrom) / 3600);
       if (idx < 0 || idx >= f.probs.length) return null;
       const n = (v) => (Number.isFinite(v) ? v : null);
+      if (n(f.probs[idx]) === null && n(f.codes[idx]) === null) return null;
       return { lat: round(p.lat, 5), lng: round(p.lng, 5), at: p.at, precipProb: n(f.probs[idx]), precipMm: n(f.mm[idx]), code: n(f.codes[idx]), tempC: n(f.temps[idx]) };
     });
-    return { points: out, source: 'Open-Meteo', attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)' };
+    return provider === 'metno'
+      ? { points: out, source: wxMet.SOURCE, attribution: wxMet.ATTRIBUTION }
+      : { points: out, source: 'Open-Meteo', attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)' };
+  }
+
+  /**
+   * 3.56 MET Norway: one call per grid cell (queued like every provider call), with the identifying
+   * User-Agent their terms require. A cell we still hold is revalidated (If-Modified-Since; 304 keeps
+   * it). Returns one stored forecast per cell (null where the call failed).
+   */
+  async _weatherFetchMet(cells, stale = new Map()) {
+    const base = wxMet.baseOf(config.weatherUrl);
+    const out = [];
+    for (const g of cells) {
+      const old = stale.get(g.k);
+      try {
+        const headers = { 'User-Agent': UA(), Accept: 'application/json' };
+        if (old && old.lm) headers['If-Modified-Since'] = old.lm;
+        const res = await this._queued(() => this.fetch(wxMet.urlOf(base, g.la, g.ln), { headers, signal: AbortSignal.timeout(8000) }));
+        const hdr = (name) => (res.headers && typeof res.headers.get === 'function' ? res.headers.get(name) : null);
+        const exp = wxMet.expiresMs(hdr('expires'));
+        if (res.status === 304 && old) { out.push({ ...old, exp }); continue; }
+        if (!res.ok) throw new Error(`upstream ${res.status}`);
+        const cell = wxMet.cellOf(await res.json());
+        out.push(cell ? { ...cell, exp, lm: hdr('last-modified') || null } : null);
+      } catch (e) {
+        this.log.warn('[geo] weather failed', String(e && e.message || e).replace(/[0-9.,-]{6,}/g, 'x'));
+        out.push(null);
+      }
+    }
+    return out;
   }
 
   _wxRemember(k, value, at) {

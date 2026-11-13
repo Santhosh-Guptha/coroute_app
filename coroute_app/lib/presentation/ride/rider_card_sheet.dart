@@ -22,6 +22,7 @@ import '../widgets/feature_switch.dart';
 import '../../domain/ride/pillion_seat.dart'; // 3.55 pillion seat
 import 'pillion_seat_sheet.dart';
 import '../social/rider_username_line.dart'; // 3.55 usernames
+import '../security/locked_cockpit_gate.dart';
 
 bool _isRiderCardShowing = false;
 
@@ -69,7 +70,9 @@ class RiderCard extends StatelessWidget {
     if (clean.isEmpty) return;
     final uri = Uri.parse('tel:$clean');
     if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!context.mounted) return;
+      // 3.56: another rider's number waits for the phone's unlock on the locked cockpit.
+      await callFromCockpit(context, clean, () => launchUrl(uri, mode: LaunchMode.externalApplication));
     } else if (context.mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cannot call $clean')));

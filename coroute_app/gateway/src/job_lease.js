@@ -19,6 +19,8 @@
  *   When a preferred node finds the lease held by a non-preferred node it asks for it (wantedAt); the
  *   holder hands it back at its next renew, after any run in progress finishes.
  *
+ * 'standby' (v3.56 DR node): never takes any lease (promotion changes the role and restarts).
+ *
  * Clocks: expiry uses wall-clock time; both VMs run chrony/NTP (OCI default). Skew well under the TTL
  * (60 s default) is harmless.
  */
@@ -35,7 +37,7 @@ class JobLease {
   constructor({ soda, role = 'all', node = os.hostname(), logger = console, clock = Date.now,
     ttlMs = 60000, heartbeatMs = 15000, graceMs = 120000, collection = COLLECTION, autoTick = true } = {}) {
     if (!soda) throw new Error('[lease] soda client required');
-    if (!['live', 'web', 'all'].includes(role)) throw new Error(`[lease] invalid role ${role}`);
+    if (!['live', 'web', 'all', 'standby'].includes(role)) throw new Error(`[lease] invalid role ${role}`);
     this.soda = soda; this.role = role; this.node = node; this.log = logger; this.clock = clock;
     this.ttlMs = ttlMs; this.heartbeatMs = heartbeatMs; this.graceMs = graceMs; this.collection = collection;
     // A restarted process is a new holder: it never mistakes its previous life's lease for its own.
@@ -156,6 +158,8 @@ class JobLease {
   }
 
   async _poll(job) {
+    // v3.56 standby (DR) node: never takes a lease, so it never runs a job while vm1 / vm2 serve.
+    if (this.role === 'standby') return;
     await this._init();
     let now = this.clock();
     const ttl = this.ttlMs;

@@ -58,6 +58,9 @@ const CATALOG = Object.freeze([
   f('speedLimits', 'Safety', 'Smart speed limits', 'Warns when over the road\'s limit, stricter near schools and hospitals.'),
   f('altitudeCare', 'Safety', 'High-altitude care', 'Acclimatisation reminders above 3,000 m and on fast climbs.'),
   f('nightCare', 'Safety', 'Night riding care', 'Earlier break prompts and stronger alerts after sunset.'),
+  // Round 4 road & safety intelligence (src/intel/; warnings read anonymous k-anonymous cells, phone-side rules)
+  f('hazardAhead', 'Safety', 'Hazard ahead warning', 'Gentle voice and chip 300-500 m before a spot where many riders braked hard, swerved, crashed or raised SOS.'),
+  f('longRideNudges', 'Safety', 'Long ride and night nudges', 'A stronger break nudge after 4 hours and a night riding notice (23:00-05:00). The 2 h break reminder is always on.'),
   // ---- Riding ----
   f('roadHazards', 'Riding', 'Live road warnings', 'Potholes and speed breakers reported by the lead, warned to the riders behind.'),
   f('roadHistory', 'Riding', 'Saved road reports', 'Road reports from earlier rides, shown on later rides of the same road.'),
@@ -68,6 +71,8 @@ const CATALOG = Object.freeze([
   f('engineCare', 'Riding', 'Engine care', 'Service reminders and engine care tips in the garage.'),
   f('rideAnalytics', 'Riding', 'Ride analytics', 'Personal ride numbers and charts after a ride.'),
   f('riskyStretch', 'Riding', 'Risky-stretch heads-up', 'Warns of stretches where many riders brake hard (anonymous, 10 riders or more).'),
+  f('roughRoadAhead', 'Riding', 'Rough road ahead', 'Low-priority heads-up before potholes and rough stretches many riders felt (at most one per 5 km).'),
+  f('twistyAhead', 'Riding', 'Twisty section ahead', 'Heads-up before twisty roads and ghats on the planned route: slow down.'),
   f('speedAudio', 'Riding', 'Lower music when speeding', 'Lowers music and other audio while the rider is over the speed limit.'),
   f('callAwareAlerts', 'Riding', 'Calls: hold ride voice, let critical alerts through', 'During a phone call ride announcements wait; crash, SOS and other critical alerts still play.'),
   // ---- Group ----
@@ -86,6 +91,7 @@ const CATALOG = Object.freeze([
   f('stretchAlert', 'Group', 'Group stretch alert', 'Tells the lead when the group spreads out more than the set distance.'),
   f('regroupSuggest', 'Group', 'Smart regroup point', 'Suggests a fuel, food or rest stop ahead where the group can gather.'),
   f('groupBreak', 'Group', 'Group break planner', 'Suggests one group break when several riders need rest (levels only).'),
+  f('fallingBehind', 'Group', 'Falling-behind alert', 'Tells the lead and sweep when a rider\'s gap keeps growing, before the group stretch alert.'),
   f('buddyPairs', 'Group', 'Buddy pairs', 'In large groups each rider watches one buddy, with a one-tap check.'),
   f('rollCall', 'Group', 'Start and arrival roll call', 'Who has joined at the start and who has arrived at the end, in the ride sheet.'),
   // ---- Places ----

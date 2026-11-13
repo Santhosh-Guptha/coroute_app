@@ -28,6 +28,7 @@ import '../safety/safety_settings_sheet.dart';
 import '../widgets/feature_switch.dart';
 import 'features_guide_screen.dart';
 import 'push_notifications_tile.dart';
+import 'road_safety_screen.dart';
 
 /// The one Settings screen, minimal by design (3.55, docs/SETTINGS_MINIMAL_v3.55.md).
 ///
@@ -278,6 +279,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       if (auth != null) _EmergencyRow(auth: auth, onTap: () => _push(const EditProfileScreen())),
                       _SpeedWarning(settings: s),
+                      // Round 4: hazard / rough road / twisty warnings, nudges, "Help make roads safer" (no switch here).
+                      _Row(
+                        key: const ValueKey('settings_road_safety'),
+                        icon: Icons.add_road_rounded,
+                        title: RoadSafetyScreen.title,
+                        subtitle: 'Hazard warnings, break nudges, help make roads safer',
+                        onTap: () => _push(const RoadSafetyScreen()),
+                      ),
                     ]),
                     _Section('Ride', [
                       _Row(

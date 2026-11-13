@@ -44,6 +44,8 @@ const { JobLease } = require('./job_lease');
 const { Mirror } = require('./mirror');
 const { FeatureFlags } = require('./feature_flags');
 const { siteOriginsOf, legacyHostRedirect } = require('./domains');
+const { Metrics, instrumentSoda } = require('./metrics');
+const { LoadShedder } = require('./load_shed');
 // Encrypted Object Storage backups (src/backups.js -> backup_jobs.js): startBackupJobs({ lease, repo, soda, logger })
 // registers 'backup-critical' and 'backup-full' on the job lease. Optional so a build without it still starts.
 const backupModule = (() => {
@@ -61,6 +63,9 @@ function createSoda() {
 async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore, mailTransport, smsProviders, smsFetch, pushImageStore } = {}) {
   // 3.57 security: every log line is redacted (tokens, passwords, OTPs, e-mails, phone numbers; src/redact.js).
   logger = require('./redact').redactingLogger(logger);
+  // v3.56: Prometheus metrics (GET /metrics, loopback / METRICS_ALLOW / METRICS_TOKEN only) and SODA call counters.
+  const metrics = new Metrics({ allow: config.metricsAllow, token: config.metricsToken });
+  soda = instrumentSoda(soda, metrics);
   // 3.57 security: protected fields (phones, emergency contact, medical ID, 2-step secrets) are encrypted at rest
   // with AES-256-GCM when DATA_ENC_KEY is set (src/field_crypto.js); every module reads them decrypted.
   const fieldCrypto = require('./field_crypto').fieldCryptoFromConfig(config, logger);
@@ -173,9 +178,15 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   if (migrate) await riderScore.init().catch((e) => logger.warn(`[rider-score] collection setup failed: ${e.message}`));
   const leaderboard = new (require('./leaderboard').Leaderboard)({ soda, repo, riderScore, flagsOf: () => featureFlags });
   network.publicRides = publicRides;
+  // Round 4 road & safety intelligence (src/intel/, docs/intelligence/): created here so it hears telemetry from the start;
+  // its routes are attached below (before the main router).
+  let intel = null;
 
   const app = express();
   app.disable('x-powered-by');
+  app.use(metrics.middleware());
+  // Never public: Caddy also answers 404 for /metrics from the internet. Before helmet / CORS (plain text).
+  app.get('/metrics', metrics.handler());
   // Only these proxies' X-Forwarded-For is believed (TRUST_PROXY; default loopback = this VM's Caddy).
   // VM2 also trusts VM1's private IP, so req.ip (and every IP rate limit) is the real client.
   app.set('trust proxy', config.trustProxy);
@@ -226,12 +237,20 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.use(cors(corsOrigins.length ? { origin: corsOrigins } : { origin: false }));
   // REDIRECT_LEGACY_HOST=true: website pages on the old host -> PUBLIC_ORIGIN (301). Never /api, /ws, /.well-known.
   app.use(legacyHostRedirect(config));
+  // v3.56 load shedding (src/load_shed.js): only non-essential reads, only under overload; never SOS, alerts, auth,
+  // ride telemetry, convoy routes or webhooks. Before body parsing, so a shed request costs nothing.
+  const shedder = new LoadShedder({ loop: metrics.loop, metrics,
+    dbQueue: () => (typeof rawSoda.queueLength === 'function' ? rawSoda.queueLength() : 0) });
+  app.use(shedder.middleware());
   // The Razorpay webhook is signed over the exact bytes it sends: keep them raw, and small (1 MB).
   app.use('/api/subscription/webhook', express.raw({ type: () => true, limit: '1mb' }));
   app.use('/api/membership/webhook', express.raw({ type: () => true, limit: '1mb' }));
   app.use(express.json({ limit: '2mb' }));
 
   const server = http.createServer(app);
+  // v3.56 keep-alive above Caddy's upstream idle timeout (60 s), headers timeout above that (Node's rule).
+  server.keepAliveTimeout = config.httpKeepAliveMs;
+  server.headersTimeout = config.httpKeepAliveMs + 5000;
   const startedAt = Date.now();
   const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery, emergencyGateway, publicRides });
   hub.rideLock = rideLock;
@@ -505,10 +524,27 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     app.use('/api/admin/email-wizard', requireAuth(gate), requireAdmin, ra.emailWizardRouter({ riders: riderAdmin }));
     app.use('/api/me/coupons', requireAuth(gate), ra.meCouponsRouter({ riders: riderAdmin }));
   }
+  // Round 6 business brain (src/business/, docs/intelligence/BUSINESS_ANALYTICS.md): nightly aggregates under the job
+  // lease, the web admin "Business" pages and "Servers", the weekly owner summary. MASTER_ADMIN only.
+  const business = require('./business').attachBusiness({ app, soda, rawSoda, repo, gate, lease, config, logger, metrics, studio: notifications.studio,
+    mailer: notifications.mailer, templates: notifications.templates, node: nodeName, ...(clock ? { clock } : {}) });
+  // "Send at each rider's best time" in the e-mail wizard reads the riders' preferred hour from the business brain.
+  notifications.studio.sendTimes = business.brain;
+  // ---------------------------------------------------------------------------------------------------------
+  // ROUND 6 app-agent mounts go here
+  // (routes reported by the Flutter / account / avatar / weather / risky-stretch agent are mounted in this block by
+  //  the lead; keep them BEFORE the main router below, whose requireAuth catch-all would answer first. Add each new
+  //  route to deploy/route_split.md: `node deploy/gen_caddy_routes.js --check` and test/route_split_356.test.js fail
+  //  on an unclassified route.)
+  // ---------------------------------------------------------------------------------------------------------
+  // Round 4 road & safety intelligence: consent, events, hazards, stops, ETAs, crash brain, admin pages' API.
+  intel = require('./intel/routes').attachIntel({ app, soda, repo, gate, lease, convoys, mirror, poiCells, logger, jwtSecret: config.jwtSecret, audit, ...(clock ? { clock } : {}) });
+  if (migrate) await intel.init().catch((e) => logger.warn(`[intel] collection setup failed: ${e.message}`));
+  intel.start();
   // 3.57 sessions & security endpoints (refresh, sign out, sign out everywhere, sessions list, password reset, re-auth,
   // e-mail change, 2-step verification). Before the main router (its requireAuth catch-all would answer first).
   const security = require('./security_routes').attachSecurityRoutes({ app, auth, gate, sessions, rideLock, logger, mailerOf: () => notifications.mailer });
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs, requireRecentAuth: security.requireRecentAuth, fieldCrypto, rideLock, securityMail: security.mail }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName, publicStats, diagLogs, requireRecentAuth: security.requireRecentAuth, fieldCrypto, rideLock, securityMail: security.mail, intel }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -540,7 +576,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Subscription expiry warnings (7/3/1 days) and rollback to community, hourly; started with retention.
   // `notify`: the neutral plan push ("Your plan ends on 12 Dec.", push.js SOCKET_EVENTS; Play payments policy).
   const subscriptions = new SubscriptionSweeper({ repo, auth, hub, logger, notify: (userId, payload) => (push ? push.onSocketEvent(userId, payload, { delivered: 0 }) : null) });
-  auth.onUserSeen = (user) => expireIfDue({ repo, auth, hub }, user);
+  auth.onUserSeen = (user) => { try { business.brain.observeOpen(user && user.userId); } catch { /* never in the way */ } return expireIfDue({ repo, auth, hub }, user); };
   // Every scheduled job that writes data or sends messages runs under a lease: exactly once per interval
   // across the nodes sharing this database. server.js calls retention.start() after listen().
   let jobsStarted = false;
@@ -559,8 +595,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     lease.run('auth-sessions-sweep', 6 * 60 * min, () => sessions.sweep(), { firstDelayMs: 15 * min });
     // Round 4: sign-ups never verified within REGISTER_PURGE_DAYS (7) are removed.
     lease.run('unverified-accounts-purge', 6 * 60 * min, () => auth.purgeUnverified(), { firstDelayMs: 20 * min });
+    // Round 6: documents of the compare-and-replace collections written before this release get their revision
+    // token (src/oracle/soda.js casRev), a few hundred per run, on the stored (raw) documents.
+    lease.run('cas-rev-seed', 24 * 60 * min, ({ signal } = {}) => require('./oracle/soda').seedMissingRevs(rawSoda, { signal, logger }), { firstDelayMs: 3 * min });
     notifications.startJobs();
     publicStats.start(lease);
+    intel.startJobs(lease);
+    business.startJobs();
     if (backupModule && typeof backupModule.startBackupJobs === 'function') {
       // Backups copy the stored (encrypted) documents as they are: the raw client, not the decrypting wrapper.
       backupModule.startBackupJobs({ lease, repo, soda: rawSoda, logger });
@@ -568,9 +609,39 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   };
   subscriptions.start = () => retention.start();
 
+  // v3.56 metrics sources read at scrape time (no work between scrapes).
+  metrics.source(() => {
+    const out = [
+      { name: 'coroute_ws_connections', help: 'Open WebSockets.', values: [[null, hub.wss.clients.size]] },
+      { name: 'coroute_ws_rooms', help: 'Convoy rooms with a socket on this node.', values: [[null, hub.rooms.size]] },
+      { name: 'coroute_convoy_rooms_loaded', help: 'Convoy rooms in memory.', values: [[null, convoys.rooms.size]] },
+      { name: 'coroute_ws_events_total', help: 'WebSocket hub counters (positions in/out, coalesced, dropped, batched frames, slow links, connections).', type: 'counter',
+        values: Object.entries(hub.stats).map(([k, v]) => [{ kind: k }, v]) },
+      { name: 'coroute_cache_db_reads_total', help: 'Database reads by the account and session caches.', type: 'counter',
+        values: [[{ cache: 'user_gate' }, gate.reads || 0], [{ cache: 'sessions' }, sessions.reads || 0]] },
+      { name: 'coroute_load_shedding', help: '1 while non-essential requests are being shed.', values: [[{ mode: shedder.mode }, shedder.mode === 'off' ? 0 : (shedder.shedding() ? 1 : 0)]] },
+      { name: 'coroute_node_info', help: 'This node (name, role, version); always 1.', values: [[{ node: nodeName, role: config.gatewayRole, version: require('../package.json').version }, 1]] },
+      { name: 'coroute_mirror_up', help: 'Mirror link to the peer gateway is up.', values: [[null, mirror.linked() ? 1 : 0]] },
+    ];
+    if (rawSoda && rawSoda.stats && typeof rawSoda.queueLength === 'function') {
+      out.push({ name: 'coroute_db_queue_length', help: 'Database calls waiting for a slot (ORACLE_MAX_INFLIGHT).', values: [[null, rawSoda.queueLength()]] });
+      out.push({ name: 'coroute_db_inflight', help: 'Database calls in flight (budgeted collections).', values: [[null, rawSoda.inFlight || 0]] });
+      out.push({ name: 'coroute_db_budget_total', help: 'Database budget counters.', type: 'counter', values: Object.entries(rawSoda.stats).map(([k, v]) => [{ kind: k }, v]) });
+    }
+    return out;
+  });
+
   async function shutdown() {
+    // v3.56 zero-downtime drain: 503 on /api/health/live first, keep serving for SHUTDOWN_DRAIN_MS so the load
+    // balancer moves new connections, then the usual stop (RECONNECT to every socket, flush, close).
+    if (config.shutdownDrainMs > 0) {
+      mirror.beginDrain();
+      await new Promise((r) => { const t = setTimeout(r, config.shutdownDrainMs); if (t.unref) t.unref(); });
+    }
+    metrics.stop();
     guardianPush?.stop();
     notifications.stop();
+    business.stop();
     featureFlags.stop();
     accessMode.stop();
     const leaseStopped = lease.stopAll({ waitMs: 8000 });
@@ -588,12 +659,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await convoys.flushAll();
     await timeline.idle();
     await audit.flush().catch(() => {});
+    await intel.stop().catch(() => {});
     if (typeof tracks.flush === 'function') await tracks.flush().catch(() => {});
     await leaseStopped.catch(() => {});
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { business, metrics, shedder, intel, rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

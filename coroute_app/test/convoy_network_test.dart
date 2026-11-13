@@ -139,11 +139,11 @@ void main() {
       rt.debugSink = (json) => out.add(Map<String, dynamic>.from(jsonDecode(json) as Map));
       rt.debugReceive(jsonEncode(hello(const ['ack', 'net1'])));
       rt.joinRoom(gid);
-      expect(out.lastWhere((m) => m['type'] == 'JOIN')['caps'], ['net1', 'pubride1']);
+      expect(out.lastWhere((m) => m['type'] == 'JOIN')['caps'], ['net1', 'pubride1', 'posbatch1']);
       // Reconnect: the JOIN sent after HELLO carries them again.
       rt.debugReceive(jsonEncode(hello(const ['ack', 'net1'])));
       expect(out.where((m) => m['type'] == 'JOIN').length, 2);
-      expect(out.lastWhere((m) => m['type'] == 'JOIN')['caps'], ['net1', 'pubride1']);
+      expect(out.lastWhere((m) => m['type'] == 'JOIN')['caps'], ['net1', 'pubride1', 'posbatch1']);
       // A 3.14 gateway never gets them.
       rt.debugReceive(jsonEncode(hello(const ['ack'])));
       expect(out.lastWhere((m) => m['type'] == 'JOIN').containsKey('caps'), isFalse);
