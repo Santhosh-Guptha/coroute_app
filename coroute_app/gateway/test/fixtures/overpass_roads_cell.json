@@ -1,0 +1,23 @@
+{
+  "note": "Synthetic Overpass answer (hand-made, not copied from OpenStreetMap) for the road cell tests.",
+  "elements": [
+    { "type": "way", "id": 1001, "tags": { "highway": "primary", "name": "Ghat Road", "maxspeed": "40", "lanes": "2", "lit": "yes" },
+      "geometry": [ { "lat": 17.3850, "lon": 78.4860 }, { "lat": 17.38525, "lon": 78.48625 }, { "lat": 17.3855, "lon": 78.4865 }, { "lat": 17.3860, "lon": 78.4868 }, { "lat": 17.3866, "lon": 78.4867 }, { "lat": 17.3870, "lon": 78.4862 } ] },
+    { "type": "way", "id": 1002, "tags": { "highway": "residential", "name": "Colony Lane", "oneway": "yes" },
+      "geometry": [ { "lat": 17.3855, "lon": 78.4865 }, { "lat": 17.3855, "lon": 78.4875 } ] },
+    { "type": "way", "id": 1003, "tags": { "highway": "trunk", "ref": "NH 44", "maxspeed": "100", "maxspeed:type": "sign", "oneway": "yes", "lanes": "3" },
+      "geometry": [ { "lat": 17.3840, "lon": 78.4850 }, { "lat": 17.3880, "lon": 78.4850 } ] },
+    { "type": "way", "id": 1004, "tags": { "highway": "service", "service": "parking_aisle" },
+      "geometry": [ { "lat": 17.3851, "lon": 78.4861 }, { "lat": 17.3852, "lon": 78.4862 } ] },
+    { "type": "way", "id": 1005, "tags": { "highway": "tertiary", "access": "private" },
+      "geometry": [ { "lat": 17.3851, "lon": 78.4861 }, { "lat": 17.3852, "lon": 78.4862 } ] },
+    { "type": "way", "id": 1006, "tags": { "highway": "footway" },
+      "geometry": [ { "lat": 17.3851, "lon": 78.4861 }, { "lat": 17.3852, "lon": 78.4862 } ] },
+    { "type": "way", "id": 1007, "tags": { "highway": "secondary", "source:maxspeed": "IN:urban" },
+      "geometry": [ { "lat": 17.3860, "lon": 78.4868 }, { "lat": 17.3860, "lon": 78.4990 }, { "lat": 17.3861, "lon": 78.5100 } ] },
+    { "type": "node", "id": 2001, "lat": 17.3857, "lon": 78.4866, "tags": { "amenity": "school", "name": "Model School" } },
+    { "type": "way", "id": 2002, "center": { "lat": 17.3862, "lon": 78.4869 }, "tags": { "amenity": "hospital" } },
+    { "type": "count", "id": 0, "tags": { "nodes": "0", "ways": "240", "relations": "0", "total": "240" } },
+    { "type": "count", "id": 0, "tags": { "nodes": "0", "ways": "2", "relations": "0", "total": "2" } }
+  ]
+}

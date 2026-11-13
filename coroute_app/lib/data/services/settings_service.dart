@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
+import '../../domain/audio/voice_clarity.dart';
 import '../../domain/tracking/screen_awake_policy.dart';
 import 'rider_score_service.dart';
 
@@ -144,6 +145,11 @@ class SettingsService extends ChangeNotifier {
   bool _batterySaver = false;
   bool _hardwarePtt = false;
   int _speedLimitWarningKmh = 0;
+  // Round 7 (curve and speed-limit prediction; docs/features_355/curve_and_speed_limit.md).
+  bool _curveWarnings = true;
+  bool _roadLimitDisplay = true;
+  bool _roadOverspeedWarning = true;
+  int _roadOverspeedTolerancePct = 10;
   bool _autoReroute = true;
 
   bool get lowData => _lowData;
@@ -213,6 +219,62 @@ class SettingsService extends ChangeNotifier {
   /// My own speed warning in km/h (0 = use the group limit, off if none).
   int get speedLimitWarningKmh => _speedLimitWarningKmh;
 
+  /// Round 7: "Sharp bend ahead" voice + chip (advisory; on by default).
+  bool get curveWarnings => _curveWarnings;
+
+  /// Round 7: the road's speed limit sign in the cockpit (from the map, or estimated "~").
+  bool get roadLimitDisplay => _roadLimitDisplay;
+
+  /// Round 7: warn when over the road's limit (voice once, then the sign only).
+  bool get roadOverspeedWarning => _roadOverspeedWarning;
+
+  /// Round 7: how far over the limit before the warning, in percent (5, 10, 15 or 20; never less than 5 km/h).
+  int get roadOverspeedTolerancePct => _roadOverspeedTolerancePct;
+
+  static const String keyCurveWarnings = 'road_curve_warnings';
+  static const String keyRoadLimitDisplay = 'road_limit_display';
+  static const String keyRoadOverspeedWarning = 'road_overspeed_warning';
+  static const String keyRoadOverspeedTolerancePct = 'road_overspeed_tolerance_pct';
+
+  Future<void> _saveRoadPref(String key, Object value) async {
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      if (value is bool) {
+        await prefs.setBool(key, value);
+      } else if (value is int) {
+        await prefs.setInt(key, value);
+      }
+    } catch (e) {
+      debugPrint('settings save $key note: $e');
+    }
+  }
+
+  Future<void> setCurveWarnings(bool value) async {
+    if (value == _curveWarnings) return;
+    _curveWarnings = value;
+    await _saveRoadPref(keyCurveWarnings, value);
+  }
+
+  Future<void> setRoadLimitDisplay(bool value) async {
+    if (value == _roadLimitDisplay) return;
+    _roadLimitDisplay = value;
+    await _saveRoadPref(keyRoadLimitDisplay, value);
+  }
+
+  Future<void> setRoadOverspeedWarning(bool value) async {
+    if (value == _roadOverspeedWarning) return;
+    _roadOverspeedWarning = value;
+    await _saveRoadPref(keyRoadOverspeedWarning, value);
+  }
+
+  Future<void> setRoadOverspeedTolerancePct(int pct) async {
+    final v = pct.clamp(5, 20);
+    if (v == _roadOverspeedTolerancePct) return;
+    _roadOverspeedTolerancePct = v;
+    await _saveRoadPref(keyRoadOverspeedTolerancePct, v);
+  }
+
   /// Auto re-route: a new route from where I am when I leave the planned one (always on, 3.55).
   bool get autoReroute => _autoReroute;
 
@@ -253,6 +315,10 @@ class SettingsService extends ChangeNotifier {
       _batterySaver = prefs.getBool(keyBatterySaver) ?? false;
       _hardwarePtt = prefs.getBool(keyHardwarePtt) ?? false;
       _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
+      _curveWarnings = prefs.getBool(keyCurveWarnings) ?? true;
+      _roadLimitDisplay = prefs.getBool(keyRoadLimitDisplay) ?? true;
+      _roadOverspeedWarning = prefs.getBool(keyRoadOverspeedWarning) ?? true;
+      _roadOverspeedTolerancePct = (prefs.getInt(keyRoadOverspeedTolerancePct) ?? 10).clamp(5, 20);
       _autoReroute = true;
       await _migrateSafetyDefaults(prefs);
     } catch (e) {
@@ -623,4 +689,36 @@ class SettingsService extends ChangeNotifier {
 
   /// Fixed to 'auto' (Nov 11): kept for callers; any side is ignored and nothing is stored.
   Future<void> setGiveWaySide(String value) async {}
+
+  // ---- Round 8 voice clarity (docs/features_355/voice_clarity.md). Intercom options sheet > Voice clarity.
+  static const String keyNoiseReduction = 'noise_reduction_v1';
+  static const String keyWindNoiseMode = 'wind_noise_mode_v1';
+  NoiseReduction? _noiseReduction;
+  bool? _windNoiseMode;
+
+  /// "Noise reduction": Strong (default) / Normal / Off. Off still keeps the voice gate and level control
+  /// ("Clean up my voice" stays always on).
+  NoiseReduction get noiseReduction => _noiseReduction ?? NoiseReduction.parse(_prefs?.getString(keyNoiseReduction));
+
+  Future<void> setNoiseReduction(NoiseReduction value) async {
+    if (value == noiseReduction && _noiseReduction != null) return;
+    _noiseReduction = value;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setString(keyNoiseReduction, value.storage);
+    } catch (e) {
+      debugPrint('settings save $keyNoiseReduction note: $e');
+    }
+  }
+
+  /// "Wind-noise mode" (default on): wind gusts are ducked fast (10 ms detector) while nobody speaks.
+  bool get windNoiseMode => _windNoiseMode ?? _prefs?.getBool(keyWindNoiseMode) ?? true;
+
+  Future<void> setWindNoiseMode(bool value) async {
+    if (value == windNoiseMode && _windNoiseMode != null) return;
+    _windNoiseMode = value;
+    notifyListeners();
+    await _save(keyWindNoiseMode, value);
+  }
 }
