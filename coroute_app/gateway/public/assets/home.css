@@ -60,27 +60,33 @@
   :root:not([data-theme="light"]) .hx-r--c { fill: #D88AA6; } :root:not([data-theme="light"]) .hx-r--d { fill: #E0B15A; } :root:not([data-theme="light"]) .hx-r--e { fill: #E9A55B; }
 }
 /* Legibility: the page colour behind the words, fading out toward the road */
-/* Phones: the words sit on the page colour and the road runs underneath them, in its own band. */
-.hx { --hx-band: clamp(300px, 70vw, 440px); }
-.hx__scene { top: auto; height: calc(var(--hx-band) + 120px); }
+/* Phones and tablets (round 7): the moving road is a band at the very top, under the see-through header, and the
+   words start right below it on the page colour. The band height is reserved here, so nothing shifts when the
+   scene starts. */
+.hx { --hx-band: clamp(190px, 54vw, 400px); }
+.hx__scene { bottom: auto; height: calc(var(--header-h) + var(--hx-band)); }
 .hx__scrim {
-  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  position: absolute; inset: 0 0 auto; height: calc(var(--header-h) + var(--hx-band) + 1px); z-index: -1; pointer-events: none;
   background:
-    linear-gradient(180deg, var(--c-bg) calc(100% - var(--hx-band) - 120px), color-mix(in srgb, var(--c-bg) 70%, transparent) calc(100% - var(--hx-band) - 40px), transparent calc(100% - var(--hx-band) + 60px)),
-    linear-gradient(0deg, var(--c-bg) 0%, transparent 14%);
+    linear-gradient(180deg, color-mix(in srgb, var(--c-bg) 55%, transparent) 0, transparent calc(var(--header-h) + 24px)),
+    linear-gradient(0deg, var(--c-bg) 0%, color-mix(in srgb, var(--c-bg) 60%, transparent) 14%, transparent 38%);
 }
-@media (max-width: 899px) { .hx { padding-bottom: var(--hx-band); } }
+@media (max-width: 899px) {
+  .hx { min-height: 0; padding: calc(var(--header-h) + var(--hx-band) + 4px) 0 clamp(36px, 6vw, 64px); }
+}
 @media (min-width: 900px) {
   .hx { align-items: center; padding-bottom: clamp(72px, 12vh, 140px); }
-  .hx__scene { top: 0; height: auto; }
+  .hx__scene { bottom: 0; height: auto; }
   .hx__scrim {
+    inset: 0; height: auto;
     background:
       linear-gradient(90deg, color-mix(in srgb, var(--c-bg) 94%, transparent) 0%, color-mix(in srgb, var(--c-bg) 80%, transparent) 34%, transparent 60%),
       linear-gradient(0deg, var(--c-bg) 0%, transparent 16%);
   }
 }
 @supports not (background: color-mix(in srgb, red 50%, transparent)) {
-  .hx__scrim { background: linear-gradient(180deg, var(--c-bg) 0%, var(--c-bg) 40%, transparent 70%); }
+  .hx__scrim { background: linear-gradient(0deg, var(--c-bg) 0%, transparent 30%); }
+  @media (min-width: 900px) { .hx__scrim { background: linear-gradient(90deg, var(--c-bg) 0%, var(--c-bg) 30%, transparent 62%); } }
 }
 .hx__inner { position: relative; }
 .hx__kicker {
@@ -558,32 +564,6 @@
   .motto__pillars a, .rv-card, .fx-card, .px-card, .hp-numbers__list > div, .px-solo, .hb-card, .gx-list li, .gx-plan, .hp-count { border: 1px solid CanvasText; }
 }
 
-/* ---------- 3.56 hero with real app screens ---------- */
-.hx--phones { min-height: 0; padding-bottom: clamp(40px, 6vw, 72px); }
-.hx--phones .hx__inner { display: grid; gap: clamp(32px, 5vw, 56px); align-items: center; }
-.hx--phones .hx__title { max-width: 12ch; }
-.hx__phones { position: relative; display: flex; justify-content: center; align-items: flex-end; width: 100%; max-width: 560px; margin: 0 auto; padding: 8px 0 12px; }
-.hx__phones .dev { flex: none; }
-.hx__phones .dev--front { position: relative; z-index: 2; width: 44%; }
-.hx__phones .dev--back { width: 36%; margin-bottom: 6%; }
-.hx__phones .dev--left { margin-right: -9%; z-index: 1; }
-.hx__phones .dev--right { margin-left: -9%; z-index: 1; }
-@media (max-width: 899px) {
-  .hx--phones .hx__scene { height: 62%; }
-  .hx--phones .hx__scrim { background: linear-gradient(180deg, var(--c-bg) 0%, var(--c-bg) 42%, color-mix(in srgb, var(--c-bg) 40%, transparent) 70%, transparent 100%), linear-gradient(0deg, var(--c-bg) 0%, transparent 10%); }
-}
-@media (max-width: 599px) {
-  .hx__phones .dev--front { width: 47%; }
-  .hx__phones .dev--back { width: 37%; }
-}
-@media (min-width: 900px) {
-  .hx--phones { min-height: min(100svh, 860px); padding-bottom: clamp(56px, 8vh, 96px); }
-  .hx--phones .hx__inner { grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); }
-}
-@media (min-width: 900px) and (max-width: 1099px) {
-  .hx--phones .hx__lead-more { display: none; }
-}
-
 /* ---------- 3.56 six differentiators ---------- */
 .sx { padding-top: clamp(48px, 6vw, 88px); }
 .sx-grid { display: grid; gap: var(--sp-16); margin-top: clamp(28px, 4vw, 48px); }
@@ -599,32 +579,6 @@
 .sx-card p { color: var(--c-text-2); font-size: var(--fs-small); line-height: var(--lh-snug); }
 .sx-card--sos { background: linear-gradient(160deg, var(--c-red-soft), var(--c-surface) 62%); }
 .sx-card--amber { background: linear-gradient(160deg, var(--c-safety-light), var(--c-surface) 62%); }
-
-/* ---------- 3.56 screens gallery (scroll-snap; site.js [data-gallery] adds the arrow buttons) ---------- */
-.gal { overflow: hidden; }
-.gal__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-24); }
-.gal__nav { display: flex; gap: var(--sp-8); }
-.gal__btn {
-  display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%;
-  background: var(--c-surface); border: 1px solid var(--c-border-strong); color: var(--c-text);
-  transition: border-color var(--d-fast) var(--ease), color var(--d-fast) var(--ease), opacity var(--d-fast) var(--ease);
-}
-.gal__btn:hover:not(:disabled) { border-color: var(--c-brand); color: var(--c-brand); }
-.gal__btn:disabled { opacity: .4; cursor: default; }
-.gal__viewport { margin-top: clamp(28px, 4vw, 48px); }
-.gal__track {
-  --gal-pad: max(var(--gutter), calc((100vw - var(--container)) / 2 + var(--gutter)));
-  display: flex; gap: clamp(16px, 2.4vw, 28px); overflow-x: auto; overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory; scroll-padding-inline: var(--gal-pad); padding: 8px var(--gal-pad) 28px;
-  scrollbar-width: thin; scrollbar-color: var(--c-border-strong) transparent;
-}
-.gal__track:focus-visible { outline-offset: -3px; }
-.gal__slide { flex: none; width: min(64vw, 248px); scroll-snap-align: start; }
-.gal__slide .dev { width: 100%; }
-.gal__cap { margin-top: var(--sp-16); }
-.gal__cap h3 { font-size: var(--fs-h4); }
-.gal__cap p { margin-top: 4px; color: var(--c-text-2); font-size: var(--fs-small); line-height: var(--lh-snug); }
-@media (prefers-reduced-motion: no-preference) { .gal__track { scroll-behavior: smooth; } }
 
 /* ---------- 3.56 Why CoRoute: comparison table (cards on phones) ---------- */
 .cmp__wrap { margin-top: clamp(28px, 4vw, 48px); border-radius: var(--r-xl); border: 1px solid var(--c-border); background: var(--c-surface); overflow: hidden; }
@@ -661,11 +615,49 @@
   .cmp__mark { margin-right: 0; }
 }
 
-/* ---------- 3.56 real screenshots in the Safe and Memorable sections ---------- */
-.hp-shot { margin: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-16); }
-.hp-shot .dev--lg { width: min(70vw, 290px); }
-.hp-shot figcaption { max-width: 22rem; text-align: center; font-size: var(--fs-xs); color: var(--c-text-3); line-height: var(--lh-snug); }
-.hp-safe .hp-shot figcaption { color: inherit; opacity: .78; }
+/* ---------- Round 7: the Safe and Memorable sections without phone screenshots ---------- */
+/* Safe: who hears an SOS. The section is always a night band, so the colours are fixed. */
+.hp-relay { margin: 0; display: grid; gap: var(--sp-24); justify-items: center; width: 100%; max-width: 26rem; margin-inline: auto; }
+.hp-relay__core { position: relative; width: 168px; height: 168px; display: grid; place-items: center; }
+.hp-relay__sos { position: relative; z-index: 1; width: 88px; height: 88px; display: grid; place-items: center; border-radius: 50%; background: #D93A2F; color: #FFFFFF; box-shadow: 0 0 0 6px rgba(217, 58, 47, .22); }
+.hp-relay__sos .icon { width: 40px; height: 40px; }
+.hp-relay__ring { position: absolute; inset: 22px; border-radius: 50%; border: 2px solid rgba(255, 138, 128, .5); }
+.hp-relay__ring--2 { inset: 0; border-color: rgba(255, 138, 128, .22); }
+@media (prefers-reduced-motion: no-preference) {
+  .hp-relay__ring { animation: hp-relay-ping 3.2s var(--ease) infinite; }
+  .hp-relay__ring--2 { animation-delay: .5s; }
+  @keyframes hp-relay-ping { 0%, 100% { transform: scale(.94); opacity: .55; } 50% { transform: scale(1.04); opacity: 1; } }
+}
+.hp-relay__list { display: grid; gap: var(--sp-12); width: 100%; }
+.hp-relay__list li { display: grid; grid-template-columns: 40px 1fr; gap: var(--sp-12); align-items: center; padding: var(--sp-12) var(--sp-16); border-radius: var(--r-lg); background: #242932; border: 1px solid #2F3540; color: #CFCBC3; font-size: var(--fs-small); line-height: var(--lh-snug); }
+.hp-relay__list .icon { width: 40px; height: 40px; padding: 10px; border-radius: 50%; background: rgba(95, 179, 196, .14); color: #5FB3C4; }
+.hp-relay__list b { color: #E7E3DC; }
+.hp-relay figcaption { max-width: 22rem; text-align: center; font-size: var(--fs-xs); line-height: var(--lh-snug); color: #CFCBC3; opacity: .78; }
+@media (min-width: 640px) and (max-width: 1023px) {
+  .hp-relay { max-width: none; }
+  .hp-relay__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Memorable: an example trip report as a card */
+.hp-trip { margin: 0; display: grid; gap: var(--sp-16); justify-items: center; width: 100%; max-width: 30rem; margin-inline: auto; }
+.hp-trip__card { width: 100%; padding: clamp(16px, 2.4vw, 24px); border-radius: var(--r-xl); background: var(--c-surface); border: 1px solid var(--c-border); box-shadow: var(--shadow-md); }
+.hp-trip__tag { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-xs); font-weight: 800; letter-spacing: .02em; color: var(--c-text-2); }
+.hp-trip__tag .icon { width: 18px; height: 18px; color: var(--c-brand); }
+.hp-trip__map { display: block; width: 100%; height: auto; aspect-ratio: 400 / 220; margin-top: var(--sp-12); border-radius: var(--r-lg); background: var(--c-surface-2); }
+.hp-trip__grid { fill: none; stroke: var(--c-border); stroke-width: 1; }
+.hp-trip__r { fill: none; stroke-width: 4; stroke-linecap: round; }
+.hp-trip__r--a { stroke: #2B7A8C; } .hp-trip__r--b { stroke: #D9822B; } .hp-trip__r--c { stroke: #B5577A; }
+.hp-trip__stop { fill: var(--c-surface); stroke: var(--c-text-2); stroke-width: 3; }
+.hp-trip__start { fill: #3E8E5E; stroke: var(--c-surface); stroke-width: 3; }
+.hp-trip__end { fill: var(--c-text); stroke: var(--c-surface); stroke-width: 3; }
+:root[data-theme="dark"] .hp-trip__r--a { stroke: #5FB3C4; } :root[data-theme="dark"] .hp-trip__r--b { stroke: #E9A55B; } :root[data-theme="dark"] .hp-trip__r--c { stroke: #D88AA6; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hp-trip__r--a { stroke: #5FB3C4; } :root:not([data-theme="light"]) .hp-trip__r--b { stroke: #E9A55B; } :root:not([data-theme="light"]) .hp-trip__r--c { stroke: #D88AA6; }
+}
+.hp-trip__stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-12); margin-top: var(--sp-16); }
+@media (min-width: 480px) { .hp-trip__stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.hp-trip__stats dt { font-size: var(--fs-xs); font-weight: 700; color: var(--c-text-3); }
+.hp-trip__stats dd { margin: 2px 0 0; font-size: var(--fs-h4); font-weight: 800; color: var(--c-text); white-space: nowrap; }
+.hp-trip figcaption { max-width: 22rem; text-align: center; font-size: var(--fs-xs); color: var(--c-text-3); line-height: var(--lh-snug); }
 .hp-secure__links { margin-top: var(--sp-20); }
 .hp-secure__links .link-arrow { margin-top: 0; }
 .px-note { margin-top: var(--sp-24); }

@@ -416,7 +416,7 @@ test('website index contains community stories container and small square checkb
 // ---------------------------------------------------------------------------
 test('home page: touring pitch, safe / secure / memorable sections, moderated reviews, no invented proof', async () => {
   const html = await (await fetch(base + '/')).text();
-  for (const id of ['standout', 'screens', 'compare', 'features', 'long-haul', 'safe', 'secure', 'memorable', 'how', 'pricing', 'numbers', 'reviews', 'faq', 'feedback']) {
+  for (const id of ['standout', 'compare', 'features', 'long-haul', 'safe', 'secure', 'memorable', 'how', 'pricing', 'numbers', 'reviews', 'faq', 'feedback']) {
     assert.ok(html.includes(`id="${id}"`), `home: section #${id}`);
   }
   assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, 'home: exactly one h1');

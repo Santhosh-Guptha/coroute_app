@@ -42,11 +42,12 @@
 
   <main class="site-main" id="main" tabindex="-1">
 
-    <!-- Hero (3.56): the motto, the strongest true differentiators and real app screens in phone frames.
-         The mountain drawing is a static backdrop; the screens are rendered from the app's v3.55 design (demo riders). -->
-    <section class="hx hx--phones" aria-labelledby="hero-title">
-      <div class="hx__scene" aria-hidden="true">
-        <svg class="hx__poster" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" focusable="false">
+    <!-- Hero (round 7): the motto over the moving convoy. A group of riders travels a winding mountain road
+         (assets/hero3d.js, WebGL, loaded late by home.js). The drawing below is the first frame: it is what shows
+         before the scene is ready, with reduced motion, on save-data and when WebGL is missing. No phone screens. -->
+    <section class="hx" aria-labelledby="hero-title">
+      <div class="hx__scene" data-hero3d data-src="/assets/hero3d.js" data-state="poster" role="img" aria-label="Illustration: a group of six riders, lead in front and sweeper at the back, travelling together along a winding mountain road.">
+        <svg class="hx__poster" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
           <defs>
             <linearGradient id="hx-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="hx-sky-top"/><stop offset="0.62" class="hx-sky-hor"/></linearGradient>
           </defs>
@@ -54,29 +55,29 @@
           <path class="hx-m3" d="M0 470 L120 410 L230 445 L380 352 L520 432 L640 386 L800 300 L930 402 L1060 338 L1200 414 L1330 334 L1460 402 L1600 360 V900 H0Z"/>
           <path class="hx-m2" d="M0 566 L150 476 L300 546 L460 452 L620 546 L760 486 L880 566 L1040 478 L1200 548 L1380 466 L1600 546 V900 H0Z"/>
           <path class="hx-m1" d="M0 690 L180 604 L360 696 L520 646 L700 726 L860 770 L1100 700 L1280 646 L1440 696 L1600 626 V900 H0Z"/>
+          <path class="hx-road" d="M740 900 C 860 800, 1040 742, 990 650 C 965 602, 1005 560, 1020 528 L1030 528 C 1020 562, 990 604, 1018 650 C 1086 760, 980 820, 1080 900 Z"/>
+          <path class="hx-route" d="M910 900 C 960 820, 1070 752, 1004 650 C 982 606, 1010 560, 1025 528"/>
+          <circle class="hx-r hx-r--a" cx="936" cy="852" r="13"/>
+          <circle class="hx-r hx-r--b" cx="990" cy="786" r="11"/>
+          <circle class="hx-r hx-r--c" cx="1026" cy="724" r="9"/>
+          <circle class="hx-r hx-r--d" cx="1010" cy="668" r="7.5"/>
+          <circle class="hx-r hx-r--e" cx="999" cy="622" r="6"/>
         </svg>
       </div>
       <div class="hx__scrim" aria-hidden="true"></div>
       <div class="container hx__inner">
-        <div class="hx__words">
-          <p class="hx__kicker"><span class="hx__kicker-dot" aria-hidden="true"></span>Safety-first app for group and solo riders</p>
-          <h1 class="hx__title" id="hero-title">Ride Together. <span>Stay Safe.</span></h1>
-          <p class="hx__lead">Crash detection with a 30-second check, SOS that still gets through when the signal fades, siren alerts when your earbuds block the road, and a live intercom for the whole group.<span class="hx__lead-more"> Family can follow along from any browser.</span></p>
-          <div class="hx__cta">
-            <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
-            <!--ios--><a class="btn btn--secondary btn--lg" href="/get#ios"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
-            <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
-            <a class="btn btn--ghost btn--lg" href="/how-it-works">How it works</a>
-          </div>
-          <p class="hx__free"><a href="#community-free"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg><span><b>Community:</b> solo riding and every safety feature are free.</span></a></p>
-          <p class="hx__note"><!--ios-->Android 6.0 or newer and iOS 14.0 or newer.<!--/ios--><!--no-ios-->Android 6.0 or newer. iOS app: building now, coming soon.<!--/no-ios--> No ads, no trackers.</p>
-          <p class="hx__live" id="live-now" data-live-now hidden><span class="hx__pulse" aria-hidden="true"></span><span id="live-now-text"></span></p>
+        <p class="hx__kicker"><span class="hx__kicker-dot" aria-hidden="true"></span>Safety-first app for group and solo riders</p>
+        <h1 class="hx__title" id="hero-title">Ride Together. <span>Stay Safe.</span></h1>
+        <p class="hx__lead">Crash detection with a 30-second check, SOS that still gets through when the signal fades, siren alerts when your earbuds block the road, and a live intercom for the whole group.<span class="hx__lead-more"> Family can follow along from any browser.</span></p>
+        <div class="hx__cta">
+          <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
+          <!--ios--><a class="btn btn--secondary btn--lg" href="/get#ios"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
+          <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
+          <a class="btn btn--ghost btn--lg" href="/how-it-works">How it works</a>
         </div>
-        <div class="hx__phones">
-          <figure class="dev dev--back dev--left"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/ride-320.avif 320w, /assets/screens/ride-480.avif 480w, /assets/screens/ride-636.avif 636w" sizes="(min-width: 1024px) 220px, (min-width: 600px) 180px, 32vw"><source type="image/webp" srcset="/assets/screens/ride-320.webp 320w, /assets/screens/ride-480.webp 480w, /assets/screens/ride-636.webp 636w" sizes="(min-width: 1024px) 220px, (min-width: 600px) 180px, 32vw"><img src="/assets/screens/ride-480.png" width="636" height="1386" alt="CoRoute ride screen: five riders of one group on a live map, each with a 3D bike marker, a speed of 42 km/h under a 60 limit, and Hold to talk and SOS buttons" fetchpriority="high" decoding="async"></picture></figure>
-          <figure class="dev dev--front"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/crash-320.avif 320w, /assets/screens/crash-480.avif 480w, /assets/screens/crash-636.avif 636w" sizes="(min-width: 1024px) 260px, (min-width: 600px) 210px, 40vw"><source type="image/webp" srcset="/assets/screens/crash-320.webp 320w, /assets/screens/crash-480.webp 480w, /assets/screens/crash-636.webp 636w" sizes="(min-width: 1024px) 260px, (min-width: 600px) 210px, 40vw"><img src="/assets/screens/crash-480.png" width="636" height="1386" alt="CoRoute crash check: Possible crash. Are you OK? A ring counts down 24 seconds left, with I'm OK and Need help buttons" fetchpriority="high" decoding="async"></picture></figure>
-          <figure class="dev dev--back dev--right"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/sirens-320.avif 320w, /assets/screens/sirens-480.avif 480w, /assets/screens/sirens-636.avif 636w" sizes="(min-width: 1024px) 220px, (min-width: 600px) 180px, 32vw"><source type="image/webp" srcset="/assets/screens/sirens-320.webp 320w, /assets/screens/sirens-480.webp 480w, /assets/screens/sirens-636.webp 636w" sizes="(min-width: 1024px) 220px, (min-width: 600px) 180px, 32vw"><img src="/assets/screens/sirens-480.png" width="636" height="1386" alt="CoRoute siren alert: Ambulance siren close by. Give way. Playing in your earbuds" fetchpriority="high" decoding="async"></picture></figure>
-        </div>
+        <p class="hx__free"><a href="#community-free"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg><span><b>Community:</b> solo riding and every safety feature are free.</span></a></p>
+        <p class="hx__note"><!--ios-->Android 6.0 or newer and iOS 14.0 or newer.<!--/ios--><!--no-ios-->Android 6.0 or newer. iOS app: building now, coming soon.<!--/no-ios--> No ads, no trackers.</p>
+        <p class="hx__live" id="live-now" data-live-now hidden><span class="hx__pulse" aria-hidden="true"></span><span id="live-now-text"></span></p>
       </div>
     </section>
 
@@ -239,69 +240,6 @@
     </section>
     <!-- /leaderboard -->
 
-    <!-- Screens (3.56): a scroll-snap gallery of real app screens. Swipe or scroll on phones; arrow buttons and the
-         keyboard on larger screens (site.js [data-gallery]). Images are lazy, AVIF/WebP with a PNG fallback. -->
-    <section class="section section--surface gal" id="screens" aria-labelledby="screens-title">
-      <div class="container">
-        <div class="gal__head">
-          <div class="hp-head">
-            <p class="eyebrow">Inside the app</p>
-            <h2 id="screens-title">See what you get on the road.</h2>
-            <p>Big, calm screens made for a handlebar mount and gloved thumbs. Shown with demo riders.</p>
-          </div>
-          <div class="gal__nav" data-gallery-nav hidden>
-            <button class="gal__btn" type="button" data-gallery-prev aria-controls="gallery-track" aria-label="Previous screens"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-chevron-left"/></svg></button>
-            <button class="gal__btn" type="button" data-gallery-next aria-controls="gallery-track" aria-label="Next screens"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-chevron-right"/></svg></button>
-          </div>
-        </div>
-      </div>
-      <div class="gal__viewport" data-gallery role="region" aria-roledescription="carousel" aria-label="CoRoute app screens">
-        <div class="gal__track" id="gallery-track" tabindex="0" aria-label="App screens, scroll sideways">
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="1 of 10: Ride together">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/ride-320.avif 320w, /assets/screens/ride-480.avif 480w, /assets/screens/ride-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/ride-320.webp 320w, /assets/screens/ride-480.webp 480w, /assets/screens/ride-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/ride-480.png" width="636" height="1386" alt="CoRoute ride screen: five riders on a live map with 3D bike markers, speed 42 km/h under a 60 limit, the next stop and Hold to talk and SOS buttons" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Ride together</h3><p>Your whole group on one live map, in road order, with lead and sweeper.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="2 of 10: Crash detection">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/crash-320.avif 320w, /assets/screens/crash-480.avif 480w, /assets/screens/crash-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/crash-320.webp 320w, /assets/screens/crash-480.webp 480w, /assets/screens/crash-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/crash-480.png" width="636" height="1386" alt="CoRoute crash check: Possible crash. Are you OK? 24 seconds left, with I'm OK and Need help buttons" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Crash detection</h3><p>A 30-second check after a hard fall. Answer, or your group is alerted.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="3 of 10: SOS in one hold">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/sos-320.avif 320w, /assets/screens/sos-480.avif 480w, /assets/screens/sos-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/sos-320.webp 320w, /assets/screens/sos-480.webp 480w, /assets/screens/sos-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/sos-480.png" width="636" height="1386" alt="CoRoute SOS screen: a large SOS button being held, Hold 3 s to send, and who will be alerted: your group, two emergency contacts and your safety card" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>SOS in one hold</h3><p>Hold for three seconds. Your group and emergency contacts are told.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="4 of 10: Siren alerts">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/sirens-320.avif 320w, /assets/screens/sirens-480.avif 480w, /assets/screens/sirens-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/sirens-320.webp 320w, /assets/screens/sirens-480.webp 480w, /assets/screens/sirens-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/sirens-480.png" width="636" height="1386" alt="CoRoute siren alert on the ride map: Ambulance siren close by. Slow down and keep left. Give way. Playing in your earbuds" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Siren alerts</h3><p>Ambulance close by? Told in your earbuds, even with noise cancelling.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="5 of 10: Live intercom">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/intercom-320.avif 320w, /assets/screens/intercom-480.avif 480w, /assets/screens/intercom-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/intercom-320.webp 320w, /assets/screens/intercom-480.webp 480w, /assets/screens/intercom-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/intercom-480.png" width="636" height="1386" alt="CoRoute intercom: hands-free is on, Asha the lead is talking, four riders listening, and the note that voice goes live to the group and nothing is recorded" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Live intercom</h3><p>Push-to-talk or hands-free, to everyone or one rider. Never recorded.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="6 of 10: Never lose the group">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/group-320.avif 320w, /assets/screens/group-480.avif 480w, /assets/screens/group-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/group-320.webp 320w, /assets/screens/group-480.webp 480w, /assets/screens/group-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/group-480.png" width="636" height="1386" alt="CoRoute group alert: Kiran fell behind 1.2 km, the sweeper has been told, with the regroup point at a fuel stop 2.4 km ahead and a Navigate button" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Never lose the group</h3><p>Know when someone falls behind, and meet at the regroup point.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="7 of 10: Guardians at home">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/guardians-320.avif 320w, /assets/screens/guardians-480.avif 480w, /assets/screens/guardians-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/guardians-320.webp 320w, /assets/screens/guardians-480.webp 480w, /assets/screens/guardians-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/guardians-480.png" width="636" height="1386" alt="CoRoute guardian link in a phone browser: Asha is riding, near Devanahalli, link ends in 28 minutes, only first name and position are shared" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Guardians at home</h3><p>Family follow a private link in any browser. No app needed.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="8 of 10: Crews and friends">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/people-320.avif 320w, /assets/screens/people-480.avif 480w, /assets/screens/people-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/people-320.webp 320w, /assets/screens/people-480.webp 480w, /assets/screens/people-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/people-480.png" width="636" height="1386" alt="CoRoute People screen: the Weekend Wanderers crew with eight members, the next ride on Sunday at 5:30 am, and a poll on where to ride" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Crews and friends</h3><p>Crews, ride invites and polls for where to ride next.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="9 of 10: Every ride, remembered">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/trip-320.avif 320w, /assets/screens/trip-480.avif 480w, /assets/screens/trip-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/trip-320.webp 320w, /assets/screens/trip-480.webp 480w, /assets/screens/trip-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/trip-480.png" width="636" height="1386" alt="CoRoute trip report: every rider's route in a different colour on the map, 128 km, 3 h 42 m riding time, 3 stops and a top speed of 78 km/h" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Every ride, remembered</h3><p>A trip report with every rider's route, distance, time and top speed.</p></div>
-            </div>
-            <div class="gal__slide" role="group" aria-roledescription="slide" aria-label="10 of 10: Easy on the eyes at night">
-              <figure class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/dark-320.avif 320w, /assets/screens/dark-480.avif 480w, /assets/screens/dark-636.avif 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><source type="image/webp" srcset="/assets/screens/dark-320.webp 320w, /assets/screens/dark-480.webp 480w, /assets/screens/dark-636.webp 636w" sizes="(min-width: 1024px) 236px, (min-width: 600px) 220px, 62vw"><img src="/assets/screens/dark-480.png" width="636" height="1386" alt="CoRoute ride screen in the dark theme: the group on a night map with the same controls" loading="lazy" decoding="async"></picture></figure>
-              <div class="gal__cap"><h3>Easy on the eyes at night</h3><p>Calm light and dark themes that follow your phone.</p></div>
-            </div>
-        </div>
-      </div>
-      <p class="container gal__status sr-only" data-gallery-status aria-live="polite"></p>
-    </section>
-
     <!-- Features: safety first -->
     <section class="section fx" id="features" aria-labelledby="features-title">
       <div class="container">
@@ -403,8 +341,18 @@
           </div>
           <a class="link-arrow hp-safe__more" href="/safety"><span>How safety works, step by step</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
         </div>
-        <figure class="hp-shot">
-          <div class="dev dev--lg"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/sos-320.avif 320w, /assets/screens/sos-480.avif 480w, /assets/screens/sos-636.avif 636w" sizes="(min-width: 1024px) 300px, (min-width: 600px) 280px, 70vw"><source type="image/webp" srcset="/assets/screens/sos-320.webp 320w, /assets/screens/sos-480.webp 480w, /assets/screens/sos-636.webp 636w" sizes="(min-width: 1024px) 300px, (min-width: 600px) 280px, 70vw"><img src="/assets/screens/sos-480.png" width="636" height="1386" alt="CoRoute SOS screen: a large red SOS button being held, Hold 3 s to send, and who will be told: your group, two emergency contacts and your safety card" loading="lazy" decoding="async"></picture></div>
+        <!-- Round 7: who hears an SOS, drawn with the site icons (the phone screenshot was removed from the home page). -->
+        <figure class="hp-relay">
+          <div class="hp-relay__core" aria-hidden="true">
+            <span class="hp-relay__ring"></span><span class="hp-relay__ring hp-relay__ring--2"></span>
+            <span class="hp-relay__sos"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg></span>
+          </div>
+          <ul class="hp-relay__list" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg><span><b>Your group</b> hears the alarm and gets a route back to you.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg><span><b>Emergency contacts</b> get a text with your location.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><span><b>Guardians</b> are notified and follow on a private live link.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg><span><b>Nearest hospital</b> is named in the alert.</span></li>
+          </ul>
           <figcaption>Hold SOS for three seconds. Your group, your emergency contacts and your guardians are told.</figcaption>
         </figure>
       </div>
@@ -484,9 +432,26 @@
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-message"/></svg><span><b>Rider stories.</b> Rate the trip, tell the story and add a group photo. With your permission it can appear below.</span></li>
           </ul>
         </div>
-        <figure class="hp-shot">
-          <div class="dev dev--lg"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/trip-320.avif 320w, /assets/screens/trip-480.avif 480w, /assets/screens/trip-636.avif 636w" sizes="(min-width: 1024px) 300px, (min-width: 600px) 280px, 70vw"><source type="image/webp" srcset="/assets/screens/trip-320.webp 320w, /assets/screens/trip-480.webp 480w, /assets/screens/trip-636.webp 636w" sizes="(min-width: 1024px) 300px, (min-width: 600px) 280px, 70vw"><img src="/assets/screens/trip-480.png" width="636" height="1386" alt="CoRoute trip report: every rider's route in a different colour on one map, 128 km, 3 h 42 m riding time, 3 stops and a top speed of 78 km/h" loading="lazy" decoding="async"></picture></div>
-          <figcaption>A trip report from the app, shown with demo riders. Your own numbers fill in after the ride.</figcaption>
+        <!-- Round 7: an example trip report drawn as a simple card (the phone screenshot was removed from the home page). -->
+        <figure class="hp-trip">
+          <div class="hp-trip__card">
+            <p class="hp-trip__tag"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Example trip report</p>
+            <svg class="hp-trip__map" viewBox="0 0 400 220" aria-hidden="true" focusable="false">
+              <path class="hp-trip__grid" d="M0 55H400M0 110H400M0 165H400M100 0V220M200 0V220M300 0V220"/>
+              <path class="hp-trip__r hp-trip__r--c" d="M30 184 C 82 160, 96 106, 150 112 S 226 172, 270 122 S 330 52, 372 44"/>
+              <path class="hp-trip__r hp-trip__r--b" d="M30 178 C 80 152, 98 98, 150 104 S 224 164, 268 114 S 328 44, 372 36"/>
+              <path class="hp-trip__r hp-trip__r--a" d="M30 172 C 78 144, 100 90, 150 96 S 222 156, 266 106 S 326 36, 372 28"/>
+              <circle class="hp-trip__stop" cx="150" cy="96" r="6"/><circle class="hp-trip__stop" cx="266" cy="106" r="6"/>
+              <circle class="hp-trip__start" cx="30" cy="172" r="8"/><circle class="hp-trip__end" cx="372" cy="28" r="8"/>
+            </svg>
+            <dl class="hp-trip__stats">
+              <div><dt>Distance</dt><dd>128 km</dd></div>
+              <div><dt>Riding time</dt><dd>3 h 42 m</dd></div>
+              <div><dt>Stops</dt><dd>3</dd></div>
+              <div><dt>Top speed</dt><dd>78 km/h</dd></div>
+            </dl>
+          </div>
+          <figcaption>An example trip report with demo riders. Your own numbers fill in after the ride.</figcaption>
         </figure>
       </div>
     </section>

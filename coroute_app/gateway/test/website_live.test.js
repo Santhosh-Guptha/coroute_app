@@ -183,45 +183,54 @@ test('pricing: no catalog means no prices, only a pointer to the plans page', as
 });
 
 /* ---------- 3D hero and budgets ---------- */
-test('hero (3.56): real app screens in phone frames, static backdrop, responsive AVIF/WebP with PNG fallback', async () => {
+test('hero (round 7): the moving convoy is back at the top, lazy and low-power, with a static first frame and no phone screens', async () => {
   const html = await (await fetch(base + '/')).text();
-  const start = html.indexOf('<section class="hx hx--phones"');
+  const start = html.indexOf('<section class="hx"');
   assert.ok(start > 0, 'hero section');
   const hero = html.slice(start, html.indexOf('</section>', start));
-  assert.ok(hero.includes('class="hx__poster"'), 'static drawing is in the page');
-  assert.ok(!hero.includes('data-hero3d'), 'no 3D scene behind the phones');
   assert.match(hero, /<h1 class="hx__title" id="hero-title">Ride Together\. <span>Stay Safe\.<\/span><\/h1>/, 'the motto is the headline');
-  const pics = hero.match(/<picture class="dev__shot">[\s\S]*?<\/picture>/g) || [];
-  assert.equal(pics.length, 3, 'three phone screens');
-  for (const pic of pics) {
-    assert.match(pic, /<source type="image\/avif" srcset="\/assets\/screens\/[a-z]+-320\.avif\?v=[0-9a-f]{10} 320w, [^"]+ 636w" sizes="[^"]+">/, 'AVIF srcset');
-    assert.match(pic, /<source type="image\/webp" srcset="[^"]+webp[^"]+"/, 'WebP srcset');
-    assert.match(pic, /<img src="\/assets\/screens\/[a-z]+-480\.png\?v=[0-9a-f]{10}" width="636" height="1386" alt="CoRoute [^"]{20,}"/, 'PNG fallback with size and alt text');
-  }
-  assert.ok(!/<script[^>]+hero3d/.test(html), 'no scene script');
+  // The scene host: a labelled picture for assistive tech, the static drawing inside as the first frame.
+  assert.match(hero, /<div class="hx__scene" data-hero3d data-src="\/assets\/hero3d\.js\?v=[0-9a-f]{10}" data-state="poster" role="img" aria-label="[^"]{40,}">/, 'scene host with a text alternative');
+  assert.match(hero, /<svg class="hx__poster"[^>]+aria-hidden="true"/, 'static drawing is in the page, decorative');
+  assert.ok(hero.includes('class="hx-road"') && (hero.match(/class="hx-r hx-r--/g) || []).length >= 4, 'the first frame shows the road and the riders');
+  assert.ok(!/<script[^>]+hero3d/.test(html), 'the scene script is not in the page: home.js adds it after load');
+  assert.ok(!/<link[^>]+rel="preload"[^>]+as="image"/.test(html) && !html.includes('fetchpriority'), 'no image preloads left from the phone hero');
+
+  // No phone screens anywhere on the home page (other pages keep theirs; the image files stay).
+  assert.ok(!html.includes('/assets/screens/') && !html.includes('dev__shot') && !html.includes('hx__phones'), 'home: no app screenshots in phone frames');
+  assert.ok(!html.includes('id="screens"') && !html.includes('href="#screens"') && !html.includes('data-gallery'), 'home: the screens gallery is gone');
+  assert.ok(html.includes('class="hp-relay"') && html.includes('class="hp-trip"'), 'the SOS and trip report sections have their own drawings');
+  const features = await (await fetch(base + '/features')).text();
+  assert.ok(features.includes('/assets/screens/'), '/features keeps its phone pictures');
   for (const f of ['crash-320.avif', 'crash-636.webp', 'crash-480.png']) {
     const r = await fetch(base + '/assets/screens/' + f);
     assert.equal(r.status, 200, f);
-    assert.equal(r.headers.get('content-type').split(';')[0], { avif: 'image/avif', webp: 'image/webp', png: 'image/png' }[f.split('.').pop()], f);
   }
-  const scene = read('assets/hero3d.js');
-  assert.doesNotThrow(() => new Function(scene), 'hero3d.js still parses (kept for later use)');
-});
 
-test('screens gallery: accessible carousel, lazy images, arrows from site.js', async () => {
-  const html = await (await fetch(base + '/')).text();
-  const start = html.indexOf('id="screens"');
-  const sec = html.slice(start, html.indexOf('</section>', start));
-  assert.ok(/data-gallery role="region" aria-roledescription="carousel" aria-label="[^"]+"/.test(sec), 'carousel region');
-  const slides = sec.match(/class="gal__slide" role="group" aria-roledescription="slide" aria-label="\d+ of \d+: [^"]+"/g) || [];
-  assert.ok(slides.length >= 8, 'at least eight labelled slides');
-  assert.ok(sec.includes('id="gallery-track" tabindex="0"'), 'track is keyboard scrollable');
-  assert.ok(/data-gallery-nav hidden/.test(sec) && sec.includes('aria-controls="gallery-track"') && sec.includes('aria-label="Next screens"'), 'arrow buttons hidden until site.js runs');
-  const imgs = sec.match(/<img [^>]+>/g) || [];
-  assert.equal(imgs.length, slides.length);
-  for (const img of imgs) assert.ok(img.includes('loading="lazy"') && /alt="CoRoute [^"]+"/.test(img), 'lazy with alt text');
-  const js = read('assets/site.js');
-  assert.ok(js.includes("querySelectorAll('[data-gallery]')") && js.includes('scrollBy') && js.includes('prev.disabled'), 'site.js wires the arrows');
+  // home.js: starts after load, not for reduced motion or save-data, falls back to the drawing on error.
+  const home = read('assets/home.js');
+  assert.ok(home.includes("querySelector('[data-hero3d]')") && home.includes('prefers-reduced-motion: reduce') && home.includes('saveData'), 'home.js gates the scene');
+  assert.ok(home.includes('requestIdleCallback') && home.includes("'load'"), 'home.js waits for load and an idle moment');
+  assert.ok(home.includes("setAttribute('data-state', 'fallback')") && home.includes("setAttribute('data-state', 'static')"), 'home.js keeps the drawing when the scene cannot run');
+
+  // hero3d.js: parses, no network, decorative canvas, pauses off screen / hidden tab / reduced motion, capped pixel ratio.
+  const scene = read('assets/hero3d.js');
+  assert.doesNotThrow(() => new Function(scene), 'hero3d.js parses');
+  assert.ok(!/fetch\(|XMLHttpRequest|https?:\/\//.test(scene), 'hero3d.js makes no network requests');
+  assert.ok(scene.includes("canvas.setAttribute('aria-hidden', 'true')"), 'canvas is decorative');
+  assert.ok(scene.includes('IntersectionObserver') && scene.includes('visibilitychange') && scene.includes('prefers-reduced-motion: reduce'), 'pauses when it cannot be seen');
+  assert.ok(scene.includes('cancelAnimationFrame') && scene.includes('webglcontextlost'), 'stops cleanly');
+  const cap = /var DPR_CAP = ([\d.]+);/.exec(scene);
+  assert.ok(cap && Number(cap[1]) <= 2, 'device pixel ratio capped at 2 or less');
+  assert.match(scene, /var SPEED = [\d.]+;/, 'tuning: speed');
+  assert.match(scene, /var RIDERS = \d+;/, 'tuning: number of riders');
+
+  // home.css: the scene height is reserved (no layout shift) and the canvas only fades in once it is live.
+  const css = read('assets/home.css');
+  assert.ok(css.includes('--hx-band:') && /\.hx__scene \{[^}]*height: calc\(var\(--header-h\) \+ var\(--hx-band\)\)/.test(css), 'the band height is reserved');
+  assert.ok(css.includes('.hx__scene[data-state="live"] .hero3d__canvas { opacity: 1; }'), 'canvas fades in over the drawing');
+  const site = read('assets/site.js');
+  assert.ok(!site.includes('data-gallery'), 'site.js no longer carries the gallery code');
 });
 
 test('homepage budgets: JS at most 250 KB gzip with the 3D scene, CSS at most 60 KB gzip', async () => {

@@ -1,10 +1,12 @@
-/* CoRoute homepage hero: a live 3D mountain road with a riding convoy.
+/* CoRoute homepage hero: a live 3D mountain road with a riding convoy (lead in front, sweeper at the back).
    Hand-written WebGL 1 (no library, about 8 KB gzip). Loaded late by home.js, only when the visitor does not ask
-   for reduced motion. The scene is endless: terrain, road and riders are computed from the same height functions
-   in the shaders and here, around a camera that rides behind the group.
-   Power: device pixel ratio capped at 1.5, 30 fps on phones, a coarser terrain grid on small screens, paused when
-   the hero is off screen or the tab is hidden. Day and night follow the site theme. If WebGL is missing or the
-   context is lost, the static illustration underneath simply stays. No network requests. */
+   for reduced motion. The scene is endless, like a looping video: terrain, road and riders are computed from the
+   same height functions in the shaders and here, around a camera that rides behind the group.
+   Power: device pixel ratio capped at 1.5, display rate (60 fps) by default and a 30 fps cap as soon as the device
+   cannot keep up, a coarser terrain grid on small screens, 4 draw calls a frame, paused when the hero is off
+   screen or the tab is hidden. Day and night follow the site theme. If WebGL is missing or the context is lost,
+   the static illustration underneath simply stays. No network requests.
+   To tweak: see "Tuning" just below (speed, number of riders, spacing, marker style). */
 (function () {
   'use strict';
   var doc = document, win = window, root = doc.documentElement;
@@ -25,13 +27,20 @@
   var small = Math.min(win.innerWidth || 1024, win.screen ? win.screen.width : 1024) < 760;
   var coarse = win.matchMedia ? win.matchMedia('(pointer: coarse)').matches : false;
   var mobile = small || coarse;
-  var FRAME_MS = mobile ? 1000 / 30 : 0;           // 30 fps cap on phones, display rate elsewhere
+  /* ---------- Tuning (docs/quality/ROUND7_WEBSITE_NOTES.md) ---------- */
+  var SPEED = 8.5;                                 // how fast the group rides (m/s); 8.5 is a calm touring pace
+  var RIDERS = 6;                                  // riders in the group, 2 to 8 (first is the lead, last the sweeper)
+  var GAP = 7.2;                                   // metres between riders
+  var NEAREST = 30;                                // metres from the camera to the sweeper
+  var MARKERS = 'bike';                            // 'bike': riders seen from behind; 'dot': the round map markers
+  var SLOW_FRAME_MS = 24;                          // average frame time above this drops the scene to 30 fps
+
+  var FRAME_MS = 0;                                // 0: display rate; set to 1000 / 30 when the device is slow
   var DPR_CAP = 1.5;
   var GRID = mobile ? 2.6 : 1.6;                   // terrain grid spacing (m)
   var HALF_W = mobile ? 90 : 120;                  // terrain half width (m)
   var DEPTH = mobile ? 230 : 300;                  // terrain depth ahead of the camera (m)
   var BEHIND = 24;
-  var SPEED = 8.5;                                 // camera speed (m/s), a calm touring pace
   var ROAD_W = 3.3;
 
   /* ---------- The world: the same functions as the GLSL below ---------- */
@@ -140,33 +149,65 @@
 
   var RIDER_VS = [
     'precision highp float;',
-    'attribute vec3 aP; attribute vec3 aC; attribute float aPulse;',
+    'attribute vec3 aP; attribute vec3 aC; attribute vec2 aFx;', // aFx: x ping phase 0..1 (0 = none), y lean (rad)
     'uniform mat4 uVP; uniform float uScale;',
-    'varying vec3 vC; varying float vPulse;',
+    'varying vec3 vC; varying float vPulse; varying float vLean; varying float vPx;',
     'void main(){',
     '  vec4 c = uVP * vec4(aP, 1.0);',
     '  gl_Position = c;',
-    '  gl_PointSize = clamp(uScale / max(c.w, 1.0), 6.0, 96.0);',
-    '  vC = aC; vPulse = aPulse;',
+    '  float size = clamp(uScale / max(c.w, 1.0), 14.0, 128.0);',
+    '  gl_PointSize = size;',
+    '  vC = aC; vPulse = aFx.x; vLean = aFx.y; vPx = 2.0 / size;',
     '}'
   ].join('\n');
+  /* One point sprite per rider. uBike 1: a rider seen from behind (rear tyre, handlebar, jacket in the member
+     colour, helmet, tail light) leaning into the bends, with a shadow and the "position update" ping on the road.
+     uBike 0: the round map marker. */
   var RIDER_FS = [
     'precision mediump float;',
-    'varying vec3 vC; varying float vPulse;',
-    'uniform vec3 uRing; uniform float uGlow;',
+    'varying vec3 vC; varying float vPulse; varying float vLean; varying float vPx;',
+    'uniform vec3 uRing; uniform vec3 uTyre; uniform float uGlow; uniform float uBike;',
+    'float box(vec2 p, vec2 b, float r){ vec2 d = abs(p) - b + r; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r; }',
     'void main(){',
-    '  vec2 q = gl_PointCoord * 2.0 - 1.0;',
-    '  float r = length(q);',
-    '  if (r > 1.0) discard;',
-    '  float core = 1.0 - smoothstep(0.24, 0.27, r);',
-    '  float ring = (1.0 - smoothstep(0.32, 0.35, r)) * (1.0 - core);',
-    '  float halo = (1.0 - smoothstep(0.3, 1.0, r)) * uGlow;',
-    '  float pr = 0.3 + vPulse * 0.68;',
-    '  float pulse = (1.0 - smoothstep(0.0, 0.05, abs(r - pr))) * (1.0 - vPulse) * step(0.001, vPulse);',
-    '  vec3 col = vC * core + uRing * ring + vC * pulse;',
-    '  float a = max(max(core, ring), max(halo * 0.55, pulse * 0.9));',
+    '  vec2 q = vec2(gl_PointCoord.x * 2.0 - 1.0, 1.0 - gl_PointCoord.y * 2.0);',
+    '  if (uBike < 0.5) {',
+    '    float r = length(q);',
+    '    if (r > 1.0) discard;',
+    '    float core = 1.0 - smoothstep(0.24, 0.27, r);',
+    '    float ring = (1.0 - smoothstep(0.32, 0.35, r)) * (1.0 - core);',
+    '    float halo = (1.0 - smoothstep(0.3, 1.0, r)) * uGlow;',
+    '    float pr = 0.3 + vPulse * 0.68;',
+    '    float pulse = (1.0 - smoothstep(0.0, 0.05, abs(r - pr))) * (1.0 - vPulse) * step(0.001, vPulse);',
+    '    vec3 col = vC * core + uRing * ring + vC * pulse;',
+    '    float a = max(max(core, ring), max(halo * 0.55, pulse * 0.9));',
+    '    if (a < 0.01) discard;',
+    '    gl_FragColor = vec4(core + ring > 0.0 ? col : vC, a);',
+    '    return;',
+    '  }',
+    '  float aa = vPx * 1.4;',
+    '  vec2 g = vec2(q.x, (q.y + 0.56) * 2.8);', // the road under the tyre, flattened by the view angle
+    '  float gr = length(g);',
+    '  float shadow = (1.0 - smoothstep(0.1, 0.46, gr)) * 0.34;',
+    '  float pr = 0.22 + vPulse * 0.72;',
+    '  float pulse = (1.0 - smoothstep(0.0, 0.07, abs(gr - pr))) * (1.0 - vPulse) * step(0.001, vPulse);',
+    '  vec2 p = q + vec2(0.0, 0.56);',
+    '  float cs = cos(vLean); float sn = sin(vLean);',
+    '  p = vec2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);',
+    '  float tyre = min(box(p - vec2(0.0, 0.21), vec2(0.07, 0.21), 0.07), box(p - vec2(0.0, 0.5), vec2(0.27, 0.03), 0.03));',
+    '  float torso = box(p - vec2(0.0, 0.62), vec2(0.175, 0.2), 0.1);',
+    '  float helmet = length(p - vec2(0.0, 0.93)) - 0.13;',
+    '  float tail = length(p - vec2(0.0, 0.4));',
+    '  float rim = min(min(tyre, torso), helmet) - 0.035;',
+    '  vec3 col = vec3(0.0); float a = shadow; float m;',
+    '  m = pulse * 0.9; col = mix(col, vC, m); a = max(a, m);',
+    '  m = (1.0 - smoothstep(0.0, 0.5, tail)) * uGlow; col = mix(col, vec3(0.92, 0.2, 0.14), m); a = max(a, m * 0.7);',
+    '  m = 1.0 - smoothstep(-aa, aa, rim); col = mix(col, uRing, m); a = max(a, m);',
+    '  m = 1.0 - smoothstep(-aa, aa, tyre); col = mix(col, uTyre, m);',
+    '  m = 1.0 - smoothstep(-aa, aa, torso); col = mix(col, vC, m);',
+    '  m = 1.0 - smoothstep(-aa, aa, helmet); col = mix(col, mix(vC, vec3(0.97), 0.62), m);',
+    '  m = 1.0 - smoothstep(-aa, aa, tail - 0.052); col = mix(col, vec3(0.93, 0.22, 0.16), m);',
     '  if (a < 0.01) discard;',
-    '  gl_FragColor = vec4(core + ring > 0.0 ? col : vC, a);',
+    '  gl_FragColor = vec4(col, a);',
     '}'
   ].join('\n');
 
@@ -194,7 +235,7 @@
     sky = program(SKY_VS, SKY_FS, ['aP'], ['uTop', 'uHor', 'uHorY']);
     terrain = program(TERRAIN_VS, TERRAIN_FS, ['aG'], ['uO', 'uVP', 'uCam', 'uFogR', 'uLow', 'uHigh', 'uFog', 'uSun', 'uLine', 'uAmb', 'uLineA']);
     road = program(ROAD_VS, ROAD_FS, ['aR'], ['uZ0', 'uVP', 'uCam', 'uFogR', 'uW', 'uRoad', 'uEdge', 'uRoute', 'uDash', 'uFog', 'uConvoy']);
-    riders = program(RIDER_VS, RIDER_FS, ['aP', 'aC', 'aPulse'], ['uVP', 'uScale', 'uRing', 'uGlow']);
+    riders = program(RIDER_VS, RIDER_FS, ['aP', 'aC', 'aFx'], ['uVP', 'uScale', 'uRing', 'uTyre', 'uGlow', 'uBike']);
   } catch (e) { fail('shader'); return; }
 
   /* ---------- Geometry ---------- */
@@ -221,16 +262,17 @@
   for (var r = 0; r < roadN; r++) { roadArr[r * 4] = r * ROAD_STEP; roadArr[r * 4 + 1] = -1; roadArr[r * 4 + 2] = r * ROAD_STEP; roadArr[r * 4 + 3] = 1; }
   var roadBuf = buffer(roadArr);
 
-  /* The convoy: distance ahead of the camera (m), lane offset, colour index, a little breathing in the gaps. */
-  var CONVOY = [
-    { ahead: 66, lane: -0.5, c: 7, ph: 0.0 },
-    { ahead: 58, lane: -1.3, c: 1, ph: 1.7 },
-    { ahead: 51, lane: -0.5, c: 2, ph: 3.1 },
-    { ahead: 44, lane: -1.3, c: 3, ph: 4.4 },
-    { ahead: 37, lane: -0.5, c: 0, ph: 2.2 },
-    { ahead: 30, lane: -1.3, c: 4, ph: 5.3 }
-  ];
-  var riderArr = new Float32Array(CONVOY.length * 7);
+  /* The convoy, lead first: distance ahead of the camera (m), lane offset (a staggered formation), colour index,
+     a little breathing in the gaps. */
+  var COLOURS = [7, 1, 2, 3, 0, 4, 5, 6];
+  var CONVOY = [];
+  var nRiders = Math.max(2, Math.min(8, RIDERS));
+  for (var ci = 0; ci < nRiders; ci++) {
+    CONVOY.push({ ahead: NEAREST + (nRiders - 1 - ci) * GAP, lane: ci % 2 ? -1.3 : -0.5, c: COLOURS[ci], ph: (ci * 1.7) % 6.28 });
+  }
+  var BIKE = MARKERS === 'bike';
+  var LEAN = 14;                                   // how hard riders lean in bends (0: upright)
+  var riderArr = new Float32Array(CONVOY.length * 8);
   var riderBuf = gl.createBuffer();
 
   /* ---------- Palettes: the app's light and dark tokens ---------- */
@@ -238,13 +280,13 @@
   var DAY = {
     top: hex('#D3E6E8'), hor: hex('#F3F1EC'), fog: hex('#F1EFEA'), low: hex('#DCE6E0'), high: hex('#93ABA6'), sun: [0.55, 0.7, 0.35],
     line: hex('#2B7A8C'), lineA: 0.26, amb: 0.5, road: hex('#4A5058'), edge: hex('#CFC8BD'), route: hex('#2B7A8C'), dash: hex('#F6F4F0'),
-    ring: hex('#FFFFFF'), glow: 0.25,
+    ring: hex('#FFFFFF'), tyre: hex('#22262B'), glow: 0.25,
     members: ['#2B7A8C', '#3E8E5E', '#B9821C', '#B5577A', '#3D7BC8', '#7E6BB0', '#2F8577', '#D9822B'].map(hex)
   };
   var NIGHT = {
     top: hex('#121519'), hor: hex('#1D3036'), fog: hex('#171B20'), low: hex('#1E242A'), high: hex('#323A44'), sun: [-0.35, 0.75, 0.3],
     line: hex('#5FB3C4'), lineA: 0.3, amb: 0.5, road: hex('#101316'), edge: hex('#3E4652'), route: hex('#5FB3C4'), dash: hex('#CFCBC3'),
-    ring: hex('#1C2026'), glow: 0.3,
+    ring: hex('#1C2026'), tyre: hex('#07090B'), glow: 0.3,
     members: ['#5FB3C4', '#6CC08B', '#E0B15A', '#D88AA6', '#79A8E8', '#A99BD6', '#6FBFAE', '#E9A55B'].map(hex)
   };
   function norm3(v) { var l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; }
@@ -281,16 +323,17 @@
   }
 
   /* ---------- Size ---------- */
-  var W = 0, H = 0, dpr = 1;
+  var W = 0, H = 0, dpr = 1, cssW = 0;
   function resize() {
     var rect = host.getBoundingClientRect();
+    cssW = rect.width;
     dpr = Math.min(win.devicePixelRatio || 1, DPR_CAP);
     var w = Math.max(1, Math.round(rect.width * dpr)), h = Math.max(1, Math.round(rect.height * dpr));
     if (w !== W || h !== H) { W = w; H = h; canvas.width = w; canvas.height = h; }
   }
 
   /* ---------- Frame ---------- */
-  var tSim = 0, last = 0, raf = 0, running = false, drawn = false;
+  var tSim = 0, last = 0, raf = 0, running = false, drawn = false, seen = 0, slowSum = 0, slowN = 0;
   function draw(now) {
     raf = 0;
     if (!running) return;
@@ -298,6 +341,14 @@
     if (FRAME_MS && last && now - last < FRAME_MS - 1) return;
     var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
     last = now;
+    // Display rate first. If the device cannot hold it (after the first frames, which compile shaders), 30 fps.
+    if (!FRAME_MS && dt) {
+      if (++seen > 20) { slowSum += dt * 1000; slowN++; }
+      if (slowN >= 60) {
+        if (slowSum / slowN > SLOW_FRAME_MS) { FRAME_MS = 1000 / 30; if (slowSum / slowN > 45) DPR_CAP = 1; }
+        slowSum = 0; slowN = 0;
+      }
+    }
     tSim += dt;
     if (night !== nightTarget) {
       var step = dt / 0.6;
@@ -310,7 +361,7 @@
   function render(t) {
     resize();
     gl.viewport(0, 0, W, H);
-    var aspect = W / H, wide = aspect > 1.15;
+    var aspect = W / H, wide = aspect > 1.15 && cssW >= 900; // wide: the desktop hero, words on the left
     var camZ = -t * SPEED;
     var lookZ = camZ - 62;
     var cx = roadX(camZ) * 0.55 + roadX(camZ - 20) * 0.45 + 5.5 * Math.sin(t * 0.05) + (wide ? -3 : 0);
@@ -319,7 +370,7 @@
     var eye = [cx, cy, camZ];
     var target = [roadX(lookZ) + 1.5 * Math.sin(t * 0.04), roadH(lookZ) - 1.0, lookZ];
     // On wide screens the vanishing point sits right of centre, beside the headline.
-    var proj = perspective((wide ? 46 : 58) * Math.PI / 180, aspect, 0.5, 520, wide ? -0.32 : 0);
+    var proj = perspective((wide ? 46 : 58) * Math.PI / 180, aspect, 0.5, 520, wide ? -0.4 : 0);
     var vp = mul(proj, lookAt(eye, target, [0, 1, 0]));
     var fogR = [DEPTH * 0.18, DEPTH * 0.98];
     var fog = pal('fog');
@@ -385,26 +436,31 @@
       var cv = CONVOY[i];
       var z = camZ - cv.ahead - 1.6 * Math.sin(t * 0.35 + cv.ph);
       var x = roadX(z) + cv.lane;
-      var o = i * 7, col = mem[cv.c];
-      riderArr[o] = x; riderArr[o + 1] = roadH(z) + 0.95; riderArr[o + 2] = z;
+      var o = i * 8, col = mem[cv.c];
+      riderArr[o] = x; riderArr[o + 1] = roadH(z) + (BIKE ? 0.84 : 0.95); riderArr[o + 2] = z;
       riderArr[o + 3] = col[0]; riderArr[o + 4] = col[1]; riderArr[o + 5] = col[2];
       // The lead sends a live "ping" every few seconds, like a position update.
       var ph = (t + i * 0.9) % (i === 0 ? 3.2 : 6.4);
       riderArr[o + 6] = ph < 1.6 ? Math.max(0.001, ph / 1.6) : 0;
+      // Lean into the bend: the road's sideways curvature where the rider is.
+      var curve = -(14.0 * 0.022 * 0.022 * Math.sin(z * 0.022) + 6.0 * 0.053 * 0.053 * Math.sin(z * 0.053 + 1.0));
+      riderArr[o + 7] = Math.max(-0.3, Math.min(0.3, curve * LEAN));
     }
     gl.useProgram(riders.p);
     gl.bindBuffer(gl.ARRAY_BUFFER, riderBuf);
     gl.bufferData(gl.ARRAY_BUFFER, riderArr, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(riders.a.aP);
     gl.enableVertexAttribArray(riders.a.aC);
-    gl.enableVertexAttribArray(riders.a.aPulse);
-    gl.vertexAttribPointer(riders.a.aP, 3, gl.FLOAT, false, 28, 0);
-    gl.vertexAttribPointer(riders.a.aC, 3, gl.FLOAT, false, 28, 12);
-    gl.vertexAttribPointer(riders.a.aPulse, 1, gl.FLOAT, false, 28, 24);
+    gl.enableVertexAttribArray(riders.a.aFx);
+    gl.vertexAttribPointer(riders.a.aP, 3, gl.FLOAT, false, 32, 0);
+    gl.vertexAttribPointer(riders.a.aC, 3, gl.FLOAT, false, 32, 12);
+    gl.vertexAttribPointer(riders.a.aFx, 2, gl.FLOAT, false, 32, 24);
     gl.uniformMatrix4fv(riders.u.uVP, false, vp);
-    gl.uniform1f(riders.u.uScale, H * (wide ? 3.0 : 2.6));
+    gl.uniform1f(riders.u.uScale, H * (BIKE ? 3.4 : (wide ? 3.0 : 2.6)));
     gl.uniform3fv(riders.u.uRing, pal('ring'));
+    gl.uniform3fv(riders.u.uTyre, pal('tyre'));
     gl.uniform1f(riders.u.uGlow, paln('glow'));
+    gl.uniform1f(riders.u.uBike, BIKE ? 1 : 0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.depthMask(false);
@@ -412,7 +468,7 @@
     gl.depthMask(true);
     gl.disableVertexAttribArray(riders.a.aP);
     gl.disableVertexAttribArray(riders.a.aC);
-    gl.disableVertexAttribArray(riders.a.aPulse);
+    gl.disableVertexAttribArray(riders.a.aFx);
   }
 
   /* ---------- Lifecycle: run only while it can be seen ---------- */
