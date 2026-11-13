@@ -355,7 +355,7 @@ entries with a `notify` list (lead and sweeper); the apps turn them into alerts.
 
 * Voice is PCM16 @ 16 kHz: 32 KB/s per *active speaker* (16 KB/s from a phone in data saver mode, 8 kHz). A convoy of 10 where one person speaks = 32 KB/s in, 288 KB/s out — trivial for the VM; OCI Always Free includes 10 TB/month egress.
 * The Always Free ADB allows 20 GB. A rider document is ~1 KB; a convoy's full GPS history is never stored (only the latest position per rider) and trip trails are trimmed by retention, so storage stays flat in the tens of MB.
-* Always Free compute: either VM.Standard.E2.1.Micro (1 OCPU / 1 GB) or up to 4 OCPU / 24 GB of Ampere A1. The gateway is I/O-bound and comfortably serves hundreds of concurrent riders on the Micro shape; move to A1 for thousands.
+* Always Free compute: either VM.Standard.E2.1.Micro (1 OCPU / 1 GB) or up to 2 OCPU / 12 GB of Ampere A1 per account (Always Free; corrected 13 Nov 2026, not 4 / 24). The gateway is I/O-bound and comfortably serves hundreds of concurrent riders on the Micro shape; move to A1 for thousands.
 
 ## Retiring old app builds (MIN_APP_BUILD)
 1. In the app, as admin: Feedback & analytics, App versions. It lists the builds riders used in the last 30 days and, for each build, how many riders would be locked out if it became the minimum.
@@ -683,3 +683,84 @@ payment webhooks, WebSockets. Drill: `LOAD_SHED=force` on staging.
 | `coroute_db_calls_total` rate > 300/s | `INTEL_CONSENT_TTL_MS=300000`, `WS_GATE_TTL_MS=300000` |
 | `coroute_db_queue_length` > 0 for minutes | ADB is the bottleneck: check its CPU in the console |
 | disk on vm3 > 80 % | lower backup retention or move old monthly copies offsite only |
+
+## Round 8 realtime (abuse limits, compact frames, big rides, SOS probe and twin continuation, stage 1, stage 4 prepared)
+
+Details, settings and measured numbers: `docs/quality/ROUND8_REALTIME_NOTES.md`. Plan: `docs/infra/HIGH_TRAFFIC_PLAN_v3.57.md`.
+
+### Abuse limits (on by default)
+
+Per IP: 50 open sockets (`WS_MAX_CONN_PER_IP`) and 120 new sockets a minute (`WS_CONN_PER_MIN_PER_IP`), refused at the
+upgrade with HTTP 429. The IP is taken from `X-Forwarded-For` through `TRUST_PROXY` (Caddy always sets it); a direct
+loopback connection without it (tools on the VM) is not counted. Per account: 30 new sockets a minute (close 4429
+`TOO_MANY_CONNECTS`) and `WS_MAX_SOCKETS_PER_USER` open (oldest closed). Per socket: token buckets per message class
+(`WS_RL_*`); over budget = dropped (+ ERROR 429 for chat / actions), a `RATE_LIMIT` warning frame, and close 4429
+`RATE_LIMIT_<CLASS>` for a socket that keeps flooding; refused JOINs close 4429 `JOIN_FLOOD`; invalid frames 4400
+`INVALID_FRAMES`. **SOS and alert messages are never counted, dropped or schema-rejected**; the SOS budget per socket
+never drops below `WS_SOS_FLOOR_PER_10S` (10) and above it the rider's open alert is echoed back.
+Watch: `curl -s 127.0.0.1:3000/metrics | grep 'coroute_ws_events_total{kind="rl'`. A NAT exit (office, carrier CGNAT)
+hitting `rlIpConcurrent`: raise `WS_MAX_CONN_PER_IP` (or 0 = off) and restart; a phone build looping: `rlUserConnect`.
+
+### Compact positions (`pos2`) and interest management
+
+The gateway advertises `pos2`; apps from this round send P2 frames and get RU2 batches, older apps keep JSON. Kill
+switch: `WS_POS2=off` (stops advertising; P2 still accepted). Big rides: above `WS_INTEREST_ABOVE` (30) sockets each
+rider gets its nearest 20, the lead / sweeper / owner and anyone in alert at full rate, the rest every 5 s; alerts
+always reach everyone. Off: `WS_INTEREST=off`.
+
+### SOS continuation on the twin (automatic)
+
+The live node sends an "SOS pending delivery" record to its mirror peer before it stores and fans out a new alert.
+If the link dies first, the peer stores the alert if needed, sends it to its sockets (riders reconnecting there see it
+in the SNAPSHOT) and starts the safety network / SMS round. Check after a failover:
+`curl -s 127.0.0.1:3000/metrics | grep coroute_ws` and the gateway log line `continued SOS ... (the peer died before its fan-out)`.
+
+### SOS probe (watchdog, staging only)
+
+One-time setup on **staging**: two accounts used only by the probe (e-mails in the watchdog env, password in the
+secrets file), one group named `SOS probe staging` with exactly those two riders, created and joined by signing in
+once with the probe's device identity (`deploy/watchdog/sos_probe.js` `probeDevice`, so the ride lock lets the probe
+sign in again every 15 min). Then in `/etc/coroute/watchdog.env`: `WATCH_SOS_PROBE=1`, `WATCH_SOS_PROBE_URL`,
+`WATCH_SOS_PROBE_API`, `WATCH_SOS_PROBE_GROUP`, `WATCH_SOS_PROBE_EMAIL_A/B` (template `watchdog.example.env`) and
+`WATCH_SOS_PROBE_PASSWORD` in `/run/coroute/secrets.env`; restart `coroute-watchdog`. It refuses any host without
+"staging" in its name and any group with another rider. Mail on > 1 s or failure (then hourly while bad), recovery
+mail, daily summary line, status file `/var/lib/coroute-watchdog/sos_probe.json`.
+
+### Stage 1: A1 as the live node
+
+`gateway/deploy/stage1_live_a1.sh --a1 a1 --a1-ip <a1 private ip> --vm1-ip <vm1 private ip> --vm2-ip <vm2 private ip>`
+walks the order and checks each step (asks before every change; `--step N` resumes):
+1. check the A1 (aarch64, 2 OCPU / 12 GB: the Always Free size per account), vm1 / vm2 healthy;
+2. install it as a LIVE node paired with vm2 (`setup_node.sh`, `host/apply.sh --role live-a1`: heap 2048 MB,
+   MemoryHigh 4 GB / MemoryMax 5 GB, `GATEWAY_ROLE=live`, `LIVE_RIDER_CAP=2500`), release the current build to it;
+3. firewalls: vm2 accepts the A1 on 3000 / 3101, vm1 accepts it on 3000;
+4. **NLB: drain vm1** (console), then vm1 restarts as `GATEWAY_ROLE=web` without mirror settings: its riders move to vm2;
+5. start the A1: it dials vm2's mirror listener (vm2 is never restarted while it holds riders), syncs, serves; install
+   `Caddyfile.vm1` on it with WEB upstreams vm2 then vm1;
+6. **NLB: the A1 becomes the primary backend**, vm2 stays the backup, vm1 is removed;
+7. vm2 hands riders back to the A1 (RECONNECT in batches);
+8. vm2's `MIRROR_PEER_URL` points at the A1 for its next restart; add the A1 to the watchdog targets; run the gate.
+`LIVE_RIDER_CAP` stays 2500 until the twin is an A1 too (stage 2), then 6000.
+
+**Stage 1: rollback.** NLB: vm1 back as primary (A1 drained); on vm1 `GATEWAY_ROLE=live` and its mirror settings back
+(`MIRROR_LISTEN_HOST`, `MIRROR_PEER_URL=ws://<vm2 private ip>:3101/mirror`), restart vm1; stop the A1's gateway once
+vm2 has handed the riders back to vm1.
+
+### Stage gates (`tool/load/ws_load.js --preset ...`)
+
+```bash
+node tool/load/ws_load.js --preset gate2x   --target-riders 2500 --target wss://staging.<domain>/ws --tokens tokens.json --gate
+node tool/load/ws_load.js --preset soak     --target-riders 2500 ... --seconds 86400
+node tool/load/ws_load.js --preset failover --target-riders 2500 ... --failover-cmd "ssh vm4 sudo systemctl kill -s KILL coroute-gateway"
+node tool/load/ws_load.js --preset flood    --target-riders 2500 ... --gate
+```
+The summary prints PASS / FAIL per target (SOS p99 < 150 ms, positions p99 < 250 ms, every SOS delivered, >= 99 %
+back within 10 s, flood limits engaged). Record results in `docs/infra/` with the date. Never against production.
+
+### Stage 4: second live pair (prepared, not enabled)
+
+`SHARDS=1` (default) changes nothing. When a second pair exists: `SHARDS=2 SHARD_PAIRS=a,b SHARD_SELF=<pair>` on every
+node; `node deploy/gen_caddy_shards.js --shards 2 --upstream a="<a-live>:3000 <a-twin>:3000" --upstream b="..."`
+prints the Caddy matchers (`/ws?g=<groupId>`, `/api/convoys/<groupId>/...`, `?shard=<pair>`) to put before the generic
+LIVE handles. Apps resolve a join code first with `GET /api/shard?code=` and join with `?shard=<pair>`; the app side of
+this (opening `/ws?g=<groupId>`) is not built yet. `--table` prints which buckets each pair owns.

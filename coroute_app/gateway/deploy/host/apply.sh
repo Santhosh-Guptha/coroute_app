@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # CoRoute host tuning and hardening (v3.56). Idempotent: safe to run again; --dry-run shows every change first.
 #
-#   sudo ./host/apply.sh --role realtime|web|dr|staging|worker [--dry-run] [--peer-ip <private ip>] [--ignore-ips "a b"]
+#   sudo ./host/apply.sh --role realtime|live-a1|web|dr|staging|worker [--dry-run] [--peer-ip <private ip>] [--ignore-ips "a b"]
 #                        [--skip-ssh] [--skip-firewall] [--force-ssh]
 #
 #   realtime  vm1  live gateway (WS, convoys, SOS)          heap 384 MB, MemoryMax 700 MB, iptables (OCI image rules)
+#   live-a1   A1   stage 1 live node, Ampere ARM 2 OCPU / 12 GB (Always Free size per account): heap 2048 MB,
+#                  MemoryHigh 4 GB, MemoryMax 5 GB (the rest: Caddy, page cache, a voice relay process), iptables,
+#                  GATEWAY_ROLE=live, LIVE_RIDER_CAP 2500 while the twin is the vm2 micro (6000 once the twin is an A1)
 #   web       vm2  web/admin/webhooks + hot mirror           heap 384 MB, MemoryMax 700 MB, iptables
 #   dr        vm3  DR standby gateway, watchdog, backups     heap 320 MB, MemoryMax 600 MB, ufw (as today)
 #   staging   vm4  staging / canary / load-test runner        heap 320 MB, MemoryMax 600 MB, ufw (as today)
@@ -30,11 +33,11 @@ while [ $# -gt 0 ]; do
     --skip-ssh) SKIP_SSH=1; shift;;
     --skip-firewall) SKIP_FW=1; shift;;
     --force-ssh) FORCE_SSH=1; shift;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0;;
     *) echo "unknown option $1" >&2; exit 2;;
   esac
 done
-case "$ROLE" in realtime|web|dr|staging|worker) ;; *) echo "--role realtime|web|dr|staging|worker is required" >&2; exit 2;; esac
+case "$ROLE" in realtime|live-a1|web|dr|staging|worker) ;; *) echo "--role realtime|live-a1|web|dr|staging|worker is required" >&2; exit 2;; esac
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FILES="$HERE/files"
@@ -56,6 +59,7 @@ tmpf() { mktemp "${TMPDIR:-/tmp}/coroute-host.XXXXXX"; }
 
 case "$ROLE" in
   realtime|web) HEAP=384; MEM_HIGH=640M; MEM_MAX=700M; FW=iptables;;
+  live-a1)      HEAP=2048; MEM_HIGH=4G; MEM_MAX=5G; FW=iptables;;
   dr|staging)   HEAP=320; MEM_HIGH=560M; MEM_MAX=600M; FW=ufw;;
   worker)       HEAP=1536; MEM_HIGH=2560M; MEM_MAX=3G; FW=ufw;;
 esac
@@ -63,6 +67,13 @@ esac
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then FW=ufw; elif [ "$FW" = ufw ] && ! command -v ufw >/dev/null; then FW=iptables; fi
 
 say "CoRoute host apply: role=$ROLE dry-run=$DRY firewall=$FW heap=${HEAP}MB host=$(hostname)"
+if [ "$ROLE" = live-a1 ]; then
+  # Round 8 stage 1: the Always Free Ampere A1 is 2 OCPU / 12 GB per account (not 4 / 24).
+  arch=$(uname -m); cpus=$(nproc); memg=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo)
+  echo "   machine: $arch, $cpus CPU, ${memg} GB"
+  [ "$arch" = aarch64 ] || echo "   ! not aarch64: live-a1 is tuned for the Ampere A1 (use --role realtime on a micro)"
+  { [ "$cpus" -ge 2 ] && [ "$memg" -ge 11 ]; } || echo "   ! expected 2 OCPU / 12 GB: heap ${HEAP} MB may be too large here"
+fi
 free -m | sed 's/^/   /'; swapon --show 2>/dev/null | sed 's/^/   /' || true
 
 say "1/10 sysctl"
@@ -123,7 +134,7 @@ if [ "$SKIP_FW" = 1 ]; then echo "   skipped (--skip-firewall)"; else
     allow -p tcp --dport 443 -m conntrack --ctstate NEW
     allow -p tcp --dport 80 -m conntrack --ctstate NEW
     allow -p udp --dport 443
-    if [ "$ROLE" = realtime ] || [ "$ROLE" = web ]; then
+    if [ "$ROLE" = realtime ] || [ "$ROLE" = live-a1 ] || [ "$ROLE" = web ]; then
       if [ -n "$PEER_IP" ]; then
         allow -p tcp -s "$PEER_IP" --dport 3000 -m conntrack --ctstate NEW
         allow -p tcp -s "$PEER_IP" --dport 3101 -m conntrack --ctstate NEW
@@ -162,9 +173,22 @@ if [ -f "$ENVF" ]; then
   add_kv WS_DEFLATE off                  # measured: +240 KB RSS per socket, 2x CPU on batches
   case "$ROLE" in
     realtime|web) add_kv SHUTDOWN_DRAIN_MS 15000;;   # NLB stops sending riders before the stop (needs TimeoutStopSec 45)
+    live-a1)
+      add_kv SHUTDOWN_DRAIN_MS 15000
+      add_kv GATEWAY_ROLE live                       # stage 1: the A1 holds the rides; vm2 stays web + mirror
+      add_kv LIVE_RIDER_CAP 2500                     # the pair is as safe as its smaller node (vm2 micro); 6000 with an A1 twin
+      add_kv WS_MAX_CONN_PER_IP 50                   # round 8 abuse limits (NAT-friendly)
+      add_kv WS_INTEREST_ABOVE 30;;                  # round 8 interest management in big rides
     dr) add_kv GATEWAY_ROLE standby;;
   esac
-  echo "   recommended, set by the owner (not automatic): LIVE_RIDER_CAP (micro: 2500), INTEL_CONSENT_TTL_MS=300000 at > 3k riders"
+  echo "   recommended, set by the owner (not automatic): LIVE_RIDER_CAP (micro: 2500; A1 pair: 6000), INTEL_CONSENT_TTL_MS=300000 at > 3k riders"
+  # Round 8 job queue (docs/features_355/job_queue.md, docs/quality/ROUND8_JOBS_NOTES.md): set by the owner, in order.
+  echo "   round 8 jobs (owner, in rollout order): 1) JOBS_QUEUE=on on every gateway (in-process workers) 2) coroute-worker on vm2/vm5 3) JOBS_SEPARATE_WORKER=on on the live node"
+  case "$ROLE" in
+    realtime) echo "   realtime: keep live work only: once coroute-worker runs elsewhere set JOBS_SEPARATE_WORKER=on here (WORKER_INPROCESS=auto already yields to any other worker)";;
+    web) echo "   web: WORKER_INPROCESS=auto works jobs inside this gateway (WORKER_INPROCESS_SHARE=0.5); a separate worker: deploy/worker/coroute-worker.service";;
+    worker) echo "   worker: install deploy/worker/coroute-worker.service + /etc/coroute/worker.env (WORKER_TYPES, WORKER_CONCURRENCY; vm3 low priority: Nice=10, WORKER_TYPES=batch)";;
+  esac
 else echo "   (no $ENVF yet)"; fi
 
 echo

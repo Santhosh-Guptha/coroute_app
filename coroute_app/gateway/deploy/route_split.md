@@ -28,6 +28,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | Class | Methods | Path | Source | Why |
 |---|---|---|---|---|
 | LIVE | * | /ws | ws.js | WebSocket: telemetry, voice relay, SOS, convoy rooms (`Hub`) |
+| LIVE | * | /voice | voice_relay.js | Round 8 voice WebSocket (VOICE_RELAY_MODE=process: the voice process on VOICE_RELAY_PORT, `deploy/caddy/voice_relay.caddy` above `@live`); tickets come from the live node's rooms |
 | LIVE | GET | /api/health | routes.js | reports `convoys.rooms.size` and socket count of the live node |
 | LIVE | GET | /api/health/live | (mirror/health, M) | NLB health check of the live node |
 | LIVE | GET | /e/:token | app.js | live emergency page: `convoys.liveViewLoaded` / `emergencyGateway.liveView` (memory) |
@@ -50,6 +51,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | LIVE | DELETE | /api/v1/sos/live-links | routes.js | `emergencyGateway.revokeLinksFor` (in-memory link table) |
 | LIVE | POST | /api/v1/sos/dispatch-external | routes.js | `emergencyGateway.dispatchExternal`; in-memory dedupe and live links |
 | LIVE | POST | /api/sos/dispatch-external | routes.js | same handler (legacy path) |
+| LIVE | POST | /api/convoys/:groupId/sos | routes.js | round 7: the SOS over HTTP next to the socket frame (`convoys.raiseSos`, idempotent per rider + clientId; room alerts in memory) |
 | LIVE | PATCH | /api/me | routes.js | `auth.updateProfile` -> `convoys.applyProfile` updates (or loads) the rider's live room: SOS roster phone / opt-out |
 | LIVE | DELETE | /api/me | routes.js | `prepareErase`: leaves rooms, `hub.disconnectUser`, `timeline.forgetUser` |
 | LIVE | POST | /api/geo/essentials | routes.js | `convoys.getRoom` / `isMember` |
@@ -80,6 +82,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | Class | Methods | Path | Source | Why |
 |---|---|---|---|---|
 | WEB | GET | /api/meta | routes.js | static metadata |
+| WEB | GET | /api/shard | shards.js | round 8 shard lookup (stage 4, SHARDS=1 = off): hash of a group id, or one database read for a join code; no room state |
 | WEB | GET | /api/web/config | web_shop.js | website config (Google web client id, support address) |
 | WEB | GET | /api/web/receipt/:orderId | web_shop.js | the rider's own receipt (database) |
 | WEB | POST | /api/web/receipt-email | purchase_email.js | optional receipt address of an order (database, mailer) |
@@ -154,6 +157,8 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | GET | /api/geo/search | routes.js | Photon/Nominatim proxy (own cache and polite queue per node) |
 | WEB | GET | /api/geo/nearby-fuel | routes.js | OSM proxy |
 | WEB | GET | /api/geo/poi-cells | routes.js | Map places by 0.05 degree cell (proxy and cache) |
+| WEB | GET | /api/geo/roads | road_cells.js | round 7: road geometry by geohash-6 cell for curve / speed-limit prediction (Overpass proxy, geo_cache 30 days, gzip + ETag) |
+| WEB | POST | /api/geo/limit-corrections | road_cells.js | round 7: one "wrong limit" vote (database; consenting riders) |
 | WEB | GET | /api/geo/reverse | routes.js | Nominatim proxy |
 | WEB | POST | /api/geo/route | routes.js | OSRM proxy |
 | WEB | POST | /api/geo/weather | routes.js | Open-Meteo proxy |
@@ -181,6 +186,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | POST | /api/road-risk/brakes | road_risk.js | database |
 | WEB | GET | /api/road-risk/near | road_risk.js | database |
 | WEB | POST | /api/diagnostics/submit | routes.js | database |
+| WEB | * | /api/admin/jobs/* | jobs/index.js | round 8 job queue admin: depth per type, oldest age, workers, dead letters (retry / discard) - database only |
 | WEB | * | /api/admin/* | routes.js, subscription_routes.js, membership_routes.js, admin_riders.js, email_marketing.js, push_campaigns.js, business/*.js ... | every other admin screen: payments, coupons, offers, pricing, payment gateway, memberships, reviews, feedback, diagnostics, audit, app builds, convoy history, page analytics, riders list / plan / coupon / e-mail, e-mail and push studios, templates, access mode, operators review, intelligence layers, Business analytics and Servers (database only; `/api/admin/business/servers` asks the peer node for its metrics over the VCN) |
 | WEB | GET | /download | app.js | redirect |
 | WEB | GET | /download/32bit | app.js | redirect |

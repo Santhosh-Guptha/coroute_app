@@ -20,6 +20,9 @@
  *   public|http|https://coroute.devmonks.space/api/health  public-ws|ws|wss://coroute.devmonks.space/ws
  *   vm1|http|https://<vm1-public-ip>/api/health/live|coroute.duckdns.org
  * (the 4th field is the TLS name to check when the URL uses an IP address).
+ *
+ * Round 8: the synthetic SOS probe on STAGING (deploy/watchdog/sos_probe.js, WATCH_SOS_PROBE=1): every 15 min a test
+ * SOS between two dedicated staging accounts; mail when delivery > 1 s or failed; result in the daily summary.
  */
 const http = require('http');
 const https = require('https');
@@ -80,8 +83,10 @@ function check(target, { timeoutMs = 8000 } = {}) {
 }
 
 class Watchdog {
-  constructor({ targets, env = process.env, mailer = null, clock = Date.now, stateFile = null, log = console, runPromote = null }) {
+  constructor({ targets, env = process.env, mailer = null, clock = Date.now, stateFile = null, log = console, runPromote = null, probe = null }) {
     this.targets = targets; this.env = env; this.clock = clock; this.log = log; this.stateFile = stateFile;
+    /** Round 8 SOS probe (sos_probe.js SosProbe) or null. */
+    this.probe = probe;
     this.failsToAlert = Math.max(1, Number(env.WATCH_FAILS || 3));
     this.mailer = mailer; this.runPromote = runPromote;
     this.state = this._load() || { targets: {}, day: null, promoted: false };
@@ -118,6 +123,7 @@ class Watchdog {
       if (e.type === 'RECOVERED') await this.mail(`[CoRoute] RECOVERED: ${e.target}`, `${e.target} is answering again after about ${e.downMin} min.\n${e.detail}\n`);
     }
     await this._maybePromote(now, events);
+    await this._maybeProbe(now, events);
     await this._maybeSummary(now);
     this._save();
     return events;
@@ -136,6 +142,15 @@ class Watchdog {
     await this.mail('[CoRoute] DR: vm3 promoted automatically', `Every one of ${need.join(', ')} was down for ${Math.round(afterMs / 60000)} min. Ran the promote command.\n${out}\n`);
   }
 
+  /** Round 8: the staging SOS probe when it is due (its own 15 min schedule, independent of the 30 s checks). */
+  async _maybeProbe(now, events) {
+    if (!this.probe) return;
+    const r = await this.probe.tick(now).catch((e) => ({ result: { ok: false, detail: e.message }, mail: null }));
+    if (!r) return;
+    events.push({ type: 'SOS_PROBE', ok: r.result.ok, ms: r.result.ms ?? null, detail: r.result.detail });
+    if (r.mail) await this.mail(r.mail.subject, r.mail.text);
+  }
+
   async _maybeSummary(now) {
     const hour = Number(this.env.WATCH_SUMMARY_HOUR_UTC ?? 3);
     const d = new Date(now);
@@ -146,6 +161,7 @@ class Watchdog {
     const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
     const backup = readJson(this.env.WATCH_BACKUP_STATUS || '/var/lib/coroute-backup/last.json');
     const drillR = readJson(this.env.WATCH_DRILL_STATUS || '/var/lib/coroute-backup/last-drill.json');
+    if (this.probe) lines.push('', this.probe.summaryLine());
     const text = `${lines.join('\n')}\n\nLast backup: ${backup ? JSON.stringify(backup) : 'no status file'}\nLast restore drill: ${drillR ? JSON.stringify(drillR) : 'no status file'}\n`;
     await this.mail(`[CoRoute] daily summary ${day}`, text);
     for (const s of Object.values(this.state.targets)) { s.checks = 0; s.okChecks = 0; }
@@ -172,7 +188,9 @@ async function main() {
   const runPromote = env.WATCH_PROMOTE_CMD ? () => new Promise((resolve, reject) => {
     execFile('/bin/sh', ['-c', env.WATCH_PROMOTE_CMD], { timeout: 600000 }, (e, so, se) => (e ? reject(new Error(`${e.message} ${se}`)) : resolve(String(so).slice(-2000))));
   }) : null;
-  const wd = new Watchdog({ targets, env, mailer: smtpMailer(env), stateFile: env.WATCH_STATE_FILE || '/var/lib/coroute-watchdog/state.json', runPromote,
+  const { SosProbe } = require('./sos_probe');
+  const probe = env.WATCH_SOS_PROBE === '1' ? new SosProbe({ env }) : null;
+  const wd = new Watchdog({ targets, env, mailer: smtpMailer(env), stateFile: env.WATCH_STATE_FILE || '/var/lib/coroute-watchdog/state.json', runPromote, probe,
     log: { info: (m) => console.log(new Date().toISOString(), m), warn: (m) => console.warn(new Date().toISOString(), m) } });
   const every = Math.max(10, Number(env.WATCH_INTERVAL_S || 30)) * 1000;
   console.log(`${new Date().toISOString()} watchdog: ${targets.map((t) => t.name).join(', ')} every ${every / 1000}s; mail ${wd.mailer ? 'on' : 'OFF (set SMTP_HOST, ALERT_TO)'}; auto-promote ${env.WATCH_AUTO_PROMOTE === '1' ? 'ON' : 'off'}`);
