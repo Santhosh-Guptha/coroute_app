@@ -71,10 +71,10 @@ Existing production instructions: [Gateway deployment runbook](../gateway/deploy
 3. Set version/build and production signing through the existing key.properties/environment setup. Do not put credentials in Git or this document.
 4. Build release APKs using the existing runbook. From coroute_app in PowerShell:
 ```powershell
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' pub get
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' analyze --no-pub
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' test --no-pub
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' build apk --release --split-per-abi --target-platform android-arm,android-arm64 --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
+& 'C:/Users/<you>/flutter/bin/flutter.bat' pub get
+& 'C:/Users/<you>/flutter/bin/flutter.bat' analyze --no-pub
+& 'C:/Users/<you>/flutter/bin/flutter.bat' test --no-pub
+& 'C:/Users/<you>/flutter/bin/flutter.bat' build apk --release --split-per-abi --target-platform android-arm,android-arm64 --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
 ```
 Use your verified production origin if it differs. Keep build/symbols with the release artifacts. Verify APK signing and upgrade installation over the currently published app before release.
 5. Deploy gateway code, lockfile, migrations and the public website together using the runbook. Required new assets include watch.html, assets/guardian.js, assets/guardian.css, _watch-sw.js and watch.webmanifest. The app serves the worker through /watch-sw.js; do not bypass the route/privacy headers.

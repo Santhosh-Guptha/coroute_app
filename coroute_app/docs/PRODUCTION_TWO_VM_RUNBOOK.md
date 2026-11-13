@@ -25,10 +25,10 @@ Reference files (all in `coroute_app/gateway/`):
                                |                 :  (only when VM1 is unhealthy)
                                v                 v
   +----------------------------------+    +----------------------------------+
-  | VM1  10.0.0.70   GATEWAY_ROLE=live|    | VM2  10.0.0.99   GATEWAY_ROLE=web |
+  | VM1  <vm1-private-ip>   GATEWAY_ROLE=live|    | VM2  <vm2-private-ip>   GATEWAY_ROLE=web |
   | Caddy :443 (TLS, DuckDNS DNS-01)  |    | Caddy :443 (TLS, DuckDNS DNS-01)  |
   |  LIVE routes -> 127.0.0.1:3000    |    |  everything -> 127.0.0.1:3000     |
-  |  WEB routes  -> 10.0.0.99:3000 ---+--->|                                   |
+  |  WEB routes  -> <vm2-private-ip>:3000 ---+--->|                                   |
   |               (fallback local)    |    |                                   |
   | gateway :3000  rooms, sockets     |<==>| gateway :3000  website, payments, |
   |                mirror :3101       |3101|  admin, mirror copy of all rides  |
@@ -55,7 +55,7 @@ Reference files (all in `coroute_app/gateway/`):
 
 ## 2. Prerequisites
 
-- Two Ubuntu 22.04/24.04 VMs in one VCN/subnet with private IPs **10.0.0.70** (VM1) and **10.0.0.99** (VM2)
+- Two Ubuntu 22.04/24.04 VMs in one VCN/subnet with private IPs **<vm1-private-ip>** (VM1) and **<vm2-private-ip>** (VM2)
   (E2.1.Micro or A1.Flex), Oracle Cloud Agent with the **Bastion** plugin enabled (Instance -> Oracle Cloud Agent).
 - The Autonomous Database with the dedicated low-privilege `COROUTE` schema (see `deploy/RUNBOOK.md` section 2)
   and its SODA URL.
@@ -82,8 +82,8 @@ export VM1_ID=<VM1 instance OCID>  VM2_ID=<VM2 instance OCID>
 |---|---|---|---|
 | Ingress | 0.0.0.0/0 | TCP 443 | clients via NLB (source IP preserved) and NLB health checks |
 | Ingress | 0.0.0.0/0 | TCP 80 | HTTP -> HTTPS redirect (optional) |
-| Ingress | 10.0.0.70/32 | TCP 3000, TCP 3101 | VM1 -> VM2 gateway and mirror |
-| Ingress | 10.0.0.99/32 | TCP 3000, TCP 3101 | VM2 -> VM1 gateway and mirror |
+| Ingress | <vm1-private-ip>/32 | TCP 3000, TCP 3101 | VM1 -> VM2 gateway and mirror |
+| Ingress | <vm2-private-ip>/32 | TCP 3000, TCP 3101 | VM2 -> VM1 gateway and mirror |
 | Ingress | <Bastion private endpoint IP>/32 | TCP 22 | SSH through Bastion only (3.2) |
 | Egress | 0.0.0.0/0 | all | ADB, Vault, Object Storage, Razorpay, OSM, DuckDNS, apt |
 
@@ -100,8 +100,8 @@ Note the Bastion's **private endpoint IP** (used in the NSG rule above).
 # [laptop] one session per VM (3 h); prints the SSH command
 oci bastion session create-managed-ssh --bastion-id <bastion OCID> --target-resource-id $VM1_ID \
   --target-os-username ubuntu --ssh-public-key-file ~/.ssh/id_ed25519.pub --session-ttl 10800 --wait-for-state SUCCEEDED
-# Connect (session OCID from the output; same for VM2 with 10.0.0.99):
-ssh -i ~/.ssh/id_ed25519 -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -W %h:%p -p 22 <session OCID>@host.bastion.$REGION.oci.oraclecloud.com" ubuntu@10.0.0.70
+# Connect (session OCID from the output; same for VM2 with <vm2-private-ip>):
+ssh -i ~/.ssh/id_ed25519 -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -W %h:%p -p 22 <session OCID>@host.bastion.$REGION.oci.oraclecloud.com" ubuntu@<vm1-private-ip>
 ```
 Use the same `-o ProxyCommand=...` with `scp` to copy files.
 
@@ -191,7 +191,7 @@ Put a calendar reminder 2 weeks before `$EXP` (PAR rotation, 6.4).
   - Fail open: off. "Operationally active backends preferred": **off** (traffic must return to VM1)
   - Health check: **HTTPS**, port **443**, URL path **/api/health/live**, status **200**,
     interval **5000 ms**, timeout **3000 ms**, retries **2** (failover in about 10-15 s)
-  - Backends: **10.0.0.70:443** (weight 1) and **10.0.0.99:443** with **Backup = on** (`is_backup`)
+  - Backends: **<vm1-private-ip>:443** (weight 1) and **<vm2-private-ip>:443** with **Backup = on** (`is_backup`)
 - Second listener **tcp80** (TCP 80) with backend set **gw-80**: same settings, backends on port 80,
   health check still HTTPS 443 /api/health/live.
 
@@ -201,7 +201,7 @@ your console/region does not show "Backup", use weights instead (VM1 weight 100,
 (`is_drain`) during normal operation and undrain it in an incident.
 
 Health checks connect by IP without SNI; Caddy answers them through `default_sni` and its `:443` block (only
-`/api/health/live`, everything else 404). If backends show *Critical* while `curl -k https://10.0.0.70/api/health/live`
+`/api/health/live`, everything else 404). If backends show *Critical* while `curl -k https://<vm1-private-ip>/api/health/live`
 answers 200 on the VM, switch the health check to TCP 443 temporarily and report it.
 
 ### 3.8 DuckDNS
@@ -223,7 +223,7 @@ finish VM2 (certificate obtained) before starting Caddy on VM1. Renewals then fa
 node gateway/deploy/gen_caddy_routes.js --check        # every route classified LIVE/WEB
 tar --exclude=gateway/node_modules --exclude='gateway/.env*' --exclude=gateway/deploy/__pycache__ \
     -czf /tmp/gateway.tgz gateway
-scp -o ProxyCommand="..." /tmp/gateway.tgz ubuntu@10.0.0.99:/tmp/
+scp -o ProxyCommand="..." /tmp/gateway.tgz ubuntu@<vm2-private-ip>:/tmp/
 ```
 
 ### 4.2 Provision
@@ -231,15 +231,15 @@ scp -o ProxyCommand="..." /tmp/gateway.tgz ubuntu@10.0.0.99:/tmp/
 # [VM2]
 sudo mkdir -p /opt/coroute && sudo tar -xzf /tmp/gateway.tgz -C /opt/coroute
 cd /opt/coroute/gateway
-sudo NODE_NAME=vm2 NODE_ROLE=web NODE_IP=10.0.0.99 PEER_IP=10.0.0.70 bash deploy/setup_node.sh
+sudo NODE_NAME=vm2 NODE_ROLE=web NODE_IP=<vm2-private-ip> PEER_IP=<vm1-private-ip> bash deploy/setup_node.sh
 sudo PUPPETEER_SKIP_DOWNLOAD=1 npm ci --omit=dev --no-audit --no-fund
 ```
-(VM1: `NODE_NAME=vm1 NODE_ROLE=live NODE_IP=10.0.0.70 PEER_IP=10.0.0.99`.) Re-running `setup_node.sh` is safe.
+(VM1: `NODE_NAME=vm1 NODE_ROLE=live NODE_IP=<vm1-private-ip> PEER_IP=<vm2-private-ip>`.) Re-running `setup_node.sh` is safe.
 
 ### 4.3 Settings (no secrets) - `/etc/coroute/gateway.env`
 `setup_node.sh` created it from `deploy/.env.example` and set `NODE_ENV`, `HOST=0.0.0.0`, `PORT`, `NODE_NAME`,
 `GATEWAY_ROLE`, `PUBLIC_ORIGIN=https://coroute.duckdns.org` and `TRUST_PROXY` (VM1 `loopback`, VM2
-`loopback,10.0.0.70`). Edit (`sudo nano /etc/coroute/gateway.env`) and set at least:
+`loopback,<vm1-private-ip>`). Edit (`sudo nano /etc/coroute/gateway.env`) and set at least:
 
 ```ini
 ORACLE_SODA_URL=https://<adb-host>/ords/coroute/soda/latest
@@ -249,8 +249,8 @@ BOOTSTRAP_ADMIN_EMAILS=<...>
 REVIEW_PHOTO_STORE=par
 LIVE_RIDER_CAP=150                      # same value on both VMs (section 9.4)
 # mirror  (VM1 values; on VM2 swap the two IPs)
-MIRROR_LISTEN_HOST=10.0.0.70
-MIRROR_PEER_URL=ws://10.0.0.99:3101/mirror
+MIRROR_LISTEN_HOST=<vm1-private-ip>
+MIRROR_PEER_URL=ws://<vm2-private-ip>:3101/mirror
 ```
 Do not put any key from the Vault table into this file.
 
@@ -288,11 +288,11 @@ curl -sI http://coroute.duckdns.org/ | head -1                                  
 ```
 ```bash
 # [VM1]
-curl -s http://10.0.0.99:3000/api/health | jq '{role,node,leases}'   # web, vm2, [retention, db-keepalive, subscriptions, backup-...]
+curl -s http://<vm2-private-ip>:3000/api/health | jq '{role,node,leases}'   # web, vm2, [retention, db-keepalive, subscriptions, backup-...]
 curl -s http://127.0.0.1:3000/api/health | jq '.leases'              # [convoy-auto-end] (+ guardian-push when enabled)
 sudo ls -l /run/coroute; findmnt -no FSTYPE /run                    # secrets.env -rw------- coroute; tmpfs
 systemctl is-active coroute-secrets coroute-gateway caddy chrony     # active x4
-sudo iptables -S INPUT | grep -E 'dport (443|80|3000|3101)'          # 3000/3101 only from 10.0.0.99
+sudo iptables -S INPUT | grep -E 'dport (443|80|3000|3101)'          # 3000/3101 only from <vm2-private-ip>
 journalctl -u coroute-gateway --since '-10 min' | grep -i -E 'error|lease' | tail
 ```
 - [console] NLB -> backend set -> backends: VM1 **OK**, VM2 **OK (backup)**.
@@ -350,7 +350,7 @@ delete the old PAR: `oci os preauth-request delete --bucket-name <bucket> --par-
 # [laptop]
 node gateway/deploy/gen_caddy_routes.js --check && (cd gateway && npm test)
 tar --exclude=gateway/node_modules --exclude='gateway/.env*' --exclude=gateway/deploy/__pycache__ -czf /tmp/gateway.tgz gateway
-scp -o ProxyCommand="..." /tmp/gateway.tgz ubuntu@10.0.0.99:/tmp/      # then the same to 10.0.0.70
+scp -o ProxyCommand="..." /tmp/gateway.tgz ubuntu@<vm2-private-ip>:/tmp/      # then the same to <vm1-private-ip>
 ```
 ```bash
 # [VM2] then, after its checks pass, [VM1]
@@ -379,8 +379,8 @@ curl -s http://127.0.0.1:3000/api/health/live | jq '{ok,state,mirror}'      # VM
 |---|---|---|---|
 | 1 | Gateway crash on VM1 | [VM1] `sudo systemctl kill -s KILL coroute-gateway` | systemd restarts it within 2 s; phones reconnect (a few 502s from Caddy meanwhile); rides intact (mirror copy on VM2 + DB). If the restart takes longer than ~10 s the NLB fails over to VM2 and back. Live-preferred job leases of the dead process expire after 60 s and are retaken by the new VM1 process; no job runs twice. |
 | 2 | Reboot VM1 | [VM1] `sudo reboot` | NLB marks VM1 unhealthy in 10-15 s; all traffic (LIVE + WEB) to VM2; riders reconnect to VM2 with their rides, voice and SOS working. After boot: secrets fetched, gateway `syncing` -> `serving`, NLB back to VM1, riders handed back. `guardian-push`/`convoy-auto-end` run on VM2 meanwhile only if VM1 stays down > 3 min (60 s TTL + 120 s grace). |
-| 3 | VM2 down | [VM2] `sudo systemctl stop coroute-gateway` (or stop the instance) | VM1's Caddy marks 10.0.0.99 down within 10 s; WEB routes served by VM1 (in-flight requests retried locally for up to 5 s). Mirror link down; VM1 serves alone. Web-preferred jobs move to VM1 120 s after their leases end (at once released on a graceful stop, 60 s TTL otherwise). Start VM2: it takes its jobs back on request. |
-| 4 | Cut the mirror link | [VM1] `sudo iptables -I INPUT -p tcp -s 10.0.0.99 --dport 3101 -j DROP` and [VM2] same with `-s 10.0.0.70` | `/api/health/live` `mirror.connected:false` on both after ~3.5 s; rides continue on VM1; WEB unaffected (port 3000). Remove with `-D` instead of `-I`: link back in seconds, unacknowledged events resent, snapshots merged. |
+| 3 | VM2 down | [VM2] `sudo systemctl stop coroute-gateway` (or stop the instance) | VM1's Caddy marks <vm2-private-ip> down within 10 s; WEB routes served by VM1 (in-flight requests retried locally for up to 5 s). Mirror link down; VM1 serves alone. Web-preferred jobs move to VM1 120 s after their leases end (at once released on a graceful stop, 60 s TTL otherwise). Start VM2: it takes its jobs back on request. |
+| 4 | Cut the mirror link | [VM1] `sudo iptables -I INPUT -p tcp -s <vm2-private-ip> --dport 3101 -j DROP` and [VM2] same with `-s <vm1-private-ip>` | `/api/health/live` `mirror.connected:false` on both after ~3.5 s; rides continue on VM1; WEB unaffected (port 3000). Remove with `-D` instead of `-I`: link back in seconds, unacknowledged events resent, snapshots merged. |
 | 5 | Database outage | [console] ADB ACL: remove both VM IPs (or stop the ADB) for 5 min | `/api/health` 503 `db: DOWN`; `/api/health/live` stays 200 (NLB does not fail over). Live rides, chat, positions, voice continue in memory; sign-in and payments fail with 5xx; signed-in riders stay signed in (account cache). Lease renewals fail: no job starts anywhere until the DB is back. Restore the ACL: writes resume, `/api/health` 200 within 30 s. |
 | 6 | Backup restore into DB2 | see 9.3 | dry run lists every collection with counts equal to the manifest; the restore writes the same counts; a test login against a gateway pointed at DB2 (local `npm start` with ORACLE_SODA_URL of DB2) works. |
 | 7 | Secrets unavailable | [VM2] `sudo systemctl stop coroute-secrets` | `/run/coroute/secrets.env` removed and the gateway stopped (Requires=). `sudo systemctl start coroute-gateway` fetches again. With Vault/policy broken, `journalctl -u coroute-secrets` names the secret that failed (never its value). |

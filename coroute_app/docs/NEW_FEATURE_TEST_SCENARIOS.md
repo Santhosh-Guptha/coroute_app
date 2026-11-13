@@ -280,8 +280,8 @@ These are explicit unchecked gates. Completed Guardian widget, timeline, push HT
 ## Commands and latest results
 Run Flutter from coroute_app; Node from coroute_app/gateway.
 ```powershell
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' analyze
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' test --no-pub
+& 'C:/Users/<you>/flutter/bin/flutter.bat' analyze
+& 'C:/Users/<you>/flutter/bin/flutter.bat' test --no-pub
 npm test
 ```
 Latest execution: expanded focused Flutter suite **90/90 passed**; full gateway suite **260/260 passed**. These are the counts actually reported for the current working tree; earlier runs had different totals. Secure-storage plugin warnings in Flutter tests mean native secure storage was not exercised. Analyzer/full Flutter suite and manual/device cases were not rerun in this test-writing pass.

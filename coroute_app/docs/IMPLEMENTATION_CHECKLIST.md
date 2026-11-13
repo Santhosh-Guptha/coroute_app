@@ -91,9 +91,9 @@ No native build, real-device notification QA, battery benchmark or actual push d
 
 Commands (PowerShell; run Flutter from coroute_app and Node from coroute_app/gateway):
 ```powershell
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' analyze
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' test --no-pub
-& 'C:/Users/santhosh/flutter/bin/flutter.bat' build apk --debug
+& 'C:/Users/<you>/flutter/bin/flutter.bat' analyze
+& 'C:/Users/<you>/flutter/bin/flutter.bat' test --no-pub
+& 'C:/Users/<you>/flutter/bin/flutter.bat' build apk --debug
 node --test test/guardians.test.js test/guardian_push.test.js test/guardians_integration.test.js
 npm test
 ```

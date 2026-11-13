@@ -15,7 +15,7 @@ anything that could stop SOS, crash detection, emergency texts or the lock-scree
 
 **Environment.** Repository `wise-chandrasekhar/coroute_app` on the owner's Windows machine, branch
 `release/v3.55.0` (all v3.55 work is in the working tree, mostly uncommitted). Flutter SDK
-`C:\Users\santhosh\flutter` (Flutter 3.47.1; check with `flutter --version`). The gateway is in `gateway/`
+`C:\Users\<you>\flutter` (Flutter 3.47.1; check with `flutter --version`). The gateway is in `gateway/`
 (Node 20+). Production is two OCI VMs behind an OCI Network Load Balancer, database on Oracle Autonomous DB,
 secrets in **OCI Vault** (fetched at boot by `coroute-secrets.service` into `/run/coroute/secrets.env`,
 OCIDs listed in `/etc/coroute/secret_ids.env`), non-secret settings in `/etc/coroute/gateway.env`.

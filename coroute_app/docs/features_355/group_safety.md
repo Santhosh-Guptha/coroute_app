@@ -182,3 +182,17 @@ headingBucket, headingDeg}` — no counts or hashes. Retention (retention.js): c
 * Hard-brake rate per rider and the 10-rider threshold in practice (cells may take months to confirm).
 * The buddy "behind" rule without a planned route (straight-line distance while moving).
 * Voice timing next to navigation prompts (all lines use the important tier).
+
+
+## 3.56 round 6: consent for the risky-stretch counts
+
+The hard brakes behind "Many riders brake hard on this stretch" are now collected only from riders who turned on
+**Help make roads safer** (the opt-in of the road hazard layer, `intel_consent`):
+
+* App: `GroupSafetyService.roadDataConsent` (wired to `IntelCareService.consentOn`). Without it no brake is queued,
+  anything queued is dropped, and nothing is posted. A brake within 300 m of a private place is never queued.
+* Gateway: `POST /api/road-risk/brakes` answers `{ ok: true, cells: 0, reason: 'NO_CONSENT' }` and stores nothing
+  for a rider without the opt-in (older apps keep working). "No" is never cached; "yes" for 15 s.
+* Unchanged for riders: the warning (`GET /api/road-risk/near`) is shown to everyone, same k >= 10, same 180 days.
+  Cells counted before 3.56 hold no rider id (salted per-cell hashes) and age out on their own.
+* Tests: `gateway/test/group_safety_355.test.js` (road risk REST), `test/round6_wiring_356_test.dart`.

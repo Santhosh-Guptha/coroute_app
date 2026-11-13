@@ -41,12 +41,26 @@ not offer in-app purchase if the app itself contains no purchase flow, prices or
 | Personal info: other (vehicle, emergency contact) | Yes | Yes, with ride members / helpers during SOS | Safety | Emergency contact required for group rides | |
 | Health and fitness: health info | Yes (Medical ID: blood group, allergies, notes) | Yes, with responders **only during an open SOS** | Safety | **Optional** | Never to admins |
 | Messages: other in-app messages | Yes (ride chat) | With ride members | App functionality | Optional | |
-| Photos | Yes (profile picture, review photos) | Review photos on website only after consent + approval | App functionality | Optional | EXIF removed |
+| Photos | Yes (profile picture: the round picture and, since round 6, a private copy of the chosen picture at most 2048 px for later adjusting; review photos) | Review photos on website only after consent + approval. The private original of a profile picture is never shared | App functionality | Optional | EXIF removed; deleted with the picture / account |
 | Audio: voice or sound recordings | Voice transmitted live to ride members; **not stored**. Siren detection on device only. | With ride members (live) | App functionality | Optional (intercom) | Declare "processed ephemerally" for voice |
 | App activity: app interactions, in-app search | Limited (feature analytics aggregates, map searches proxied) | No | Analytics, app functionality | — | |
 | App info and performance: crash logs, diagnostics | Yes, **only when the user sends** the diagnostics log | No | Analytics / troubleshooting | Optional | |
 | Device or other IDs | Yes (FCM push token) | No (Google FCM as processor) | Notifications | Optional (push switch) | |
 | Financial info: purchase history | **Not collected by the app** (website only) | — | — | — | Answer "No" for the app |
+
+**Round 4 (build 10026) road & safety intelligence:** with the opt-in "Help make roads safer" (off by default)
+the app sends anonymous road signals (hard braking, swerves, skids, potholes as ~150 m cells with direction, speed
+band and hour) and crash alarm sensor numbers with their outcome; the gateway counts consented riders' ride positions
+into ~1 km cells (speed, turning, stops). Data safety updates:
+* **Location: approximate** — Collected: Yes; Shared: No; Purpose: **App functionality** (safety warnings) and
+  **Analytics** (road safety statistics); **Optional** (user can choose: the switch). Precise location stays as
+  above (rides); the analytics use only cells after trimming.
+* **App activity: other actions** — Collected: Yes (crash alarm outcome, "Was this a real crash?"), Optional,
+  Purpose: App functionality / Analytics (fewer false crash alarms). Not shared.
+* Data is **not** used for advertising or sold; users can request deletion (in-app Delete my contributions, /account,
+  account deletion).
+* **No new permissions** (confirmed: no manifest change in round 4; the warnings use the location and motion sensor
+  access the app already has during rides).
 
 Security practices: data encrypted in transit (TLS) — **Yes**; users can request deletion — **Yes**
 (in-app Delete account + web URL `https://coroute.devmonks.space/delete-account`); committed to the

@@ -102,7 +102,7 @@ $ npm test --prefix coroute_app/gateway
 
 ### 3. Kinematic Pattern Detector Verification
 
-The detector in [`road_hazard_detector.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/domain/safety/road_hazard_detector.dart) was tested against synthetic and recorded multi-axis sensor traces:
+The detector in [`road_hazard_detector.dart`](lib/domain/safety/road_hazard_detector.dart) was tested against synthetic and recorded multi-axis sensor traces:
 
 1. **Genuine Pothole Impact (`TEST-KIN-01`)**:
    - Trace: $a_z = 32.0\text{ m/s}^2$ ($2.26\text{ g}$ dynamic vertical shock above $1.0\text{ g}$ gravity), $\omega_{yaw} = 35.0^\circ/\text{s}$ at $t = 1020\text{ ms}$ ($20\text{ ms}$ coincidence).
@@ -140,7 +140,7 @@ The detector in [`road_hazard_detector.dart`](file:///C:/Users/santhosh/Document
 
 ### 4. 100-Meter Spatial Deduplication & Aggregation
 
-The spatial aggregation logic in [`road_hazard_aggregator.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/domain/safety/road_hazard_aggregator.dart) and [`road_hazards.js`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/gateway/src/road_hazards.js) verifies:
+The spatial aggregation logic in [`road_hazard_aggregator.dart`](lib/domain/safety/road_hazard_aggregator.dart) and [`road_hazards.js`](gateway/src/road_hazards.js) verifies:
 
 1. **Intra-Corridor Boundary Merging (`TEST-AGG-04`)**:
    - Observations separated by $20\text{ m}$, $35\text{ m}$, and $99\text{ m}$ along the same heading ($90^\circ$ East) merge into the existing hazard pin.

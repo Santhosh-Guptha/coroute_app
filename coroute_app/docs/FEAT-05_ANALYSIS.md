@@ -29,13 +29,13 @@ When a severe crash occurs or a rider is incapacitated in these dead zones:
 
 | Subsystem / Requirement | Files Inspected in Repository | Current Capability & Status |
 | :--- | :--- | :--- |
-| **Android SDK Baseline** | [`coroute_app/android/app/build.gradle.kts`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/android/app/build.gradle.kts) | `compileSdk = 37`, `minSdk = 23` (Android 6.0 Marshmallow). Target SDK tracks modern Android. |
-| **iOS Baseline** | [`coroute_app/ios/Runner/Info.plist`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/ios/Runner/Info.plist) | Background audio and location enabled. iOS deployment target $\ge 12.0$. |
-| **SOS & Crash Detection** | [`coroute_app/lib/data/services/safety_service.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/data/services/safety_service.dart), [`convoy_service.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/data/services/convoy_service.dart) | 15-second crash countdown, `CrashAlarmState`, bystander siren, and `raiseSosFrom`. |
-| **FEAT-04 Biometrics** | [`coroute_app/lib/data/services/biometric_safety_bridge.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/data/services/biometric_safety_bridge.dart) | Provides `BiometricTraumaLevel` (`stableTrauma`, `elevatedTrauma`, `criticalTraumaLevel1`, `unverified`), resting baseline, and 5-min history. |
-| **Medical Info & Consent** | [`coroute_app/lib/data/models/medical_info.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/data/models/medical_info.dart), `auth_service.dart` | `bloodGroup` (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`). Explicit profile opt-in. |
-| **Offline SOS Persistence** | [`coroute_app/lib/data/models/pending_sos.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/data/models/pending_sos.dart) | `PendingSosStore` stores pending alerts in `SharedPreferences`. |
-| **Feature Gating** | [`coroute_app/lib/core/config/feature_gates.dart`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/lib/core/config/feature_gates.dart) | Tier enum: `community`, `proRider`, `roadCaptain`, `tourOperator`. |
+| **Android SDK Baseline** | [`coroute_app/android/app/build.gradle.kts`](android/app/build.gradle.kts) | `compileSdk = 37`, `minSdk = 23` (Android 6.0 Marshmallow). Target SDK tracks modern Android. |
+| **iOS Baseline** | [`coroute_app/ios/Runner/Info.plist`](ios/Runner/Info.plist) | Background audio and location enabled. iOS deployment target $\ge 12.0$. |
+| **SOS & Crash Detection** | [`coroute_app/lib/data/services/safety_service.dart`](lib/data/services/safety_service.dart), [`convoy_service.dart`](lib/data/services/convoy_service.dart) | 15-second crash countdown, `CrashAlarmState`, bystander siren, and `raiseSosFrom`. |
+| **FEAT-04 Biometrics** | [`coroute_app/lib/data/services/biometric_safety_bridge.dart`](lib/data/services/biometric_safety_bridge.dart) | Provides `BiometricTraumaLevel` (`stableTrauma`, `elevatedTrauma`, `criticalTraumaLevel1`, `unverified`), resting baseline, and 5-min history. |
+| **Medical Info & Consent** | [`coroute_app/lib/data/models/medical_info.dart`](lib/data/models/medical_info.dart), `auth_service.dart` | `bloodGroup` (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`). Explicit profile opt-in. |
+| **Offline SOS Persistence** | [`coroute_app/lib/data/models/pending_sos.dart`](lib/data/models/pending_sos.dart) | `PendingSosStore` stores pending alerts in `SharedPreferences`. |
+| **Feature Gating** | [`coroute_app/lib/core/config/feature_gates.dart`](lib/core/config/feature_gates.dart) | Tier enum: `community`, `proRider`, `roadCaptain`, `tourOperator`. |
 
 ---
 

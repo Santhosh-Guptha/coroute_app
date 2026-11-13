@@ -54,6 +54,8 @@ when the person acts.
 | 34 | Android permissions (location, background location, mic, notifications, Bluetooth, full-screen intent, battery exemption) | System consent, with in-app prominent disclosure | System settings; Safety health screen | OS | OS | `permissions_service.dart` |
 | 35 | Website cookies | None used for analytics; only the guardian pilot session cookie (httpOnly) | — | — | — | `app.js`, `guardian_routes.js` |
 | 36 | Google sign-in data | Action-based | Choose sign-in method | `users` | — | `auth.js` |
+| 37 | **Help make roads safer** (round 4: anonymous road and safety signals, crash alarm numbers + outcome) | **Opt-in, off**; one-time prompt after the first completed ride | App Settings > Road safety; website `/account#roads`; Delete / Download my contributions on both | `intel_consent` (`on`, `at`, `source`, `promptedAt`) | Yes: time + source, last 20 changes | `src/intel/privacy.js`, `GET/PUT /api/intel/consent` |
+| 38 | Road safety warnings (hazard ahead, rough road, twisty, nudges) | Opt-out, on (comfort / safety, no data sent) | App Settings > Road safety | phone pref `intel_settings_v1` | — | `intel_care_service.dart` |
 
 **Open items:** record the privacy-notice version accepted (sign-up and material change); 18+
 confirmation at sign-up; DPDP review of the fixed-on items 11, 12, 19, 25 (see privacy pack §2.1).
@@ -75,6 +77,10 @@ confirmation at sign-up; DPDP review of the fixed-on items 11, 12, 19, 25 (see p
 | POI cell cache | 7 days | memory + `geo_cache` | `app.js` comment |
 | Road hazards | pothole 45 d, rough road 30 d, speed breaker 365 d (renewed by confirmations) | `retention` | `road_and_places.js` |
 | Road risk cells | 180 days without a new hard brake | `retention` | `retention.js` |
+| Road & safety intelligence raw rows (`intel_raw`: monthly rider hash, cells, no position finer than ~150 m) | **90 days** (`INTEL_RAW_DAYS`); deletable earlier by the rider | `intel-daily` lease job | `src/intel/engine.js` `purgeRaw` |
+| Intelligence aggregates (`intel_cells`) | decayed (half-life 90 d), pruned when near zero; current-month short hashes dropped at month change | `intel-daily` | `engine.js` `pruneCells`, `_rider` |
+| Crash brain training copies (`intel_crash_train`: sensor numbers, phone maker, month, label; no hash, no position) | **2 years** | `intel-daily` | `engine.js` `purgeRaw` |
+| Intelligence consent record | until account deletion | account cascade | `src/intel/routes.js` |
 | Guardian grants / sessions | until expiry / revoke, then purged | `retention` | `repo.purgeGuardianAccess` |
 | Uploaded diagnostics logs | **30 days**; admin requests 7 days | `diag-log-retention` (6 h) | `diag_logs.js` `RETENTION_DAYS`, `REQUEST_TTL_DAYS` |
 | Server SOS SMS rows | numbers, names, links purged **48 h** after last status change | `sos-sms` | `sos_sms.js` `PURGE_AFTER_MS` |

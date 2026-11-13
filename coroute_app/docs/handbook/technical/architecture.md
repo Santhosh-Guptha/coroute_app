@@ -64,8 +64,9 @@ flowchart LR
 
 ### 1.1 Two-VM roles
 
-`GATEWAY_ROLE` (`gateway/src/config.js`) is `live`, `web` or `all` (single VM, default). The role
-only decides which node **prefers** a scheduled job; routing is decided by Caddy.
+`GATEWAY_ROLE` (`gateway/src/config.js`) is `live`, `web`, `all` (single VM, default) or, since v3.56,
+`standby` (the DR node: boots, never takes a job lease, `/api/health/live` 503). The role only decides which node
+**prefers** a scheduled job; routing is decided by Caddy.
 
 | Node | Serves | Notes |
 |---|---|---|
@@ -76,6 +77,71 @@ Failover: the NLB health-checks `GET /api/health/live` on each VM (VM1 primary, 
 VM1 unhealthy, then all traffic goes to VM2, which already has every room in memory. When VM1 is
 back it syncs (`syncing` then `serving`) and riders are handed back at `MIRROR_HANDBACK_PER_SEC`
 after `MIRROR_HANDBACK_DELAY_MS`. Drills: [deployment_and_operations.md](deployment_and_operations.md#8-failover-drills).
+
+### 1.1a Infrastructure topology (v3.56)
+
+Full plan, capacity numbers and failure scenarios: [`docs/infra/INFRASTRUCTURE_PLAN_v3.56.md`](../../infra/INFRASTRUCTURE_PLAN_v3.56.md).
+Hosts are named `vm1`..`vm5`; no addresses in the docs (they live in the untracked `gateway/deploy/inventory.local.env`).
+
+```mermaid
+flowchart TB
+  subgraph Clients
+    APP["Android app
+REST + WSS /ws"]
+    BR["Browsers
+site, /admin, /operator, /e/, /watch"]
+  end
+  DNS["DNS: coroute.devmonks.space (provider) + coroute.duckdns.org (DuckDNS)
+TTL 300"]
+  APP & BR --> DNS --> NLB
+  subgraph T1["OCI tenancy 1 (Hyderabad)"]
+    NLB["Network Load Balancer
+health: /api/health/live
+vm1 primary, vm2 backup"]
+    subgraph VM1["vm1 E2.1.Micro: realtime primary (live)"]
+      C1["Caddy: TLS, static assets from disk
+(precompressed, immutable), route split"] --> G1["gateway: /ws, rooms, SOS,
+live links, guardian"]
+    end
+    subgraph VM2["vm2 E2.1.Micro: web + hot mirror (web)"]
+      C2["Caddy (NLB backup)"] --> G2["gateway: web, auth, admin,
+payments, webhooks"]
+    end
+    ADB[("Autonomous DB (SODA)")]
+    OS1[("Object Storage: encrypted backups,
+photos, diagnostics")]
+    VAULT1["Vault -> /run/coroute (tmpfs)"]
+  end
+  NLB --> C1
+  NLB -.-> C2
+  C1 -- "WEB routes" --> G2
+  G1 <-- "mirror (AES-256-GCM)" --> G2
+  G1 & G2 --> ADB
+  G1 & G2 --> OS1
+  subgraph T2["OCI tenancy 2"]
+    VM3["vm3 micro: DR warm standby (standby)
+watchdog (30 s checks, alert mails)
+encrypted offsite backups 7/4/3 + restore drill"]
+    VM4["vm4 micro: staging / canary
+load-test runner, watchdog of vm3"]
+    VM5["vm5 A1 2 OCPU / 12 GB (pending):
+Valhalla routing, tiles, Umami, batch"]
+    OS2[("Object Storage: offsite copy")]
+    ADB2[("DR ADB (proposed)")]
+  end
+  VM3 -- "public endpoint + ACL" --> ADB
+  VM3 --> OS2
+  VM3 -. "nightly restore" .-> ADB2
+  VM3 -. "checks" .-> NLB
+  DNS -. "DR switch (promote_vm3.sh)" .-> VM3
+  G1 & G2 -. "routing (HTTPS, IP allow list)" .-> VM5
+```
+
+Performance paths (v3.56): Caddy serves `/assets`, `/fonts`, icons and APKs from disk; positions are throttled per
+rider (`WS_POS_MIN_MS`) and sent as one `RIDER_UPDATES` frame per window to apps that announce `posbatch1`; SOS and
+alerts keep their priority lane; the socket hot path uses the cached account (120 s, stale-while-revalidate); the
+SODA client limits calls in flight (`ORACLE_MAX_INFLIGHT`, alerts / sessions / leases bypass it); non-essential reads
+are shed under overload (`src/load_shed.js`); `GET /metrics` (loopback only) exposes Prometheus metrics.
 
 ### 1.2 Mirror (live replication between nodes)
 
@@ -219,7 +285,7 @@ sequenceDiagram
   loop every 2.5 s moving (5 s data saver), 30 s idle
     P->>G: TELEMETRY or binary 0x10 frame
     G->>G: speed estimator inputs, timeline checks (overspeed, stale, off route)
-    G-->>O: RIDER_UPDATE (coalesced in big rooms)
+    G-->>O: RIDER_UPDATE, or one RIDER_UPDATES batch to posbatch1 apps<br/>(v3.56: max 1 per rider per 800 ms, rooms over 20 flush every 500 ms, SOS never waits)
     G-)M: P (1/s per rider)
   end
   G->>DB: room_snapshots flush every RIDER_PERSIST_INTERVAL_MS (15 s)
@@ -227,6 +293,9 @@ sequenceDiagram
   G->>DB: track_chunks (simplified after 14 d, deleted after 90 d)
 ```
 
+- v3.56 fan-out: `RIDER_UPDATES {riders:[...], ts}` carries several riders in one frame; only sockets whose JOIN
+  announced `posbatch1` get it (the app splits it back into `RIDER_UPDATE` events in `realtime_service.dart`), every
+  other socket keeps one `RIDER_UPDATE` per rider. A peer with a send backlog loses stale positions, never alerts.
 - The phone records GPS through `geolocator` in a foreground service (`flutter_foreground_task`,
   type `location|microphone`), distance filter 8 m moving / 25 m stopped (`AppConfig`).
 - Points that cannot be sent wait in a local SQLite queue (`sqflite_track_queue.dart`) and the
@@ -439,6 +508,6 @@ and the operators handbook [../operators/](../operators/).
 | Razorpay | website payments | order amount, rider e-mail/phone prefill | `RAZORPAY_*` or admin-saved keys |
 | Google Sign-In | app and website sign-in | ID token verified server side | `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID` |
 | OSM Photon / Nominatim / OSRM / Overpass | search, reverse, routes, places | query text or rounded coordinates, no rider id | `GEO_*`, `POI_OVERPASS_URL`, `ESSENTIALS_OVERPASS_URL` |
-| Open-Meteo | weather on route | rounded route points | `WEATHER_URL` |
+| MET Norway (api.met.no; Open-Meteo only if `WEATHER_PROVIDER=open-meteo`) | weather on route | rounded route points (0.1 degree cells) | `WEATHER_PROVIDER`, `WEATHER_MET_URL`, `WEATHER_URL` |
 | OpenStreetMap tiles | maps (phone and live page) | tile requests from the viewer | none |
 | Google Play In-App Review | rating card | none from CoRoute | Play library |

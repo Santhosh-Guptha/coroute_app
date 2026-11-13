@@ -117,7 +117,7 @@ This comprehensive audit evaluates the entire CoRoute motorcycle convoy intellig
 | **Unit & Widget Tests** | **1,501 Passed / 0 Failed** | 63 test suites across all core services, UI components, and mock gateways. |
 | **Static Code Analysis** | **0 Warnings / 0 Errors** | `flutter analyze` clean. |
 | **Android Runtime Test** | **100% Success** | Tested on Android 16 (API 36) emulator with `adb install -r`. App booted and resumed smoothly. |
-| **Dual Production Deployment** | **Deployed & Verified** | Oracle Node 1 (`152.67.181.198`) & Node 2 (`129.225.79.93`) serving verified binaries. |
+| **Dual Production Deployment** | **Deployed & Verified** | Oracle Node 1 (`<vm1-public-ip>`) & Node 2 (`<vm2-public-ip>`) serving verified binaries. |
 
 ### Public Production Endpoints
 - **Universal Release APK (Recommended for all devices):**  

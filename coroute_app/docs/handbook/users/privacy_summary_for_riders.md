@@ -27,6 +27,10 @@ This is a short, plain summary. The full privacy policy is on the CoRoute websit
 
 **Stays on your phone:** crash detection and motion data, siren listening, your tank and mileage numbers, the diagnostics log (until you send it), saved maps (deleted 7 days after the trip) and the safety summary on your trip report.
 
+**Your profile picture:** the round picture is what signed-in riders see. A smaller copy of the picture you chose is kept so you can adjust it later; **only you can open it**. Location and camera details in the file are never kept. Removing the picture deletes both.
+
+**Private places** (Settings › Road safety): up to 3 places kept on your phone only. Within 300 m of them your route is not recorded or uploaded and nothing goes into the anonymous road data. Your live position during a ride is not hidden (group, guardian link, SOS).
+
 ## Who sees what
 
 | Who | What they see |
@@ -62,6 +66,14 @@ The microphone is used only during a ride: for group talk when you talk, and for
 ## Diagnostics: your choice
 
 The app keeps a technical log on your phone (7 days, 20 MB at most) to help fix problems. It never contains messages, names, phone numbers, e-mail addresses, medical info, passwords or addresses; locations are rounded to about 100 m and written only during rides. It leaves your phone only when you send it: **Send feedback › Attach diagnostics log**, the "send the log of this ride?" question after a safety event, or a support request you approve. **Send safety logs automatically** is off unless you turn it on.
+
+## Help make roads safer: your choice (off by default)
+
+Road safety warnings (hazard ahead, rough road, twisty roads, no-fuel gaps) reach every rider. Sharing your own
+anonymous road and safety signals is **off until you turn it on** (Settings > Road safety, or /account). When on:
+signals as areas of about 150 m (never your route), not the first and last 300 m of a ride, a monthly one-way code
+instead of your id, shown only once 5 riders passed a spot, raw signals deleted after 90 days. Download or delete
+your contributions at any time; older-than-90-days totals are anonymous and cannot be split out.
 
 ## Your choices
 

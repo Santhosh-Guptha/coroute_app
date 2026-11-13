@@ -104,6 +104,22 @@ All are code-complete, analyzer clean, with pure-logic tests (and gateway tests 
 | Offline crash-incident queue | Retired (duplicate of the pending-SOS store, which already resends offline SOS once) | — | platform.md |
 | Voice-command / siren services at start-up | No longer started at launch (no audio source). Siren detection now runs only during a ride, on the shared ride mic (see the v3.55 sound section) | — | platform.md |
 
+## Round 4 road & safety intelligence (Nov 12, 2026, build 10026)
+
+| Feature | Status | Admin switch | Doc |
+|---|---|---|---|
+| Help make roads safer (opt-in consent, trimming, k-anonymity, delete / export) | Built (code + tests) | env `INTEL_ENABLED`, `INTEL_KILL` | docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md |
+| Hazard ahead warning (hotspots) | Built, needs device check | `hazardAhead` | same |
+| Rough road ahead (potholes) | Built, needs device check | `roughRoadAhead` | same |
+| Twisty section ahead, twisty km in the ride report | Built, needs device check | `twistyAhead` | same |
+| Long ride and night nudges, lead's group break | Built, needs device check | `longRideNudges` | same |
+| Falling-behind alert + regroup at learned stops | Built, needs 2-phone check | `fallingBehind` (+ `regroupSuggest`) | same |
+| Rider stops, no-fuel gap warning in planning | Built | — | same |
+| ETA based on riders | Built (shows once data exists) | — | same |
+| Dangerous times + pre-ride tip (no weather) | Built | `hazardAhead` | same |
+| Crash brain | Built, **shadow** (`CRASH_BRAIN_MODE`) | — | same |
+| Valhalla motorcycle routing | Prepared (A1 only) | env `ROUTER_KIND` | gateway/deploy/valhalla/README.md |
+
 ## v3.55 sound, calls and live settings (Nov 9, 2026)
 
 Third round of 3.55 work: what the rider hears with music and calls, the lock screen, siren alerts (horn alerts were removed), a cleaner intercom voice, and settings that apply in the middle of a ride. Details: [features_355/audio_and_calls.md](features_355/audio_and_calls.md), [features_355/sound_awareness_and_intercom.md](features_355/sound_awareness_and_intercom.md), [SETTINGS_LIVE_AUDIT_v3.55.md](SETTINGS_LIVE_AUDIT_v3.55.md).

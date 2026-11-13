@@ -145,7 +145,36 @@ diagnosticsUpload, riderScore, leaderboard ...).
 | POST | `/api/geo/essentials` | Bearer | Fuel, puncture, food, medical along a route (Overpass). |
 | GET | `/api/geo/poi-cells` | Bearer | Map places by cell (cached 7 days; 20/min). |
 | GET | `/api/geo/nearby-fuel` | Bearer | Nearest fuel stations. |
-| POST | `/api/geo/weather` | Bearer | Weather on route (Open-Meteo; `WEATHER_USER_PER_MIN` 6/min). |
+| POST | `/api/geo/weather` | Bearer | Weather on route (MET Norway by default since 3.56, `WEATHER_PROVIDER=metno`; `open-meteo` only under a commercial agreement; `WEATHER_USER_PER_MIN` 6/min). |
+
+### 1.5b Road & safety intelligence (round 4, `src/intel/`, docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md)
+
+Collection only with the rider's consent ("Help make roads safer"); reads are for every signed-in rider. Cells are
+k-anonymous (`INTEL_K_MIN`, 5). Read answers are gzip when the client accepts it. Rate limits: reads 60/min, writes
+120/h per rider.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/intel/info` | Public | What is collected, k-min, retention, half-life, trim (no data). |
+| GET | `/api/intel/consent` | Bearer | `{ on, at, promptedAt, source }`. |
+| PUT | `/api/intel/consent` | Bearer | `{ on: bool, prompted?: bool, source?: 'web' }`; off discards open ride counters at once. |
+| POST | `/api/intel/events` | Bearer | `{ events: [{ type: hard_brake|swerve|skid|pothole|rough, gh (geohash-7), hb 0-7, sb 0-4, how, ts, conf }] }` (≤ 200; ≤ 3 per type and cell). 202 `{ accepted, reason? }` (NO_CONSENT, OFF). SOS / crash come from the alert itself. |
+| POST | `/api/intel/crash` | Bearer | `{ id, outcome: ok|sent, features: { pg, dur, v, still, rot, mount, path, thr, dm, sev } }` → `{ accepted, shadow }`. |
+| POST | `/api/intel/crash/feedback` | Bearer | `{ id, real: bool }` ("Was this a real crash?"). |
+| GET | `/api/intel/crash-params?model=` | Bearer | `{ mode, version, group, params: { impactScale } | null, checksum }` (sha256 of `version|group|scale(4 dp) or none`). |
+| GET | `/api/intel/hazards` · `/road-quality` · `/stops` · `/twisty` | Bearer | `?bbox=s,w,n,e` (≤ 64 geohash-4 tiles) or `?tiles=tdr1,tdr4` → `{ version, kMin, cells: [...] }`. No counts or hashes. |
+| GET | `/api/intel/ride-tip?lat=&lng=` | Bearer | `{ tip, region }` or `{ tip: null }`. |
+| POST | `/api/intel/fuel-gaps` | Bearer | `{ polyline | points, fuel?: [{lat,lng,name}], gapKm? }` → `{ gaps: [{ fromKm, toKm, lengthKm, after, toEnd }], fuelCount, routeKm }`. |
+| GET / DELETE | `/api/intel/me/contributions` | Bearer | Export (raw rows ≤ 90 days, no hash) / delete my contributions. |
+| POST | `/api/geo/route` | Bearer | (changed) legs and `durationS` scaled by riders' speeds when learned (`etaSource: 'riders'`, `routerDurationS`, per-leg `etaFactor` 0.6-1.6). `router: 'valhalla'` when `ROUTER_KIND=valhalla`. |
+
+Admin (MASTER_ADMIN, `/api/admin/intel`): `GET /overview`, `GET /hazards|road-quality|stops|twisty` (`?type=`,
+`?sinceDays=`, `?format=csv`; no area = India-wide walk), `GET /dangerous-times` (`?format=csv`), `GET /crash-brain`,
+`POST /crash-brain/train|approve {version}|rollback` (approve: 409 SHADOW_MODE / VERSION_CONFLICT /
+NOT_ENOUGH_LABELS), `POST /purge`, `POST /aggregate` (409 NOT_LEASE_HOLDER on the other node),
+`GET /rider/:userId/export`, `POST /rider/:userId/delete`.
+
+`GET /api/health` gains `intel` (last runs, aggregate counts, memory estimate).
 
 ### 1.6 Ride Guardian (pilot, only when `GUARDIAN_ENABLED=true`, prefix `/api/guardian`)
 
@@ -274,6 +303,30 @@ The app calls only `/api/membership/my` and `/api/me/capabilities`; buying happe
 | E-mail studio | `/api/admin/email/studio/*` (templates, check, preview, audience-count, test, campaigns, rules, unique-codes, images); account notices may go to up to 50 named riders (`audience.kind = usernames`). See docs/features_355/email_marketing.md |
 | Operators | see 1.10 |
 | Web console pages | GET `/admin`, `/admin/:file` (strict CSP, noindex) |
+
+### 1.12b Business analytics and Servers (round 6, `src/business/`, docs/intelligence/BUSINESS_ANALYTICS.md)
+
+All `Admin` (MASTER_ADMIN), `Cache-Control: no-store`, 120 requests a minute per IP. Numbers come from the nightly
+aggregates; every answer carries `meta { enabled, lastRunAt, lastRunMs, truncated[], running }`.
+
+| Method | Path | Returns / does |
+|---|---|---|
+| GET | `/api/admin/business/overview` | `funnel { all, recent }` (signedUp, verified, firstRide, firstGroupRide, paid), `revenue { weekly[26], last7, renewals { in7, in14, in30, list[] } }`, `week`, `atRisk { count }` |
+| GET | `/api/admin/business/retention` | `retention { weeks: 12, cohorts: [{ week, start, size, active[] }] }` |
+| GET | `/api/admin/business/conversion` | `conversion { plans[], coupons[], campaigns[], planViews }` |
+| GET | `/api/admin/business/churn?limit=&offset=` | `riders: [{ userId, username, name, score, factors[], modelScore?, lastRideAt, planEndsAt, mailable, whyNot }]`, `total`, `counts`, `model` |
+| POST | `/api/admin/business/churn/winback` `{ userIds? }` | `{ usernames[], mailable, notMailable, starter, category }` for the e-mail wizard. Sends nothing |
+| GET | `/api/admin/business/sendtime` | `sendtime { grid[168], hours[24], riders, withBest }` |
+| GET | `/api/admin/business/review` | `items: [{ id, type, label, count, severity, note, riders[], review }]` |
+| POST | `/api/admin/business/review/:id` `{ status: REVIEWED or OPEN, note? }` | stores the decision (audited). Never changes an account |
+| GET | `/api/admin/business/servers` | `{ status, nodes[], jobs[], backup, thresholds }` |
+| GET, PUT | `/api/admin/business/settings` `{ weeklySummary }` | the weekly summary switch (audited) |
+| GET | `/api/admin/business/summary/preview` | `{ subject, text, lines[] }` with this week's numbers |
+| POST | `/api/admin/business/summary/test` | sends the summary to the caller's own address only |
+| POST | `/api/admin/business/refresh` | runs the nightly computation now (200 done, 202 still running) |
+
+E-mail studio: `POST /api/admin/email/studio/campaigns` accepts `bestTime: true` ("send at each rider's best
+time": within 24 hours of `sendAt`, never in the quiet hours).
 
 ### 1.13 Provider callbacks
 

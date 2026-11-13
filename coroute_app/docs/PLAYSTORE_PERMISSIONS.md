@@ -72,7 +72,8 @@ Data is encrypted in transit (HTTPS only, `usesCleartextTraffic=false`). Riders 
 | Financial info: purchase history | Yes | No | Optional | Subscription | Card/UPI data handled by Razorpay (check Razorpay SDK's own disclosure) |
 | App info & performance: diagnostics | Yes | No | Optional (explicit consent) | Analytics / support | Phone-check report: model, OS, check results. No IMEI/serial/recordings/location trail |
 | Device or other IDs | No | | | | |
-| Messages / contacts / photos / files | No | | | | Emergency texts are sent by the rider's phone to the contact the rider chose (SEND_SMS); no message is read or uploaded |
+| Photos | Yes | No (review photos reach the website only after consent and admin approval) | Optional | App functionality | Profile picture (the round picture plus a private copy of the chosen picture for later adjusting, round 6) and trip / place review photos. EXIF removed. See docs/handbook/compliance/play_store_compliance.md |
+| Messages / contacts / files | No | | | | Emergency texts are sent by the rider's phone to the contact the rider chose (SEND_SMS); no message is read or uploaded |
 
 *Transfers to the rider's own group or emergency contacts are user-initiated (exempt); SMS/
 maps providers act as service providers.

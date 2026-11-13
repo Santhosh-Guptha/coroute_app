@@ -6,7 +6,7 @@ Build 3.55.0+10023 (up to commit f01cb7e: handbook, legal pages, minimal profile
 You are the release agent for CoRoute (motorcycle group/solo riding SAFETY app: Flutter Android app + Node.js gateway on two OCI VMs + website + web admin). Build 3.55.0+10023 is deployed. Ship the next increment: commit, test, build, deploy, verify, and continue the Play Store work. Report after each section. STOP at any failed safety gate.
 
 === 0. RULES ===
-- Repo C:\Users\santhosh\Documents\antigravity\wise-chandrasekhar\coroute_app, branch release/v3.55.0, Flutter C:\Users\santhosh\flutter. Full background: PROJECT_CONTEXT.md, docs/MASTER_AGENT_PROMPT_v3.55.md (sections 4-8 still apply for deploy and Play), docs/handbook/README.md.
+- Repo C:\Users\<you>\Documents\antigravity\wise-chandrasekhar\coroute_app, branch release/v3.55.0, Flutter C:\Users\<you>\flutter. Full background: PROJECT_CONTEXT.md, docs/MASTER_AGENT_PROMPT_v3.55.md (sections 4-8 still apply for deploy and Play), docs/handbook/README.md.
 - Never commit or print secrets (CLUSTER_CREDENTIALS.md, .env, key.properties, keystores, FCM JSON, SMTP passwords). Secrets live in OCI Vault and /etc/coroute/*.env.
 - The app must show no prices/payments/coupons: dart tool/play_policy_scan.dart must print 0 hits.
 - Never weaken SOS, crash detection, emergency texts or the lock-screen Medical ID.

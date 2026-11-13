@@ -9,7 +9,7 @@
 > report format. This file is kept as history and as the detailed per-round reference for device steps; where
 > the two differ (branch name, `COROUTE_API` define, trip head rights, open decisions), DEPLOY_PROMPT wins.
 
-You are taking over the CoRoute v3.55 release. Work in `wise-chandrasekhar/coroute_app` (git branch `release/v3.54.0-full`; all v3.55 work is UNCOMMITTED in the working tree). Flutter SDK is at `C:\Users\santhosh\flutter` (3.47.1). Safety comes first: never ship anything that could stop SOS, crash detection, emergency texts or the lock-screen Medical ID from working.
+You are taking over the CoRoute v3.55 release. Work in `wise-chandrasekhar/coroute_app` (git branch `release/v3.54.0-full`; all v3.55 work is UNCOMMITTED in the working tree). Flutter SDK is at `C:\Users\<you>\flutter` (3.47.1). Safety comes first: never ship anything that could stop SOS, crash detection, emergency texts or the lock-screen Medical ID from working.
 
 ## 1. Read first (in this order)
 1. `PROJECT_CONTEXT.md` (top section "Current state: v3.55")

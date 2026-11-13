@@ -138,6 +138,26 @@ Tests: `gateway/test/web_admin_riders_357.test.js`; smoke + screenshots `node to
 search, Riders, rider page, dialogs, wizard for one rider and an audience, status, Push, Settings, Audit log, `/account`;
 desktop and tablet, light and dark). `tool/web_admin_smoke.js` opens sections by hash (the tablet menu is a drawer).
 
+## Round 6: Business, Servers, Weekly summary
+
+Menu group **Business** (file `public/admin/business.js`; details in docs/intelligence/BUSINESS_ANALYTICS.md):
+
+| Page | Link | What the admin does there |
+|---|---|---|
+| Overview | `#/business` | Reads the activation funnel, weekly net revenue and renewals due |
+| Retention | `#/retention` | Reads the weekly cohort table (share who rode in each week after signing up) |
+| Conversion | `#/conversion` | Compares plans, coupons and e-mail campaigns |
+| At risk | `#/atrisk` | Sees riders drifting away with the reasons; **Send win-back e-mail** opens the e-mail wizard with the riders who agreed to offer e-mails (others are listed with the reason, button off) |
+| Best send time | `#/sendtimes` | Sees when riders are usually active; used by "At each rider's best time" in the wizard |
+| Review list | `#/review` | Reviews payment / coupon / sign-up signals; **Mark reviewed**. Nothing is blocked automatically |
+
+Menu group **Admin**: **Servers** (`#/servers`: both nodes, colours, jobs, backups; refreshes every 15 s) and
+**Settings > Weekly summary** (`#/settings/summary`: switch, preview, "Send me a test now", link to the template).
+
+Every Business page shows when the numbers were computed and a **Refresh numbers now** button. The numbers are
+computed every night. The e-mail wizard's step 3 has a third "When" choice: **At each rider's best time (within 24
+hours)**.
+
 ## New endpoints
 
 - 3.56: `GET/PUT /api/admin/pricing-rules` (minimum price), `GET /api/admin/membership/catalog` now also returns `effective` (price now per plan) and `rules`; `PUT /api/admin/membership/catalog` accepts `listPriceInr` and `offer` (audited as `pricing.plan_price`). Board endpoints: see [marketing_board.md](marketing_board.md).

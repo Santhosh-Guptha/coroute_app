@@ -124,6 +124,7 @@ All have safe defaults; change only with a reason. Groups (see `config.js` for e
 `GEO_SEARCH_URL` (Nominatim), `GEO_ROUTE_URL` (OSRM), `GEO_PHOTON_URL` (Photon), `GEO_COUNTRY` (`in`),
 `GEO_COUNTRY_BBOX`, `GEO_PHOTON_MIN_INTERVAL_MS`, `GEO_REVERSE_TIMEOUT_MS`, `GEO_MIN_INTERVAL_MS`,
 `GEO_CONTACT`, `POI_OVERPASS_URL`, `ESSENTIALS_OVERPASS_URL`, `WEATHER_URL` (Open-Meteo; empty
+3.56: `WEATHER_PROVIDER` (`metno` default = MET Norway api.met.no, free for commercial use with credit; `open-meteo` = the old provider, whose free tier is non-commercial only), `WEATHER_MET_URL` (optional, default `https://api.met.no`; the outbound firewall / egress allowlist must allow `api.met.no:443`), `GEO_CONTACT` is sent in the User-Agent (required by MET Norway's terms). Empty `WEATHER_URL` still switches weather off.
 disables), `WEATHER_CACHE_MIN`, `WEATHER_PER_MIN`, `WEATHER_USER_PER_MIN`.
 
 ### 2.6 Messaging

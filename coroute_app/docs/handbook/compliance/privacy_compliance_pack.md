@@ -190,3 +190,19 @@ public numbers, usernames-only leaderboards with opt-out, data-only pushes witho
 on-phone crash and siren processing, voice never stored, diagnostics redaction on phone and server,
 EXIF stripping, encrypted backups, immediate account erase with "Former rider" anonymisation,
 road reports without rider ids. Details: [../technical/security_overview.md §8](../technical/security_overview.md#8-privacy-by-design-security-relevant).
+
+## Round 4: road & safety intelligence (12 Nov 2026)
+
+* Purpose: road safety warnings for all riders (hazards, rough road, twisty roads, fuel gaps, dangerous hours) and
+  fewer false crash alarms. Lawful basis: **consent** ("Help make roads safer", opt-in, off by default, timestamped,
+  withdrawable at any time; collection stops at once).
+* Minimisation: geohash cells (~150 m / ~1 km / ~40 km), heading and speed bands, hour of week; first / last 300 m of
+  every ride trimmed; k-anonymity 5; keyed monthly one-way rider hash (INTEL_HASH_KEY), never the id; no medical
+  data, no phone numbers, no full tracks.
+* Retention: raw rows 90 days; aggregates decay (half-life 90 days); crash training copies 2 years, de-identified.
+* Rights: export and delete "my contributions" (app, website, admin for support), account deletion cascades. Honest
+  limits explained to the rider (older contributions exist only in anonymous totals).
+* Open for legal review: whether crash alarm outcomes could be processed as legitimate use for safety without consent
+  (today: consent required); DPDP notice wording in the app prompt. Details:
+  [docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md](../../intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md).
+

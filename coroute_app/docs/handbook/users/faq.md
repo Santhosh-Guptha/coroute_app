@@ -157,6 +157,14 @@ Only you. It never rewards speed, and SOS or crash alarms never lower it.
 
 ## Privacy and deleting data
 
+**What is "Help make roads safer"?** An opt-in switch (off by default) that shares anonymous road and safety signals
+from your rides, so every rider gets better hazard warnings. See Settings > Road safety. You still get every warning
+with it off.
+
+**Can I delete what I shared?** Yes: Settings > Road safety > Delete my contributions (or /account on the website).
+Everything from the last 90 days goes, including its share of the totals. Older contributions exist only inside
+anonymous totals with no link to you.
+
 **44. Do you sell my data or show ads?**
 No. No ads, no third-party trackers, no sale of data.
 

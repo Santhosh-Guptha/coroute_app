@@ -13,8 +13,8 @@ test, build 3.55.0+10025, deploy the gateway (VM2 then VM1), QA, Play internal t
 STOP at any failed safety gate.
 
 === 0. RULES ===
-- Repo C:\Users\santhosh\Documents\antigravity\wise-chandrasekhar\coroute_app, branch release/v3.55.0, Flutter
-  C:\Users\santhosh\flutter. Background: PROJECT_CONTEXT.md, docs/MASTER_AGENT_PROMPT_v3.55.md (deploy + Play sections),
+- Repo C:\Users\<you>\Documents\antigravity\wise-chandrasekhar\coroute_app, branch release/v3.55.0, Flutter
+  C:\Users\<you>\flutter. Background: PROJECT_CONTEXT.md, docs/MASTER_AGENT_PROMPT_v3.55.md (deploy + Play sections),
   docs/NEXT_AGENT_PROMPT_v3.55_round2.md, docs/handbook/README.md.
 - The changes are already in the working tree (uncommitted, ~150 files). If any are missing, they come as
   coroute_v3.55_round3_files.zip (full files made against a510e31; BASE_MD5_a510e31.txt has the base md5 of each MODIFIED

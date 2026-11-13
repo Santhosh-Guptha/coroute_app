@@ -1,7 +1,7 @@
 # Prompt: finish and release CoRoute v3.55 (paste into your agent)
 
 ```
-Finish and release CoRoute v3.55. Repo wise-chandrasekhar/coroute_app, branch release/v3.55.0, Flutter C:\Users\santhosh\flutter.
+Finish and release CoRoute v3.55. Repo wise-chandrasekhar/coroute_app, branch release/v3.55.0, Flutter C:\Users\<you>\flutter.
 Follow docs/DEPLOY_PROMPT_v3.55.md for details. Stop and report at any failed safety gate. Never print or commit secrets.
 
 A. BUILD AND COMMIT

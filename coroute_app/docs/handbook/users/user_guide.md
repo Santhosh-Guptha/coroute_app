@@ -163,6 +163,39 @@ The alert comes about 3 seconds after the siren starts, so short chirps, horns a
 | Low battery (under 10 %) | "Battery saver for SOS is on": CoRoute stops extras to keep SOS and crash detection running, and sends your last location to your group once |
 | Phone not in a mount | "Phone not in a mount? Crash detection works best with the phone in a handlebar mount." |
 
+### Road safety warnings (round 4)
+
+Gentle warnings that come from many riders' rides. Everyone gets them, whether or not you share your own signals.
+They never speak or show over an SOS or crash alarm, and they also appear on the lock-screen cockpit.
+
+| Warning | What you hear or see | Switch (Settings > Road safety) |
+|---|---|---|
+| Hazard ahead | "Hazard ahead in 400 meters. Riders brake hard here. Ride carefully." 300-500 m before a spot where many riders braked hard, swerved, crashed or raised SOS, in your direction of travel. At most one every 2 km. | Hazard warnings (on) |
+| Rough road ahead | "Pothole ahead." or "Rough road ahead." At most one every 5 km, lowest priority. | Rough road ahead (on) |
+| Twisty section | "Ghat section for the next 8 kilometers. Slow down." about 1 km before twisty roads on your planned route. | Twisty section ahead (on) |
+| Long ride and night | A stronger nudge after 4 hours without a real break; a notice after 30 minutes of riding between 23:00 and 05:00, then a break reminder an hour later. Tap Snooze for 20 minutes of quiet. The 2-hour break reminder is always on. | Long ride and night nudges (on) |
+| Group break (lead) | "Group riding 2 h 10 min. Suggest a break at Indian Oil." | same |
+| Falling behind (lead and sweep) | "Ravi is falling behind (1.2 km, growing)", with "Send regroup at ..." when you are stopped. | admin switch |
+| Pre-ride tip | Once a day at most: "Evening rides here see more hard braking. Ride safe." | Hazard warnings |
+| No known fuel (planning) | "No known fuel for 110 km after HP Highway" under the route in Plan a ride. | — |
+| ETA based on riders | The planner shows "Time (riders)" when the time comes from how fast riders really ride those roads. | — |
+
+The warnings are downloaded for your route when the ride starts and kept on the phone for 14 days, so they work
+without signal.
+
+### Help make roads safer (round 4)
+
+Off until you turn it on (Settings > Road safety, or your account on the website). After your first ride CoRoute
+asks once. When it is on, your phone shares anonymous signals from your rides: hard braking, sudden swerves, skids,
+potholes and rough road (as an area of about 150 m with direction, speed band and hour), and the gateway counts
+where riders stop and how fast roads are ridden. Since round 6 the older "Many riders brake hard on this stretch" warning follows the same switch: your hard brakes are counted only while it is on (everyone still gets the warning). Never your route, name, phone number or medical details; the first
+and last 300 m of every ride are left out; a spot is shown only once 5 different riders passed; raw signals are
+deleted after 90 days. After a crash alarm you cancel, you may be asked "Was this a real crash?" (optional, one tap):
+it helps crash detection raise fewer false alarms.
+
+"Download my contributions" and "Delete my contributions" are on the same screen. Deleting removes the last 90 days,
+including their share of the totals; older contributions exist only inside anonymous totals and cannot be split out.
+
 ### Safety health
 
 **Settings › Safety health** (also a tile on the ride map) checks your phone: location, notifications, microphone, Bluetooth, battery limits, full-screen alerts and sound. Each problem has a button that opens the right system page: **Allow**, **Battery settings**, **Sound settings**, **Show steps** or **Open settings**.
@@ -176,8 +209,10 @@ While the phone is locked you see a small padlock at the top: **"Locked: unlock 
 | Works without unlocking | Asks for your fingerprint or PIN first |
 |---|---|
 | The live map: your speed, the next turn, ETA, your group and their distances, alerts (sirens, crash countdown, another rider's SOS) | Chat messages (you only see "New message from Arjun", never the text) |
-| **SOS** (hold), **I'm OK**, **Call 112**, **Medical ID** | Profile, settings, trips, crews, account |
+| **SOS** (hold), **I'm OK**, **Call 112** (and 108 / 100 / the highway helpline), **Medical ID**; calling **your own emergency contact while your SOS or crash alarm is open** | Profile, settings, trips, crews, account |
 | **Mute** / **Unmute** and **Talk** | Searching or changing the route, **End ride** / **Leave**, sharing a link, calling a contact |
+
+**Calling from a locked phone.** One rule: a locked phone calls emergency services, and your own emergency contact while your own SOS or crash alarm is open. Every other number (another rider, another rider's emergency contact, a place) asks for your fingerprint or PIN first and dials once you unlock. This keeps other people's numbers private if your phone is found or taken, and never slows down your own emergency.
 
 When something needs the unlock, your phone's fingerprint or PIN sheet opens; once you unlock, what you tapped opens. If you cancel, you stay on the ride map. The **Back** button does nothing while locked.
 
@@ -311,6 +346,8 @@ There is nothing to download by hand. When a ride starts (on Wi-Fi, unless data 
 
 ### Places on the map
 
+**Where riders stop** (round 6): places where many riders stop along your route (anonymous). Always shown on the trip planner; on the ride map it is off until you switch it on in **Places on map** (the pin button), and it hides itself while an alert is open.
+
 Fuel stations (by fuel type), hospitals (always shown), mechanics, food, stays and **Historic places**. Tap a place for details, **CoRoute rider reviews** and **Navigate**. On a ride you can find **Fuel stations near you** and route to one.
 
 ---
@@ -320,6 +357,29 @@ Fuel stations (by fuel type), hospitals (always shown), mechanics, food, stays a
 ### Username and profile
 
 Your **username** is how other riders see you. Change it in **My profile** once every 30 days. You can add a profile picture. Non-friends see only your username and picture; friends also see your first name and ride totals. Your phone number, e-mail, location and medical info are never shown on your profile.
+
+### Adjust your profile picture
+
+In **My profile**, tap the camera button on your picture:
+
+- **Adjust picture**: your picture opens under a round frame. **Drag** to move it, **pinch** (or use the slider) to zoom, **Turn left** / **Turn right** to rotate, **Reset** to start again (double tap does the same), then **Save**. You can come back and adjust it again at any time without choosing the picture again.
+- **Take a new photo** / **Choose a new picture**: the new picture goes through the same screen before it is saved.
+- **Remove picture**: deletes it.
+
+On the website, open **Your account › Edit picture**: the same frame, with the mouse, touch or the keyboard (arrow keys move, **+** and **-** zoom, **[** and **]** turn, **0** resets).
+
+What is stored: the round picture other riders see, and a smaller copy of the picture you chose so you can adjust it later. **Only you can open the original.** Location and camera details inside the file are never kept. Removing the picture deletes both. A picture added before this version has no stored original: "Adjust picture" then works on the current picture and says so; choose a new picture for full quality.
+
+### Private places
+
+**Settings › Road safety › Private places.** Mark up to **3 places** such as home or work on the map. Within **300 m** of them:
+
+- your route is **not recorded**, so that part is missing from trip reports, shared trip links, route pictures and GPX files (for you and for everyone else);
+- nothing is added to the anonymous road data ("Help make roads safer"), and hard brakes there are not counted.
+
+Private places are kept **on your phone only**; CoRoute's server never receives them. They stay when you sign out (remove them yourself before you hand the phone to someone else); clearing the app's data or uninstalling removes them.
+
+**What is not hidden:** your **live position during a ride**. Your group, a guardian's live link and an SOS always get your real position, also next to a private place. Safety comes first.
 
 ### People tab
 

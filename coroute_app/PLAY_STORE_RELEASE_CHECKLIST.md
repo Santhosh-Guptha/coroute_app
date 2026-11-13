@@ -2,7 +2,7 @@
 
 > **Target App:** CoRoute: Group Ride Convoy (`space.devmonks.coroute_app`)  
 > **Production API:** `https://coroute.devmonks.space` (fallback `https://coroute.duckdns.org`)  
-> **Maintainer Contact:** `santhoshbukka5@gmail.com`  
+> **Maintainer Contact:** `<owner-email>`  
 > **Current Version:** `3.55.0+10019`
 
 ---
@@ -36,7 +36,7 @@
 ### 2.1 URLs & Contact Information
 - [ ] **Privacy Policy URL:** `https://coroute.devmonks.space/privacy` *(Hosted on VM, HTTPS validated)*
 - [ ] **Terms of Use URL:** `https://coroute.devmonks.space/terms` *(Hosted on VM, HTTPS validated)*
-- [ ] **Support Email:** `santhoshbukka5@gmail.com`
+- [ ] **Support Email:** `<owner-email>`
 - [ ] **Website:** `https://coroute.devmonks.space`
 
 ### 2.2 App Content Declarations
@@ -102,7 +102,7 @@ Upload an unlisted YouTube or Google Drive video showing:
 ### 4.2 Build Android App Bundle (AAB)
 Run the release build command:
 ```powershell
-& "C:\Users\santhosh\flutter\bin\flutter.bat" build appbundle --release --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
+& "C:\Users\<you>\flutter\bin\flutter.bat" build appbundle --release --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
 ```
 - [ ] Output artifact generated: `build/app/outputs/bundle/release/app-release.aab` (Play splits it per phone, so riders download only their CPU's code)
 - [ ] Website APKs (same release): `flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --obfuscate --split-debug-info=build/symbols`, then copy `app-arm64-v8a-release.apk` to `/opt/coroute/gateway/public/coroute.apk` and `app-armeabi-v7a-release.apk` to `/opt/coroute/gateway/public/coroute-32bit.apk` on the VM (see `gateway/deploy/RUNBOOK.md` section 4)
@@ -115,11 +115,11 @@ Run the release build command:
 
 ### 5.1 Internal Testing Track (Immediate)
 1. Upload `app-release.aab` to **Testing → Internal testing** in Play Console.
-2. Add your developer email (`santhoshbukka5@gmail.com`) to the internal tester list.
+2. Add your developer email (`<owner-email>`) to the internal tester list.
 3. Install via internal testing opt-in link on a physical device.
 4. Verify:
    - [ ] Google Sign-In & Email login.
-   - [ ] Master Admin elevation for `santhoshbukka5@gmail.com`.
+   - [ ] Master Admin elevation for `<owner-email>`.
    - [ ] Create convoy & join code generation.
    - [ ] Map radar loading & OpenStreetMap tiles.
    - [ ] SOS action sheet: GPS coordinates copy, ICE dialer intent, and SMS intent.
