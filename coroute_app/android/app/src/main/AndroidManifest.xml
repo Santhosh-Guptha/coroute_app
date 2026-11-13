@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Every permission and why: docs/PLAYSTORE_PERMISSIONS.md (keep both in step). -->
     <!-- Convoy sync, SOS delivery, map tiles; network kind for the tile cache and the phone check. -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -47,6 +48,22 @@
     <!-- 3.55: lets the rider allow CoRoute's "Critical ride alerts" channel through Do Not Disturb
          (Settings > Do Not Disturb access; normal permission, nothing is asked at install). -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
+    <!-- v3.57 build health (docs/release/PLAY_BUILD_HEALTH_PLAN_v3.57.md section 4): permissions CoRoute
+         never uses, removed if any library's manifest adds them (no effect when none does). Decisions:
+         docs/release/R8_KEEP_RULES_v3.57.md "Permissions".
+         - AD_ID: no ads and no Firebase Analytics (FCM only); the Play advertising ID declaration is "No".
+         - READ_PHONE_STATE: never requested. PhoneCallChannel detects calls from the audio mode without it;
+           SMS uses the default SMS SIM without listing SIMs.
+         - READ/WRITE_EXTERNAL_STORAGE: nothing is written to or read from shared storage. Photos come
+           from the system photo picker, the diagnostics file is shared from the app cache.
+         - CAMERA: "Take a new photo" uses the camera app (ACTION_IMAGE_CAPTURE via image_picker), which
+           needs no permission. Declaring CAMERA would even break it: Android then refuses
+           ACTION_IMAGE_CAPTURE until the permission is granted. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
     <!-- SEND_SMS implies telephony: without this Play would hide CoRoute from tablets without a SIM. -->
     <uses-feature android:name="android.hardware.telephony" android:required="false"/>
 

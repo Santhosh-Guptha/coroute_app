@@ -24,5 +24,13 @@ target_include_directories(coroute_voice PRIVATE rnnoise/include rnnoise/src .)
 target_compile_options(coroute_voice PRIVATE -O2 -fvisibility=hidden -ffunction-sections -fdata-sections
   -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function)
 target_compile_definitions(coroute_voice PRIVATE RNNOISE_BUILD)
+# 16 KB page size (Android 15+ devices, Play requirement for native code): every PT_LOAD segment is
+# aligned to 16 KB. NDK r28 already does this by default and build.gradle.kts passes
+# ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON; the flag stays so the library never regresses with another NDK.
+# -z common-page-size=16384 is NOT added: checked v3.57 with lld (readelf -lW): p_align is 0x4000
+# either way; it only pads the RELRO segment's memory size to a 16 KB boundary (more memory, no
+# alignment gain). Verify a built APK/AAB with
+# tool/check_16kb_alignment.sh (docs/release/ROUND9_BUILD_NOTES.md).
+# ABIs: arm64-v8a, armeabi-v7a, x86_64 (cmake abiFilters in build.gradle.kts).
 target_link_options(coroute_voice PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384)
 target_link_libraries(coroute_voice m)
