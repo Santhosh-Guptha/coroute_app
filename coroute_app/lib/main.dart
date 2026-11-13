@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'core/native_licenses.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
@@ -94,6 +95,7 @@ import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
 import 'presentation/splash/splash_screen.dart';
 import 'presentation/widgets/push_router_host.dart'; // 3.55 push notifications
+import 'presentation/widgets/startup_warmup.dart'; // round 7 idle precache
 import 'presentation/settings/intel_prompt_host.dart';
 import 'data/services/private_places_store.dart';
 
@@ -103,6 +105,7 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 /// 3.55: everything runs in a guarded zone so uncaught errors reach the diagnostics log
 /// (docs/features_355/diagnostics_logs.md). The binding is initialised inside the same zone.
 void main() {
+  registerNativeLicenses(); // round 8: RNNoise attribution in the licences page
   runZonedGuarded<Future<void>>(_main, (error, stack) {
     DiagLog.caught(DiagCat.errors, 'uncaught_zone', error, stack);
     // Still printed to the console / logcat as before the guarded zone.
@@ -143,30 +146,41 @@ Future<void> _main() async {
   PushRouterHost.openRideInvite = RideInviteScreen.open;
   tz_data.initializeTimeZones();
   BackgroundService.initCommunicationPort();
+  // ==== Round 7 start-up (UX/perf) BEGIN: the independent reads below used to run one after the other;
+  // they now run side by side and ALL still finish before runApp, so everything that was ready at the
+  // first frame before is ready now (theme, settings, sound settings, tile cache, package info).
+  // Nothing safety-related is deferred or reordered: the providers are created in the same order.
   // Portrait + landscape are both supported; layouts adapt to width.
-  await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-  // Light or dark is decided before the first frame, so there is no flash.
-  await MetaService.readPackageInfo();
+  final orientations = SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   // 3.55 persistent diagnostics log: files in <filesDir>/diag, native crashes merged (not awaited:
-  // entries logged before it is ready wait in memory).
-  DiagLogService.instance.init(build: '${MetaService.currentVersion}+${MetaService.currentBuild}').ignore();
+  // entries logged before it is ready wait in memory). Starts as soon as the build number is known.
+  final packageInfo = MetaService.readPackageInfo().then((_) {
+    DiagLogService.instance.init(build: '${MetaService.currentVersion}+${MetaService.currentBuild}').ignore();
+  });
+  // Light or dark is decided before the first frame, so there is no flash.
   final theme = ThemeController();
-  await theme.load();
+  final themeLoaded = theme.load();
   // Another rider's SOS over the lock screen (Android full-screen intent, heads-up fallback).
   AlertService.urgentPoster = RideNotificationChannel.postUrgent;
   // The phone's language decides the safety texts when the setting is "System language".
   L10n.systemLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
   // Data saver is known before the first frame, so the first ride already uses it.
   final settings = SettingsService();
-  await settings.load();
-  await settings.loadSoundSettings(); // 3.55 sound awareness (mic): siren / voice cleanup settings
+  final settingsLoaded = settings.load().then((_) => settings.loadSoundSettings()); // 3.55 sound awareness (mic): siren / voice cleanup settings
   // Map tiles saved on the phone (3.16): best effort; without it maps use the network.
-  try {
-    final dir = await SafetyNative.cacheDir();
-    if (dir != null) TileCache.instance = await TileCache.open('$dir/tiles');
-  } catch (_) {
-    TileCache.instance = null;
-  }
+  final tilesOpened = () async {
+    try {
+      final dir = await SafetyNative.cacheDir();
+      if (dir != null) TileCache.instance = await TileCache.open('$dir/tiles');
+    } catch (_) {
+      TileCache.instance = null;
+    }
+  }();
+  await Future.wait<void>([orientations, packageInfo, themeLoaded, settingsLoaded, tilesOpened]);
+  // Battery saver reduces motion app-wide (no shimmer loop, no parallax): lib/core/ui/app_motion.dart.
+  AppMotion.batterySaver.value = settings.batterySaver;
+  settings.addListener(() => AppMotion.batterySaver.value = settings.batterySaver);
+  // ==== Round 7 start-up (UX/perf) END
   // Saved trip maps past their time (7 days after the trip) or over 300 MB go; the rest are kept.
   OfflineMapRetentionService.sweep().ignore();
   // Rider-only ride numbers (hard stops) older than 90 days go; nothing else to maintain.
@@ -600,7 +614,9 @@ class CoRouteApp extends StatelessWidget {
                       .read<VoiceService>()
                       .speak(line, priority: VoicePriority.important, key: key)
                       .ignore())
-                  ..learnedStops = (() => safety.intel.learnedStops); // round 4: learned rider stops for regroup points
+                  ..learnedStops = (() => safety.intel.learnedStops) // round 4: learned rider stops for regroup points
+                  // round 7: falling-behind voice lines go through the one warning scheduler.
+                  ..advisoryGate = safety.roadCare.mayAdviseFallingBehind;
             safety.intel.regroupName = () => gs.currentRegroupName;
             return gs;
           },
@@ -759,6 +775,8 @@ class _App extends StatelessWidget {
       theme: AppTheme.themeFor(theme.palette),
       // Colours switch at once everywhere; a cross-fade would mix the two themes.
       themeAnimationDuration: Duration.zero,
+      // Round 7: the same iOS-style bounce on every list (lib/core/ui/app_motion.dart).
+      scrollBehavior: const AppScrollBehavior(),
       home: const SplashScreen(),
       builder: (context, child) {
         // Large text is honoured up to 1.3x (every screen is laid out for it); beyond that it is capped.
@@ -928,6 +946,7 @@ class _SessionBinderState extends State<_SessionBinder> {
     lockCockpit.start().ignore();
     auth.beforeSignOut.add(push.unregisterNow);
     auth.afterSignOut.add(trips.clearLocal);
+    auth.afterSignOut.add(StartupWarmup.reset); // round 7: screen caches (profiles, crews, leaderboard) forgotten at sign-out
     SessionGuard.instance.addListener(_guardChanged);
   }
 
@@ -971,6 +990,8 @@ class _SessionBinderState extends State<_SessionBinder> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         convoys.startSession(token: auth.token ?? '', userId: auth.currentUserId!, admin: auth.isMasterAdmin);
         trips.syncWithCloud(userId: auth.currentUserId);
+        // Round 7: next-likely screens' data after a few idle seconds (never during a ride).
+        if (mounted) StartupWarmup.schedule(context, userId: auth.currentUserId!);
       });
     } else if (!auth.isAuthenticated && _boundUserId != null) {
       _boundUserId = null;

@@ -127,10 +127,15 @@ test('chat dedupe survives a reload of the convoy from the database', async () =
 
 test('CHECK_IN has its own budget, separate from SOS; a refused one keeps its clientId (429)', async () => {
   const r = await ride('budget');
-  for (let i = 0; i < 3; i++) r.wr.sendJson({ type: 'SOS', lat: 1, lng: 1, clientId: `sos-b-${i}` });
-  await sleep(150);
+  // Round 8: the SOS budget has a floor of 10 per 10 s (WS_SOS_FLOOR_PER_10S) and an SOS above it is never refused:
+  // the rider's open alert is echoed back instead (test/rt8_limits.test.js covers the floor in detail).
+  for (let i = 0; i < 10; i++) r.wr.sendJson({ type: 'SOS', lat: 1, lng: 1, clientId: `sos-b-${i}` });
+  await sleep(300);
+  r.wr.inbox.length = 0;
   r.wr.sendJson({ type: 'SOS', lat: 1, lng: 1, clientId: 'sos-b-x' });
-  assert.equal((await r.wr.next((m) => m.type === 'ERROR')).code, 429, 'the SOS budget is used up');
+  const echo = await r.wr.next((m) => m.type === 'ALERT' || m.type === 'ERROR');
+  assert.equal(echo.type, 'ALERT', 'an SOS over the budget is answered with the open alert, never an error');
+  assert.equal(echo.duplicate, true);
   for (let i = 0; i < 3; i++) {
     r.wr.sendJson({ type: 'CHECK_IN', result: 'OK', clientId: `ci-${i}` });
     await ackOf(r.wr, `ci-${i}`);

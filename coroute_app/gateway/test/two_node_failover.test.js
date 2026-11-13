@@ -178,8 +178,10 @@ test('durable SOS: the echo waits for the DB write and the peer; a resend to the
     const conf = await b2.next((m) => m.type === 'ALERT');
     assert.equal(conf.duplicate, true, 'answered as the stored SOS');
     assert.equal(conf.alert.clientId, 'sos-d-2');
-    // The group on B hears it (it was never broadcast by the dead node), and it is one alert only.
-    const heard = await bl.next((m) => m.type === 'ALERT' && m.alert.alertId === conf.alert.alertId);
+    // The group on B has it (never broadcast by the dead node): round 8 the twin already delivered it from the "SOS
+    // pending delivery" record (in the SNAPSHOT of riders reconnecting there), before 3.57 on the resend. One alert only.
+    const heard = bl.snapshot.activeAlerts.some((a) => a.alertId === conf.alert.alertId)
+      || await bl.next((m) => m.type === 'ALERT' && m.alert.alertId === conf.alert.alertId);
     assert.ok(heard);
     b2.sendJson({ type: 'SOS', lat: 17.5, lng: 78.5, clientId: 'sos-d-2' });
     assert.equal((await b2.next((m) => m.type === 'ALERT')).duplicate, true);
