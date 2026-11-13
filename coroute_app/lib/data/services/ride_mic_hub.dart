@@ -29,6 +29,14 @@
 //  * intercom only (detection not wanted): voiceCommunication with the OS effects and SCO, as
 //    before 3.55.
 //
+// ==== Round 10 rescue beacon BEGIN (wide-band listeners)
+// A rescue listener (lib/data/services/rescue_finder_service.dart: a responder's phone during an
+// open SOS only) needs 17..20 kHz, which a 16 kHz capture cannot hold. While one is attached the
+// SAME single capture opens at 48 kHz (raw built-in mic), the rescue listener gets the 48 kHz
+// frames, and the siren detector and the intercom get the usual 16 kHz frames through a low-pass
+// decimator (lib/domain/rescue/decimator.dart). Without a rescue listener nothing changes.
+// ==== Round 10 rescue beacon END
+//
 // Privacy: frames live in memory for the time of one callback. Nothing is recorded, stored or
 // sent by the hub; only the intercom sends voice, while the rider talks.
 //
@@ -44,6 +52,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:record/record.dart';
 
+import '../../domain/rescue/decimator.dart'; // Round 10 rescue beacon
 import 'background_service.dart';
 
 /// Why the hub is (not) listening, for the settings screen and logs.
@@ -119,6 +128,30 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
   final Int16List _frame = Int16List(frameSamples);
   int _fill = 0;
   int _oddByte = -1;
+  // ==== Round 10 rescue beacon BEGIN: 48 kHz listeners (see the header)
+  static const int wideSampleRate = 48000;
+  static const int wideFrameSamples = 960; // 20 ms at 48 kHz
+  final List<MicFrameListener> _wide = [];
+  final Int16List _wideFrame = Int16List(wideFrameSamples);
+  int _wideFill = 0;
+  final Decimator3 _decimator = Decimator3();
+
+  /// A rescue listener: raw 48 kHz frames from the phone's own mic. Never stored.
+  void addWideBandListener(MicFrameListener l) {
+    if (_wide.contains(l)) return;
+    _wide.add(l);
+    reevaluate();
+  }
+
+  void removeWideBandListener(MicFrameListener l) {
+    if (_wide.remove(l)) reevaluate();
+  }
+
+  /// The capture runs at 48 kHz for a rescue listener now.
+  bool get wideBandActive => _open && (_config?.wideBand ?? false);
+
+  bool get _wantWide => _wide.isNotEmpty && !_inCall && (_foreground || _fgsRunning);
+  // ==== Round 10 rescue beacon END
 
   MicHubState get state => _state;
   bool get isOpen => _open;
@@ -205,7 +238,8 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
     if (_disposed) return;
     final det = _wantDetection;
     final ic = _wantIntercom;
-    if (!det && !ic) {
+    final wide = _wantWide; // Round 10 rescue beacon
+    if (!det && !ic && !wide) {
       await _close();
       _setState(_inCall
           ? MicHubState.pausedCall
@@ -232,7 +266,7 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
     }
-    final want = MicPlan.forNeeds(detection: det, intercom: ic, intercomHandsFree: _intercomHandsFree, headset: _headset);
+    final want = MicPlan.forNeeds(detection: det, intercom: ic, intercomHandsFree: _intercomHandsFree, headset: _headset, wide: wide);
     if (_open && _config == want) return;
     await _close();
     await _openWith(want);
@@ -249,7 +283,7 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
       final stream = await _recorder.startStream(RecordConfig(
         device: device,
         encoder: AudioEncoder.pcm16bits,
-        sampleRate: sampleRate,
+        sampleRate: cfg.wideBand ? wideSampleRate : sampleRate, // Round 10 rescue beacon
         numChannels: 1,
         autoGain: cfg.processed,
         echoCancel: cfg.processed,
@@ -262,6 +296,8 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
       ));
       _fill = 0;
       _oddByte = -1;
+      _wideFill = 0; // Round 10 rescue beacon
+      _decimator.reset();
       _open = true;
       _config = cfg;
       _sub = stream.listen(_onBytes, onError: _onError, onDone: () {
@@ -394,7 +430,27 @@ class RideMicHub extends ChangeNotifier with WidgetsBindingObserver {
     if (i < bytes.length) _oddByte = bytes[i];
   }
 
+  // Round 10 rescue beacon: 48 kHz samples go to the rescue listeners and, decimated, to the usual path.
   void _push(int sample) {
+    if (!(_config?.wideBand ?? false)) return _push16(sample);
+    _wideFrame[_wideFill++] = sample;
+    if (_wideFill < wideFrameSamples) return;
+    _wideFill = 0;
+    final frame = Int16List.fromList(_wideFrame);
+    const info = MicFrameInfo(processed: false, headset: false);
+    for (final l in List<MicFrameListener>.from(_wide)) {
+      try {
+        l(frame, info);
+      } catch (e) {
+        debugPrint('RideMicHub rescue listener note: $e');
+      }
+    }
+    for (final v in _decimator.process(frame)) {
+      _push16(v);
+    }
+  }
+
+  void _push16(int sample) {
     _frame[_fill++] = sample;
     if (_fill < frameSamples) return;
     _fill = 0;
@@ -493,7 +549,10 @@ class MicPlan {
   /// Capture explicitly from the phone's own (built-in) mic.
   final bool builtInMic;
 
-  const MicPlan({required this.processed, required this.bluetooth, required this.builtInMic});
+  /// Round 10 rescue beacon: 48 kHz (raw built-in mic) for a rescue listener; 16 kHz otherwise.
+  final bool wideBand;
+
+  const MicPlan({required this.processed, required this.bluetooth, required this.builtInMic, this.wideBand = false});
 
   static const MicPlan detection = MicPlan(processed: false, bluetooth: false, builtInMic: true);
   static const MicPlan headsetTalk = MicPlan(processed: true, bluetooth: true, builtInMic: false);
@@ -503,7 +562,13 @@ class MicPlan {
     required bool intercom,
     required bool intercomHandsFree,
     required bool headset,
+    bool wide = false, // Round 10 rescue beacon
   }) {
+    // Round 10: a rescue listener needs the raw phone mic at 48 kHz, except while push-to-talk is
+    // held on a headset (the headset mic then, as before; the rescue listener pauses meanwhile).
+    if (wide && !(intercom && headset && !intercomHandsFree)) {
+      return const MicPlan(processed: false, bluetooth: false, builtInMic: true, wideBand: true);
+    }
     // Talk alone: the voice path as before 3.55 (headset mic over SCO when there is one).
     if (intercom && !detection) return headsetTalk;
     // Push-to-talk held with a headset: the headset mic while the button is held only.
@@ -515,11 +580,11 @@ class MicPlan {
 
   @override
   bool operator ==(Object other) =>
-      other is MicPlan && other.processed == processed && other.bluetooth == bluetooth && other.builtInMic == builtInMic;
+      other is MicPlan && other.processed == processed && other.bluetooth == bluetooth && other.builtInMic == builtInMic && other.wideBand == wideBand;
 
   @override
-  int get hashCode => Object.hash(processed, bluetooth, builtInMic);
+  int get hashCode => Object.hash(processed, bluetooth, builtInMic, wideBand);
 
   @override
-  String toString() => 'MicPlan(processed: $processed, bluetooth: $bluetooth, builtInMic: $builtInMic)';
+  String toString() => 'MicPlan(processed: $processed, bluetooth: $bluetooth, builtInMic: $builtInMic${wideBand ? ', wideBand' : ''})';
 }

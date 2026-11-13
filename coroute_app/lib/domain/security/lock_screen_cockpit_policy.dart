@@ -83,7 +83,11 @@ class LockScreenCockpitPolicy {
   static const String routeSosHold = 'safety/sos_hold';
   static const String routeCrashAlarm = 'safety/crash_alarm';
   static const String routeEmergencySos = 'safety/emergency_sos';
-  static const Set<String> allowedRouteNames = {routeSosHold, routeCrashAlarm, routeEmergencySos};
+  // Round 10 rescue beacon: the victim's beacon screen (bystander stop, Medical ID) and the responders'
+  // finder are safety screens too.
+  static const String routeRescueBeacon = 'safety/rescue_beacon';
+  static const String routeRescueFinder = 'safety/rescue_finder';
+  static const Set<String> allowedRouteNames = {routeSosHold, routeCrashAlarm, routeEmergencySos, routeRescueBeacon, routeRescueFinder};
 
   /// A tap this recent before a screen opens counts as the rider's own tap: the unlock is asked at once.
   /// Screens that open by themselves (no recent tap) are covered and wait for the rider.

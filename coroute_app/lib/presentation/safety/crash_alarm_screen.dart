@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/biometric_safety_bridge.dart';
 import '../../data/services/safety_service.dart';
+import '../rescue/rescue_beacon_panel.dart'; // Round 10 rescue beacon
 import '../widgets/emergency_sos_sheet.dart';
 import 'sos_hold_screen.dart';
 
@@ -138,6 +139,9 @@ class CrashAlarmScreen extends StatelessWidget {
                             ),
                           ),
                         ],
+                        // Round 10 rescue beacon: siren status, bystander "Stop siren: help is here" (3 s hold),
+                        // rider "I'm OK". Shows nothing unless the beacon runs (docs/features_355/rescue_beacon.md).
+                        const RescueBeaconPanel(),
                         EmergencySosSheet(lat: alarm.lat, lng: alarm.lng, onResolved: safety.closeAlarm),
                       ],
                     ),

@@ -1,3 +1,5 @@
+import '../rescue/find_rider_button.dart'; // Round 10 rescue finder
+import '../rescue/rescue_beacon_panel.dart'; // Round 10 rescue beacon
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -147,6 +149,7 @@ class IncidentSheetBody extends StatelessWidget {
             _Responders(responders: inc.responders, now: now, forMe: true),
             if (linkId != null) ...[const SizedBox(height: Space.s12), LiveLinkControls(alertId: linkId)],
             const SizedBox(height: Space.s16),
+            const RescueBeaconPanel(), // Round 10 rescue beacon: status / "Still able to respond?" / start by hand
             _BigButton(
               icon: Icons.check_circle_outline_rounded,
               label: L10n.t('sos.ok'),
@@ -230,6 +233,7 @@ class IncidentSheetBody extends StatelessWidget {
                     )
                 : openMaps,
           ),
+        if (emergency && id != null) FindRiderButton(alertId: id), // Round 10 rescue finder
         if (phone.isNotEmpty) ...[
           const SizedBox(height: Space.s8),
           _BigButton(icon: Icons.call_outlined, label: L10n.t('incident.call', {'name': _first(inc.who)}), outlined: true, onPressed: () => _dial(context, phone)),

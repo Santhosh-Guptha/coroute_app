@@ -1,3 +1,4 @@
+import '../rescue/find_rider_button.dart'; // Round 10 rescue finder
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
@@ -136,6 +137,8 @@ class AssistSheetBody extends StatelessWidget {
       case AssistStage.responding:
         actions = [
           big(Icons.navigation_outlined, L10n.t('incident.navigate'), () => navigateToAssist(context, a), color: AppTheme.sos),
+          const SizedBox(height: Space.s8),
+          FindRiderButton(incidentId: a.incidentId), // Round 10 rescue finder (shows only with a rescue id)
           const SizedBox(height: Space.s8),
           big(Icons.flag_outlined, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), outlined: true),
           const SizedBox(height: Space.s8),
