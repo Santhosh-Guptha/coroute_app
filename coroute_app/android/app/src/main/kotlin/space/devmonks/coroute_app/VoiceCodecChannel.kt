@@ -144,11 +144,12 @@ class VoiceCodecChannel : MethodChannel.MethodCallHandler {
             val c = MediaCodec.createByCodecName(name)
             try {
                 val caps = c.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_OPUS).encoderCapabilities
-                if (caps.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)) {
+                if (caps?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) == true) {
                     fmt.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
                 }
-                val cr = caps.complexityRange
-                fmt.setInteger(MediaFormat.KEY_COMPLEXITY, 5.coerceIn(cr.lower, cr.upper))
+                caps?.complexityRange?.let { cr ->
+                    fmt.setInteger(MediaFormat.KEY_COMPLEXITY, 5.coerceIn(cr.lower, cr.upper))
+                }
                 c.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 c.start()
             } catch (t: Throwable) {
