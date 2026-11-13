@@ -41,6 +41,7 @@ class _GarageScreenState extends State<GarageScreen> {
   void _showBikeSheet({BikeProfile? editing}) {
     showModalBottomSheet(
       context: context,
+      sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
       isScrollControlled: true,
       constraints: const BoxConstraints(maxWidth: 600),
       backgroundColor: AppTheme.card,
@@ -68,8 +69,8 @@ class _GarageScreenState extends State<GarageScreen> {
     final controller = TextEditingController(
       text: bike.totalOdometerKm.round().toString(),
     );
-    showDialog(
-      context: context,
+    showAppDialog(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

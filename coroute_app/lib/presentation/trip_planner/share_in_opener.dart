@@ -80,7 +80,7 @@ class ShareInOpener {
         );
         return;
       }
-      unawaited(nav.push(MaterialPageRoute(builder: (_) => TripPlannerScreen(sharedText: text))));
+      unawaited(nav.push(MaterialPageRoute(settings: const RouteSettings(name: 'map/planner'), builder: (_) => TripPlannerScreen(sharedText: text))));
     } finally {
       _opening = false;
     }

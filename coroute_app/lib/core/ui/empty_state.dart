@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import 'ui_tokens.dart';
 
@@ -94,4 +97,37 @@ class EmptyState extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Loading failed and there is nothing to show: what happened, one line, and
+/// Retry. With old data on screen use a toast instead and keep the data.
+class ErrorState extends StatelessWidget {
+  final String title;
+  final String? message;
+  final FutureOr<void> Function()? onRetry;
+  final String retryLabel;
+  final IconData icon;
+
+  const ErrorState({
+    super.key,
+    this.title = 'Could not load',
+    this.message = 'Check your connection and try again.',
+    this.onRetry,
+    this.retryLabel = 'Try again',
+    this.icon = Icons.cloud_off_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) => EmptyState(
+        icon: icon,
+        title: title,
+        message: message,
+        primaryLabel: onRetry == null ? null : retryLabel,
+        onPrimary: onRetry == null
+            ? null
+            : () {
+                HapticFeedback.lightImpact().catchError((Object _) {});
+                onRetry!();
+              },
+      );
 }

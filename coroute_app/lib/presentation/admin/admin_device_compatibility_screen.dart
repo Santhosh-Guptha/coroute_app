@@ -1,3 +1,4 @@
+import '../../core/ui/app_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,6 +6,7 @@ import '../../data/models/device_diagnostic_report.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/skeleton.dart';
 import 'admin_ui.dart';
 
 /// Admin Device Compatibility Dashboard (FEAT-DIAG-03).
@@ -159,7 +161,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
       ),
       body: SafeArea(
         child: _loading
-            ? Center(child: CircularProgressIndicator(color: AppTheme.palette.primary))
+            ? const SkeletonGroup(padding: EdgeInsets.all(16), children: [SkeletonCards(count: 4, stats: true)]) // round 7
             : RefreshIndicator(
                 color: AppTheme.palette.primary,
                 onRefresh: () => _loadDashboardData(page: 1),
@@ -598,6 +600,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
   void _openReportDetailModal(String diagnosticId) {
     showModalBottomSheet(
       context: context,
+      sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
       isScrollControlled: true,
       backgroundColor: AppTheme.palette.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -691,7 +694,7 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
     if (_loading) {
       return SizedBox(
         height: 350,
-        child: Center(child: CircularProgressIndicator(color: AppTheme.palette.primary)),
+        child: const ClipRect(child: SkeletonList(padding: EdgeInsets.zero)), // round 7
       );
     }
 

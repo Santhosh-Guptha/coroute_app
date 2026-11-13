@@ -29,11 +29,22 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
   @override
   void initState() {
     super.initState();
+    // Round 7 (stale-while-revalidate): the profile as last seen is shown at once, then refreshed in place.
+    final cached = SwrCache.shared.peek<RiderProfile>('rider:${widget.username}');
+    if (cached != null) {
+      _p = cached;
+      _loading = false;
+    }
     _load();
   }
 
   Future<void> _load() async {
     final p = await context.read<FriendsService>().profileOf(widget.username);
+    if (p != null) {
+      SwrCache.shared.put<RiderProfile>('rider:${widget.username}', p);
+    } else {
+      SwrCache.shared.remove('rider:${widget.username}');
+    }
     if (!mounted) return;
     setState(() {
       _p = p;
@@ -68,7 +79,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                 DsScreenHeader(title: 'Rider', onBack: () => Navigator.maybePop(context)),
                 const SizedBox(height: 18),
                 if (_loading)
-                  const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                  const SkeletonProfile(cards: 1) // round 7: shaped like the profile
                 else if (p == null)
                   DsCard(child: Text('This rider could not be found.', style: AppText.body))
                 else ...[
@@ -77,7 +88,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                     padding: const EdgeInsets.all(18),
                     child: Column(
                       children: [
-                        UserAvatar(label: p.username, avatarUrl: p.avatarUrl, size: 88, filled: true),
+                        UserAvatar(label: p.username, avatarUrl: p.avatarUrl, size: 88, filled: true, heroTag: AppHero.avatar(p.username)),
                         const SizedBox(height: 12),
                         Text(p.username, style: AppText.headline.copyWith(fontSize: 22), maxLines: 1, overflow: TextOverflow.ellipsis),
                         if ((p.displayName ?? '').isNotEmpty) Text(p.displayName!, style: AppText.label),

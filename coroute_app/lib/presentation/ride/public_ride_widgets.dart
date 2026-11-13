@@ -677,8 +677,8 @@ class _ChannelViewState extends State<_ChannelView> {
           ),
           TextButton.icon(
             onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
+              final ok = await showAppDialog<bool>(
+                context, // round 7: app motion (spring scale + fade, reduce-motion aware)
                 builder: (d) => AlertDialog(
                   title: const Text('Share your name and number?'),
                   content: const Text('They will see your first name and phone number.'),

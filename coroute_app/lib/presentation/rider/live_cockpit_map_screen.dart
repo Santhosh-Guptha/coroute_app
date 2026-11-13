@@ -50,7 +50,10 @@ import '../../data/services/weather_service.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../../domain/notify/alert_priority.dart';
 import '../../domain/ride/ride_facts.dart';
+import '../../domain/road/cockpit_layout.dart';
 import '../../domain/safety/effective_speed_limit.dart';
+import '../../domain/diag/diag_log.dart';
+import '../../domain/safety/sos_fast_path.dart';
 import '../../domain/route/route_plan.dart';
 import '../../domain/route/route_progress.dart';
 import '../../domain/safety/speed_limit_advisor.dart';
@@ -101,6 +104,7 @@ import 'ride_advisories.dart'; // 3.55 heritage places on the way, off the group
 import '../../domain/places/heritage_ahead.dart';
 import '../../domain/route/off_route_group.dart';
 import '../safety/sos_hold_screen.dart';
+import 'widgets/road_ahead_chips.dart';
 import 'package:flutter/gestures.dart' show GestureBinding, PointerDownEvent, PointerEvent;
 import '../../core/theme/theme_controller.dart';
 import '../../data/services/safety_native.dart';
@@ -1180,6 +1184,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
   // ---------------------------------------------------------------- actions
 
+  /// Round 7: "Is this limit wrong?" for the road I am standing on (never while moving).
+  void _openWrongLimit() {
+    final roads = _roadCareSafety?.roadData;
+    if (roads == null || roads.shownLimits.isEmpty || !_advice.tapGate.canTap || (_lockCockpit?.locked ?? false)) return;
+    _popup<void>('wrong_limit', () => WrongLimitSheet.show(context, shown: roads.shownLimits.last, roads: roads));
+  }
+
   /// The SOS from the ride notification: the hold screen (also over the lock
   /// screen); nothing is sent unless the rider holds SOS there.
   Future<void> _openSosHold(ConvoyService service, AuthService auth) async {
@@ -1188,30 +1199,49 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     await _triggerSos(service, auth);
   }
 
-  /// The one SOS path: my position (or a 5 s GPS fallback when I have none),
-  /// type CRASH_OR_EMERGENCY, kept on the phone and re-sent after a dead zone
+  /// The one SOS path: type CRASH_OR_EMERGENCY, kept on the phone and re-sent after a dead zone
   /// by ConvoyService, then the SOS sheet with the delivery state.
+  ///
+  /// Round 7 (SosFastPath): with a position already in memory (my rider record, else the safety
+  /// service's last fix) the SOS is sent in this call, before any await and before any UI work.
+  /// Without one: the system's last known position (at most 300 ms), else a fresh fix (at most
+  /// 5 s, as before), then the SOS goes out whatever happened.
   Future<void> _triggerSos(ConvoyService service, AuthService auth) async {
     final uid = auth.currentUserId ?? service.myUserId ?? '';
     final me = service.activeConvoy?.riders[uid];
-    var lat = me?.lat ?? 0.0;
-    var lng = me?.lng ?? 0.0;
-    if (lat == 0.0 && lng == 0.0) {
-      try {
+    final safety = context.read<SafetyService?>();
+    var lat = 0.0, lng = 0.0;
+    final timing = await SosFastPath.run(
+      cachedSources: [
+        () => me == null ? null : (lat: me.lat, lng: me.lng, source: 'rider'),
+        () {
+          final f = safety?.lastFix;
+          return f == null ? null : (lat: f.lat, lng: f.lng, source: 'safety_fix');
+        },
+      ],
+      lastKnown: () async {
+        final pos = await Geolocator.getLastKnownPosition();
+        return pos == null ? null : (lat: pos.latitude, lng: pos.longitude, source: 'last_known');
+      },
+      current: () async {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 5)),
         );
-        lat = pos.latitude;
-        lng = pos.longitude;
-      } catch (_) {}
-    }
-    service.triggerSosAlert(
-      userId: me?.userId ?? uid,
-      userName: auth.currentUserName ?? me?.name ?? 'Rider',
-      lat: lat,
-      lng: lng,
-      type: 'CRASH_OR_EMERGENCY',
+        return (lat: pos.latitude, lng: pos.longitude, source: 'gps');
+      },
+      send: (la, lo) {
+        lat = la;
+        lng = lo;
+        service.triggerSosAlert(
+          userId: me?.userId ?? uid,
+          userName: auth.currentUserName ?? me?.name ?? 'Rider',
+          lat: la,
+          lng: lo,
+          type: 'CRASH_OR_EMERGENCY',
+        );
+      },
     );
+    DiagLog.info(DiagCat.sos, 'fast_path', {'src': timing.source, 'waitMs': timing.waitedMs, 'pos': timing.hadPosition});
     if (mounted) _popup<void>('sos', () => EmergencySosSheet.show(context, lat: lat, lng: lng), protected: true);
   }
 
@@ -3168,6 +3198,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                       child: MinimalSpeedAlert(speedKmh: me.speedKmh, limitKmh: speedLimit),
                     ),
                   ],
+                  // Round 7: the road's limit sign and the bend chip sit at the start edge of the row
+                  // whose end edge holds the action stack, so they share the row without overlapping
+                  // and nothing below is pushed down. They repaint on their own (RepaintBoundary +
+                  // their own listenable) and are empty during an emergency.
+                  Stack(
+                    children: [
                   // Disciplined right-side fuel & action stack (flows under top bar & alerts without
                   // collision); fades out with the other floating controls as the sheet opens.
                   ValueListenableBuilder<double>(
@@ -3201,6 +3237,23 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                       );
                     },
                     ),
+                  ),
+                      if (_roadCareSafety != null)
+                        PositionedDirectional(
+                          start: 0,
+                          top: Space.s8,
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: _sheetExpansion,
+                            builder: (_, t, chips) => _fade(side ? 1.0 : _floatingOpacity(t), chips!),
+                            child: RoadAheadChips(
+                              view: _roadCareSafety!.roadCare.roadView,
+                              layout: CockpitLayout.of(width: side ? w - panelW : w, height: h, textScale: textScaler.scale(1.0)),
+                              // "Wrong limit?" only while standing still (speak while moving, act when stopped).
+                              onLimitTap: _advice.tapGate.canTap ? _openWrongLimit : null,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),

@@ -22,6 +22,7 @@ Future<bool?> showPlaceReviewSheet(
 }) {
   return showModalBottomSheet<bool>(
     context: context,
+    sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
     useSafeArea: true,
     isScrollControlled: true,
     backgroundColor: AppTheme.card,

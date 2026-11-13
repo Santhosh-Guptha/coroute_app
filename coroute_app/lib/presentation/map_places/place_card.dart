@@ -20,6 +20,7 @@ String _km(double km) => km < 1 ? '${(km * 1000).round()} m' : km < 10 ? '${km.t
 Future<void> showPlaceCard(BuildContext context, PlacePoi poi, MapPlacesService service) {
   return showModalBottomSheet<void>(
     context: context,
+    sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
     useSafeArea: true,
     backgroundColor: AppTheme.card,
     constraints: const BoxConstraints(maxWidth: 600),
@@ -206,7 +207,7 @@ class _PlaceRiderReviewsState extends State<PlaceRiderReviews> {
         ]),
         const SizedBox(height: Space.s8),
         if (_loading)
-          const Padding(padding: EdgeInsets.all(Space.s8), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))))
+          const Shimmer(child: Padding(padding: EdgeInsets.symmetric(vertical: Space.s8), child: SkeletonParagraph(lines: 2))) // round 7: same height as the rating lines
         else if (_failed)
           Text('Ratings could not load. Check your connection.', style: AppText.caption.copyWith(color: AppTheme.muted))
         else if (s == null)
@@ -220,13 +221,13 @@ class _PlaceRiderReviewsState extends State<PlaceRiderReviews> {
               separatorBuilder: (_, _) => const SizedBox(width: Space.s8),
               itemBuilder: (_, i) => ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: Image.network(
+                // Round 7: sized decode (these are full-size rider photos), placeholder, fade-in.
+                child: AppNetworkImage(
                   widget.reviews.photoUrl(photos[i]),
                   headers: widget.reviews.photoHeaders,
                   width: 84,
                   height: 84,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(width: 84, height: 84, color: AppTheme.soft, child: Icon(Icons.image_not_supported_outlined, color: AppTheme.muted)),
+                  fallback: Container(width: 84, height: 84, color: AppTheme.soft, child: Icon(Icons.image_not_supported_outlined, color: AppTheme.muted)),
                 ),
               ),
             ),

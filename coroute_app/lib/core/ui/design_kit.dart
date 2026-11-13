@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'app_motion.dart';
+import 'pressable.dart';
 import 'ui_tokens.dart';
 
 /// Building blocks of the CoRoute design canvas (Manrope + teal).
@@ -65,8 +67,10 @@ class DsCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: onTap == null ? body : InkWell(onTap: onTap, child: body),
     );
-    if (semanticsLabel == null) return card;
-    return Semantics(label: semanticsLabel, button: onTap != null, child: card);
+    // Round 7: a tappable card shrinks a little while pressed (visual only; the tap is the InkWell's).
+    final Widget shown = onTap == null ? card : PressScale(child: card);
+    if (semanticsLabel == null) return shown;
+    return Semantics(label: semanticsLabel, button: onTap != null, child: shown);
   }
 }
 
@@ -249,6 +253,10 @@ class DsButton extends StatelessWidget {
   final double height;
   final double fontSize;
 
+  /// Round 7: work in progress. A small spinner replaces the icon INSIDE the
+  /// button and taps are ignored; the page is never blocked.
+  final bool loading;
+
   const DsButton({
     super.key,
     required this.label,
@@ -257,6 +265,7 @@ class DsButton extends StatelessWidget {
     this.tone = DsButtonTone.brand,
     this.height = 56,
     this.fontSize = 16,
+    this.loading = false,
   });
 
   @override
@@ -281,19 +290,28 @@ class DsButton extends StatelessWidget {
         fg = AppTheme.text;
         side = BorderSide(color: AppTheme.border2, width: 1);
     }
-    return SizedBox(
+    return PressScale(
+      enabled: onPressed != null && !loading,
+      child: SizedBox(
       height: height,
       child: Material(
         color: onPressed == null ? bg.withValues(alpha: 0.5) : bg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md), side: side),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: onPressed,
+          onTap: loading ? null : onPressed,
           child: Center(
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (icon != null) ...[
+                if (loading) ...[
+                  SizedBox(
+                    width: fontSize + 2,
+                    height: fontSize + 2,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+                  ),
+                  const SizedBox(width: 10),
+                ] else if (icon != null) ...[
                   Icon(icon, size: fontSize + 6, color: fg),
                   const SizedBox(width: 10),
                 ],
@@ -309,6 +327,7 @@ class DsButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -343,6 +362,9 @@ class DsChip extends StatelessWidget {
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
       child: Text(
         text,
+        // Round 7: a long translation is cut, never pushed out of the row.
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w500, height: 1.35),
       ),
     );
@@ -528,7 +550,16 @@ class DsSwitchRow extends StatelessWidget {
               ],
             ),
           ),
-          Switch(value: value, onChanged: onChanged),
+          Switch(
+            value: value,
+            // Round 7: a selection tick when the value changes.
+            onChanged: onChanged == null
+                ? null
+                : (v) {
+                    AppHaptics.selection();
+                    onChanged!(v);
+                  },
+          ),
         ],
       ),
     );
@@ -588,7 +619,10 @@ class DsSegment<T> extends StatelessWidget {
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
-                  onTap: () => onChanged(values[i]),
+                  onTap: () {
+                    if (values[i] != selected) AppHaptics.selection();
+                    onChanged(values[i]);
+                  },
                   child: Center(
                     child: Text(
                       label(values[i]),

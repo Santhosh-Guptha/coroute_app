@@ -375,8 +375,8 @@ class _AdminReviewDetailScreenState extends State<AdminReviewDetailScreen> {
   /// closing animation (disposing it when the pop future completes threw
   /// "TextEditingController was used after being disposed").
   Future<String?> _askReason(String title, String hint) {
-    return showDialog<String>(
-      context: context,
+    return showAppDialog<String>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => _ReasonDialog(title: title, hint: hint),
     );
   }

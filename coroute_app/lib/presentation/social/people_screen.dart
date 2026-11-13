@@ -362,7 +362,7 @@ class _PeopleScreenState extends State<PeopleScreen> {
       case PeopleSearchPhase.empty:
         return centered(_EmptyHint(line: 'No rider with that username', button: 'Share your invite link', onPressed: _shareInvite));
       case PeopleSearchPhase.loading when s.results.isEmpty:
-        return centered(const Center(child: SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3))));
+        return ListView(padding: _listPadding, children: const [SkeletonRows(count: 5, trailing: true)]); // round 7: rows, not a spinner
       default:
         return ListView(
           padding: _listPadding,
@@ -789,7 +789,7 @@ class _RequestTileState extends State<_RequestTile> {
                 onTap: widget.onProfile,
                 child: crewOrRide && r.username.isEmpty
                     ? DsAvatar(avatarInitials(r.title), size: 44, filled: true)
-                    : UserAvatar(label: r.username, avatarUrl: r.avatarUrl, size: 44),
+                    : UserAvatar(label: r.username, avatarUrl: r.avatarUrl, size: 44, heroTag: crewOrRide ? null : AppHero.avatar(r.username)), // round 7: a rider's picture flies to the profile (riders are unique in the results)
               ),
               const SizedBox(width: 12),
               Expanded(

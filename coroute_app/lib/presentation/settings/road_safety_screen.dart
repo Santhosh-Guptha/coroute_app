@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/intel_care_service.dart';
 import '../../data/services/safety_service.dart';
+import '../rider/widgets/road_ahead_settings_card.dart'; // round 7: curve warnings and road speed limits
 import 'private_places_card.dart';
 
 /// Round 4 Settings > "Road safety" (docs/intelligence/ROAD_AND_SAFETY_INTELLIGENCE.md):
@@ -76,8 +77,8 @@ class _RoadSafetyScreenState extends State<RoadSafetyScreen> {
   }
 
   Future<void> _delete() async {
-    final ok = await showDialog<bool>(
-      context: context,
+    final ok = await showAppDialog<bool>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (c) => AlertDialog(
         title: const Text('Delete my contributions?'),
         content: const Text(RoadSafetyScreen.deleteNote),
@@ -192,6 +193,14 @@ class _RoadSafetyScreenState extends State<RoadSafetyScreen> {
                           ),
                         ),
                     ]),
+                  ),
+                  // Round 7: curve warnings, road speed limits, estimated limits, road data storage.
+                  const SizedBox(height: Space.s24),
+                  const DsSectionHeader(RoadAheadSettingsCard.title),
+                  const SizedBox(height: Space.s8),
+                  const DsCard(
+                    padding: EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
+                    child: RoadAheadSettingsCard(),
                   ),
                 ],
               ],

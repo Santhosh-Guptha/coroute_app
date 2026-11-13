@@ -1,8 +1,11 @@
+import '../../core/ui/app_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/adaptive.dart';
+import '../../core/ui/skeleton.dart';
 import '../../core/ui/ui_tokens.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/membership_service.dart';
@@ -77,8 +80,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
 
   void _openInviteDialog() {
     _inviteCtrl.clear();
-    showDialog(
-      context: context,
+    showAppDialog(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -122,8 +125,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
   }
 
   Future<void> _handleRemoveMember(String userId, String name) async {
-    final confirm = await showDialog<bool>(
-      context: context,
+    final confirm = await showAppDialog<bool>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
         title: Text('Remove rider?', style: TextStyle(color: AppTheme.text)),
@@ -195,7 +198,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           // Pull-to-refresh works even when the content is short; the bottom
           // inset keeps the last card above the system nav bar.
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom),
+          // Round 7: on tablets / landscape the cards stay a readable 640 dp column in the middle.
+          padding: Adaptive.of(context).pagePadding(top: 16, bottom: 16 + MediaQuery.paddingOf(context).bottom),
           children: [
             if (activeTrip != null) ...[
               _buildActiveTripLockBanner(activeTrip),
@@ -230,14 +234,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: AppTheme.brand,
-            ),
-          ),
+          // Round 7: the plan text takes shape while it loads (no spinner).
+          const Shimmer(child: SkeletonParagraph(lines: 3)),
           const SizedBox(height: 16),
           Text(
             'Checking your plan',

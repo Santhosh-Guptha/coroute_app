@@ -94,7 +94,8 @@ class RideStartView extends StatelessWidget {
       if (!context.mounted) return;
       await Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
+        // Round 7: no edge-swipe back over the planner map (see AppMotion.noSwipeRoutePrefix).
+        MaterialPageRoute(settings: const RouteSettings(name: 'map/planner'), builder: (_) => const TripPlannerScreen()),
       );
     } finally {
       _isStartingRide = false;
@@ -118,8 +119,8 @@ class RideStartView extends StatelessWidget {
       if (!await PermissionsScreen.ensure(context)) return;
       if (!context.mounted) return;
       final hasContact = (context.read<AuthService>().emergencyContact ?? '').trim().isNotEmpty;
-      final ok = await showDialog<bool>(
-        context: context,
+      final ok = await showAppDialog<bool>(
+        context, // round 7: app motion (spring scale + fade, reduce-motion aware)
         builder: (ctx) => AlertDialog(
           title: const Text('Ride solo without internet?'),
           content: Text(
@@ -163,8 +164,8 @@ class RideStartView extends StatelessWidget {
       messenger?.showSnackBar(const SnackBar(content: Text('SOS is not available right now. Call 112.')));
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
+    final ok = await showAppDialog<bool>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         title: const Text('Send SOS?'),
         content: const Text('Your group and emergency contact are alerted as soon as the phone reconnects.'),

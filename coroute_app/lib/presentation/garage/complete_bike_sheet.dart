@@ -1,3 +1,4 @@
+import '../../core/ui/app_motion.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -119,6 +120,7 @@ Future<BikeGateResult?> showCompleteBikeSheet(BuildContext context, {GarageServi
   final g = garage ?? GarageService.shared;
   return showModalBottomSheet<BikeGateResult>(
     context: context,
+    sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
     isScrollControlled: true,
     backgroundColor: AppTheme.card,
     constraints: const BoxConstraints(maxWidth: 600),

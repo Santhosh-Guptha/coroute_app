@@ -209,13 +209,13 @@ class _PlaceReviewCard extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: Image.network(
+                    // Round 7: sized decode, placeholder, fade-in.
+                    child: AppNetworkImage(
                       api.apiUrlOf(PlaceReviewService.relativePath(u['url']?.toString() ?? '')),
                       headers: api.authHeaders,
                       width: 132,
                       height: 100,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(height: 100, color: AppTheme.soft, child: Icon(Icons.broken_image_outlined, color: AppTheme.muted)),
+                      fallback: Container(height: 100, color: AppTheme.soft, child: Icon(Icons.broken_image_outlined, color: AppTheme.muted)),
                     ),
                   ),
                   const SizedBox(height: 4),

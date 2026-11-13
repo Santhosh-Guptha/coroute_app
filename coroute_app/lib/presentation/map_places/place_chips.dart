@@ -1,3 +1,4 @@
+import '../../core/ui/app_motion.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -130,6 +131,7 @@ class PlacesMapButton extends StatelessWidget {
 Future<void> showPlacesSheet(BuildContext context, MapPlacesService service, {double? usableKm, double marginKm = 0, bool riderStopsSwitch = false}) =>
     showModalBottomSheet<void>(
       context: context,
+      sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
       useSafeArea: true,
       isScrollControlled: true,
       backgroundColor: AppTheme.card,

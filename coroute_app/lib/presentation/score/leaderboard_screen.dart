@@ -35,7 +35,16 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _svc.loadLeaderboard());
+    // Round 7 (stale-while-revalidate): the last leaderboard is on screen at once; a fresh one replaces it.
+    _svc.leaderboard = SwrCache.shared.peek<Leaderboard>('leaderboard');
+    _svc.position = SwrCache.shared.peek<LeaderboardPosition>('leaderboard:me');
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _svc.loadLeaderboard();
+      final lb = _svc.leaderboard;
+      final pos = _svc.position;
+      if (lb != null && _svc.error == null) SwrCache.shared.put<Leaderboard>('leaderboard', lb);
+      if (pos != null) SwrCache.shared.put<LeaderboardPosition>('leaderboard:me', pos);
+    });
   }
 
   @override
@@ -113,7 +122,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           if (_svc.error != null)
             EmptyState(icon: Icons.cloud_off_rounded, title: 'Leaderboard not loaded', message: _svc.error, primaryLabel: 'Try again', onPrimary: _svc.loadLeaderboard)
           else
-            const Center(child: CircularProgressIndicator()),
+            const SkeletonRows(count: 8, trailing: true), // round 7: leaderboard rows
         ],
       );
     }

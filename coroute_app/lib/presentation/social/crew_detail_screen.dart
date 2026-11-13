@@ -46,9 +46,18 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
 
   CrewsService get _svc => context.read<CrewsService>();
 
+  // Round 7 (stale-while-revalidate): the crew as last seen is shown at once and refreshed in place.
+  String get _cacheKey => 'crew:${widget.crewId}';
+
   @override
   void initState() {
     super.initState();
+    final cached = SwrCache.shared.peek<(CrewDetail, List<CrewPoll>)>(_cacheKey);
+    if (cached != null) {
+      _crew = cached.$1;
+      _polls = cached.$2;
+      _tab = _polls.any((p) => p.open && p.myVote.isEmpty) ? _CrewTab.polls : _CrewTab.members;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _sub = _svc.changes.where((id) => id == widget.crewId).listen((_) {
@@ -76,6 +85,7 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
           polls = await _svc.polls(widget.crewId);
         } on ApiException catch (_) {}
       }
+      SwrCache.shared.put<(CrewDetail, List<CrewPoll>)>(_cacheKey, (crew, polls));
       if (!mounted) return;
       setState(() {
         _crew = crew;
@@ -87,9 +97,12 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
       });
     } on ApiException catch (e) {
       if (!mounted) return;
+      final gone = e.statusCode == 404 || e.statusCode == 403;
+      if (gone) SwrCache.shared.remove(_cacheKey);
       setState(() {
         _loading = false;
-        _gone = e.statusCode == 404 || e.statusCode == 403;
+        _gone = gone;
+        if (gone) _crew = null;
       });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -254,10 +267,15 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
     }
   }
 
-  Future<void> _vote(CrewPoll p, List<String> ids) async {
+  /// Round 7: answers false when the vote was refused, so the card's optimistic tick goes back.
+  Future<bool> _vote(CrewPoll p, List<String> ids) async {
     final (updated, err) = await _svc.vote(widget.crewId, p, ids);
-    if (err != null) return _say(err);
+    if (err != null) {
+      _say(err);
+      return false;
+    }
     if (updated != null && mounted) setState(() => _polls = [for (final x in _polls) x.pollId == updated.pollId ? updated : x]);
+    return true;
   }
 
   Future<void> _pollMenu(CrewPoll p) async {
@@ -317,6 +335,7 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
               child: ListView(
                 padding: dsScreenPadding,
                 children: [
+                  TopProgressLine(active: _loading && c != null), // round 7: refreshing in place
                   DsScreenHeader(
                     title: c?.name ?? 'Crew',
                     subtitle: c == null ? null : '${c.members.length} ${c.members.length == 1 ? 'rider' : 'riders'} · ${CrewRoles.label(c.myRole)}',
@@ -336,7 +355,7 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
                   ),
                   const SizedBox(height: 18),
                   if (_loading && c == null)
-                    const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                    const SkeletonProfile(cards: 2) // round 7: shaped like the crew page
                   else if (_gone || c == null)
                     DsCard(child: Text(_gone ? 'You are not in this crew any more.' : 'This crew could not be loaded. Pull down to try again.', style: AppText.body))
                   else ...[
@@ -535,7 +554,8 @@ class _MemberRow extends StatelessWidget {
 /// choice) or tick options and save (multiple choice). [onVote] null = read-only (closed).
 class PollCard extends StatefulWidget {
   final CrewPoll poll;
-  final ValueChanged<List<String>>? onVote;
+  /// Round 7: may answer a Future; `false` (or an error) undoes the optimistic tick.
+  final FutureOr<Object?> Function(List<String> optionIds)? onVote;
   final VoidCallback? onMore;
   const PollCard({super.key, required this.poll, required this.onVote, this.onMore});
 
@@ -597,7 +617,17 @@ class _PollCardState extends State<PollCard> {
                             _picked = next;
                           });
                         } else if (!p.myVote.contains(o.id)) {
-                          widget.onVote!([o.id]);
+                          // Round 7 (optimistic): the tick moves at once; it goes back if the vote is refused.
+                          AppHaptics.selection();
+                          Optimistic.run<Set<String>?>(
+                            read: () => _picked,
+                            apply: (v) {
+                              if (mounted) setState(() => _picked = v);
+                            },
+                            next: {o.id},
+                            commit: (_) async => await widget.onVote!([o.id]),
+                            key: 'poll:${p.pollId}',
+                          );
                         }
                       },
               ),
@@ -900,7 +930,7 @@ class _InvitePickerState extends State<_InvitePicker> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (f == null && _error == null)
-            const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+            const SkeletonRows(count: 4) // round 7
           else if (f != null && f.isEmpty) ...[
             Text('No friends yet.', style: AppText.body),
             const SizedBox(height: 8),

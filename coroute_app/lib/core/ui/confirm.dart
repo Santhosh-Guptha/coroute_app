@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import 'app_motion.dart';
 import 'ui_tokens.dart';
 
 /// The one confirmation dialog, for End Ride, Leave Ride, Delete Trip and
@@ -18,8 +19,8 @@ Future<bool> confirmAction(
   String cancelLabel = 'Cancel',
   bool destructive = false,
 }) async {
-  final result = await showDialog<bool>(
-    context: context,
+  final result = await showAppDialog<bool>(
+    context,
     builder: (ctx) {
       final Color confirmBg = destructive ? StatusColors.critical : AppTheme.neonCyan;
       final Color confirmFg = destructive ? StatusColors.onCritical : Colors.black;

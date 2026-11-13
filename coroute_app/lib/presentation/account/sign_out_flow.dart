@@ -1,3 +1,4 @@
+import '../../core/ui/app_motion.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -29,8 +30,8 @@ class SignOutFlow {
   /// The dialog. Null when cancelled.
   static Future<SignOutChoice?> ask(BuildContext context) {
     var keep = true;
-    return showDialog<SignOutChoice>(
-      context: context,
+    return showAppDialog<SignOutChoice>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           title: const Text(title),

@@ -1,3 +1,4 @@
+import '../../core/ui/app_motion.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -19,6 +20,7 @@ Future<void> showPillionSeatSheet(BuildContext context, ConvoyService service) a
   final seated = me != null && me.isCoRiding && convoy.riders.containsKey(me.ridingWithUserId);
   await showModalBottomSheet<void>(
     context: context,
+    sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
     isScrollControlled: true,
     backgroundColor: AppTheme.card,
     constraints: const BoxConstraints(maxWidth: 600),
@@ -94,8 +96,8 @@ Future<void> showPillionSeatSheet(BuildContext context, ConvoyService service) a
 
 /// "You'll ride pillion on Asha's Royal Enfield Classic 350 (Red). Confirm?" then the seat.
 Future<bool> confirmPillionSeat(BuildContext context, ConvoyService service, RiderModel rider) async {
-  final ok = await showDialog<bool>(
-    context: context,
+  final ok = await showAppDialog<bool>(
+    context, // round 7: app motion (spring scale + fade, reduce-motion aware)
     builder: (d) => AlertDialog(
       title: const Text('Ride pillion?'),
       content: Column(

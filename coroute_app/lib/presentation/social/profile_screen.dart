@@ -183,10 +183,11 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
               child: ListView(
                 padding: dsScreenPadding,
                 children: [
+                  TopProgressLine(active: svc.loading && p != null), // round 7: refreshing in place
                   DsScreenHeader(title: 'My profile', onBack: () => Navigator.maybePop(context)),
                   const SizedBox(height: 18),
                   if (p == null && svc.loading)
-                    const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                    const SkeletonProfile(cards: 2) // round 7: shaped like the profile
                   else if (p == null)
                     DsCard(child: Text('Your profile could not be loaded. Pull down to try again.', style: AppText.body))
                   else ...[

@@ -99,8 +99,8 @@ class _RideAnalyticsScreenState extends State<RideAnalyticsScreen> {
 
   Future<void> _editPrice(String unit) async {
     final ctrl = TextEditingController(text: _price == null ? '' : _trimNum(_price!));
-    final result = await showDialog<double?>(
-      context: context,
+    final result = await showAppDialog<double?>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         title: const Text('Fuel price'),
         content: Column(
@@ -161,7 +161,7 @@ class _RideAnalyticsScreenState extends State<RideAnalyticsScreen> {
                 ),
                 Expanded(
                   child: data == null
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const SkeletonGroup(padding: EdgeInsets.fromLTRB(20, 4, 20, 28), children: [SkeletonCards(count: 4, stats: true)]) // round 7
                       : data.isEmpty
                           ? _EmptyAnalytics(onSuggest: () => RateAndFeedback.openFeedback(context, category: FeedbackCategory.safetyIdea))
                           : _AnalyticsBody(data: data, onEditPrice: _editPrice, onSuggest: () => RateAndFeedback.openFeedback(context, category: FeedbackCategory.safetyIdea)),

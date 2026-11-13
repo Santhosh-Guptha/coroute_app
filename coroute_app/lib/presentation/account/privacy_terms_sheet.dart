@@ -18,6 +18,7 @@ class PrivacyTermsSheet extends StatelessWidget {
   static const String privacyLabel = 'Privacy policy';
   static const String termsLabel = 'Terms of use';
   static const String yourDataLabel = 'Your data';
+  static const String licensesLabel = 'Open-source licences';
 
   /// The website page that explains what CoRoute keeps and how to get or delete it.
   static const String yourDataPath = '/privacy-and-security';
@@ -72,8 +73,15 @@ class PrivacyTermsSheet extends StatelessWidget {
           key: const ValueKey('privacy_sheet_your_data'),
           icon: Icons.folder_shared_rounded,
           label: yourDataLabel,
-          divider: false,
           onTap: () => _open(context, yourDataUrl),
+        ),
+        // Round 8: the licences of the Flutter packages and of RNNoise (intercom noise suppression).
+        DsListRow(
+          key: const ValueKey('privacy_sheet_licenses'),
+          icon: Icons.description_outlined,
+          label: licensesLabel,
+          divider: false,
+          onTap: () => showLicensePage(context: context, applicationName: 'CoRoute'),
         ),
       ],
     );

@@ -125,8 +125,8 @@ class _AdminFeaturesScreenState extends State<AdminFeaturesScreen> {
 
   Future<String?> _askReason(AdminFeature f) async {
     final controller = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
+    final reason = await showAppDialog<String>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
         final text = controller.text.trim();
         return AlertDialog(

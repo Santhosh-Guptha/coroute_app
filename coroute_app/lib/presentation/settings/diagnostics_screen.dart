@@ -253,7 +253,7 @@ class _DiagLogViewerScreenState extends State<DiagLogViewerScreen> {
             ),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const SkeletonList(itemExtent: 48, itemBuilder: _logLineSkeleton) // round 7
                   : shown.isEmpty
                       ? Center(child: Text('Nothing logged yet.', style: AppText.body))
                       : ListView.separated(
@@ -285,3 +285,6 @@ class _DiagLogViewerScreenState extends State<DiagLogViewerScreen> {
         child: ChoiceChip(label: Text(label), selected: selected, onSelected: (_) => onTap()),
       );
 }
+
+/// Round 7: placeholder for one log line while the log is read.
+Widget _logLineSkeleton(BuildContext _) => const SkeletonListTile(avatar: false, height: 48);

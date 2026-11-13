@@ -121,8 +121,8 @@ Future<String?> adminAskText(
   bool destructive = false,
   String? Function(String text)? validator,
 }) {
-  return showDialog<String>(
-    context: context,
+  return showAppDialog<String>(
+    context, // round 7: app motion (spring scale + fade, reduce-motion aware)
     builder: (_) => _AskTextDialog(
       title: title,
       message: message,

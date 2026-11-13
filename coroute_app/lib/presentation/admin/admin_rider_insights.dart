@@ -103,8 +103,8 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
 
   Future<void> _changePlan() async {
     final plan = _map('plan');
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
+    final result = await showAppDialog<Map<String, dynamic>>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (_) => _PlanDialog(currentTier: plan['tier']?.toString() ?? 'community'),
     );
     if (result == null || !mounted) return;

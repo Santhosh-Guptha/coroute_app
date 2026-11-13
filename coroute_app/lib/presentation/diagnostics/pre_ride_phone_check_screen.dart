@@ -218,8 +218,8 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
 
   /// Prominent disclosure (Google Play) before asking for "Allow all the time".
   Future<bool> _backgroundLocationDisclosure() async {
-    final ok = await showDialog<bool>(
-      context: context,
+    final ok = await showAppDialog<bool>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         title: const Text('Location with the screen off'),
         content: const Text(
@@ -245,8 +245,8 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
       Navigator.pop(context, true);
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
+    final ok = await showAppDialog<bool>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         title: const Text('Ride without these?'),
         content: Text(
@@ -406,7 +406,8 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
         if (_isLoading) LinearProgressIndicator(minHeight: 3, color: AppTheme.brand),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            // Round 7: a readable centred column on tablets / landscape.
+            padding: Adaptive.of(context).pagePadding(top: 12, bottom: 16),
             children: [
               if (widget.triggerReason != null) ...[
                 Text(widget.triggerReason!, style: AppText.caption.copyWith(color: AppTheme.text2)),
@@ -568,8 +569,8 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
     final safety = context.read<SafetyService?>();
     if (safety == null) return;
     final who = (auth?.emergencyContactName ?? '').trim();
-    final ok = await showDialog<bool>(
-      context: context,
+    final ok = await showAppDialog<bool>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         title: const Text('Send a test text?'),
         content: Text(
@@ -671,8 +672,8 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
 
   void _showInspectDataDialog(DeviceDiagnosticReport report) {
     final jsonStr = report.toJsonString(pretty: true);
-    showDialog<void>(
-      context: context,
+    showAppDialog<void>(
+      context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (ctx) => AlertDialog(
         title: const Text('What is sent'),
         content: SizedBox(

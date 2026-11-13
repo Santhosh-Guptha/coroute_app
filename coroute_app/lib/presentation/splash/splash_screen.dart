@@ -14,6 +14,7 @@ import '../rider/rider_home_screen.dart';
 import '../../data/services/app_version_service.dart';
 import '../update/force_update_screen.dart';
 
+/// Round 7: the next screen cross-fades in (no slide from a splash).
 /// A static logo while the saved session loads. No animation, no polling,
 /// no minimum display time: it moves on as soon as the account is known.
 class SplashScreen extends StatefulWidget {
@@ -50,7 +51,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final versionService = context.read<AppVersionService?>();
     if (versionService != null && versionService.isMandatoryUpdateRequired) {
       _navigated = true;
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
+      Navigator.pushReplacement(context, appFadeRoute((_) => const ForceUpdateScreen()));
       return true;
     }
     return false;
@@ -75,7 +76,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
         if (_checkMandatoryUpdate()) return;
         _navigated = true;
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AccessGateScreen()));
+        Navigator.pushReplacement(context, appFadeRoute((_) => const AccessGateScreen()));
         return;
       }
     }
@@ -83,10 +84,10 @@ class _SplashScreenState extends State<SplashScreen> {
     if (auth.isAuthenticated && auth.isMasterAdmin) {
       _navigated = true;
       // One admin console for phones and tablets (it adapts its layout).
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MasterAdminDashboard()));
+      Navigator.pushReplacement(context, appFadeRoute((_) => const MasterAdminDashboard()));
     } else if (auth.isAuthenticated) {
       _navigated = true;
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const RiderHomeScreen()));
+      Navigator.pushReplacement(context, appFadeRoute((_) => const RiderHomeScreen()));
     } else {
       final onboarded = await OnboardingScreen.isDone();
       if (!mounted || _navigated) return;
@@ -95,7 +96,7 @@ class _SplashScreenState extends State<SplashScreen> {
       _navigated = true;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => onboarded ? const AccessGateScreen() : const OnboardingScreen()),
+        appFadeRoute((_) => onboarded ? const AccessGateScreen() : const OnboardingScreen()),
       );
     }
   }

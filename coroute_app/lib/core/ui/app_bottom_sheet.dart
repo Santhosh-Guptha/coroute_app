@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'app_motion.dart';
 import 'ui_tokens.dart';
 
 /// Scrim behind every pop-up (sheets, dialogs, in-cockpit panels): dims the
@@ -48,7 +49,8 @@ Future<T?> showAppSheet<T>(
     backgroundColor: AppTheme.card,
     shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
     clipBehavior: Clip.antiAlias,
-    sheetAnimationStyle: AnimationStyle(duration: Motion.sheet, reverseDuration: Motion.sheet),
+    // Round 7: spring in, ease out; reduce motion / battery saver shorten or remove it.
+    sheetAnimationStyle: AppMotion.sheetStyleOf(context),
     builder: (ctx) {
       final t = title;
       final bottomInset = MediaQuery.viewInsetsOf(ctx).bottom;

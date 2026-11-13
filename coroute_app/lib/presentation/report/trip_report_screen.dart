@@ -1414,7 +1414,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
       tapWithoutPlace: true,
       selectedEventId: widget.highlight?.eventId,
       emptyState: widget.eventsLoading
-          ? const LoadingSpinner()
+          ? const SkeletonList(itemExtent: 56) // round 7: timeline rows
           : const EmptyState(icon: Icons.timeline_rounded, title: 'No events for this trip'),
     );
   }

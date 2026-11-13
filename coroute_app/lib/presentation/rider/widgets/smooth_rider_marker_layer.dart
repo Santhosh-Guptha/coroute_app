@@ -144,7 +144,9 @@ class _SmoothMarkerLayerState extends State<SmoothMarkerLayer> with SingleTicker
         // Drawn from the camera's pose: no tween of its own (keeps the ticker idle).
         _tracks[m.id] = MarkerTrack(lat, lng, m.heading.isFinite ? m.heading : 0.0, now);
       } else if (track == null) {
-        _tracks[m.id] = MarkerTrack(lat, lng, m.heading.isFinite ? m.heading : 0.0, now);
+        // Round 7: other riders dead-reckon briefly past their last report (GlideTrack), so a late
+        // report does not make the bike stop and jump.
+        _tracks[m.id] = GlideTrack(lat, lng, m.heading.isFinite ? m.heading : 0.0, now);
       } else {
         track.retarget(lat, lng, m.heading.isFinite ? m.heading : track.targetHeading, now);
         if (track.isAnimating(now)) animating = true;

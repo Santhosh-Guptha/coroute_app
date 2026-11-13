@@ -177,7 +177,7 @@ class _RideInviteScreenState extends State<RideInviteScreen> {
                 DsScreenHeader(title: 'Ride invitation', onBack: () => Navigator.maybePop(context)),
                 const SizedBox(height: 18),
                 if (_loading && inv == null)
-                  const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                  const SkeletonCards(count: 2, lines: 3) // round 7
                 else if (inv == null)
                   DsCard(child: Text(_error ?? 'This ride invitation could not be loaded.', style: AppText.body))
                 else ...[
@@ -589,7 +589,7 @@ class _CrewRideInviteSheetState extends State<CrewRideInviteSheet> {
               style: AppText.body.copyWith(color: AppTheme.text2)),
           const SizedBox(height: 8),
           if (m == null && _error == null)
-            const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+            const SkeletonRows(count: 4) // round 7
           else if (m != null && m.isEmpty)
             Text('No one else is in this crew yet.', style: AppText.body)
           else if (m != null) ...[

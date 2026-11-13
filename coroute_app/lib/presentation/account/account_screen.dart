@@ -315,8 +315,8 @@ Future<bool> _reauth(BuildContext context, AuthService auth) async {
     return r['success'] == true;
   }
   final ctrl = TextEditingController();
-  final pw = await showDialog<String>(
-    context: context,
+  final pw = await showAppDialog<String>(
+    context, // round 7: app motion (spring scale + fade, reduce-motion aware)
     builder: (ctx) => AlertDialog(
       title: const Text('Confirm it is you'),
       content: TextField(

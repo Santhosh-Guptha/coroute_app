@@ -137,7 +137,7 @@ class _AdminDiagLogsScreenState extends State<AdminDiagLogsScreen> {
               ),
               const SizedBox(height: 12),
               if (_loading)
-                const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                const SkeletonCards(count: 4, lines: 1) // round 7: shaped placeholder, not a spinner
               else if (_error != null)
                 AdminCard(warning: true, child: Text(_error!, style: AppText.body))
               else if (_logs.isEmpty)
@@ -322,7 +322,7 @@ class _AdminDiagLogViewerState extends State<AdminDiagLogViewer> {
           ),
           const SizedBox(height: 12),
           if (_loading)
-            const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+            const SkeletonRows(count: 3, avatar: false, itemExtent: 44)
           else if (_lines.length < _total)
             DsButton(label: 'Load more', tone: DsButtonTone.outline, onPressed: () => _loadLines()),
         ],

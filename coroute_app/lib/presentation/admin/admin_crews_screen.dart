@@ -96,7 +96,7 @@ class _AdminCrewsScreenState extends State<AdminCrewsScreen> {
               ),
               const SizedBox(height: 12),
               if (_loading)
-                const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                const SkeletonRows(count: 6, trailing: true) // round 7
               else if (_error != null)
                 AdminCard(warning: true, child: Text(_error!, style: AppText.body))
               else if (_crews.isEmpty)
@@ -215,7 +215,7 @@ class _AdminCrewDetailState extends State<_AdminCrewDetail> {
                 if (_error != null)
                   AdminCard(warning: true, child: Text(_error!, style: AppText.body))
                 else if (d == null)
-                  const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+                  const SkeletonCards(count: 3) // round 7
                 else ...[
                   if ((crew['description']?.toString() ?? '').isNotEmpty) ...[
                     AdminCard(child: Text(crew['description'].toString(), style: AppText.body)),

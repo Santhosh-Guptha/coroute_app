@@ -40,6 +40,7 @@ class AfterRidePlaceReviews extends StatelessWidget {
     var done = false;
     await showModalBottomSheet<void>(
       context: context,
+      sheetAnimationStyle: AppMotion.sheetStyleOf(context), // round 7: spring in, reduce-motion aware
       useSafeArea: true,
       isScrollControlled: true,
       backgroundColor: AppTheme.card,

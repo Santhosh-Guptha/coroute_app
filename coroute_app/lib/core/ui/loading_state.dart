@@ -11,16 +11,24 @@ class LoadingState extends StatelessWidget {
   final bool hasData;
   final Widget child;
 
+  /// Round 7: the placeholder for the first load, shaped like the content
+  /// (`skeleton: (_) => const SkeletonList()`). Without it: the small spinner.
+  final WidgetBuilder? skeleton;
+
   const LoadingState({
     super.key,
     required this.loading,
     required this.child,
     this.hasData = true,
+    this.skeleton,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (!hasData && loading) return const LoadingSpinner();
+    if (!hasData && loading) {
+      final s = skeleton;
+      return s == null ? const LoadingSpinner() : Builder(builder: s);
+    }
     return Stack(
       fit: StackFit.passthrough,
       children: [

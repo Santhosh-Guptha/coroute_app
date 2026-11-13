@@ -40,7 +40,13 @@ class _RiderScoreScreenState extends State<RiderScoreScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _svc.refresh());
+    // Round 7 (stale-while-revalidate): the last score is on screen at once; a fresh one replaces it.
+    _svc.score = SwrCache.shared.peek<RiderScore>('score:me');
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _svc.refresh();
+      final s = _svc.score;
+      if (s != null && _svc.error == null) SwrCache.shared.put<RiderScore>('score:me', s);
+    });
   }
 
   @override
@@ -107,7 +113,7 @@ class _RiderScoreScreenState extends State<RiderScoreScreen> {
           if (_svc.error != null)
             EmptyState(icon: Icons.cloud_off_rounded, title: 'Score not loaded', message: _svc.error, primaryLabel: 'Try again', onPrimary: _svc.refresh)
           else
-            const Center(child: CircularProgressIndicator()),
+            const SkeletonCards(count: 3, stats: true), // round 7: score cards
         ],
       );
     }

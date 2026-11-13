@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../ui/app_motion.dart' show appPageTransitionsTheme;
 import '../ui/ui_tokens.dart';
 import 'app_palette.dart';
 
@@ -180,6 +181,9 @@ class AppTheme {
       dividerColor: p.border,
       hintColor: p.textFaint,
       splashFactory: InkRipple.splashFactory,
+      // Round 7: iOS-style slide + parallax + edge-swipe back on every page; safety routes appear at once
+      // (lib/core/ui/app_motion.dart).
+      pageTransitionsTheme: appPageTransitionsTheme,
       appBarTheme: AppBarTheme(
         backgroundColor: p.background,
         foregroundColor: p.text,

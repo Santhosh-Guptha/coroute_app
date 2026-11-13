@@ -134,7 +134,10 @@ class MapPickerScreen extends StatefulWidget {
   static Future<PickedPlace?> pick(BuildContext context, {required String title, PickedPlace? initial, bool forStop = false, String confirmLabel = 'Use this place', String? initialQuery}) {
     return Navigator.push<PickedPlace>(
       context,
-      MaterialPageRoute(builder: (_) => MapPickerScreen(title: title, initial: initial, forStop: forStop, confirmLabel: confirmLabel, initialQuery: initialQuery)),
+      MaterialPageRoute(
+          // Round 7: slides like every page, but no edge-swipe back (the map's left edge is for panning).
+          settings: const RouteSettings(name: 'map/picker'),
+          builder: (_) => MapPickerScreen(title: title, initial: initial, forStop: forStop, confirmLabel: confirmLabel, initialQuery: initialQuery)),
     );
   }
 
