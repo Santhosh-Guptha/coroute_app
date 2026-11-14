@@ -20,11 +20,16 @@ import '../../../domain/road/speed_limit_resolver.dart';
 /// * Bend: an arrow for the side and tightness, the comfortable speed and the distance.
 /// * [onLimitTap]: only offered when the rider is not moving (the "wrong limit?" sheet).
 class RoadAheadChips extends StatelessWidget {
-  const RoadAheadChips({super.key, required this.view, required this.layout, this.onLimitTap});
+  const RoadAheadChips({super.key, required this.view, required this.layout, this.onLimitTap, this.showLimit = true, this.showCurve = true});
 
   final ValueListenable<RoadAheadView> view;
   final CockpitLayout layout;
   final VoidCallback? onLimitTap;
+
+  /// Round 11 HUD: the sign moves into the turn card and the bend into the safety strip (both at
+  /// least as large there); the ride HUD turns these off so nothing shows twice.
+  final bool showLimit;
+  final bool showCurve;
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +39,10 @@ class RoadAheadChips extends StatelessWidget {
         builder: (context, v, _) {
           if (v.isEmpty) return const SizedBox.shrink();
           final limit = v.limit, curve = v.curve;
+          if ((limit == null || !showLimit) && (curve == null || !showCurve)) return const SizedBox.shrink();
           final children = <Widget>[
-            if (limit != null) RoadLimitSign(limit: limit, level: v.level, size: layout.signSize, onTap: onLimitTap),
-            if (curve != null) CurveChip(curve: curve, advisoryKmh: v.curveAdvisoryKmh, distanceM: v.curveDistanceM, height: layout.chipHeight),
+            if (limit != null && showLimit) RoadLimitSign(limit: limit, level: v.level, size: layout.signSize, onTap: onLimitTap),
+            if (curve != null && showCurve) CurveChip(curve: curve, advisoryKmh: v.curveAdvisoryKmh, distanceM: v.curveDistanceM, height: layout.chipHeight),
           ];
           return MediaQuery.withClampedTextScaling(
             minScaleFactor: 1.0,

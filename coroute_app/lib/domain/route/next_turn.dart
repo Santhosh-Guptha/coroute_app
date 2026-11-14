@@ -80,6 +80,33 @@ class NextTurn {
     return null;
   }
 
+  /// Round 11 HUD (marked edit): the next [count] step starts ahead of [alongM], nearest first, for
+  /// the turn card's "then ..." line. Same rules as [compute].
+  static List<NextTurn> computeAhead({
+    required List<RouteStep> steps,
+    required RouteProgress line,
+    required double alongM,
+    int count = 2,
+    double lookM = 25,
+    double minAheadM = 5,
+  }) {
+    final out = <NextTurn>[];
+    if (steps.isEmpty || !line.isUsable || count <= 0) return out;
+    final length = line.lengthM;
+    for (final s in steps) {
+      if (s.startM <= alongM + minAheadM || s.startM <= 0) continue;
+      if (s.startM >= length) break;
+      final before = _pointAt(line, s.startM - lookM);
+      final at = _pointAt(line, s.startM);
+      final after = _pointAt(line, s.startM + lookM);
+      final b1 = GeoMath.bearing(before.$1, before.$2, at.$1, at.$2);
+      final b2 = GeoMath.bearing(at.$1, at.$2, after.$1, after.$2);
+      out.add(NextTurn(direction: classify(signedDelta(b1, b2)), distanceM: s.startM - alongM, road: s.roadLabel));
+      if (out.length >= count) break;
+    }
+    return out;
+  }
+
   /// The point [d] metres along the line (clamped to its ends).
   static (double, double) _pointAt(RouteProgress line, double d) {
     final pts = line.points;
