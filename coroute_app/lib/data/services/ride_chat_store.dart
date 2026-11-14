@@ -102,6 +102,24 @@ class RideChatStore {
     }
   }
 
+  /// v3.58 Chat tab: the ended rides whose chat is kept here, newest first: (groupId, messages, last message).
+  static Future<List<({String groupId, int count, GroupMessageModel? last})>> archivedRides() async {
+    final p = await _p();
+    if (p == null) return const [];
+    try {
+      final out = <({String groupId, int count, GroupMessageModel? last})>[];
+      for (final e in _readArchive(p).entries) {
+        final raw = e.value;
+        if (raw is! List || raw.isEmpty) continue;
+        final lastRaw = raw.last;
+        out.add((groupId: e.key, count: raw.length, last: lastRaw is Map ? GroupMessageModel.fromJson(Map<String, dynamic>.from(lastRaw)) : null));
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
   static Map<String, dynamic> _readArchive(SharedPreferences p) {
     final raw = p.getString(keyArchive);
     if (raw == null) return {};

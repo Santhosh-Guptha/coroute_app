@@ -24,6 +24,7 @@ import 'package:coroute_app/data/services/track_recorder.dart';
 import 'package:coroute_app/data/services/track_uploader.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
+import 'package:coroute_app/presentation/shell/coroute_nav_bar.dart';
 
 /// 3.12 behaviour regressions found by the adversarial review (TEST_BEHAVIOUR.md).
 void main() {
@@ -77,18 +78,19 @@ void main() {
 
   testWidgets('Android back on another tab returns to the Ride tab instead of leaving the app', (tester) async {
     await pumpShell(tester);
-    expect(find.text('No active ride'), findsOneWidget);
+    expect(find.byKey(const Key('home_carousel')), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(NavigationDestination, 'Profile'));
+    // v3.58 shell: Home · Explore · + · Community · Chat (CoRouteNavBar).
+    await tester.tap(find.byKey(const Key('nav_community')));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, HomeTab.profile.index);
+    expect(tester.widget<CoRouteNavBar>(find.byType(CoRouteNavBar)).selected, NavSlot.community);
 
     // System back: the shell handles it (the route is not popped) and shows Ride again.
     final handled = await tester.binding.handlePopRoute();
     await tester.pump(const Duration(milliseconds: 300));
     expect(handled, isTrue);
     expect(find.byType(RiderHomeScreen), findsOneWidget);
-    expect(tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex, HomeTab.ride.index);
+    expect(tester.widget<CoRouteNavBar>(find.byType(CoRouteNavBar)).selected, NavSlot.home);
   });
 
   testWidgets('Without a ride, back on the Ride tab may leave the app (PopScope allows the pop)', (tester) async {

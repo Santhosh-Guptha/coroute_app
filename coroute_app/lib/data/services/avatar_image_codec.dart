@@ -92,6 +92,36 @@ class AvatarImageCodec {
     }
   }
 
+  /// v3.58 cover photo: the centre of [image] cut to [aspect] (width / height), at most [maxWidth] px wide,
+  /// re-encoded with no metadata. [cy] moves the cut up (0) or down (1).
+  static Future<EncodedPicture> renderCover(ui.Image image, {double aspect = 8 / 3, int maxWidth = 1600, double cy = 0.5}) async {
+    final w = image.width.toDouble(), h = image.height.toDouble();
+    double sw = w, sh = w / aspect;
+    if (sh > h) {
+      sh = h;
+      sw = h * aspect;
+    }
+    final sx = (w - sw) / 2;
+    final sy = (h - sh) * cy.clamp(0.0, 1.0);
+    final outW = math.min(maxWidth, sw.round()).clamp(1, 1 << 14);
+    final outH = (outW / aspect).round().clamp(1, 1 << 14);
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    canvas.drawImageRect(image, ui.Rect.fromLTWH(sx, sy, sw, sh), ui.Rect.fromLTWH(0, 0, outW.toDouble(), outH.toDouble()), ui.Paint()..filterQuality = ui.FilterQuality.high);
+    final picture = recorder.endRecording();
+    final ui.Image rendered;
+    try {
+      rendered = await picture.toImage(outW, outH);
+    } finally {
+      picture.dispose();
+    }
+    try {
+      return await _encode(rendered, quality: 85);
+    } finally {
+      rendered.dispose();
+    }
+  }
+
   /// The original to keep for later adjusting: [image] as decoded (at most 2048 px), re-encoded so
   /// it has no metadata. Null when it can not be written under the upload limit.
   static Future<EncodedPicture?> encodeOriginal(ui.Image image) async {

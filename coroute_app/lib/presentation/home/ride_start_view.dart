@@ -180,15 +180,20 @@ class RideStartView extends StatelessWidget {
     messenger?.showSnackBar(const SnackBar(content: Text('SOS queued. It goes out the moment the phone reconnects. Call 112 if you can.')));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthService>();
-    final convoys = context.watch<ConvoyService?>();
+  /// The one alert above the Home content (reconnecting with SOS, safety details, ride ended, ride saved), or
+  /// null. Shared by this view and the v3.58 HomeScreen.
+  static Widget? alertFor(
+    BuildContext context, {
+    required AuthService auth,
+    required ConvoyService? convoys,
+    bool showRideSaved = false,
+    VoidCallback? onViewSummary,
+    VoidCallback? onDismissRideSaved,
+  }) {
     final reconnecting = convoys != null && convoys.activeConvoy == null && convoys.hasUnconfirmedRide;
     final needsProfile = _needsProfile(auth);
-    Widget? alert;
     if (reconnecting) {
-      alert = RideAlert(
+      return RideAlert(
         tier: AlertTier.critical,
         title: 'Reconnecting to your ride…',
         message: 'No signal yet. Your group sees you again as soon as the phone reconnects.',
@@ -196,7 +201,7 @@ class RideStartView extends StatelessWidget {
         onAction: () => _sosWhileReconnecting(context),
       );
     } else if (needsProfile) {
-      alert = RideAlert(
+      return RideAlert(
         tier: AlertTier.important,
         title: 'Add your safety details',
         message: 'Your group needs your phone number and an emergency contact before you ride.',
@@ -205,14 +210,14 @@ class RideStartView extends StatelessWidget {
       );
     } else if (convoys != null && convoys.rideEndedNotice) {
       // The gateway answered "This ride has ended" (409 RIDE_ENDED): the end was missed offline.
-      alert = RideAlert(
+      return RideAlert(
         tier: AlertTier.normal,
         title: 'This ride has ended',
         message: 'It ended while you were offline. Your trip is in Trips.',
         onDismiss: convoys.clearRideEndedNotice,
       );
     } else if (showRideSaved) {
-      alert = RideAlert(
+      return RideAlert(
         tier: AlertTier.normal,
         title: 'Ride saved',
         message: 'Your trip is in Trips.',
@@ -221,6 +226,14 @@ class RideStartView extends StatelessWidget {
         onDismiss: onDismissRideSaved,
       );
     }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
+    final convoys = context.watch<ConvoyService?>();
+    final Widget? alert = alertFor(context, auth: auth, convoys: convoys, showRideSaved: showRideSaved, onViewSummary: onViewSummary, onDismissRideSaved: onDismissRideSaved);
     final a = alert;
     final name = auth.currentUserName ?? '';
 
@@ -270,11 +283,11 @@ class RideStartView extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: Space.s12),
-                const _OfflineSoloCard(),
+                const OfflineSoloCard(),
                 const SizedBox(height: Space.s24),
                 const DsSectionHeader('Bike status'),
                 const SizedBox(height: Space.s12),
-                const _BikeStatusCard(),
+                const BikeStatusCard(),
                 // After a ride the cockpit did not close itself (the lead ended it, or "Leave" from the
                 // notification): asks once for the post-trip review. Renders nothing.
                 const PendingTripReviewCheck(),
@@ -481,8 +494,8 @@ class _ActionTile extends StatelessWidget {
 
 /// "BIKE STATUS": usable range, crash detection and the intercom, from the
 /// services this phone has (each is optional, so the tab renders without them).
-class _BikeStatusCard extends StatelessWidget {
-  const _BikeStatusCard();
+class BikeStatusCard extends StatelessWidget {
+  const BikeStatusCard({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -560,14 +573,17 @@ class _BikeStatusCard extends StatelessWidget {
 }
 
 /// Offline solo ride (3.54): the entry when none runs, and its status, SOS and End while it runs.
-class _OfflineSoloCard extends StatelessWidget {
-  const _OfflineSoloCard();
+class OfflineSoloCard extends StatelessWidget {
+  /// v3.58: false hides the entry card while no solo ride runs (the new Home offers it in the + sheet).
+  final bool showEntry;
+  const OfflineSoloCard({super.key, this.showEntry = true});
 
   @override
   Widget build(BuildContext context) {
     final safety = context.watch<SafetyService?>();
     if (safety == null) return const SizedBox.shrink();
     if (!safety.offlineSoloActive) {
+      if (!showEntry) return const SizedBox.shrink();
       return DsCard(
         onTap: () => RideStartView.startOfflineSolo(context),
         child: Row(

@@ -21,6 +21,12 @@ String? avatarPathOf(Object? v) {
   return s.startsWith('/api/avatars/') ? s : null;
 }
 
+/// v3.58: `/api/covers/<id>` from the gateway, else null (never a third-party URL).
+String? coverPathOf(Object? v) {
+  final s = v?.toString() ?? '';
+  return s.startsWith('/api/covers/') ? s : null;
+}
+
 int _int(Object? v) => v is num ? v.toInt() : 0;
 double _double(Object? v) => v is num ? v.toDouble() : 0;
 String _str(Object? v) => v?.toString() ?? '';

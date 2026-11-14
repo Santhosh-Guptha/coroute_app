@@ -4,24 +4,26 @@ import '../../data/services/geo_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/l10n/l10n.dart';
-import '../../core/theme/app_theme.dart';
 import '../../core/ui/confirm.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
-import '../../core/ui/ride_alert.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/place_review_service.dart';
 import '../map_places/after_ride_place_reviews.dart';
 import '../widgets/feature_switch.dart';
 import '../../data/services/ride_notification_service.dart';
-import '../../data/services/safety_service.dart';
-import '../../data/services/timeline_service.dart';
 import '../account/account_screen.dart';
 import '../alerts/alerts_screen.dart';
 import '../home/ride_start_view.dart';
 import '../ride/emergency_guidance.dart';
 import '../ride/map_focus.dart';
-import '../social/people_screen.dart';
+import '../chat/chat_list_screen.dart'; // v3.58 shell
+import '../explore/explore_screen.dart'; // v3.58 shell
+import '../home/home_screen.dart'; // v3.58 shell
+import '../shell/coroute_nav_bar.dart'; // v3.58 shell
+import '../shell/quick_actions_sheet.dart'; // v3.58 shell
+import '../shell/shell_badges.dart'; // v3.58 shell
+import '../social/community_screen.dart'; // v3.58 shell
 import 'live_cockpit_map_screen.dart';
 import 'trip_history_screen.dart';
 import '../engagement/ride_wrapup_sheet.dart';
@@ -31,9 +33,11 @@ import '../../data/services/engagement_service.dart';
 import '../../domain/security/lock_screen_cockpit_policy.dart';
 import '../security/locked_cockpit_gate.dart';
 
-/// The tabs of the app, in bottom navigation order. 3.55: People (friends, crews, requests) is
-/// one tap away from anywhere.
-enum HomeTab { ride, trips, people, alerts, profile }
+/// The tabs of the app shell. v3.58 (docs/design/REDESIGN_v3.58.md): the bottom bar shows
+/// Home (ride) · Explore · + · Community (people) · Chat; Trips, Alerts and Profile are kept as tabs
+/// without a bar slot (opened from Home's header and Profile; Back returns to Home), so every
+/// existing `selectTab` caller keeps working.
+enum HomeTab { ride, explore, people, chat, trips, alerts, profile }
 
 /// "Leave ride" from the ride notification (3.16, item 3). The notification
 /// button only sets [ConvoyService.leaveRequestedFromNotification]; this
@@ -111,8 +115,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   void initState() {
     super.initState();
     RiderHomeScreen._current = this;
-    // 3.55 People hub: "open friends / crews / requests" from anywhere switches to the People tab.
-    PeopleScreen.tabOpener = _openPeopleTab;
+    // v3.58: the Community tab is its own screen; "open friends / crews / requests" pushes the People hub
+    // (PeopleScreen.open with no tab opener), which keeps the requested segment.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final s = context.read<ConvoyService>();
@@ -218,14 +222,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     _rideNotif?.pendingUiAction.removeListener(_onRideNotifAction);
     _mapFocus.dispose();
     if (RiderHomeScreen._current == this) RiderHomeScreen._current = null;
-    if (PeopleScreen.tabOpener == _openPeopleTab) PeopleScreen.tabOpener = null;
     super.dispose();
-  }
-
-  bool _openPeopleTab(BuildContext context) {
-    if (!mounted) return false;
-    RiderHomeScreen.selectTab(context, HomeTab.people);
-    return true;
   }
 
   void _select(HomeTab tab) {
@@ -292,7 +289,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     if (groupId != null) {
       return LiveCockpitMapScreen(key: ValueKey(groupId), convoyId: groupId, embedded: true, focus: _mapFocus, isVisible: _tab == HomeTab.ride);
     }
-    return RideStartView(
+    return HomeScreen(
       showRideSaved: _rideSaved,
       onViewSummary: () {
         setState(() => _rideSaved = false);
@@ -304,8 +301,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 
   Widget _body(HomeTab tab, String? groupId) => switch (tab) {
         HomeTab.ride => _rideTab(groupId),
+        HomeTab.explore => const ExploreScreen(),
+        HomeTab.chat => const ChatListScreen(),
         HomeTab.trips => TripHistoryScreen(embedded: true),
-        HomeTab.people => const PeopleScreen(embedded: true),
+        HomeTab.people => const CommunityScreen(),
         HomeTab.alerts => const AlertsScreen(),
         HomeTab.profile => const AccountScreen(embedded: true),
       };
@@ -343,71 +342,34 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       ),
       bottomNavigationBar: (groupId != null && _tab == HomeTab.ride)
           ? null
-          : DecoratedBox(
-              decoration: BoxDecoration(
-                color: AppTheme.bg,
-                border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
-              ),
-        child: NavigationBar(
-          selectedIndex: _tab.index,
-          onDestinationSelected: (i) => _select(HomeTab.values[i]),
-          backgroundColor: AppTheme.bg,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home_rounded),
-              label: 'Home',
+          // v3.58: Home · Explore · + · Community · Chat (lib/presentation/shell). Trips, Alerts and Profile
+          // have no slot: nothing is highlighted while one of them is shown.
+          : CoRouteNavBar(
+              selected: switch (_tab) {
+                HomeTab.ride => NavSlot.home,
+                HomeTab.explore => NavSlot.explore,
+                HomeTab.people => NavSlot.community,
+                HomeTab.chat => NavSlot.chat,
+                _ => null,
+              },
+              onSelect: (slot) => _select(switch (slot) {
+                NavSlot.home => HomeTab.ride,
+                NavSlot.explore => HomeTab.explore,
+                NavSlot.community => HomeTab.people,
+                NavSlot.chat => HomeTab.chat,
+              }),
+              onPlus: () => QuickActionsSheet.show(context, onExplore: () => _select(HomeTab.explore)),
+              badges: {
+                NavSlot.home: ShellBadges.alerts(context),
+                NavSlot.community: ShellBadges.community(context),
+                NavSlot.chat: ShellBadges.chat(context),
+              },
+              badgeLabels: const {
+                NavSlot.home: 'alerts need attention',
+                NavSlot.community: 'requests waiting',
+                NavSlot.chat: 'unread messages',
+              },
             ),
-            NavigationDestination(
-              icon: Icon(Icons.route_outlined),
-              selectedIcon: Icon(Icons.route_rounded),
-              label: 'Trips',
-            ),
-            NavigationDestination(
-              key: Key('nav_people'),
-              icon: PeopleNavIcon(),
-              selectedIcon: PeopleNavIcon(selected: true),
-              label: 'People',
-            ),
-            NavigationDestination(
-              icon: _AlertsNavIcon(),
-              selectedIcon: _AlertsNavIcon(selected: true),
-              label: 'Alerts',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(Icons.person_rounded),
-              label: 'Profile',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The Alerts icon with the number of critical and important alerts.
-/// Rebuilds on timeline changes and on ride facts, never on positions.
-class _AlertsNavIcon extends StatelessWidget {
-  final bool selected;
-  const _AlertsNavIcon({this.selected = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final facts = context.select<ConvoyService, AlertFacts>(alertFactsOf);
-    final timeline = context.watch<TimelineService>();
-    // This phone's own safety prompts ("Are you OK?") count too; "Time for a break" does not.
-    final prompts = context.select<SafetyService?, int>((s) => s?.prompts.where((p) => p.tier != AlertTier.normal).length ?? 0);
-    // Assistance requests from other groups and accidents reported ahead count too (never social).
-    final network = context.select<ConvoyService, int>((s) => s.assistRequests.length + s.hazards.length);
-    final n = alertsBadgeCount(facts, timeline) + prompts + network;
-    return Semantics(
-      label: n > 0 ? '$n alerts need attention' : null,
-      child: Badge.count(
-        count: n,
-        isLabelVisible: n > 0,
-        child: Icon(selected ? Icons.notifications_rounded : Icons.notifications_none_rounded),
-      ),
     );
   }
 }

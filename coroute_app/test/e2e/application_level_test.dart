@@ -25,8 +25,10 @@ import 'package:coroute_app/domain/tracking/track_point.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 import 'package:coroute_app/presentation/auth/access_gate_screen.dart';
 import 'package:coroute_app/presentation/onboarding/onboarding_screen.dart';
+import 'package:coroute_app/presentation/onboarding/welcome_screen.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
 import 'package:coroute_app/presentation/splash/splash_screen.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -102,7 +104,7 @@ void main() {
 
       // Initially on SplashScreen
       expect(find.byType(SplashScreen), findsOneWidget);
-      expect(find.text(AppConstants.appName), findsOneWidget);
+      expect(find.byType(CoRouteWordmark), findsOneWidget); // v3.58: the name is the helmet wordmark
 
       // Wait for auth loading (the splash has no minimum display time)
       await tester.pump(const Duration(milliseconds: 300));
@@ -115,7 +117,7 @@ void main() {
       expect(find.text('Create account'), findsOneWidget);
     });
 
-    testWidgets('First launch shows the three onboarding pages once, then sign-in', (tester) async {
+    testWidgets('First launch shows the Welcome screen once, then sign-in', (tester) async {
       SharedPreferences.setMockInitialValues({});
       final mockHttp = MockClient((req) async => http.Response('{}', 404));
       final api = ApiClient(httpClient: mockHttp, storage: const FlutterSecureStorage());
@@ -144,16 +146,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
-      expect(find.byType(OnboardingScreen), findsOneWidget);
-      expect(find.text('Ride together'), findsOneWidget);
-      expect(find.text('Skip'), findsOneWidget);
+      // v3.58: the first launch opens the Welcome screen.
+      expect(find.byType(WelcomeScreen), findsOneWidget);
+      expect(find.text(WelcomeScreen.headline1), findsOneWidget);
+      expect(find.text(WelcomeScreen.headline2), findsOneWidget);
+      expect(find.text(WelcomeScreen.getStarted), findsOneWidget);
+      expect(find.byKey(const Key('welcome_call_112')), findsOneWidget);
       expect(OnboardingScreen.pages.length, 3);
 
-      await tester.tap(find.text('Next'));
-      await tester.pumpAndSettle();
-      expect(find.text('Stay connected'), findsOneWidget);
-
-      await tester.tap(find.text('Skip'));
+      await tester.ensureVisible(find.text(WelcomeScreen.haveAccount));
+      await tester.tap(find.text(WelcomeScreen.haveAccount));
       await tester.pumpAndSettle();
       expect(find.byType(AccessGateScreen), findsOneWidget);
       expect((await SharedPreferences.getInstance()).getBool(OnboardingScreen.doneKey), isTrue);

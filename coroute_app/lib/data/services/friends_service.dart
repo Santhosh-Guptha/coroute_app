@@ -67,6 +67,10 @@ class MyProfile {
 
   /// Changes when another original is stored (the cached copy on this phone is then dropped).
   final String? avatarOriginalTag;
+
+  /// v3.58 profile cover photo: `/api/covers/<id>` or null; [coverAdjustable] when its original is kept.
+  final String? coverUrl;
+  final bool coverAdjustable;
   final bool publicLeaderboard;
 
   /// "Let riders find me": found by username prefix and suggested to riders I rode with (default on).
@@ -83,6 +87,8 @@ class MyProfile {
     this.avatarAdjustable = false,
     this.avatarCrop,
     this.avatarOriginalTag,
+    this.coverUrl,
+    this.coverAdjustable = false,
     this.publicLeaderboard = true,
     this.discoverable = true,
     this.usernameChangedAt = 0,
@@ -99,6 +105,8 @@ class MyProfile {
         avatarAdjustable: raw['avatarAdjustable'] == true,
         avatarCrop: AvatarCrop.fromJson(raw['avatarCrop']),
         avatarOriginalTag: raw['avatarOriginalTag']?.toString(),
+        coverUrl: coverPathOf(raw['coverUrl']),
+        coverAdjustable: raw['coverAdjustable'] == true,
         publicLeaderboard: raw['publicLeaderboard'] != false,
         discoverable: raw['discoverable'] != false,
         usernameChangedAt: raw['usernameChangedAt'] is num ? (raw['usernameChangedAt'] as num).toInt() : 0,
@@ -529,6 +537,38 @@ class FriendsService extends ChangeNotifier {
     } on ApiException catch (e) {
       // A gateway from before 3.56 has no adjust routes: save the cropped picture the old way.
       if (e.statusCode == 404 && original != null) return uploadAvatar(cropped, croppedMime);
+      return e.message;
+    }
+  }
+
+  // ---- v3.58 cover photo (gateway src/covers.js: private original + public wide cover) ----
+
+  /// Saves a new cover: [cover] is the wide public picture. With [original] the full picture is kept privately
+  /// first (owner only), so the framing can be changed later. Returns null on success, else the message.
+  Future<String?> saveCover({required Uint8List cover, required String coverMime, Uint8List? original, String? originalMime}) async {
+    if (cover.length > 2 * 1024 * 1024) return 'This picture is too large (up to 2 MB).';
+    try {
+      var path = '/me/cover';
+      if (original != null && original.length <= 2 * 1024 * 1024) {
+        final res = await _api.postBytes('/me/cover/original', original, originalMime ?? 'image/jpeg');
+        final id = res is Map ? res['originalId']?.toString() : null;
+        if (id != null && id.isNotEmpty) path = '/me/cover?original=${Uri.encodeQueryComponent(id)}&cx=0.5&cy=0.5&zoom=1&rot=0';
+      }
+      await _api.postBytes(path, cover, coverMime);
+      await refreshProfile();
+      return null;
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return 'Cover photos need the latest CoRoute server. Try again later.';
+      return e.message;
+    }
+  }
+
+  Future<String?> removeCover() async {
+    try {
+      await _api.delete('/me/cover');
+      await refreshProfile();
+      return null;
+    } on ApiException catch (e) {
       return e.message;
     }
   }

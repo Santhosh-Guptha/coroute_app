@@ -7,6 +7,7 @@ import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/presentation/report/ride_share_card.dart';
 import 'package:coroute_app/presentation/ride/messages_sheet.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -138,7 +139,7 @@ void main() {
           palette: p,
         );
         expect(tester.takeException(), isNull);
-        expect(find.text('CoRoute'), findsOneWidget);
+        expect(find.byType(CoRouteWordmark), findsOneWidget); // v3.58 helmet wordmark
         expect(find.text('Hyderabad to Srisailam'), findsOneWidget);
         expect(find.text('Gachibowli to Srisailam'), findsOneWidget);
         expect(find.text('Sun 4 Oct 2026'), findsOneWidget);

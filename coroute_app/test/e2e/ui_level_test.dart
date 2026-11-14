@@ -27,6 +27,7 @@ import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 import 'package:coroute_app/presentation/auth/access_gate_screen.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
+import 'package:coroute_app/presentation/shell/coroute_nav_bar.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -239,22 +240,22 @@ void main() {
       ));
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Ride tab (default): no active ride, so the start view with its two actions.
-      // The drawer and the home profile card are gone (3.12 shell).
-      expect(find.byType(NavigationBar), findsOneWidget);
-      expect(find.text('No active ride'), findsOneWidget);
-      expect(find.text('Start Ride'), findsOneWidget);
-      expect(find.text('Join Ride'), findsOneWidget);
+      // v3.58 shell: Home (no ride) with the new bottom bar; the drawer is still gone.
+      expect(find.byType(CoRouteNavBar), findsOneWidget);
+      expect(find.byKey(const Key('home_carousel')), findsOneWidget);
+      expect(find.byKey(const Key('home_emergency')), findsOneWidget, reason: 'Emergency is visible on Home');
       expect(find.byType(Drawer), findsNothing);
 
-      // Join Ride opens the join sheet (not a dialog).
-      await tester.tap(find.text('Join Ride'));
+      // "+" -> Join with a code opens the join sheet (not a dialog).
+      await tester.tap(find.byKey(const Key('nav_plus')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('qa_join')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
       expect(find.text('Join a ride'), findsOneWidget);
       expect(find.text('Enter the code shared by the person who started the ride.'), findsOneWidget);
-      expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Join'), findsOneWidget);
 
       // Close the sheet.
@@ -263,12 +264,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Join a ride'), findsNothing);
 
-      // The profile header now lives on the Profile tab.
-      await tester.tap(find.widgetWithText(NavigationDestination, 'Profile'));
+      // Profile is behind the avatar on Home.
+      await tester.tap(find.byKey(const Key('home_avatar')));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Neo One'), findsOneWidget);
-      expect(find.text('My bikes'), findsOneWidget);
-      expect(find.text('Emergency contact & Medical ID'), findsOneWidget);
+      expect(find.text('Neo One'), findsWidgets);
+      expect(find.byKey(const Key('profile_emergency')), findsOneWidget);
     });
   });
 

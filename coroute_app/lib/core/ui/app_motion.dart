@@ -42,11 +42,22 @@ abstract final class AppMotion {
   @visibleForTesting
   static MotionLevel? debugLevelOverride;
 
-  static MotionLevel levelOf(BuildContext context) {
+  static MotionLevel levelOf([BuildContext? context]) {
     final forced = debugLevelOverride;
     if (forced != null) return forced;
+    bool disable = false;
+    if (context != null && context.mounted) {
+      try {
+        disable = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+      } catch (_) {}
+    }
+    if (!disable) {
+      try {
+        disable = WidgetsBinding.instance.platformDispatcher.accessibilityFeatures.disableAnimations;
+      } catch (_) {}
+    }
     return MotionSpec.level(
-      disableAnimations: MediaQuery.maybeDisableAnimationsOf(context) ?? false,
+      disableAnimations: disable,
       batterySaver: batterySaver.value,
     );
   }
@@ -117,21 +128,24 @@ class AppPageTransitionsBuilder extends PageTransitionsBuilder {
     NavigatorState? found;
     void search(Element e) {
       if (found != null) return;
-      if (e is StatefulElement && e.state is NavigatorState) {
-        found = e.state as NavigatorState;
-        return;
+      if (e.mounted && e is StatefulElement && e.state is NavigatorState) {
+        final s = e.state as NavigatorState;
+        if (s.mounted) {
+          found = s;
+          return;
+        }
       }
       e.visitChildren(search);
     }
     final root = WidgetsBinding.instance.rootElement;
-    if (root != null) search(root);
+    if (root != null && root.mounted) search(root);
     return found;
   }
 
   @override
   Duration get transitionDuration {
     final nav = _findNavigator();
-    if (nav != null) {
+    if (nav != null && nav.mounted) {
       Route? topRoute;
       try {
         nav.popUntil((r) {
@@ -141,8 +155,8 @@ class AppPageTransitionsBuilder extends PageTransitionsBuilder {
       } catch (_) {}
       final name = topRoute?.settings.name;
       if (AppMotion.isInstantRoute(name)) return Duration.zero;
-      if (AppMotion.levelOf(nav.context) == MotionLevel.none) return Duration.zero;
     }
+    if (AppMotion.levelOf() == MotionLevel.none) return Duration.zero;
     return AppMotion.page;
   }
 

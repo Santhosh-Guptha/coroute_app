@@ -60,7 +60,10 @@ class PeopleNavIcon extends StatelessWidget {
 class PeopleScreen extends StatefulWidget {
   final bool embedded;
   final PeopleSegment? initial;
-  const PeopleScreen({super.key, this.embedded = false, this.initial});
+
+  /// v3.58: opened from Community's search box: the username search has the keyboard at once.
+  final bool focusSearch;
+  const PeopleScreen({super.key, this.embedded = false, this.initial, this.focusSearch = false});
 
   /// The segment a caller asked for (read by the hub, then cleared).
   static final ValueNotifier<PeopleSegment?> requested = ValueNotifier<PeopleSegment?>(null);
@@ -103,6 +106,7 @@ class _PeopleScreenState extends State<PeopleScreen> {
       if (!mounted) return;
       _onRequested();
       _refresh();
+      if (widget.focusSearch) _queryFocus.requestFocus();
     });
   }
 
