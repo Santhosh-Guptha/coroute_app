@@ -10,9 +10,11 @@ import '../account/change_password_screen.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/onboarding_screen.dart';
+import '../onboarding/welcome_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../../data/services/app_version_service.dart';
 import '../update/force_update_screen.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 /// Round 7: the next screen cross-fades in (no slide from a splash).
 /// A static logo while the saved session loads. No animation, no polling,
@@ -96,7 +98,8 @@ class _SplashScreenState extends State<SplashScreen> {
       _navigated = true;
       Navigator.pushReplacement(
         context,
-        appFadeRoute((_) => onboarded ? const AccessGateScreen() : const OnboardingScreen()),
+        // v3.58: first launch opens the Welcome screen (Get started / I already have an account).
+        appFadeRoute((_) => onboarded ? const AccessGateScreen() : const WelcomeScreen()),
       );
     }
   }
@@ -120,22 +123,10 @@ class _SplashScreenState extends State<SplashScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         // Calm: the logo mark, the name, one line. No frame, no shadow.
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: Image.asset(
-                            'assets/branding/coroute_icon.png',
-                            width: 72,
-                            height: 72,
-                            cacheWidth: 216,
-                            filterQuality: FilterQuality.medium,
-                          ),
-                        ),
+                        const CoRouteAppIcon(size: 72, semanticLabel: null),
                         const SizedBox(height: Space.s24),
-                        Text(
-                          AppConstants.appName,
-                          textAlign: TextAlign.center,
-                          style: AppText.headline.copyWith(fontSize: 26),
-                        ),
+                        // v3.58 logo: the helmet is the "o" of CoRoute.
+                        const CoRouteWordmark(fontSize: 32),
                         const SizedBox(height: Space.s4),
                         Text(
                           AppConstants.appTagline,

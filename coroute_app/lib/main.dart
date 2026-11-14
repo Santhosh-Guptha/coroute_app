@@ -104,6 +104,7 @@ import 'presentation/widgets/push_router_host.dart'; // 3.55 push notifications
 import 'presentation/widgets/startup_warmup.dart'; // round 7 idle precache
 import 'presentation/settings/intel_prompt_host.dart';
 import 'data/services/private_places_store.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -930,10 +931,7 @@ class _UpdateGate extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  ClipRRect(
-                    borderRadius: Radii.lgAll,
-                    child: Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72, cacheWidth: 216),
-                  ),
+                  const CoRouteAppIcon(size: 72),
                   const SizedBox(height: Space.s24),
                   Text('Update required', textAlign: TextAlign.center, style: AppText.title),
                   const SizedBox(height: Space.s8),

@@ -90,6 +90,7 @@
         android:label="CoRoute"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -256,6 +257,17 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT"/>
             </intent-filter>
         </service>
+        <!-- Ride foreground service notification icon (BackgroundService.rideNotificationIcon). -->
+        <meta-data
+            android:name="space.devmonks.coroute_app.NOTIFICATION_ICON"
+            android:resource="@drawable/ic_stat_coroute" />
+        <!-- Push notifications shown by Firebase itself (app in background) use the helmet small icon. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_coroute" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

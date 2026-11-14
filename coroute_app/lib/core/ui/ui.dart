@@ -17,6 +17,7 @@ export 'empty_state.dart';
 export 'loading_state.dart';
 export 'map_control.dart';
 export 'optimistic.dart';
+export 'place_art.dart';
 export 'pressable.dart';
 export 'ride_alert.dart';
 export 'ride_metric.dart';

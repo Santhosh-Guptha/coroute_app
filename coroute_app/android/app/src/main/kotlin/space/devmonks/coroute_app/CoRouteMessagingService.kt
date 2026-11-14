@@ -144,7 +144,7 @@ class CoRouteMessagingService : FirebaseMessagingService() {
             val partner = (data["partner"] ?: "").trim().take(MAX_PARTNER)
             builder.setSubText(if (partner.isEmpty()) "Partner perk" else "Partner perk · $partner")
         }
-        builder.setSmallIcon(applicationInfo.icon)
+        builder.setSmallIcon(R.drawable.ic_stat_coroute)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(style)

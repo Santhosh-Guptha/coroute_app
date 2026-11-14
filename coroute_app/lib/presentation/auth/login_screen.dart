@@ -17,6 +17,7 @@ import '../security/secure_screen.dart';
 import 'check_inbox_screen.dart';
 import 'complete_profile_screen.dart';
 import 'ride_lock_dialog.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 /// Sign in and create account: one calm screen, one primary button.
 ///
@@ -24,7 +25,9 @@ import 'ride_lock_dialog.dart';
 /// of space, secondary actions as plain text links. The backend calls and
 /// the validation are unchanged.
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  /// v3.58: "Get started" on the Welcome screen opens the create-account form; everything else signs in.
+  final bool startInRegister;
+  const LoginScreen({super.key, this.startInRegister = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -32,7 +35,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   /// false: sign in, true: create account.
-  bool _register = false;
+  late bool _register = widget.startInRegister;
 
   // Sign In Controllers
   final _loginIdentifierController = TextEditingController();
@@ -461,22 +464,10 @@ class _LoginScreenState extends State<LoginScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.asset(
-            'assets/branding/coroute_icon.png',
-            width: 44,
-            height: 44,
-            cacheWidth: 132,
-            filterQuality: FilterQuality.medium,
-            errorBuilder: (context, error, stackTrace) => Icon(Icons.two_wheeler_outlined, color: AppTheme.primary, size: 32),
-          ),
-        ),
+        const CoRouteAppIcon(size: 44, semanticLabel: null),
         const SizedBox(height: Space.s16),
-        Semantics(
-          header: true,
-          child: Text(AppConstants.appName, textAlign: TextAlign.center, style: AppText.headline.copyWith(fontSize: 24)),
-        ),
+        // v3.58 logo: the helmet is the "o" of CoRoute.
+        const CoRouteWordmark(fontSize: 28),
         const SizedBox(height: Space.s4),
         Text(
           'Ride together, safely.',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config/app_config.dart';
@@ -81,7 +82,7 @@ class PrivacyTermsSheet extends StatelessWidget {
           icon: Icons.description_outlined,
           label: licensesLabel,
           divider: false,
-          onTap: () => showLicensePage(context: context, applicationName: 'CoRoute'),
+          onTap: () => showLicensePage(context: context, applicationName: 'CoRoute', applicationIcon: const Padding(padding: EdgeInsets.all(8), child: CoRouteAppIcon(size: 56, semanticLabel: null))),
         ),
       ],
     );

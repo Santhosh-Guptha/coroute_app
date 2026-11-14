@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 // Shared pieces of the admin console, built on the UI kit (Manrope + teal
 // canvas) so every admin screen has the same shell (rail or top nav), the
@@ -940,20 +941,13 @@ class AdminContent extends StatelessWidget {
   }
 }
 
-/// The CoRoute mark: 36 px teal rounded square with the white hub icon.
+/// The CoRoute mark (v3.58 helmet logo) at console size.
 class AdminBrandMark extends StatelessWidget {
   final double size;
   const AdminBrandMark({super.key, this.size = 36});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: AppTheme.brand, borderRadius: BorderRadius.circular(size * 0.28)),
-      child: Icon(Icons.hub_outlined, color: Colors.white, size: size * 0.6),
-    );
-  }
+  Widget build(BuildContext context) => CoRouteAppIcon(size: size, semanticLabel: null);
 }
 
 class _Header extends StatelessWidget {

@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart' hide Path;
 import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/ui/ui.dart';
+import 'package:coroute_app/core/ui/coroute_logo.dart';
 
 /// What the post-ride share card shows. Only real numbers: a value that is
 /// not known is left out of the card (never shown as 0 or guessed).
@@ -145,10 +146,8 @@ class RideShareCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text(
-                    'CoRoute',
-                    style: AppText.overline.copyWith(color: _p.accentText),
-                  ),
+                  // v3.58 logo on every shared ride card.
+                  CoRouteWordmark(fontSize: 18, color: _p.text),
                   const SizedBox(width: Space.s8),
                   Expanded(
                     child: Text(
