@@ -42,7 +42,7 @@ const sectionOf = (html, id) => {
   return html.slice(start, html.indexOf('</section>', i));
 };
 
-test('pages: /leaderboard in the shared shell, nav and sitemap; the home section is hidden and empty', async () => {
+test('pages: /leaderboard in the shared shell, nav and sitemap; no duplicate on the home page', async () => {
   const r = await fetch(base + '/leaderboard');
   assert.equal(r.status, 200);
   const html = await r.text();
@@ -56,11 +56,8 @@ test('pages: /leaderboard in the shared shell, nav and sitemap; the home section
   assert.ok(!/\d/.test(textOf(sec).replace(/Top 10/g, '')), 'no number written into the page');
 
   const home = await (await fetch(base + '/')).text();
-  const open = home.match(/<section[^>]*id="leaderboard"[^>]*>/);
-  assert.ok(open && /\bhidden\b/.test(open[0]) && /data-lb-hide-empty/.test(open[0]) && /data-lb-limit="5"/.test(open[0]), 'home: hidden until a board has a rider');
-  const hs = sectionOf(home, 'leaderboard');
-  assert.ok(hs.includes('href="/leaderboard"') && textOf(hs).includes('Riders can hide their name in the app'));
-  assert.ok(!/\d/.test(textOf(hs).replace(/top 10/gi, '')), 'home: no number written into the page');
+  // v3.58: no leaderboard section on the home page (it repeated the page); the impact block links it.
+  assert.ok(!/<section[^>]*id="leaderboard"/.test(home), 'home: no duplicate leaderboard section');
   assert.ok(home.includes('href="/leaderboard" data-nav="leaderboard"'), 'header links the page');
 
   const sm = await (await fetch(base + '/sitemap.xml')).text();

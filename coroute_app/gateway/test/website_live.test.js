@@ -199,7 +199,8 @@ test('hero (round 7): the moving convoy is back at the top, lazy and low-power, 
   // No phone screens anywhere on the home page (other pages keep theirs; the image files stay).
   assert.ok(!html.includes('/assets/screens/') && !html.includes('dev__shot') && !html.includes('hx__phones'), 'home: no app screenshots in phone frames');
   assert.ok(!html.includes('id="screens"') && !html.includes('href="#screens"') && !html.includes('data-gallery'), 'home: the screens gallery is gone');
-  assert.ok(html.includes('class="hp-relay"') && html.includes('class="hp-trip"'), 'the SOS and trip report sections have their own drawings');
+  // v3.58: the SOS and trip report detail sections moved off the home page (the scroll story shows both).
+  assert.ok(html.includes('id="story"'), 'the scroll story tells the SOS and trip report parts');
   const features = await (await fetch(base + '/features')).text();
   assert.ok(features.includes('/assets/screens/'), '/features keeps its phone pictures');
   for (const f of ['crash-320.avif', 'crash-636.webp', 'crash-480.png']) {

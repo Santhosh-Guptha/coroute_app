@@ -1,7 +1,8 @@
 'use strict';
 /**
- * Runs the homepage's rider-stories and "CoRoute in numbers" blocks from public/assets/site.js against a
- * small fake DOM: template layouts, safe text, honest empty states and the usage-stats thresholds.
+ * Runs the homepage's rider-stories block from public/assets/site.js against a
+ * small fake DOM: template layouts, safe text and honest empty states. (v3.58: the home "CoRoute in numbers"
+ * block was removed with the duplicate home sections; the impact block shows the community totals.)
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -15,8 +16,7 @@ const between = (a, b) => {
   assert.ok(i >= 0 && j > i, `site.js block ${a}`);
   return JS.slice(i, j);
 };
-const REVIEWS = between('/* ---------- Rider reviews', '/* ---------- CoRoute in numbers');
-const USAGE = between('/* ---------- CoRoute in numbers', '/* ---------- Theme toggle');
+const REVIEWS = between('/* ---------- Rider reviews', '/* ---------- Theme toggle');
 
 class El {
   constructor(tag) {
@@ -57,7 +57,7 @@ function makeDoc(ids) {
     createElement: (t) => new El(t),
     createElementNS: (ns, t) => new El(t),
     getElementById: (id) => byId[id] || null,
-    querySelector: (sel) => (sel === '[data-usage-stats]' ? byId.numbers || null : null),
+    querySelector: () => null,
   };
 }
 const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
@@ -80,23 +80,6 @@ async function runReviews(routes) {
   new Function('doc', 'win', 'clamp', 'hasIO', 'fetch', REVIEWS)(doc, { fetch }, clamp, false, fetch);
   await flush();
   return { box: doc.byId['community-stories-container'], summary: doc.byId['reviews-summary'], calls };
-}
-
-async function runUsage(routes) {
-  const doc = makeDoc(['numbers', 'usage-stats-list', 'usage-stats-note']);
-  doc.byId.numbers.hidden = true;
-  const calls = [];
-  const fetch = async (url) => {
-    calls.push(url);
-    if (!(url in routes)) return response(404, { error: 'Not found' });
-    return response(200, routes[url]);
-  };
-  // eslint-disable-next-line no-new-func
-  new Function('doc', 'win', 'fetch', USAGE)(doc, { fetch }, fetch);
-  await flush();
-  const list = doc.byId['usage-stats-list'];
-  const tiles = list.children.map((d) => [d.children[0].textContent, d.children[1].textContent]);
-  return { section: doc.byId.numbers, tiles, note: doc.byId['usage-stats-note'].textContent, calls };
 }
 
 const story = (extra) => ({
@@ -162,37 +145,3 @@ test('no stories: honest empty state; failures: error state with retry', async (
   assert.deepEqual(broken.calls, ['/api/public/community-stories?limit=6', '/community-stories']);
 });
 
-test('CoRoute in numbers: shows real counts, hides small or missing ones', async () => {
-  const full = await runUsage({ '/api/public/usage-stats': { ok: true, stats: { riders: 120, ridesCompleted: 48, kmRidden: 15234.6, groupsRidden: 21, sosResolved: 2, avgRating: 4.62, updatedAt: Date.UTC(2026, 10, 5) } } });
-  assert.equal(full.section.hidden, false);
-  // Privacy: rounded down (tens; 100 or 1,000 km) and marked "+"; fewer than 10 SOS alerts are not shown.
-  assert.deepEqual(full.tiles, [
-    ['Rides completed', '40+'], ['Kilometres ridden', '15,000+'], ['Riders', '120+'], ['Group rides', '20+'], ['Average rider rating', '4.6 / 5'],
-  ]);
-  assert.match(full.note, /^Updated \d{1,2} Nov 2026\.$/);
-  assert.deepEqual(full.calls, ['/api/public/usage-stats']);
-
-  const partial = await runUsage({ '/api/public/usage-stats': { ok: true, stats: { riders: 15, ridesCompleted: 12, kmRidden: 40, groupsRidden: 1, sosResolved: 0, avgRating: null } } });
-  assert.equal(partial.section.hidden, false);
-  assert.deepEqual(partial.tiles.map((t) => t[0]), ['Rides completed', 'Riders'], 'zeros and tiny numbers left out');
-
-  const tiny = await runUsage({ '/api/public/usage-stats': { ok: true, stats: { riders: 400, ridesCompleted: 9, kmRidden: 9000, groupsRidden: 5, sosResolved: 1, avgRating: 5 } } });
-  assert.equal(tiny.section.hidden, true, 'fewer than 10 completed rides: section stays hidden');
-  assert.equal(tiny.tiles.length, 0);
-
-  const fallback = await runUsage({ '/api/public/community-stats': { enabled: true, totalRiders: 60, totalKilometers: 4200, longestTrips: [] } });
-  assert.deepEqual(fallback.calls, ['/api/public/usage-stats', '/api/public/community-stats']);
-  assert.equal(fallback.section.hidden, false);
-  assert.deepEqual(fallback.tiles, [['Kilometres ridden', '4,200+'], ['Riders', '60+']]);
-
-  // An older server's exact small totals are rounded here too: 1,234 riders read as 1,200+, 9 group rides are left out.
-  const exact = await runUsage({ '/api/public/usage-stats': { ok: true, stats: { riders: 1234, ridesCompleted: 57, kmRidden: 987, groupsRidden: 9, sosResolved: 12, avgRating: null } } });
-  assert.deepEqual(exact.tiles, [['Rides completed', '50+'], ['Kilometres ridden', '900+'], ['Riders', '1,200+'], ['SOS alerts resolved', '10+']]);
-
-  const smallFallback = await runUsage({ '/api/public/community-stats': { enabled: true, totalRiders: 3, totalKilometers: 80 } });
-  assert.equal(smallFallback.section.hidden, true);
-  const privateStats = await runUsage({ '/api/public/community-stats': { enabled: false, message: 'private' } });
-  assert.equal(privateStats.section.hidden, true);
-  const nothing = await runUsage({});
-  assert.equal(nothing.section.hidden, true);
-});

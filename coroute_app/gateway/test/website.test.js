@@ -323,7 +323,8 @@ test('terms agree with the privacy policy on who an SOS reaches; iOS wording is 
   const terms = await (await fetch(base + '/terms')).text();
   assert.ok(!/reaches only the members of your convoy/.test(terms), 'terms no longer say SOS reaches only the convoy');
   assert.ok(terms.includes('riders of other groups who are already riding toward you on the same road'));
-  for (const p of ['/', '/get', '/about', '/how-it-works']) {
+  // v3.58: the home FAQ moved to /how-it-works (one FAQ for the site); the home page says it in the hero button.
+  for (const p of ['/get', '/about', '/how-it-works']) {
     const html = await (await fetch(base + p)).text();
     // 3.55: the iOS app is being built; without an iOS link every page says so the same way (no dates promised).
     assert.ok(html.includes('The iOS app is building now and coming soon.'), `${p}: iOS wording`);
@@ -414,11 +415,18 @@ test('website index contains community stories container and small square checkb
 // ---------------------------------------------------------------------------
 // Homepage for long-distance group riders: safe, secure, memorable, real reviews only.
 // ---------------------------------------------------------------------------
-test('home page: touring pitch, safe / secure / memorable sections, moderated reviews, no invented proof', async () => {
+test('home page: touring pitch, one section per idea, moderated reviews, no invented proof', async () => {
   const html = await (await fetch(base + '/')).text();
-  for (const id of ['standout', 'compare', 'features', 'long-haul', 'safe', 'secure', 'memorable', 'how', 'pricing', 'numbers', 'reviews', 'faq', 'feedback']) {
+  // v3.58: the home page keeps one section per idea; the detail lives on /features, /safety, /how-it-works (FAQ),
+  // /privacy-and-security and /plans, so nothing is said twice.
+  for (const id of ['story', 'standout', 'compare', 'impact', 'secure', 'pricing', 'reviews', 'rate', 'latest', 'feedback']) {
     assert.ok(html.includes(`id="${id}"`), `home: section #${id}`);
   }
+  for (const id of ['features', 'long-haul', 'safe', 'memorable', 'how', 'numbers', 'leaderboard', 'ride-analytics', 'group-rides', 'help-build', 'faq']) {
+    assert.ok(!html.includes(`id="${id}"`), `home: duplicate section #${id} is gone`);
+  }
+  assert.ok((html.match(/<section[\s>]/g) || []).length <= 12, 'home: at most 12 sections');
+  for (const href of ['/features', '/safety', '/how-it-works#faq', '/leaderboard', '/privacy-and-security']) assert.ok(html.includes(`href="${href}"`), `home links ${href}`);
   assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, 'home: exactly one h1');
   assert.ok(html.includes('href="/get"') && html.includes('Download for Android') && html.includes('href="/how-it-works"'), 'home: primary and secondary CTA');
   assert.ok(/<meta name="description" content="[^"]*safety-first app for group and solo motorcycle riders/i.test(html), 'home: description targets riders, safety first');
@@ -449,23 +457,10 @@ test('home page: touring pitch, safe / secure / memorable sections, moderated re
   assert.doesNotThrow(() => new Function(js), 'site.js parses');
 });
 
-test('home page: "CoRoute in numbers" is hidden until real counts load; stories use the shared templates', async () => {
-  const html = await (await fetch(base + '/')).text();
-  const m = html.match(/<section[^>]*id="numbers"[^>]*>/);
-  assert.ok(m, 'home: section #numbers');
-  assert.ok(/\bhidden\b/.test(m[0]) && m[0].includes('data-usage-stats'), 'numbers: hidden by default, filled by site.js');
-  assert.ok(html.includes('id="usage-stats-list"'), 'numbers: list container');
-  // No number is written into the page itself: they only come from the API.
-  const section = html.slice(html.indexOf('id="numbers"'), html.indexOf('<!-- /numbers -->'));
-  assert.ok(section.length > 200, 'numbers: section found');
-  assert.ok(!/\d{2,}/.test(section.replace(/<[^>]+>/g, '')), 'numbers: no hard-coded counts');
+test('home page: stories use the shared templates', async () => {
   const fs = require('fs');
   const path = require('path');
   const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'site.js'), 'utf8');
-  const usage = js.slice(js.indexOf('CoRoute in numbers'), js.indexOf('Theme toggle'));
-  assert.ok(usage.includes("'/api/public/usage-stats'") && usage.includes("'/api/public/community-stats'"), 'numbers: API with fallback');
-  assert.ok(usage.includes('setInterval(loadUsage, 60000)') && usage.includes('requestAnimationFrame'), 'numbers: live refresh every 60 s with counters');
-  assert.ok(!/innerHTML/.test(usage), 'numbers: no innerHTML');
   const { TEMPLATE_IDS } = require('../src/trip_reviews');
   for (const id of TEMPLATE_IDS) assert.ok(js.includes(`'${id}'`), `site.js knows template ${id}`);
   const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'home.css'), 'utf8');

@@ -42,7 +42,9 @@ test('without an iOS link the site never offers an iOS download and says so cons
     assert.ok(!/<!--\/?(no-)?ios-->/.test(html), `${page} leaks block markers`);
   }
   const home = await (await fetch(base + '/')).text();
-  assert.ok(home.includes('The iOS app is building now and coming soon. Until then, CoRoute runs on Android 7.0 or newer.'));
+  // v3.58: the iPhone answer lives in the one site FAQ on /how-it-works.
+  const hiw = await (await fetch(base + '/how-it-works')).text();
+  assert.ok(hiw.includes('The iOS app is building now and coming soon. Until then, CoRoute runs on Android 7.0 or newer.'));
   const get = await (await fetch(base + '/get')).text();
   assert.ok(get.includes('The iOS app is building now and coming soon.'));
   assert.ok(!get.includes('id="ios"'));

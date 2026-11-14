@@ -34,7 +34,7 @@ section. STOP at any failed safety gate.
 "chore(tool): web_compat CSS fallback tool", "test(website): device compatibility guards". Push.
 
 === 3. TEST ===
-1. gateway npm test -> 1465 passing (1458 + 7 new). cd tool/web_compat && npm install && node css_compat.js --check
+1. gateway npm test -> 1462 passing (see the build10030 complete prompt). cd tool/web_compat && npm install && node css_compat.js --check
    -> "up to date".
 2. Website screenshots and Play graphics are unchanged by round 14 (no re-render needed).
 

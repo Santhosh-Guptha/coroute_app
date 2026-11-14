@@ -137,43 +137,20 @@ test('home: Community, solo riding and every safety feature are free (hero, pric
   assert.ok(pricing.includes('id="community-free"'), 'Community banner inside pricing');
   assert.ok(textOf(pricing).includes('Solo riding and every safety feature are free.') && pricing.includes('href="/plans"'), 'pricing: free line, plans only on /plans');
   assert.ok(!/\d/.test(textOf(pricing)), 'pricing: still no number written into the page');
-  const faq = sectionOf(html, 'faq');
+  // v3.58: one FAQ for the site, on /how-it-works.
+  const hiw = await (await fetch(base + '/how-it-works')).text();
+  const faq = sectionOf(hiw, 'faq');
   assert.ok(/Is it free\?[\s\S]*Yes for solo riders, always/.test(textOf(faq)), 'FAQ answer');
   assert.ok(textOf(faq).includes('What do the numbers on this site say about me?'), 'FAQ: numbers and privacy');
+  assert.ok(!/Is CoRoute free\?/.test(textOf(faq)), 'no second, older free answer');
 });
 
-test('home: group rides section explains riding as a group, no prices on the home page', async () => {
+test('home: no duplicate sections; the rate card sits with the rider reviews (v3.58)', async () => {
   const html = await (await fetch(base + '/')).text();
-  const g = sectionOf(html, 'group-rides');
-  assert.ok(textOf(g).includes('Get safety for your group rides.'));
-  for (const f of ['Live group map', 'Live intercom', 'Group SOS', 'Regroup', 'Lead and sweep', 'Public ride sharing']) assert.ok(g.includes(`<h3>${f}</h3>`), f);
-  assert.ok(!g.includes('gx-plans'), 'no price chips (3.56: prices only on /plans)');
-  assert.ok(!/\d/.test(textOf(g)), 'no price or number in the page');
-  assert.ok(g.includes('href="/get"') && g.includes('href="/plans"'), 'CTAs');
-});
-
-test('home: ride analytics card shows live community totals, never sample numbers (3.55)', async () => {
-  const html = await (await fetch(base + '/')).text();
-  const ra = sectionOf(html, 'ride-analytics');
-  const t = textOf(ra);
-  for (const w of ['Distance and rides', 'Hours in the saddle', 'Top speed', 'Safety stats', 'private to you']) assert.ok(t.includes(w), w);
-  assert.ok(ra.includes('data-ride-analytics'), 'filled from /api/public/usage-stats by site.js');
-  assert.ok(!/Sample|made-up|1,240/.test(ra), 'no sample badge and no made-up numbers');
-  assert.ok(t.includes('at least 10 rides'), 'caption explains the privacy floor');
-  const js = await (await fetch(base + '/assets/site.js')).text();
-  assert.ok(js.includes('renderRideAnalytics') && js.includes('weeklyKm'));
-});
-
-test('home: how-we-count note under the numbers, help-us-build with ratings and safety ideas', async () => {
-  const html = await (await fetch(base + '/')).text();
-  const numbers = html.slice(html.indexOf('id="numbers"'), html.indexOf('<!-- /numbers -->'));
-  assert.ok(numbers.includes('id="how-we-count"'));
-  const t = textOf(numbers);
-  for (const w of ['How we count', 'Totals only', 'Never per city, per route or per rider', 'Rounded down', 'No cookies, no trackers']) assert.ok(t.includes(w), w);
-  const hb = sectionOf(html, 'help-build');
-  assert.ok(textOf(hb).includes('Help us build the future of rider safety.'));
-  assert.ok(hb.includes('href="#feedback" data-fb-topic="safety-idea"'), 'safety idea link preselects the topic');
-  assert.ok(textOf(hb).includes('Rate us in the app'));
+  for (const id of ['group-rides', 'ride-analytics', 'numbers', 'help-build', 'faq']) assert.ok(!html.includes(`id="${id}"`), `#${id} removed`);
+  const reviews = sectionOf(html, 'reviews');
+  assert.ok(reviews.includes('id="rate"') && textOf(reviews).includes('Rate us in the app'), 'rate card inside reviews');
+  assert.ok(!/\d/.test(textOf(sectionOf(html, 'pricing'))), 'no price on the home page');
 });
 
 test('feedback form: topics match the server, safety ideas are stored with their topic', async () => {

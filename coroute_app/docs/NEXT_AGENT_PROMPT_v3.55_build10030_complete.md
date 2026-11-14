@@ -1,12 +1,12 @@
-# CoRoute build 3.55.0+10030: complete release prompt (rounds 11-14, everything done on 14 Nov 2026)
+# CoRoute build 3.55.0+10030: complete release prompt (rounds 11-15, everything done on 14 Nov 2026)
 
 One prompt for everything still uncommitted in the working tree: round 11 (app redesign + ride HUD), round 12 (website
-story + Play graphics), round 13 (new helmet logo everywhere), round 14 (website works on every device). It replaces
-the separate round 11, 13 and 14 prompts (those stay in docs/ for reference). Paste everything inside the block.
+story + Play graphics), round 13 (new helmet logo everywhere), round 14 (website works on every device), round 15
+(website cleanup: repeated sections removed). It replaces the separate round 11, 13 and 14 prompts (those stay in docs/ for reference). Paste everything inside the block.
 
 ```
 You are the release agent for CoRoute (motorcycle group/solo riding SAFETY app: Flutter Android app + Node.js gateway +
-website + web admin). Build 3.55.0+10029 is committed (latest commit a3b4a46). Rounds 11-14 are in the working tree,
+website + web admin). Build 3.55.0+10029 is committed (latest commit a3b4a46). Rounds 11-15 are in the working tree,
 uncommitted, and ship together as build 3.55.0+10030 (pubspec already 3.55.0+10030). Commit, test, build, device QA,
 deploy gateway + website, Play graphics, Play internal testing. Report after each section. STOP at any failed safety
 gate.
@@ -23,8 +23,10 @@ gate.
   website/Play:   docs/quality/ROUND12_WEBSITE_NOTES.md, docs/store/play_assets_v3.58/README.md
   logo:           docs/brand/BRAND_GUIDE_v3.58.md
   devices:        docs/quality/WEBSITE_DEVICE_COMPAT_v3.58.md, tool/web_compat/README.md
-- Do not commit _to_delete/, _incoming/ or tool/web_compat/node_modules. 21 old website screenshots (dark-*,
-  guardians-*, sirens-* in gateway/public/assets/screens) were moved to _to_delete/old_screens: `git rm` them.
+  cleanup:        docs/quality/WEBSITE_CLEANUP_v3.58.md
+- Do not commit _incoming/ (transfer zips; delete them after the commit) or tool/web_compat/node_modules. 21 old
+  website screenshots (dark-*, guardians-*, sirens-* in gateway/public/assets/screens) were deleted from the working
+  tree on purpose: stage the deletions with `git add -A gateway/public/assets/screens`.
 - Logo files are generated: change tool/brand/build_brand.py and run `python3 tool/brand/build_brand.py` (fontTools +
   rsvg-convert), never edit the logo PNGs by hand. Website CSS: after ANY CSS change run
   `cd tool/web_compat && npm install && node css_compat.js`; never hand-edit lines marked /* compat */ or
@@ -54,7 +56,7 @@ C) WEBSITE STORY + PLAY GRAPHICS (round 12): home scroll story "A ride with CoRo
    features, safety, how it works, get, guide; honest offline link / rescue beacon wording; Get page Bluetooth line;
    privacy page Bluetooth section (offline link, rescue beacon, headsets, finder microphone). Play graphics in
    docs/store/play_assets_v3.58/ (8 phone 1080x2160, 7" and 10" tablet sets, feature graphic, icon, listing text),
-   RENDERED FROM DESIGN MOCKS by node tool/store_assets/render.js: section 7 re-captures them from the real build.
+   RENDERED FROM DESIGN MOCKS by node tool/store_assets/render.js: section 6 re-captures them from the real build.
 D) NEW LOGO (round 13): the rider's helmet is the "o" of CoRoute (visor = road ahead, amber light = lead rider). The
    old curved-road mark is retired everywhere.
    - Android: launcher icon (legacy, round, adaptive foreground on teal), NEW monochrome layer (Android 13+ themed
@@ -85,6 +87,19 @@ E) WEBSITE ON EVERY DEVICE (round 14; 16 problems found and fixed, table in WEBS
      <= 2 cores) get the still hero poster; "CoRoute" spelled correctly across the website (was "Coroute").
    - New tool tool/web_compat (css_compat.js) and test gateway/test/website_device_compat_358.test.js (7 checks);
      website.test.js and live_page.test.js updated for the "CoRoute" spelling (text changed on purpose).
+F) WEBSITE CLEANUP (round 15; the owner said the site had too many repeated things):
+   - Home page 22 -> 11 sections, about 4,600 -> 2,500 words: removed the sections that repeated the scroll story and
+     "Six things" (crash/SOS twice more, group tools twice more, trip report, ride analytics, how-it-works steps,
+     group-rides pitch, numbers + leaderboard teaser, help-us-build); each idea now lives once, on its own page, and
+     the home links /features, /safety, /how-it-works#faq, /leaderboard, /privacy-and-security.
+   - One FAQ for the site (12 answers) on /how-it-works#faq; the old how-it-works answers that were out of date (intercom
+     needs data, host pays a membership) are gone. Rate card moved under the rider reviews. /features impact strip
+     removed (home has the full block, /safety keeps its safety strip).
+   - Dead code removed: the "CoRoute in numbers"/ride analytics script in site.js and every unused CSS rule in
+     home.css, site.css, pages.css (382 KB -> 289 KB across the main files). Before/after screenshots of all 26 pages
+     at 390 and 1280 px: no visual change from the CSS clean-up.
+   - Tests updated on purpose: website, website_privacy_messaging, website_impact_355, website_ios_blocks,
+     website_leaderboard_355, website_live, website_stories_render.
 
 === 2. COMMIT ===
 IMPORTANT: the top-level .gitignore (line 29 "*.xml" and a png rule) silently ignores NEW Android resources. Force-add
@@ -106,14 +121,16 @@ Commits, in order:
  6 "feat(app): helmet launcher, themed and notification icons, logo in screens"
  7 "feat(website): helmet logo, favicons, manifest, og image; e-mail brand header"
  8 "fix(website): works on every device (narrow and large-text layouts, older Safari/Chrome fallbacks, safe areas)"
+   + "refactor(website): one place for each idea, one FAQ, unused CSS and scripts removed"
  9 "chore(tool): web_compat CSS fallback tool" + "test(website): device compatibility guards"
 10 "docs(store): Play graphics v3.58 with the new logo" + "docs(v3.58): redesign, logo, device notes"
 11 "chore(build): track Android resources hidden by .gitignore"
 12 "chore(release): 3.55.0+10030". Push.
 
 === 3. TEST AND BUILD ===
-1. cd gateway && npm ci && npm test -> 1465 passing (flaky alone-reruns: public_ride_mirror, two_node_failover,
-   job_lease, login performance, email_marketing_357).
+1. cd gateway && npm ci && npm test -> 1462 passing (1458 + 7 device checks - 3 tests for removed home
+   sections; flaky alone-reruns: public_ride_mirror, two_node_failover, job_lease, login performance,
+   email_marketing_357).
 2. cd tool/web_compat && npm install && node css_compat.js --check -> "compat check: up to date".
 3. flutter pub get && flutter analyze && flutter test. NEVER RUN BEFORE: test/ui10_*, test/hud_* (widget), the updated
    shell tests, test/e2e/ui_level_test.dart (new profile), test/e2e/application_level_test.dart and
@@ -143,6 +160,9 @@ release.sh (staging -> vm2 -> vm1). On staging first, then production:
 - Website W1-W13 (ROUND12_WEBSITE_NOTES.md, incl. Safari iOS and slow 3G): home story scrolls smoothly (phone +
   desktop), reduced motion shows still frames, pages show the new screens, /privacy Bluetooth section, admin
   destinations API works (no admin page yet).
+- Cleanup: home shows 11 sections, every link to /features, /safety, /how-it-works#faq, /leaderboard works; the FAQ on
+  /how-it-works opens; e-mail links to /#feedback still land on the form; the impact block appears once real totals
+  exist.
 - Logo W-L1-W-L4: favicon in Chrome/Firefox/Safari, iOS Add to Home Screen icon, Android install icon (maskable);
   header/footer wordmark light/dark and at 360 px; og-image link preview in WhatsApp; test e-mails to Gmail and
   Outlook with images on and off (welcome, receipt, offer, security code with no images).

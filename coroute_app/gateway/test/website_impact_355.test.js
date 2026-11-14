@@ -115,12 +115,12 @@ test('home: the impact section is hidden until real numbers load and writes no n
   }
   assert.ok(!/\d/.test(t), 'impact: no number written into the page');
   assert.ok(!/saves? lives|lives saved|guarantee/i.test(t), 'impact: no overpromising');
-  // The ride analytics card keeps its own hooks (fed by usage-stats).
-  assert.ok(html.includes('data-ride-analytics') && html.includes('id="ra-chart"'));
+  assert.ok(sec.includes('href="/leaderboard"'), 'impact links the leaderboards (v3.58: home leaderboard section removed)');
 });
 
-test('/safety and /features carry a compact impact strip with the same hooks', async () => {
-  const want = { '/safety': ['sos', 'crash', 'answered', 'response', 'roads'], '/features': ['km', 'hours', 'groupRides', 'largestGroup', 'longestTrip', 'bikes'] };
+test('/safety carries a compact impact strip with the same hooks (v3.58: removed from /features, home has the full block)', async () => {
+  const want = { '/safety': ['sos', 'crash', 'answered', 'response', 'roads'] };
+  assert.ok(!(await (await fetch(base + '/features')).text()).includes('data-impact'), '/features: no repeated impact strip');
   for (const [p, keys] of Object.entries(want)) {
     const html = await (await fetch(base + p)).text();
     const open = html.match(/<section[^>]*id="impact"[^>]*>/);
