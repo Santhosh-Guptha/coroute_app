@@ -1,0 +1,7 @@
+{
+  "name": "coroute-web-compat",
+  "private": true,
+  "description": "Adds fallbacks for older phone browsers to the website CSS (see README.md). Not part of the gateway runtime.",
+  "scripts": { "compat": "node css_compat.js", "check": "node css_compat.js --check" },
+  "dependencies": { "postcss": "8.4.49" }
+}
