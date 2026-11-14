@@ -258,6 +258,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   registerMembershipPublicRoutes({ r, repo, wrap, convoys, hub }); // hub: SUBSCRIPTION_ACTIVATED after a web payment
   // 3.56 marketing board on the website (public posts; website only, never pushed to the app).
   require('./board').registerBoardPublicRoutes({ r, repo, wrap });
+  // v3.58 Explore: admin-curated destinations (public list + photos; distances are worked out on the phone).
+  require('./destinations').registerDestinationPublicRoutes({ r, repo, wrap });
   // Aggregated, PII-free usage numbers for the website (cached 5 min).
   registerPublicUsageRoutes({ r, repo, wrap, store: publicStats });
   // Rounded count of riders on a ride right now for the website (cached 30 s, no PII).
@@ -1214,6 +1216,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin, hub });
   // 3.56 marketing board: admin posts (web admin "Board" section).
   require('./board').registerBoardAdminRoutes({ r, repo, wrap, requireAdmin });
+  // v3.58 Explore destinations: admin CRUD + photo upload (MASTER_ADMIN).
+  require('./destinations').registerDestinationAdminRoutes({ r, repo, wrap, requireAdmin });
   // 3.55: saved road reports along a ride, CoRoute rider place reviews (+ admin moderation).
   require('./road_and_places').registerRoadAndPlaceRoutes({ r, repo, convoys, wrap, requireAdmin });
   // 3.55 risky-stretch heads-up: anonymous hard-brake cells, served only with k >= 10 riders.

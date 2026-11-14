@@ -32,6 +32,7 @@ const config = require('./config');
 const U = require('./usernames');
 const F = require('./friends');
 const A = require('./avatars');
+const CV = require('./covers'); // v3.58 profile cover photo
 const { stampEvent } = require('./push');
 
 const FEATURE_OFF = { error: 'This feature is turned off for now.', code: 'FEATURE_OFF' };
@@ -104,6 +105,13 @@ function avatarOf(u, flagsOf) {
   return A.avatarUrlOf(u && u.avatarId);
 }
 
+/** v3.58: the public cover photo URL (same switch as profile pictures), or null. */
+function coverOf(u, flagsOf) {
+  const fl = flagsOf ? flagsOf() : null;
+  if (fl && !fl.isOn('profilePhotos')) return null;
+  return CV.coverUrlOf(u && u.coverId);
+}
+
 /** Small public card (lists, non-friends): username + picture only. */
 function cardOf(u, flagsOf) {
   return { username: u.username || '', avatarUrl: avatarOf(u, flagsOf) };
@@ -161,6 +169,7 @@ function attachSocial({ app, repo, auth, hub = null, lease = null, featureFlags 
       await U.forgetUsernames(repo, uid).catch(() => {});
       await F.forgetFriends(soda, uid).catch(() => {});
       await A.forgetAvatars(soda, uid).catch(() => {});
+      await CV.forgetCovers(soda, uid).catch(() => {});
       statsCache.delete(uid);
     }
     return out;
@@ -251,6 +260,8 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
         // it is the tail of the id only and gives no access to anything.
         avatarAdjustable: !!(u.avatarId && A.isOriginalId(u.avatarOriginalId)), avatarCrop: (u.avatarId && u.avatarCrop) || null,
         avatarOriginalTag: u.avatarId && A.isOriginalId(u.avatarOriginalId) ? u.avatarOriginalId.slice(-8) : null,
+        // v3.58 cover photo: public URL, and whether the private original is kept (re-frame without picking again).
+        coverUrl: coverOf(u, flagsOf), coverAdjustable: !!(u.coverId && CV.isOriginalId(u.coverOriginalId)), coverCrop: (u.coverId && u.coverCrop) || null,
         publicLeaderboard: u.publicLeaderboard !== false,
         discoverable: u.discoverable !== false,
         usernameChangedAt: last, nextUsernameChangeAt: last ? last + U.CHANGE_MS : 0,
@@ -379,6 +390,46 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       .set('Content-Disposition', 'inline').set('X-Content-Type-Options', 'nosniff').set('X-Robots-Tag', 'noindex').send(found.data);
   }));
 
+  // ---- v3.58 cover photo (src/covers.js): private original + public wide cover, same pipeline as the avatar ----
+  r.post('/me/cover/original', feature('profilePhotos'), avatarUploadLimiter, rawBody(CV.MAX_BYTES, 2), wrap(async (req, res) => {
+    const u = await me(req);
+    try {
+      const out = await CV.saveOriginal(repo, u, req.body);
+      noStore(res).status(201).json({ ok: true, originalId: out.originalId, width: out.width, height: out.height });
+    } catch (e) { sendErr(res, e); }
+  }));
+  // Body: the cropped wide cover. ?original=<id> (from /me/cover/original) keeps that original; ?cx=&cy=&zoom=&rot= its framing.
+  r.post('/me/cover', feature('profilePhotos'), avatarAdjustLimiter, rawBody(CV.MAX_BYTES, 2), wrap(async (req, res) => {
+    const u = await me(req);
+    try {
+      const q = req.query || {};
+      const original = typeof q.original === 'string' && q.original ? q.original : null;
+      const crop = q.cx !== undefined ? { cx: q.cx, cy: q.cy, zoom: q.zoom, rot: q.rot } : null;
+      const out = await CV.saveCover(repo, u, req.body, { originalId: original, crop });
+      noStore(res).status(201).json({ ok: true, coverUrl: out.coverUrl, coverAdjustable: out.hasOriginal, coverCrop: out.crop });
+    } catch (e) { sendErr(res, e); }
+  }));
+  // Owner only: no id in the path.
+  r.get('/me/cover/original', feature('profilePhotos'), avatarReadLimiter, wrap(async (req, res) => {
+    const found = await CV.readOriginal(repo, req.user.userId);
+    if (!found) return noStore(res).status(404).json({ error: 'There is no original cover to adjust.', code: 'NO_ORIGINAL' });
+    noStore(res).set('Content-Type', found.mime).set('Content-Disposition', 'inline').set('X-Content-Type-Options', 'nosniff')
+      .set('X-Robots-Tag', 'noindex').set('X-Cover-Crop', JSON.stringify(found.crop || null)).send(found.data);
+  }));
+  r.delete('/me/cover', friendWriteLimiter, wrap(async (req, res) => {
+    const removed = await CV.removeCover(repo, req.user.userId);
+    res.json({ ok: true, removed });
+  }));
+  r.get('/covers/:coverId', feature('profilePhotos'), avatarReadLimiter, wrap(async (req, res) => {
+    const found = await CV.readCover(soda, String(req.params.coverId || ''));
+    const admin = req.user.role === 'MASTER_ADMIN';
+    if (!found || (!admin && await F.hasBlocked(soda, found.userId, req.user.userId))) {
+      return res.status(404).set('Cache-Control', 'no-store').json({ error: 'Not found' });
+    }
+    res.set('Cache-Control', 'private, max-age=86400, immutable').set('Content-Type', found.mime)
+      .set('Content-Disposition', 'inline').set('X-Content-Type-Options', 'nosniff').set('X-Robots-Tag', 'noindex').send(found.data);
+  }));
+
   // ---- other riders ----
   /** Target user doc for :username, or null when unknown OR when the target blocked the viewer. */
   const visibleTarget = async (req, raw) => {
@@ -400,6 +451,8 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       const s = await rideStatsOf(repo, t.userId);
       const score = await storedScoreOf(repo, t.userId);
       Object.assign(profile, {
+        // v3.58: the cover photo, like the stats, only for the rider and their friends (non-friends see a card).
+        coverUrl: coverOf(t, flagsOf),
         displayName: firstNameOf(t.name),
         stats: { trips: s.trips, totalKm: s.totalKm, ridingHours: s.ridingHours, score: score ? score.score : null, level: score ? score.level : null },
       });
@@ -658,6 +711,15 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
       await repo.addAuditEntry({ at: Date.now(), by: req.user.email || req.user.userId, byUserId: req.user.userId, action: 'user.avatar.remove', target: userId, details: {} }).catch(() => {});
     }
     auth.gate?.invalidate?.(userId);
+    res.json({ ok: true, removed });
+  }));
+  // v3.58: cover photo moderation (same rules as the avatar removal).
+  r.delete('/admin/users/:userId/cover', requireAdmin, wrap(async (req, res) => {
+    const userId = String(req.params.userId || '');
+    const removed = await CV.removeCover(repo, userId, { by: req.user.userId });
+    if (removed && typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({ at: Date.now(), by: req.user.email || req.user.userId, byUserId: req.user.userId, action: 'user.cover.remove', target: userId, details: {} }).catch(() => {});
+    }
     res.json({ ok: true, removed });
   }));
   r.get('/admin/users/:userId/social', requireAdmin, wrap(async (req, res) => {
