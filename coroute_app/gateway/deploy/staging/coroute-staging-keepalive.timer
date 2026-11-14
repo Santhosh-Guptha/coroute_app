@@ -1,0 +1,13 @@
+# /etc/systemd/system/coroute-staging-keepalive.timer
+# Fires daily at 03:15:00 UTC (08:45:00 IST).
+# Persistent: runs immediately if the VM was offline or rebooted during the window.
+[Unit]
+Description=Daily CoRoute staging database keep-alive timer
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

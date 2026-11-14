@@ -1,0 +1,23 @@
+# /etc/systemd/system/coroute-staging-keepalive.service
+# Daily keep-alive for Oracle Always Free staging Autonomous Database (coroutestaging).
+# Triggered daily by coroute-staging-keepalive.timer.
+[Unit]
+Description=CoRoute staging database daily keep-alive
+After=network-online.target coroute-secrets.service
+Wants=network-online.target coroute-secrets.service
+
+[Service]
+Type=oneshot
+User=coroute
+Group=coroute
+WorkingDirectory=/opt/coroute/gateway
+EnvironmentFile=-/etc/coroute/gateway.env
+EnvironmentFile=-/run/coroute/secrets.env
+ExecStart=/usr/bin/node scripts/staging_keepalive.js
+TimeoutStartSec=60
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
