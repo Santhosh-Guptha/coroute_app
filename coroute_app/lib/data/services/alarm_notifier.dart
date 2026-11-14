@@ -93,7 +93,7 @@ class AlarmNotifier {
       _listenForBackgroundPresses();
       final ok = await plugin.initialize(
         const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          android: AndroidInitializationSettings('@drawable/ic_stat_coroute'),
           iOS: DarwinInitializationSettings(
             requestAlertPermission: false,
             requestBadgePermission: false,

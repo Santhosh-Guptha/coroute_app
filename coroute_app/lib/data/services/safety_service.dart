@@ -58,6 +58,7 @@ import '../../domain/road/road_ahead_engine.dart';
 import 'intel_care_service.dart';
 import '../../domain/safety/mount_classifier.dart' show MountKind;
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
+import '../../domain/ride/ride_stats_accumulator.dart'; // round 11 HUD: ride so far, distance by speed
 import 'diag_log_service.dart';
 
 enum SafetyPromptKind { checkIn, fatigue, fuel, followUp, overspeed }
@@ -517,6 +518,20 @@ class SafetyService extends ChangeNotifier {
   final SoloCheckIn _checkIn = SoloCheckIn();
   FuelRangeTracker _fuel = FuelRangeTracker();
 
+  // ---- Round 11 ride HUD (marked edit): "Ride so far" / "Distance by speed" for the ride sheet.
+  RideStatsAccumulator _hudStats = RideStatsAccumulator();
+
+  /// The ride's stats (read when [hudStatsRevision] changes; never notifies this service's
+  /// listeners, so the cockpit does not rebuild for them).
+  RideStatsAccumulator get hudStats => _hudStats;
+
+  /// Bumped when [hudStats] changed (at most about once a fix while moving).
+  final ValueNotifier<int> hudStatsRevision = ValueNotifier<int>(0);
+  int _hudSavedAt = 0;
+  String? _hudLoadedFor;
+  static const String _keyHudStats = 'coroute_hud_ride_stats_v1';
+  // ---- end round 11
+
   /// Learned mileage, riding style and "fill up here" warnings (on the phone only).
   final FuelEconomyService fuelEconomy = FuelEconomyService();
 
@@ -739,6 +754,8 @@ class SafetyService extends ChangeNotifier {
     _soloSos = null;
     _lastFix = null;
     _detector.reset();
+    _hudStats = RideStatsAccumulator(); // round 11 HUD: a new offline solo ride starts at zero
+    hudStatsRevision.value = hudStatsRevision.value + 1;
     _soloFixSub = _soloFixSource().listen(_onFix, onError: (Object _) {});
     // The foreground service keeps GPS and the sensor alive with the screen off.
     if (_native) BackgroundService.start(convoyName: 'Solo ride (offline)', riderCount: 1).ignore();
@@ -1146,6 +1163,7 @@ class SafetyService extends ChangeNotifier {
         _intel(intel.startRide); // round 4: tiles along the route (offline after that), crash brain params
         roadData.startRide(); // round 7: the "limits on your last ride" list starts again (kept after the ride ends)
         _restoreFuel(gid).ignore();
+        _restoreHudStats().ignore(); // round 11 HUD
         fuelEconomy.ensureLoaded(reload: true).ignore();
       }
     }
@@ -1243,6 +1261,7 @@ class SafetyService extends ChangeNotifier {
       // Offline solo ride: crash detection, plus (round 9 fix) my own speed warning from Settings,
       // which needs no convoy; before, the limit set in Settings never applied in an offline solo ride.
       _checkSpeedLimit(p);
+      _onHudStatsFix(p); // round 11 HUD
       _updateSensor();
       return;
     }
@@ -1270,8 +1289,58 @@ class SafetyService extends ChangeNotifier {
     _checkSpeedLimit(p);
     roadCare.onFix(p, dark: _dark, otherLimitKmh: _lastCheckedLimit, otherActive: _isOverspeedActive); // 3.55
     _intel(() => intel.onFix(p, stretchStartMs: _fatigue.stretchStart)); // round 4
+    _onHudStatsFix(p); // round 11 HUD
     _updateSensor();
   }
+
+  // ---- Round 11 ride HUD (marked edit) ------------------------------------------------------
+  /// The limit the stats count "over limit" against: the effective group / personal limit, or the
+  /// road's posted (not estimated) limit when it is stricter.
+  int _hudLimitKmh() {
+    var limit = _lastCheckedLimit;
+    final road = roadCare.roadView.value.limit;
+    if (road != null && !road.estimated && road.kmh > 0 && (limit <= 0 || road.kmh < limit)) limit = road.kmh;
+    return limit;
+  }
+
+  void _onHudStatsFix(TrackPoint p) {
+    try {
+      if (_hudStats.onFix(ts: p.ts, lat: p.lat, lng: p.lng, speedKmh: p.speedKmh, accuracyM: p.accuracyM, limitKmh: _hudLimitKmh()) ||
+          hudStatsRevision.value != _hudStats.revision) {
+        hudStatsRevision.value = _hudStats.revision;
+      }
+      // Saved every 30 s at most (cheap JSON); the last half minute is lost on a hard kill.
+      if (p.ts - _hudSavedAt >= 30000) {
+        _hudSavedAt = p.ts;
+        _saveHudStats();
+      }
+    } catch (_) {}
+  }
+
+  String get _hudKey => '${_groupId ?? 'solo'}|${_port.myUserId}';
+
+  void _saveHudStats() {
+    final json = jsonEncode({'k': _hudKey, 's': _hudStats.toJson()});
+    SharedPreferences.getInstance().then((prefs) => prefs.setString(_keyHudStats, json)).catchError((Object _) => false).ignore();
+  }
+
+  Future<void> _restoreHudStats() async {
+    final key = _hudKey;
+    if (_hudLoadedFor == key) return;
+    _hudLoadedFor = key;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_keyHudStats);
+      if (_disposed || raw == null || raw.isEmpty || _hudKey != key) return;
+      final j = jsonDecode(raw);
+      if (j is! Map || j['k'] != key) return;
+      final saved = RideStatsAccumulator.fromJson(j['s'] is Map ? j['s'] as Map : null);
+      if (saved == null || saved.distanceM < _hudStats.distanceM) return;
+      _hudStats = saved;
+      hudStatsRevision.value = hudStatsRevision.value + 1;
+    } catch (_) {}
+  }
+  // ---- end round 11
 
   /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = on. Only
   /// non-safety extras read it (engine care); crash detection, SOS and texts never do.
@@ -1473,6 +1542,10 @@ class SafetyService extends ChangeNotifier {
     _lastAwayM = null;
     _lastFix = null;
     _fuel = FuelRangeTracker();
+    _hudStats = RideStatsAccumulator(); // round 11 HUD
+    _hudLoadedFor = null;
+    _hudSavedAt = 0;
+    hudStatsRevision.value = hudStatsRevision.value + 1;
     fuelEconomy.startRide();
     _fuelAhead = null;
     _fuelLoadedFor = null;

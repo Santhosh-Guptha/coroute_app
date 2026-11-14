@@ -65,6 +65,6 @@ void main() {
   });
 
   test('build number unchanged', () {
-    expect(read('pubspec.yaml').contains('version: 3.55.0+10026'), isTrue);
+    expect(read('pubspec.yaml').contains('version: 3.55.0+10030'), isTrue);
   });
 }

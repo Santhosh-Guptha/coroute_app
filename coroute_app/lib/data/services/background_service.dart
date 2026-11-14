@@ -147,6 +147,11 @@ class BackgroundService {
     FlutterForegroundTask.initCommunicationPort();
   }
 
+  /// v3.58: the helmet small icon (one colour) instead of the launcher icon. The manifest meta-data
+  /// below points at @drawable/ic_stat_coroute.
+  static const NotificationIcon rideNotificationIcon =
+      NotificationIcon(metaDataName: 'space.devmonks.coroute_app.NOTIFICATION_ICON');
+
   static bool get _isAndroidOrIos => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   static void _ensureInit() {
@@ -188,7 +193,11 @@ class BackgroundService {
       if (await FlutterForegroundTask.isRunningService) {
         // The big ride notification is showing: re-posting the plain one would replace it.
         if (_richActive) return true;
-        final r = await FlutterForegroundTask.updateService(notificationTitle: 'Convoy: $convoyName', notificationText: text);
+        final r = await FlutterForegroundTask.updateService(
+          notificationTitle: 'Convoy: $convoyName',
+          notificationText: text,
+          notificationIcon: rideNotificationIcon,
+        );
         return r is ServiceRequestSuccess;
       }
       // 3.55: microphone type from the first start when a mic consumer may be needed and the
@@ -205,6 +214,7 @@ class BackgroundService {
         serviceTypes: Platform.isAndroid ? serviceTypesFor(micActive: withMic) : null,
         notificationTitle: 'Convoy: $convoyName',
         notificationText: text,
+        notificationIcon: rideNotificationIcon,
         notificationButtons: const [
           NotificationButton(id: buttonSos, text: 'SOS'),
           NotificationButton(id: buttonLeave, text: 'Leave ride'),
@@ -251,7 +261,7 @@ class BackgroundService {
     if (_richActive) return;
     try {
       if (await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.updateService(notificationTitle: title, notificationText: text);
+        await FlutterForegroundTask.updateService(notificationTitle: title, notificationText: text, notificationIcon: rideNotificationIcon);
       }
     } catch (e) {
       debugPrint('Foreground service update note: $e');

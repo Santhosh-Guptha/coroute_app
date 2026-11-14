@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:url_launcher/url_launcher.dart' show launchUrl; // round 11 HUD: call a rider from the group list
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
@@ -134,11 +135,9 @@ import 'widgets/coroute_orbit_control.dart';
 import 'widgets/glove_quick_settings_modal.dart';
 import 'widgets/minimal_cockpit_overlay.dart';
 import 'widgets/minimal_cockpit_settings_cards.dart';
-import 'widgets/minimal_cockpit_stats_row.dart';
 import 'widgets/minimal_hold_to_talk_bar.dart';
 import 'widgets/ghost_rider_marker.dart';
 import 'widgets/smooth_rider_marker_layer.dart';
-import 'map/map_orientation_button.dart';
 import 'map/nav_camera_controller.dart';
 import '../../data/services/location_precision_service.dart';
 import 'widgets/cockpit_dual_state_banner.dart';
@@ -156,6 +155,16 @@ import '../../domain/ride/ride_tap_gate.dart';
 import '../../domain/ride/bike_markers.dart'; // 3.55 bike markers, pillion on the bike
 import 'widgets/bike_rider_marker.dart';
 import '../ride/pillion_seat_sheet.dart'; // 3.55 pillion seat
+// Round 11 ride HUD (turn card, safety strip, control column, sheet parts).
+import 'hud/hud_logic.dart';
+import 'hud/hud_top.dart';
+import 'hud/hud_controls.dart';
+import 'hud/hud_safety_strip.dart';
+import 'hud/hud_sheet_parts.dart';
+import 'hud/hud_speed.dart';
+import '../../domain/ride/ride_stats_accumulator.dart';
+import '../../domain/road/road_ahead_engine.dart' show RoadAheadView;
+import '../map_places/place_chips.dart' show showPlacesSheet;
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -288,6 +297,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   String? _lastAlertKey;
   bool _pointerRouted = false;
   bool _rideDarkWanted = false;
+
+  /// Round 11 HUD: the rider asked for the night map from the control column.
+  bool _nightManual = false;
   ThemeController? _theme;
   RouteObserver<ModalRoute<void>>? _subscribedObserver;
   ModalRoute<void>? _subscribedRoute;
@@ -1134,7 +1146,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     try {
       final s = _convoys;
       final convoy = s == null ? null : (s.allConvoys[widget.convoyId] ?? s.activeConvoy);
-      want = s != null && convoy != null && !_isTerminalTripStatus(convoy.tripStatus) && s.batterySaverActive;
+      want = s != null && convoy != null && !_isTerminalTripStatus(convoy.tripStatus) && (s.batterySaverActive || _nightManual);
     } catch (_) {
       want = false;
     }
@@ -2965,17 +2977,19 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         final textScaler = MediaQuery.textScalerOf(context);
         // Room kept above the fully open sheet in portrait: the top bar and, under it, the SOS
         // button, so SOS rides on the sheet's edge without covering the sheet or leaving the screen.
-        final topBarReserve = textScaler.scale(64).clamp(64.0, 120.0).toDouble();
+        // Round 11 HUD: the destination pill and the turn card stay visible above the full sheet.
+        final topBarReserve = textScaler.scale(200).clamp(200.0, 300.0).toDouble();
         final sheetMax = side
             ? 0.85
             : ((h - topInset - Space.s8 - topBarReserve - Space.s8 - sosSize - Space.s12) / h).clamp(0.5, 0.85).toDouble();
-        // The recenter chip grows with the text size; the zoom pair is 2 x 44 dp + 8.
-        final recenterH = Space.s16 + textScaler.scale(18).clamp(18.0, 40.0).toDouble();
         // Zoom pair plus the map orientation (compass) button above it: 3 x 44 dp + 2 x 8.
         // Places button, orientation, zoom in, zoom out: 4 x 44 dp + 3 x 8.
         // 3.55 ride chat: the always-visible Chat button (56 dp + 8) on top in a group ride.
         final showChat = !convoy.isSoloRide && convoy.hasGroupFeatures;
-        final zoomH = 44.0 + 8.0 + 44.0 + 8.0 + 44.0 + 8.0 + 44.0 + (showChat ? RideChatButton.size + 8.0 : 0.0);
+        // Round 11 HUD: the 56 dp control column (zoom only when the screen is tall enough).
+        final groupMap = !convoy.isSolo && convoy.riders.length > 1;
+        final showZoom = side ? h >= 640 : h >= 860;
+        final zoomH = HudControlColumn.heightFor(group: groupMap, recenter: !_autoFollow, zoom: showZoom) + (showChat ? RideChatButton.size + 8.0 : 0.0);
         _navSide = side;
         _navPanelW = panelW;
         _navTopReserve = topInset + topBarReserve;
@@ -3012,8 +3026,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 minFraction: null, // Anchors sheet to exact bottom of hands-free VOX/PTT bar; cannot drag down further
                 header: _sheetHeader(convoy, me, snap, stoppedFor, now,
                     guardianOn: guardianOn,
-                    meshPeersCount: service.p2pMeshPeerCount),
+                    meshPeersCount: service.p2pMeshPeerCount,
+                    limitKmh: speedLimit,
+                    connection: connection,
+                    service: service,
+                    uid: uid),
                 body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,
+                    limitKmh: speedLimit,
                     offlinePlaces: offlinePlaces,
                     possibleIncident: possible,
                     fuelRangeKm: fuelRangeKm,
@@ -3053,27 +3072,55 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  MinimalCockpitTopBar(
-                    title: _topTitle(convoy, snap),
+                  // Round 11 HUD: back + destination pill, the turn card (road + limit sign without a
+                  // route), the safety strip (one advisory at a time). Speed lives in the sheet.
+                  HudTopBar(
+                    title: _hudDestinationTitle(convoy, snap),
+                    subtitle: _hudDestinationSubtitle(snap),
                     connection: connection,
-                    gps: gps,
+                    emergencyRoute: guidance?.statusLine != null,
+                    onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
+                    onRouteOptions: () => _popup<void>('route_options', () => _openRouteOptions(convoy, me, snap)),
+                    chips: [
+                      if (SmartAirbagBridgeService().isConnected || SmartAirbagBridgeService().connectionState == AirbagConnectionState.connected)
+                        const HudStatusChip(icon: Icons.shield_outlined, label: 'Airbag'),
+                      if (_bleRemote?.status == BleRemoteStatus.paired) const HudStatusChip(icon: Icons.radio_button_checked_rounded, label: 'Remote'),
+                      if ((gps == GpsState.lowAccuracy || gps == GpsState.unavailable) && !me.isTunnelCoasting)
+                        HudStatusChip(icon: Icons.gps_not_fixed_rounded, label: gps.label, warn: true),
+                      if (isOfflineMode)
+                        HudStatusChip(
+                          key: const Key('cockpit_pill_offline_mode'),
+                          icon: Icons.cloud_off_rounded,
+                          label: 'Offline mode',
+                          warn: true,
+                          onTap: () => _popup<void>('offline', () => _showOfflineExplainer(context, convoy, service)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: Space.s8),
+                  HudTurnCard(
+                    model: _hudTurnModel(convoy, snap),
                     routeStatus: guidance?.statusLine ?? _guide.statusLine,
                     emergencyRoute: guidance?.statusLine != null,
                     onStopNavigation: guidance?.target == null ? null : guidance?.stop,
-                    onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
-                    onNavigationTap: () => _launchOfflineNav(convoy, me, snap),
-                    isTunnelCoasting: me.isTunnelCoasting,
-                    subtitle: convoy.name,
-                    roadName: _guide.currentRoadName,
-                    speedKmh: RideFacts.hasPosition(me) ? me.speedKmh : null,
-                    speedLimitKmh: speedLimit,
-                    riderCount: convoy.riders.length,
-                    isAirbagPaired: SmartAirbagBridgeService().isConnected ||
-                        SmartAirbagBridgeService().connectionState == AirbagConnectionState.connected,
-                    isRemotePaired: _bleRemote?.status == BleRemoteStatus.paired,
-                    isOfflineMode: isOfflineMode,
-                    onOfflineModeTap: () => _popup<void>('offline', () => _showOfflineExplainer(context, convoy, service)),
+                    limitSign: _roadCareSafety == null
+                        ? null
+                        : RepaintBoundary(
+                            child: ValueListenableBuilder<RoadAheadView>(
+                              valueListenable: _roadCareSafety!.roadCare.roadView,
+                              builder: (_, v, _) => v.limit == null
+                                  ? const SizedBox.shrink()
+                                  : RoadLimitSign(
+                                      limit: v.limit!,
+                                      level: v.level,
+                                      size: CockpitLayout.of(width: side ? w - panelW : w, height: h, textScale: textScaler.scale(1.0)).signSize,
+                                      // "Wrong limit?" only while standing still (speak while moving, act when stopped).
+                                      onTap: _advice.tapGate.canTap ? _openWrongLimit : null,
+                                    ),
+                            ),
+                          ),
                   ),
+                  HudSafetyStrip(view: _roadCareSafety?.roadCare.roadView),
                   // HUD Toast Banner (cleanly positioned under top bar, never covering it)
                   if (_hudToastMessage != null)
                     Padding(
@@ -3246,133 +3293,69 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                     },
                     ),
                   ),
-                      if (_roadCareSafety != null)
-                        PositionedDirectional(
-                          start: 0,
-                          top: Space.s8,
-                          child: ValueListenableBuilder<double>(
-                            valueListenable: _sheetExpansion,
-                            builder: (_, t, chips) => _fade(side ? 1.0 : _floatingOpacity(t), chips!),
-                            child: RoadAheadChips(
-                              view: _roadCareSafety!.roadCare.roadView,
-                              layout: CockpitLayout.of(width: side ? w - panelW : w, height: h, textScale: textScaler.scale(1.0)),
-                              // "Wrong limit?" only while standing still (speak while moving, act when stopped).
-                              onLimitTap: _advice.tapGate.canTap ? _openWrongLimit : null,
-                            ),
-                          ),
-                        ),
+                      // Round 11 HUD: the round 7 limit sign is in the turn card and the bend in the
+                      // safety strip (both at least as large there), so RoadAheadChips is not shown here.
                     ],
                   ),
                 ],
               ),
             ),
 
-            // 5. Floating Recenter Chip (only when the map is panned away from the rider). Right
-            // side, riding just above the sheet's top edge in portrait (bottom corner in landscape),
-            // fading out as the sheet opens so it never sits over the sheet's content.
-            if (!_autoFollow)
-              ListenableBuilder(
-                listenable: _sheetMotion,
-                builder: (_, chip) {
-                  final base = side ? bottomInset + Space.s16 : _sheetTop.value + Space.s12;
-                  return Positioned(
-                    right: rightInset + Space.s16,
-                    bottom: _clampSafe(base, bottomInset + Space.s12, h - recenterH - topInset - Space.s16),
-                    child: _fade(floatingOpacity(), chip!),
-                  );
-                },
-                child: Material(
-                  color: AppTheme.card.withAlpha(230),
-                  borderRadius: BorderRadius.circular(24),
-                  elevation: 4,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(24),
-                    onTap: () => _setAutoFollow(true),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.my_location_rounded, size: 18, color: AppTheme.brand),
-                          const SizedBox(width: Space.s8),
-                          Text(
-                            'RECENTER',
-                            maxLines: 1,
-                            style: AppText.label.copyWith(
-                              color: AppTheme.brand,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-            // 6. Floating Zoom Controls (+ / -), stacked above the recenter chip when it shows
-            // (in landscape too: they used to overlap it there).
+            // 5-6. Round 11 HUD control column (right side, just above the sheet's top edge in
+            // portrait, bottom corner of the map in landscape), fading out as the sheet opens.
+            // Orientation, layers, night map, group view; Recenter when panned; zoom when there is room.
             ListenableBuilder(
               listenable: _sheetMotion,
-              builder: (_, zoom) {
-                final recenterOffset = _autoFollow ? 0.0 : recenterH + Space.s8;
+              builder: (_, column) {
                 final base = side ? bottomInset + Space.s16 : _sheetTop.value + Space.s12;
                 return Positioned(
-                  right: rightInset + Space.s16,
-                  bottom: _clampSafe(base + recenterOffset, bottomInset + Space.s12, h - zoomH - topInset - Space.s16),
-                  child: _fade(floatingOpacity(), zoom!),
+                  right: rightInset + Space.s12,
+                  bottom: _clampSafe(base, bottomInset + Space.s12, h - zoomH - topInset - Space.s16),
+                  child: _fade(floatingOpacity(), column!),
                 );
               },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showChat) ...[
-                    RideChatButton(unread: service.unreadChat(convoy.groupId), onTap: () => _openChat(convoy, me)),
-                    const SizedBox(height: 8),
-                  ],
-                  if (_placesFor(lowData) case final places?) ...[
-                    PlacesMapButton(
-                      service: places,
-                      riderStopsSwitch: true, // 3.56: "Where riders stop" on the ride map (off by default)
-                      usableKm: () => context.read<SafetyService?>()?.estimatedUsableKm,
-                      marginKm: () => context.read<SettingsService?>()?.fuelProfile.marginKm ?? 0,
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  MapOrientationButton(controller: _navCam),
-                  const SizedBox(height: 8),
-                  _MapZoomButton(
-                    key: const Key('cockpit_zoom_in_button'),
-                    icon: Icons.add_rounded,
-                    tooltip: 'Zoom in',
-                    onTap: () {
-                      // Following: shift the speed zoom instead of fighting the camera.
-                      if (_autoFollow) {
-                        _navCam.nudgeZoom(1.0);
-                        return;
-                      }
-                      try {
-                        _mapController.move(_mapController.camera.center, (_mapController.camera.zoom + 1.0).clamp(3.0, 19.0));
-                      } catch (_) {}
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  _MapZoomButton(
-                    key: const Key('cockpit_zoom_out_button'),
-                    icon: Icons.remove_rounded,
-                    tooltip: 'Zoom out',
-                    onTap: () {
-                      if (_autoFollow) {
-                        _navCam.nudgeZoom(-1.0);
-                        return;
-                      }
-                      try {
-                        _mapController.move(_mapController.camera.center, (_mapController.camera.zoom - 1.0).clamp(3.0, 19.0));
-                      } catch (_) {}
-                    },
-                  ),
-                ],
+              child: ListenableBuilder(
+                listenable: _navCam,
+                builder: (context, _) => HudControlColumn(
+                  leading: showChat ? RideChatButton(unread: service.unreadChat(convoy.groupId), onTap: () => _openChat(convoy, me)) : null,
+                  headingUp: _navCam.courseUp,
+                  onToggleOrientation: _navCam.toggleOrientation,
+                  following: _autoFollow,
+                  onRecenter: () => _setAutoFollow(true),
+                  onLayers: switch (_placesFor(lowData)) {
+                    final places? => () => _popup<void>('places', () => showPlacesSheet(
+                          context,
+                          places,
+                          usableKm: context.read<SafetyService?>()?.estimatedUsableKm,
+                          marginKm: context.read<SettingsService?>()?.fuelProfile.marginKm ?? 0,
+                          riderStopsSwitch: true, // 3.56: "Where riders stop" on the ride map (off by default)
+                        )),
+                    _ => null,
+                  },
+                  night: !AppTheme.isLight,
+                  onToggleNight: _toggleNightMap,
+                  onFitGroup: groupMap ? () => _fitGroup(convoy) : null,
+                  showZoom: showZoom,
+                  onZoomIn: () {
+                    // Following: shift the speed zoom instead of fighting the camera.
+                    if (_autoFollow) {
+                      _navCam.nudgeZoom(1.0);
+                      return;
+                    }
+                    try {
+                      _mapController.move(_mapController.camera.center, (_mapController.camera.zoom + 1.0).clamp(3.0, 19.0));
+                    } catch (_) {}
+                  },
+                  onZoomOut: () {
+                    if (_autoFollow) {
+                      _navCam.nudgeZoom(-1.0);
+                      return;
+                    }
+                    try {
+                      _mapController.move(_mapController.camera.center, (_mapController.camera.zoom - 1.0).clamp(3.0, 19.0));
+                    } catch (_) {}
+                  },
+                ),
               ),
             ),
 
@@ -3403,7 +3386,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               sheetHeight: side ? null : _sheetTop,
               sheetExpansion: side ? null : _sheetExpansion,
               // Keeps the Orbit button clear of SOS (left) and the zoom / recenter stack (right).
-              sheetClearance: Space.s12 + zoomH + Space.s8 + recenterH + Space.s8,
+              sheetClearance: Space.s12 + zoomH + Space.s8,
               leftInset: side ? panelW : leftInset,
               // A solo ride (Community host) shows no Intercom or Group tiles.
               isSolo: convoy.isSoloRide,
@@ -3553,19 +3536,174 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     );
   }
 
-  String _topTitle(ConvoyModel convoy, RideSnapshot snap) {
+  // ------------------------------------------------------------------ round 11 ride HUD
+
+  /// Destination pill title: the next stop, the destination, or the ride's name.
+  String _hudDestinationTitle(ConvoyModel convoy, RideSnapshot snap) {
     final next = snap.nextStop;
-    if (next != null) {
-      final d = snap.nextStopM;
-      final name = next.name.isEmpty ? StopKind.fromCategory(next.category).label : next.name;
-      return d == null ? 'Next: $name' : 'Next: $name, ${formatDistanceRounded(d)}';
-    }
-    if (RideFacts.hasDestination(convoy)) {
-      final name = convoy.destinationName.isEmpty ? 'destination' : convoy.destinationName;
-      final d = snap.remainingM;
-      return d == null ? 'To $name' : 'To $name, ${formatDistanceRounded(d)}';
-    }
+    if (next != null) return next.name.isEmpty ? StopKind.fromCategory(next.category).label : next.name;
+    if (RideFacts.hasDestination(convoy)) return convoy.destinationName.isEmpty ? 'Destination' : convoy.destinationName;
     return convoy.name;
+  }
+
+  /// "12 km · 9:03 pm" (next stop or destination), null without a destination.
+  String? _hudDestinationSubtitle(RideSnapshot snap) {
+    final d = snap.nextStop != null ? snap.nextStopM : snap.remainingM;
+    final parts = <String>[
+      if (snap.nextStop != null) 'Next stop',
+      if (d != null) formatDistanceRounded(d),
+      if (snap.nextStop == null && snap.eta != null) _eta(snap.eta),
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  /// The turn card: the next turns on the line I follow (with the "then" line), a "follow the
+  /// route" card when the route has no step ahead, or the road I am on without a route.
+  HudTurnModel _hudTurnModel(ConvoyModel convoy, RideSnapshot snap) {
+    final line = _guide.active;
+    try {
+      final along = line?.matched?.alongM;
+      final steps = _guide.activeRoute?.steps ?? const [];
+      if (line != null && along != null) {
+        final turns = NextTurn.computeAhead(steps: steps, line: line, alongM: along, count: 2);
+        if (turns.isNotEmpty) return HudTurnModel.fromTurns(turns);
+      }
+    } catch (_) {}
+    final road = _guide.currentRoadName;
+    if (line != null) {
+      final next = snap.nextStop;
+      final d = next != null ? snap.nextStopM : snap.remainingM;
+      final where = next != null ? (next.name.isEmpty ? 'Next stop' : next.name) : (convoy.destinationName.isEmpty ? 'Destination' : convoy.destinationName);
+      return HudTurnModel.follow(
+        title: (road == null || road.trim().isEmpty) ? 'Follow the route' : 'Continue on ${road.trim()}',
+        subtitle: d == null ? where : '$where in ${formatDistanceRounded(d)}',
+      );
+    }
+    return HudTurnModel.free(
+      title: HudTurnText.freeRideTitle(road),
+      subtitle: convoy.isSoloRide ? 'Solo · no route' : 'No route · riding free',
+    );
+  }
+
+  /// Destination pill: change destination, add a stop, share ETA, hand off to a navigation app.
+  /// A sheet like any other: the locked-cockpit guard asks for the unlock first.
+  Future<void> _openRouteOptions(ConvoyModel convoy, RiderModel me, RideSnapshot snap) {
+    final lead = context.read<ConvoyService>().canEditRoute;
+    final hasDest = RideFacts.hasDestination(convoy);
+    return showAppSheet<void>(
+      context,
+      title: 'Route',
+      builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, children: [
+        if (lead)
+          ListTile(
+            minTileHeight: 56,
+            leading: const Icon(Icons.edit_location_alt_outlined),
+            title: const Text('Change destination or stops'),
+            subtitle: const Text('The whole group gets the new route'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _openStops(convoy);
+            },
+          ),
+        ListTile(
+          minTileHeight: 56,
+          leading: const Icon(Icons.add_location_alt_outlined),
+          title: const Text('Add a stop for me'),
+          subtitle: const Text('Fuel, food and places along the way'),
+          onTap: () {
+            Navigator.pop(ctx);
+            _openEssentials();
+          },
+        ),
+        if (hasDest)
+          ListTile(
+            minTileHeight: 56,
+            leading: const Icon(Icons.share_outlined),
+            title: const Text('Share my ETA'),
+            subtitle: _etaShareSubtitle(snap) == null ? null : Text(_etaShareSubtitle(snap)!),
+            onTap: () {
+              Navigator.pop(ctx);
+              _shareEta(convoy, snap.remainingM, snap.eta);
+            },
+          ),
+        if (hasDest || snap.nextStop != null)
+          ListTile(
+            minTileHeight: 56,
+            leading: const Icon(Icons.navigation_outlined),
+            title: const Text('Open in navigation app'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _launchOfflineNav(convoy, me, snap);
+            },
+          ),
+        if (!lead && !hasDest)
+          const ListTile(
+            leading: Icon(Icons.info_outline_rounded),
+            title: Text('No route on this ride'),
+            subtitle: Text('The lead can set a destination'),
+          ),
+      ]),
+    );
+  }
+
+  /// Night map from the control column: the dark ride palette and the soft dark tiles
+  /// (the same override the battery saver uses).
+  void _toggleNightMap() {
+    final theme = _theme;
+    final on = theme?.rideDarkOverride ?? false;
+    _nightManual = !on;
+    _syncRideDark();
+    if (_nightManual != on) {
+      _showHudToast(_nightManual ? 'Night map on' : 'Night map off', Icons.dark_mode_outlined, AppTheme.accentText);
+    }
+  }
+
+  /// "Show all riders": the camera fits every rider with a position, clear of the HUD and sheet.
+  void _fitGroup(ConvoyModel convoy) {
+    final pts = <LatLng>[
+      for (final r in convoy.riders.values)
+        if (RideFacts.hasPosition(r)) LatLng(r.lat, r.lng),
+    ];
+    if (pts.length < 2) {
+      _showHudToast('No other riders on the map yet', Icons.groups_outlined, AppTheme.accentText);
+      return;
+    }
+    _setAutoFollow(false);
+    try {
+      final top = _navTopReserve + 160;
+      final bottom = _navSide ? 24.0 : _sheetTop.value + 24;
+      _mapController.fitCamera(CameraFit.coordinates(
+        coordinates: pts,
+        padding: EdgeInsets.fromLTRB(_navSide ? _navPanelW + 32 : 32, top, 88, bottom),
+        maxZoom: 16,
+      ));
+    } catch (_) {}
+  }
+
+  /// Group pill text from the ladder (lead ahead / last behind / falling behind).
+  (String, bool) _hudGroupPill(ConvoyModel convoy, RiderModel me, RideSnapshot snap, String? connection, int now) {
+    if (convoy.isSolo || convoy.riders.length <= 1) return (HudGroupPill.text(riders: 1, solo: true, connection: connection), connection != null);
+    double? leadAhead;
+    double? lastBehind;
+    final behind = <String>[];
+    for (final r in snap.ladder) {
+      if (r.tooFarBehind && !r.isMe) behind.add(r.rider.name);
+      final f = r.fromMeM;
+      if (f == null || r.isMe) continue;
+      if (f > 0 && (leadAhead == null || f > leadAhead)) leadAhead = f;
+      if (f < 0 && (lastBehind == null || -f > lastBehind)) lastBehind = -f;
+    }
+    final iAmLead = leadAhead == null && lastBehind != null;
+    final text = HudGroupPill.text(
+      riders: convoy.riders.length,
+      riding: RideFacts.ridingCount(convoy.riders.values, nowMs: now),
+      leadAheadM: leadAhead,
+      lastBehindM: lastBehind,
+      iAmLead: iAmLead,
+      fallingBehind: behind,
+      connection: connection,
+    );
+    return (text, HudGroupPill.warn(fallingBehind: behind, connection: connection));
   }
 
   String _eta(Duration? eta) {
@@ -3577,9 +3715,28 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     );
   }
 
-  Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now, {bool guardianOn = true, int meshPeersCount = 0, double bottomInset = 0.0}) {
+  /// Round 11 HUD collapsed sheet: speed dial with the limit ring, ETA, km left, hold-to-end;
+  /// the group pill; the talk bar (group rides); the stopped details when standing still.
+  Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now,
+      {bool guardianOn = true,
+      int meshPeersCount = 0,
+      double bottomInset = 0.0,
+      int limitKmh = 0,
+      String? connection,
+      ConvoyService? service,
+      String uid = ''}) {
     void toggle() => _sheetKey.currentState?.toggle();
     final next = snap.nextStop;
+    final (leftValue, leftUnit) = metricDistance(snap.remainingM);
+    final svc = service;
+    // End or leave, as RideLifecycleBar: the lead / owner ends, others leave. The hold starts the
+    // existing flow (confirm dialog, offline queue, lock-screen gate), never ends at once.
+    final VoidCallback? onEnd = svc == null
+        ? null
+        : (svc.canEndTrip ? () => _endRide(svc) : () => _leaveRide(svc, uid));
+    final (pillText, pillWarn) = _hudGroupPill(convoy, me, snap, connection, now);
+    final hasDest = RideFacts.hasDestination(convoy);
+    final rideStats = hasDest ? null : context.read<SafetyService?>()?.hudStats;
     return Padding(
       // Same side inset as the sheet body ([RideSheet.hPad]) so the stats, the talk bar and the
       // expanded content share one edge. The sheet itself adds the navigation bar inset.
@@ -3588,7 +3745,24 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (stoppedFor != null)
+          HudCollapsedRow(
+            speedKmh: me.speedKmh,
+            limitKmh: limitKmh,
+            hasFix: RideFacts.hasPosition(me),
+            // No destination: moving time and km ridden (the ride's own numbers) instead of ETA / left.
+            eta: hasDest ? (snap.eta == null ? '-' : _eta(snap.eta)) : HudFormat.clock(rideStats?.movingMs ?? 0),
+            etaLabel: hasDest ? 'ETA' : 'Moving',
+            leftValue: hasDest ? leftValue : HudFormat.km(rideStats?.distanceM ?? 0),
+            leftUnit: hasDest ? leftUnit : 'km',
+            leftLabel: hasDest ? 'Left' : 'Ridden',
+            onHoldEnd: onEnd,
+            endLabel: svc?.canEndTrip ?? true ? 'End' : 'Leave',
+            onTap: toggle,
+          ),
+          const SizedBox(height: Space.s8),
+          HudGroupPillView(text: pillText, warn: pillWarn, solo: convoy.isSolo, onTap: toggle),
+          if (stoppedFor != null) ...[
+            const SizedBox(height: Space.s8),
             StoppedDetails(
               stoppedFor: stoppedFor,
               place: RideFacts.hasPosition(me) ? '${me.lat.toStringAsFixed(5)}, ${me.lng.toStringAsFixed(5)}' : '',
@@ -3600,30 +3774,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               onTellWhy: () => _popup<void>('status', () => RiderStatusSheet.show(context, userId: me.userId)),
               onTap: toggle,
               isSolo: convoy.isSoloRide,
-            )
-          else
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: toggle,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 6.0),
-                child: MinimalCockpitStatsRow(
-                  convoy: convoy,
-                  me: me,
-                  snap: snap,
-                  eta: _eta(snap.eta),
-                  guardianOn: guardianOn,
-                  now: now,
-                  meshPeersCount: meshPeersCount,
-                ),
-              ),
             ),
+          ],
           // Talk is a group feature: no talk bar in a solo ride (Community host).
-          if (convoy.hasGroupFeatures)
+          if (convoy.hasGroupFeatures) ...[
+            const SizedBox(height: Space.s8),
             MinimalHoldToTalkBar(
               convoy: convoy,
               me: me,
             ),
+          ],
         ],
       ),
     );
@@ -3646,13 +3806,43 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     int riddenKm = 0,
     String? weatherLine,
     TilePrefetcher? prefetcher,
+    int limitKmh = 0,
   }) {
     final paused = convoy.tripStatus == 'PAUSED';
+    final (leftValue, leftUnit) = metricDistance(snap.remainingM);
+    final safetyForStats = context.read<SafetyService?>();
+    final bandEdges = SpeedBandProfile.forVehicle(me.vehicleKind);
     final chatQueued = service.outbox.where((o) => o.type == 'CHAT' && o.groupId == convoy.groupId).length;
     final hasDest = RideFacts.hasDestination(convoy);
     // "Dark in 40 min" during the last hour of daylight (null after dark or without a position).
     final darkLine = RideFacts.hasPosition(me) ? DarkCheck.rideLine(now: DateTime.fromMillisecondsSinceEpoch(now), lat: me.lat, lng: me.lng) : null;
+    // Round 11 HUD half sheet: the stats repaint on their own (hudStatsRevision), never the cockpit.
+    Widget stats(Widget Function(RideStatsAccumulator s) build) {
+      final svc = safetyForStats;
+      if (svc == null) return build(RideStatsAccumulator());
+      return ValueListenableBuilder<int>(valueListenable: svc.hudStatsRevision, builder: (_, _, _) => build(svc.hudStats));
+    }
+
     return [
+      // 0. Round 11 HUD (half sheet): arc speedometer with the effective limit, ETA / left / max,
+      // ride so far, distance by speed, over the limit.
+      stats((s) => HudArcSpeedometer(
+            key: const Key('hud_arc_speedometer'),
+            speedKmh: me.speedKmh,
+            limitKmh: limitKmh,
+            peakKmh: s.peakKmh,
+            hasFix: RideFacts.hasPosition(me),
+          )),
+      const SizedBox(height: Space.s8),
+      stats((s) => HudEtaRow(eta: snap.eta == null ? '-' : _eta(snap.eta), leftValue: leftValue, leftUnit: leftUnit, maxKmh: s.peakKmh)),
+      const SizedBox(height: Space.s16),
+      stats((s) => HudRideSoFar(stats: s)),
+      const SizedBox(height: Space.s12),
+      stats((s) => HudSpeedBands(stats: s, edgesKmh: bandEdges, currentKmh: me.speedKmh)),
+      const SizedBox(height: Space.s12),
+      stats((s) => HudOverLimit(stats: s)),
+      const SizedBox(height: Space.s24),
+
       // 1. Compact Ride Summary
       Semantics(
         header: true,
@@ -3740,6 +3930,35 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         const OfflineLinkCapabilityLine(), // Round 10: "4 of 6 phones support long range"
         const SizedBox(height: Space.s12),
       ],
+
+      // Round 11 HUD (full sheet): the group in ride order: distance / time to me, role, status,
+      // falling behind, battery, call (calls ask for the unlock while locked).
+      if (!convoy.isSolo && snap.ladder.length > 1) ...[
+        HudSectionTitle('Group', trailing: Text('${convoy.riders.length} riders', style: AppText.caption)),
+        for (final rung in snap.ladder)
+          if (!rung.isMe)
+            HudRiderRow(
+              key: ValueKey<String>('hud_rider_${rung.rider.userId}'),
+              name: rung.rider.name,
+              color: colors[rung.rider.userId] ?? AppTheme.primary,
+              role: RideFacts.findLead(convoy)?.userId == rung.rider.userId ? 'Lead' : (rung.rider.isSweeper ? 'Sweep' : null),
+              distanceText: HudGroupPill.riderGap(rung.fromMeM,
+                  speedKmh: (rung.fromMeM ?? 0) > 0 ? me.speedKmh : rung.rider.speedKmh),
+              statusText: rung.tooFarBehind ? 'Falling behind' : statuses[rung.rider.userId]?.label,
+              warn: rung.tooFarBehind || statuses[rung.rider.userId] == RiderStatus.emergency,
+              battery: rung.rider.lastSeenEpochMs > 0 ? rung.rider.batteryLevel : null,
+              onTap: () => _openRider(rung.rider),
+              onCall: rung.rider.phone.trim().isEmpty
+                  ? null
+                  : () => LockedCockpit.run(context, CockpitAction.dialContact,
+                      () => launchUrl(Uri(scheme: 'tel', path: rung.rider.phone.trim()))).ignore(),
+            ),
+        const SizedBox(height: Space.s12),
+      ],
+
+      // Round 11 HUD (full sheet): speed over the ride.
+      stats((s) => HudTripChart(trace: s.speedTrace, stepMs: s.traceStep, limitKmh: limitKmh)),
+      const SizedBox(height: Space.s12),
 
       // 4. Grouped Secondary Management
       SecondaryManagementGroup(
@@ -4470,36 +4689,3 @@ class _HudBottomClipper extends CustomClipper<Rect> {
   @override
   bool shouldReclip(covariant _HudBottomClipper oldClipper) => false;
 }
-
-class _MapZoomButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _MapZoomButton({
-    super.key,
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.card.withAlpha(230),
-      borderRadius: BorderRadius.circular(24),
-      elevation: 4,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: onTap,
-        child: SizedBox(
-          // 3.56 audit A-01: 48 dp (gloves); was 44.
-          width: 48,
-          height: 48,
-          child: Icon(icon, color: AppTheme.text, size: 24),
-        ),
-      ),
-    );
-  }
-}
-
