@@ -54,6 +54,8 @@ const PUBLIC = Object.freeze({
   'GET /api/public/leaderboard': 'public usernames that did not opt out',
   'GET /api/public/live-now': 'rounded count of riders on a ride',
   'GET /api/public/board': 'website offers board', 'GET /api/public/board/images/:imageId': 'website offers board images',
+  // v3.58 Explore: admin-curated destination list and its admin-uploaded photos (no personal data; distances are worked out on the phone)
+  'GET /api/public/destinations': 'admin-curated destinations (no personal data)', 'GET /api/public/destinations/:id/photo': 'admin-uploaded destination photos',
   'GET /api/public/rides/:slug': 'operator rides published as public', 'GET /api/public/clubs/:code': 'club join page',
   'POST /api/pv': 'cookieless page-view counter',
   'POST /api/feedback': 'website feedback form (honeypot, timing, rate limit)',

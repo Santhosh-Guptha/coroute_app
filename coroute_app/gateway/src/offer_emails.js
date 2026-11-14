@@ -29,6 +29,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { validEmail } = require('./mailer');
 const { cleanCouponCode, plansLink } = require('./web_shop');
+const { brandHeaderRow } = require('./email_brand');
 
 const C = Object.freeze({ consent: 'marketing_consent', suppression: 'email_suppression', campaigns: 'offer_email_campaigns' });
 const SUPPRESSION_REASONS = Object.freeze(['unsubscribe', 'bounce', 'complaint', 'admin']);
@@ -78,7 +79,7 @@ function renderContent(content, origin) {
       if (/^\/(?!\/)[A-Za-z0-9/_\-.?=&%]*$/.test(h)) url = o + h;
       else if (o && h.startsWith(`${o}/`)) url = h;
       if (!url) { errors.push(`Links may only point to this site (${o || 'PUBLIC_ORIGIN'}): ${h.slice(0, 60)}`); return label; }
-      return `<a href="${esc(url)}" style="color:#5b4bd6;">${label}</a>`;
+      return `<a href="${esc(url)}" style="color:#2B7A8C;">${label}</a>`;
     });
     return s;
   };
@@ -105,10 +106,10 @@ function buildOfferEmail({ subject, heading, content, imageUrl, coupon, origin, 
   const body = renderContent(content, o);
   const ctaUrl = coupon ? plansLink(o, coupon.code) : `${o}/plans`;
   const ctaLabel = coupon ? `Use code ${coupon.code}` : 'See plans';
-  const couponHtml = coupon ? '<tr><td style="padding:6px 0 18px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:2px dashed #5b4bd6;border-radius:10px;">'
+  const couponHtml = coupon ? '<tr><td style="padding:6px 0 18px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:2px dashed #2B7A8C;border-radius:10px;">'
     + '<tr><td style="padding:16px;text-align:center;">'
     + (coupon.headline ? `<div style="font-size:16px;font-weight:700;color:#111827;padding-bottom:8px;">${esc(coupon.headline)}</div>` : '')
-    + `<div style="font-family:SFMono-Regular,Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:2px;color:#5b4bd6;">${esc(coupon.code)}</div>`
+    + `<div style="font-family:SFMono-Regular,Consolas,monospace;font-size:24px;font-weight:700;letter-spacing:2px;color:#2B7A8C;">${esc(coupon.code)}</div>`
     + (coupon.note ? `<div style="font-size:13px;color:#6b7280;padding-top:8px;">${esc(coupon.note)}</div>` : '')
     + '</td></tr></table></td></tr>' : '';
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">'
@@ -116,12 +117,12 @@ function buildOfferEmail({ subject, heading, content, imageUrl, coupon, origin, 
     + '<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;"><tr><td align="center">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:28px 28px 20px;">'
-    + '<tr><td style="font-size:15px;font-weight:700;color:#5b4bd6;letter-spacing:.2px;padding-bottom:18px;">CoRoute</td></tr>'
+    + brandHeaderRow(o)
     + (imageUrl ? `<tr><td style="padding-bottom:18px;"><img src="${esc(imageUrl)}" alt="" width="504" style="display:block;width:100%;max-width:504px;height:auto;border-radius:10px;"></td></tr>` : '')
     + `<tr><td style="font-size:22px;font-weight:700;color:#111827;padding-bottom:12px;">${esc(heading || subject)}</td></tr>`
     + `<tr><td style="font-size:15px;line-height:1.55;color:#3b4151;">${body.html}</td></tr>`
     + couponHtml
-    + `<tr><td style="padding:4px 0 10px;"><a href="${esc(ctaUrl)}" style="display:inline-block;background:#5b4bd6;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px;">${esc(ctaLabel)}</a></td></tr>`
+    + `<tr><td style="padding:4px 0 10px;"><a href="${esc(ctaUrl)}" style="display:inline-block;background:#2B7A8C;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px;">${esc(ctaLabel)}</a></td></tr>`
     + '<tr><td style="font-size:12px;line-height:1.5;color:#6b7280;padding-top:16px;border-top:1px solid #f0f1f3;">'
     + 'You get this e-mail because you turned on offer e-mails in your CoRoute account. '
     + `<a href="${esc(unsubscribeUrl)}" style="color:#6b7280;">Unsubscribe</a> · <a href="${esc(accountUrl)}" style="color:#6b7280;">Manage e-mails</a>`
@@ -534,7 +535,7 @@ const PAGE_HEADERS = { 'Cache-Control': 'no-store', 'Content-Security-Policy': "
 function page(title, bodyHtml) {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">'
     + `<title>${esc(title)} | CoRoute</title></head><body style="margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f4f5f7;color:#111827;">`
-    + `<main style="max-width:480px;margin:48px auto;background:#fff;border-radius:12px;padding:28px;"><p style="color:#5b4bd6;font-weight:700;margin:0 0 16px;">CoRoute</p>${bodyHtml}</main></body></html>`;
+    + `<main style="max-width:480px;margin:48px auto;background:#fff;border-radius:12px;padding:28px;"><p style="color:#2B7A8C;font-weight:700;margin:0 0 16px;">CoRoute</p>${bodyHtml}</main></body></html>`;
 }
 
 /**
@@ -551,7 +552,7 @@ function unsubscribeRouter({ offers }) {
     res.set(PAGE_HEADERS);
     if (!tokenOk(offers.secret, u, t)) return res.status(400).type('html').send(page('Link not valid', '<h1 style="font-size:20px;">This link is not valid</h1><p>Turn offer e-mails off on your account page at any time.</p>'));
     return res.type('html').send(page('Unsubscribe', '<h1 style="font-size:20px;">Stop offer e-mails?</h1><p>You will not get CoRoute offer e-mails any more. Receipts and safety messages are not affected.</p>'
-      + `<form method="post" action="/email/unsubscribe?u=${encodeURIComponent(u)}&amp;t=${encodeURIComponent(t)}${cid ? `&amp;cid=${cid}` : ''}"><button type="submit" style="background:#5b4bd6;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;">Unsubscribe</button></form>`));
+      + `<form method="post" action="/email/unsubscribe?u=${encodeURIComponent(u)}&amp;t=${encodeURIComponent(t)}${cid ? `&amp;cid=${cid}` : ''}"><button type="submit" style="background:#2B7A8C;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;">Unsubscribe</button></form>`));
   });
   r.post('/email/unsubscribe', limiter, express.urlencoded({ extended: false, limit: '2kb' }), async (req, res, next) => {
     try {

@@ -4,23 +4,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Privacy Policy | Coroute</title>
-  <meta name="description" content="What the Coroute app collects, why, how long it is kept and how to delete it. No ads, no data sales, no tracking SDKs.">
+  <title>Privacy Policy | CoRoute</title>
+  <meta name="description" content="What the CoRoute app collects, why, how long it is kept and how to delete it. No ads, no data sales, no tracking SDKs.">
   <link rel="canonical" href="__ORIGIN__/privacy">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Coroute">
-  <meta property="og:title" content="Privacy Policy | Coroute">
+  <meta property="og:site_name" content="CoRoute">
+  <meta property="og:title" content="Privacy Policy | CoRoute">
   <meta property="og:description"
-    content="What the Coroute app collects, why, how long it is kept and how to delete it. No ads, no data sales, no tracking SDKs.">
+    content="What the CoRoute app collects, why, how long it is kept and how to delete it. No ads, no data sales, no tracking SDKs.">
   <meta property="og:url" content="__ORIGIN__/privacy">
   <meta property="og:image" content="__ORIGIN__/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Privacy Policy | Coroute">
+  <meta name="twitter:title" content="Privacy Policy | CoRoute">
   <meta name="twitter:description"
-    content="What the Coroute app collects, why, how long it is kept and how to delete it. No ads, no data sales, no tracking SDKs.">
+    content="What the CoRoute app collects, why, how long it is kept and how to delete it. No ads, no data sales, no tracking SDKs.">
   <meta name="twitter:image" content="__ORIGIN__/og-image.png">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
@@ -163,7 +163,7 @@
         </details>
       </nav>
 
-      <article class="legal-doc" aria-label="Coroute Privacy Policy, full text" data-legal-text>
+      <article class="legal-doc" aria-label="CoRoute Privacy Policy, full text" data-legal-text>
         <div class="legal-intro">
           <p>CoRoute helps a group of riders stay together: it shows every member of your convoy on a map, lets you send
             quick status
@@ -634,12 +634,21 @@
         </section>
 
         <section class="legal-section" id="bluetooth" aria-labelledby="bluetooth-h">
-          <h2 id="bluetooth-h">Bluetooth and Offline Mesh Relay</h2>
-          <p>CoRoute utilizes Bluetooth Low Energy (BLE) strictly for offline peer-to-peer convoy coordination and
-            emergency failover. Outside of active offline convoy mesh relay, CoRoute does not use Bluetooth. Bluetooth
-            is never used for background tracking, advertising identifiers, or third-party beacons. BLE scanning and
-            broadcasting operate only while an active convoy is in progress and terminate automatically when the ride
-            ends.</p>
+          <h2 id="bluetooth-h">Bluetooth: offline link, rescue beacon and headsets</h2>
+          <p>CoRoute uses Bluetooth for three things, and only during a ride:</p>
+          <ul>
+            <li><b>Offline group link.</b> When the mobile signal drops, the phones of riders in the same ride connect
+              to each other over Bluetooth and pass on positions, alerts, SOS and voice. Messages are encrypted with a
+              key for that ride only; other phones cannot read them. It stops when the signal returns or the ride ends.</li>
+            <li><b>Rescue beacon.</b> After a crash with no response, or an SOS that stays unanswered, the rider's phone
+              sends a Bluetooth signal so the group's phones can tell how close they are. The signal carries a short
+              code for that alert, not your name or position. It stops when the alert is resolved.</li>
+            <li><b>Helmet headsets.</b> To use a Bluetooth helmet headset for the intercom and spoken alerts.</li>
+          </ul>
+          <p>CoRoute does not use Bluetooth to work out your location, for advertising, or outside a ride. On Android 12
+            and newer this is the "Nearby devices" permission; you can refuse it, and SOS by text message still works.</p>
+          <p>While a rescue is running, the phones of riders helping to find you briefly listen with the microphone for
+            the beacon's sound. This is processed on the phone and nothing is recorded or sent.</p>
         </section>
 
         <section class="legal-section" id="trip-reviews" aria-labelledby="trip-reviews-h">

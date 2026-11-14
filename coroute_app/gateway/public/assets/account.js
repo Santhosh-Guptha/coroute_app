@@ -617,7 +617,9 @@
   window.CoAvatar = { show: showAvatar };
 
   var editBtn = S.$('ac-photo-edit');
-  if (!dialog || !editBtn || typeof dialog.showModal !== 'function' || !window.createImageBitmap) return;
+  // Older browsers (Safari < 15.4: no <dialog>, no createImageBitmap) cannot run the photo editor: hide its button
+  // instead of showing one that does nothing. The picture itself still shows, and the app can change it.
+  if (!dialog || !editBtn || typeof dialog.showModal !== 'function' || !window.createImageBitmap) { if (editBtn) editBtn.hidden = true; return; }
   var canvas = S.$('ac-crop-canvas'), ctx = canvas.getContext('2d');
   var zoomInput = S.$('ac-crop-zoom'), fileInput = S.$('ac-crop-file'), msg = S.$('ac-crop-msg'), help = S.$('ac-crop-help');
   var saveBtn = S.$('ac-crop-save'), removeBtn = S.$('ac-crop-remove'), emptyNote = S.$('ac-crop-empty');

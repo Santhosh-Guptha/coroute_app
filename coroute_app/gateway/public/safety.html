@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Motorcycle crash detection and SOS for group rides | Coroute</title>
+<title>Motorcycle crash detection and SOS for group rides | CoRoute</title>
 <meta name="description" content="How CoRoute looks after riders on long trips: crash detection with a 30-second check, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <link rel="canonical" href="__ORIGIN__/safety">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="CoRoute">
-<meta property="og:title" content="Motorcycle crash detection and SOS for group rides | Coroute">
+<meta property="og:title" content="Motorcycle crash detection and SOS for group rides | CoRoute">
 <meta property="og:description" content="How CoRoute looks after riders on long trips: crash detection with a 30-second check, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <meta property="og:url" content="__ORIGIN__/safety">
 <meta property="og:image" content="__ORIGIN__/og-image.png">
@@ -16,7 +16,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Motorcycle crash detection and SOS for group rides | Coroute">
+<meta name="twitter:title" content="Motorcycle crash detection and SOS for group rides | CoRoute">
 <meta name="twitter:description" content="How CoRoute looks after riders on long trips: crash detection with a 30-second check, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
@@ -46,6 +46,8 @@
         <nav class="pg-jump" aria-label="On this page">
           <a href="#crash">Crash</a>
           <a href="#sos">Who is told</a>
+          <a href="#rescue">Rescue finder</a>
+          <a href="#offline-link">No signal</a>
           <a href="#guardian">Guardians</a>
           <a href="#false-alarms">False alarms</a>
         </nav>
@@ -70,6 +72,10 @@
         <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg><h3>5. A text, if there is no internet</h3><p>If the alert cannot go over the internet, CoRoute opens a ready-to-send text with your location to your emergency contact, from your own SIM.</p></li>
         <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-heart"/></svg><h3>6. Hospital and resolution</h3><p>The alert can show the nearest hospital from OpenStreetMap. When the situation is handled, marking it resolved tells everyone who was alerted.</p></li>
       </ol>
+      <div class="pg-shots-row">
+        <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/crash-320.avif 320w, /assets/screens/crash-480.avif 480w, /assets/screens/crash-636.avif 636w" sizes="(min-width: 600px) 230px, 62vw"><source type="image/webp" srcset="/assets/screens/crash-320.webp 320w, /assets/screens/crash-480.webp 480w, /assets/screens/crash-636.webp 636w" sizes="(min-width: 600px) 230px, 62vw"><img src="/assets/screens/crash-480.png" width="636" height="1386" alt="CoRoute crash check: Are you OK? 24 seconds left; if you don't answer, SOS reaches family by SMS and your group" loading="lazy" decoding="async"></picture></div><figcaption>The 30-second check, over the lock screen.</figcaption></figure>
+        <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/sos-320.avif 320w, /assets/screens/sos-480.avif 480w, /assets/screens/sos-636.avif 636w" sizes="(min-width: 600px) 230px, 62vw"><source type="image/webp" srcset="/assets/screens/sos-320.webp 320w, /assets/screens/sos-480.webp 480w, /assets/screens/sos-636.webp 636w" sizes="(min-width: 600px) 230px, 62vw"><img src="/assets/screens/sos-480.png" width="636" height="1386" alt="CoRoute SOS sent: SMS to family with no data, the group alerted, a live link, the rescue beacon and Call 112" loading="lazy" decoding="async"></picture></div><figcaption>No answer: who was told, the beacon, Call 112.</figcaption></figure>
+      </div>
     </div>
   </section>
 
@@ -86,10 +92,45 @@
         <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Your guardians</h3><p>Family members you added get a notification and can follow on their private link.</p></li>
         <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div><h3>Emergency contact by text</h3><p>When the internet is down, a ready-to-send text with your location, from your own SIM.</p></li>
         <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></div><h3>Nearby riders</h3><p>Riders of other CoRoute groups already on your road. Always on. See below.</p></li>
-        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mesh"/></svg></div><h3>No network at all</h3><p>Group phones on a shared hotspot pass the SOS along, phone to phone, until one of them gets through.</p></li>
+        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mesh"/></svg></div><h3>No network at all</h3><p>The group's phones pass the SOS along, phone to phone over Bluetooth or a shared hotspot, a few hundred metres per hop, until one of them gets through.</p></li>
         <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div><h3>A text from our server</h3><p>Once the SOS reaches us, by any route, our server texts your emergency contacts if your phone could not, and again when you are safe.</p></li>
         <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-siren"/></svg></div><h3>Sirens, even in earbuds</h3><p>During a ride the phone listens for ambulance, police and fire sirens and tells riders who cannot hear outside to give way. Nothing is recorded.</p></li>
       </ul>
+    </div>
+  </section>
+
+  <!-- Round 12: rescue beacon and finder (docs/features_355/rescue_beacon.md: honest ranges) -->
+  <section class="section section--surface" id="rescue" aria-labelledby="rescue-title">
+    <div class="container pg-split">
+      <div>
+        <div class="hm-head">
+          <p class="eyebrow eyebrow--safety">Rescue beacon and finder</p>
+          <h2 id="rescue-title">When the map pin is not enough.</h2>
+          <p>A rider who has gone off the road can be metres away and still out of sight. After an unanswered crash alarm, the rider's phone starts the rescue beacon: a siren that gets louder, and a locator signal other phones can pick up. Riders who come to help tap Find and follow a hotter or colder meter.</p>
+        </div>
+        <dl class="hm-facts">
+          <div><dt>GPS and the route</dt><dd>Bring helpers close<span>The long distance is covered by the shared position.</span></dd></div>
+          <div><dt>Bluetooth signal</dt><dd>Roughly 30 to 100 m<span>Bodies, bikes and trees shorten it.</span></dd></div>
+          <div><dt>Siren and locator sound</dt><dd>Tens of metres<span>Clearer in a quiet forest than beside a highway.</span></dd></div>
+        </dl>
+        <p class="t-small t-muted" style="margin-top:var(--sp-16)">The finder helps riders find you in the last stretch. Its distances are estimates from signal strength, never exact, and it works only when the helpers have CoRoute open.</p>
+      </div>
+      <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/finder-320.avif 320w, /assets/screens/finder-480.avif 480w, /assets/screens/finder-636.avif 636w" sizes="(min-width: 600px) 260px, 62vw"><source type="image/webp" srcset="/assets/screens/finder-320.webp 320w, /assets/screens/finder-480.webp 480w, /assets/screens/finder-636.webp 636w" sizes="(min-width: 600px) 260px, 62vw"><img src="/assets/screens/finder-480.png" width="636" height="1386" alt="CoRoute Find Ravi: a colder to hotter meter at about 30 m, estimated, with Bluetooth and locator sound meters" loading="lazy" decoding="async"></picture></div><figcaption>Find Ravi: the meter rises as you get closer.</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- Round 12: offline link (docs/features_355/offline_long_range_link.md: per-hop range) -->
+  <section class="section" id="offline-link" aria-labelledby="offline-title">
+    <div class="container pg-split pg-split--rev">
+      <div>
+        <div class="hm-head">
+          <p class="eyebrow">Offline link</p>
+          <h2 id="offline-title">No signal in the forest. The group still talks.</h2>
+          <p>When the mobile network drops, the group's phones pass messages along, a few hundred metres per hop: positions, alerts, short messages and an SOS. A group riding close together forms a chain; two riders far apart with nobody between them are not linked. As soon as one phone finds signal again, it sends the group's updates on.</p>
+        </div>
+        <div class="chip-row"><span class="chip chip--warn">Offline link: 5 riders, 2 hops</span><span class="chip">No extra hardware</span><span class="chip">Needs Nearby devices permission</span></div>
+      </div>
+      <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/offline-320.avif 320w, /assets/screens/offline-480.avif 480w, /assets/screens/offline-636.avif 636w" sizes="(min-width: 600px) 260px, 62vw"><source type="image/webp" srcset="/assets/screens/offline-320.webp 320w, /assets/screens/offline-480.webp 480w, /assets/screens/offline-636.webp 636w" sizes="(min-width: 600px) 260px, 62vw"><img src="/assets/screens/offline-480.png" width="636" height="1386" alt="CoRoute map with no mobile signal: Offline link, 5 riders, 2 hops; phones pass messages a few hundred metres per hop" loading="lazy" decoding="async"></picture></div><figcaption>The chip shows how many riders and hops the link reaches.</figcaption></figure>
     </div>
   </section>
 
@@ -144,7 +185,7 @@
       <div class="hm-head">
         <p class="cluster cluster--8"><span class="eyebrow">CoRoute safety network</span><span class="badge badge--new">New in 3.15</span></p>
         <h2 id="nearby-title">What if another rider can reach you first?</h2>
-        <p>Nearby help works only when other Coroute groups are riding on the same road at that moment. On many roads there will be nobody. Do not count on it.</p>
+        <p>Nearby help works only when other CoRoute groups are riding on the same road at that moment. On many roads there will be nobody. Do not count on it.</p>
       </div>
       <dl class="hm-facts">
         <div><dt>Before they agree</dt><dd>They see only the road and the distance<span>No name, no exact position, no group details.</span></dd></div>
@@ -191,7 +232,7 @@
         <p>Cancel during the countdown and nothing goes out. If an alarm did go out, mark it resolved and everyone who was told sees that. Speed warnings and accident warnings from other groups are advisory only.</p>
       </div>
       <div class="hm-notice">
-        <strong>Coroute complements emergency services. It does not replace them.</strong> In an emergency in India, call 112. Elsewhere, call your local emergency number. Coroute cannot promise that anyone will respond.
+        <strong>CoRoute complements emergency services. It does not replace them.</strong> In an emergency in India, call 112. Elsewhere, call your local emergency number. CoRoute cannot promise that anyone will respond.
       </div>
     </div>
   </section>

@@ -11,7 +11,7 @@ self.addEventListener('push', (event) => {
 });
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const candidate = event.notification.data?.url;
+  const candidate = event.notification.data && event.notification.data.url;
   const url = typeof candidate === 'string' && /^\/watch#ticket=[A-Za-z0-9_-]{32}$/.test(candidate) ? candidate : '/watch';
   event.waitUntil(self.clients.openWindow(url));
 });

@@ -111,6 +111,8 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | PATCH | /api/me/privacy | social_routes.js | database |
 | WEB | * | /api/me/avatar/* | social_routes.js, avatars.js | profile picture: upload, original, crop, delete (database / object storage) |
 | WEB | GET | /api/avatars/:avatarId | social_routes.js | profile picture bytes |
+| WEB | * | /api/me/cover/* | social_routes.js, covers.js | v3.58 profile cover photo: upload, private original, delete (database / object storage) |
+| WEB | GET | /api/covers/:coverId | social_routes.js | v3.58 cover photo bytes |
 | WEB | GET | /api/users/* | social_routes.js | username check, search, public profile (database) |
 | WEB | * | /api/friends/* | social_routes.js | friends, requests, suggestions (database; `hub.sendToUser` notices are relayed to VM1 by the mirror) |
 | WEB | * | /api/blocks/* | social_routes.js | blocks (database) |

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Join ride __CODE__ | Coroute</title>
-<meta name="description" content="You are invited to a Coroute group ride. Open the app to join with code __CODE__.">
+<title>Join ride __CODE__ | CoRoute</title>
+<meta name="description" content="You are invited to a CoRoute group ride. Open the app to join with code __CODE__.">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
 <meta name="color-scheme" content="light dark">
@@ -17,9 +17,10 @@
 <script src="/assets/theme-init.js"></script>
 <script src="/assets/site.js" defer></script>
 <style>
-  .invite{min-height:calc(100svh - var(--header-h));display:flex;align-items:center;padding-block:clamp(24px,4vw,48px) calc(clamp(96px,13vw,190px) + 16px);isolation:isolate;background:radial-gradient(900px 380px at 85% -10%,var(--c-brand-light),transparent 70%),linear-gradient(180deg,var(--c-surface) 0%,var(--c-sky) 62%,var(--c-bg) 100%)}
+  .invite{/* compat */min-height:calc(100vh - var(--header-h));min-height:calc(100svh - var(--header-h));display:flex;align-items:center;/* compat */padding-top:24px;/* compat */padding-bottom:calc((96px) + 16px);padding-block:clamp(24px,4vw,48px) calc(clamp(96px,13vw,190px) + 16px);isolation:isolate;background:radial-gradient(900px 380px at 85% -10%,var(--c-brand-light),transparent 70%),linear-gradient(180deg,var(--c-surface) 0%,var(--c-sky) 62%,var(--c-bg) 100%)}
   .invite > .container{position:relative;z-index:1}
-  .invite__card{position:relative;overflow:hidden;max-width:560px;margin-inline:auto;background:var(--c-surface-1);border:var(--border);border-radius:var(--r-sheet);box-shadow:var(--shadow-lg);padding:clamp(24px,4vw,40px);display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--sp-16)}
+  .invite__card{position:relative;overflow:hidden;max-width:560px;/* compat */margin-left:auto;/* compat */margin-right:auto;margin-inline:auto;background:var(--c-surface-1);border:var(--border);border-radius:var(--r-sheet);box-shadow:var(--shadow-lg);/* compat */padding:24px;padding:clamp(24px,4vw,40px);display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--sp-16)}
+  .no-flexgap .invite__card > * + *{/* compat:generated */margin-top:var(--sp-16)}
   .invite__route{width:100%;max-width:300px;height:56px;margin-bottom:var(--sp-4)}
   .invite__route .road{stroke-width:12}
   .invite__route .road__edge{stroke-width:14}
@@ -27,14 +28,17 @@
   .invite__rider--lead{fill:var(--c-amber)}
   .invite__rider--member{fill:var(--c-text)}
   .invite__rider--you{fill:var(--c-surface-1);stroke:var(--c-accent);stroke-width:3;stroke-dasharray:4 4}
-  .invite h1{font-size:clamp(2.25rem,1.6rem + 2.8vw,3.5rem);line-height:var(--lh-display);letter-spacing:var(--tr-display)}
+  .invite h1{/* compat */font-size:2.25rem;font-size:clamp(2.25rem,1.6rem + 2.8vw,3.5rem);line-height:var(--lh-display);letter-spacing:var(--tr-display)}
   .invite__lead{color:var(--c-text-2);font-size:var(--fs-lead);max-width:26em}
   .invite__code{margin:var(--sp-8) 0;display:flex;flex-direction:column;align-items:center;gap:var(--sp-8);width:100%}
+  .no-flexgap .invite__code > * + *{/* compat:generated */margin-top:var(--sp-8)}
   .invite__code-label{color:var(--c-text-3)}
-  .invite__code-value{font-family:var(--font-display);font-weight:700;font-variant-numeric:tabular-nums;font-size:clamp(2.75rem,10vw,4.5rem);line-height:1;letter-spacing:.16em;padding:var(--sp-16) var(--sp-24) var(--sp-16) calc(var(--sp-24) + .16em);border:var(--border-strong);border-radius:var(--r-md);background:var(--c-asphalt);color:var(--c-text);max-width:100%;overflow-wrap:anywhere}
+  .invite__code-value{font-family:var(--font-display);font-weight:700;font-variant-numeric:tabular-nums;/* compat */font-size:2.75rem;font-size:clamp(2.75rem,10vw,4.5rem);line-height:1;letter-spacing:.16em;padding:var(--sp-16) var(--sp-24) var(--sp-16) calc(var(--sp-24) + .16em);border:var(--border-strong);border-radius:var(--r-md);background:var(--c-asphalt);color:var(--c-text);max-width:100%;overflow-wrap:anywhere}
   .invite__actions{display:flex;flex-direction:column;gap:var(--sp-12);width:100%;max-width:360px;margin-top:var(--sp-8)}
+  .no-flexgap .invite__actions > * + *{/* compat:generated */margin-top:var(--sp-12)}
   .invite__fallback{font-size:var(--fs-small);color:var(--c-text-2)}
   .invite__note{display:flex;gap:var(--sp-12);align-items:flex-start;text-align:left;margin-top:var(--sp-16);padding-top:var(--sp-16);border-top:var(--border);width:100%;font-size:var(--fs-small);color:var(--c-text-3)}
+  .no-flexgap .invite__note > * + *{/* compat:generated */margin-left:var(--sp-12)}
   .invite__note .icon{width:18px;height:18px;color:var(--c-green);margin-top:2px}
 </style>
 </head>
@@ -55,15 +59,15 @@
         </svg>
         <p class="eyebrow eyebrow--plain">Ride invite</p>
         <h1 id="invite-title">You're invited to a ride</h1>
-        <p class="invite__lead">Open Coroute and the code is entered for you.</p>
+        <p class="invite__lead">Open CoRoute and the code is entered for you.</p>
         <div class="invite__code">
           <p class="t-label invite__code-label" id="code-label">Join code</p>
           <p class="invite__code-value">__CODE__</p>
         </div>
         <div class="invite__actions">
-          <a class="btn btn--primary btn--lg btn--block" href="coroute://join/__CODE__" data-no-transition>Open in Coroute</a>
+          <a class="btn btn--primary btn--lg btn--block" href="coroute://join/__CODE__" data-no-transition>Open in CoRoute</a>
           <a class="btn btn--secondary btn--lg btn--block" href="/get">Get the app</a>
-          <p class="invite__fallback">Coroute is free for Android. <a class="link" href="/download">Download the app directly</a>, then open this link again.</p>
+          <p class="invite__fallback">CoRoute is free for Android. <a class="link" href="/download">Download the app directly</a>, then open this link again.</p>
         </div>
         <p class="invite__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg><span>While you ride in this group, your position is shared with its members so everyone stays together. Read the <a class="link" href="/privacy">privacy policy</a>.</span></p>
       </div>

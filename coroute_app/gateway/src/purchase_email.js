@@ -22,6 +22,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { validEmail } = require('./mailer');
+const { brandHeaderRow } = require('./email_brand');
 
 const COLLECTION = 'mail_log';
 const MAX_ATTEMPTS = 3;
@@ -44,19 +45,19 @@ function istDate(ms, time = true) {
 const maskEmail = (e) => String(e || '').replace(/^(.).*?(@.*)$/, '$1***$2');
 
 /** The branded, calm HTML e-mail around the template words and the payment lines. */
-function layoutHtml({ heading, intro, rows = [], totalLabel, totalValue, details = [], buttonUrl, buttonLabel, footer }) {
+function layoutHtml({ heading, intro, rows = [], totalLabel, totalValue, details = [], buttonUrl, buttonLabel, footer, origin = '' }) {
   const para = (t) => esc(t).replace(/\n/g, '<br>');
   const row = (l, v, strong) => `<tr><td style="padding:8px 0;color:#3b4151;${strong ? 'font-weight:700;color:#111827;' : ''}">${esc(l)}</td><td style="padding:8px 0;text-align:right;white-space:nowrap;${strong ? 'font-weight:700;color:#111827;' : 'color:#3b4151;'}">${esc(v)}</td></tr>`;
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>CoRoute</title></head>'
     + '<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;"><tr><td align="center">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:28px 28px 20px;">'
-    + '<tr><td style="font-size:15px;font-weight:700;color:#5b4bd6;letter-spacing:.2px;padding-bottom:18px;">CoRoute</td></tr>'
+    + brandHeaderRow(origin)
     + `<tr><td style="font-size:22px;font-weight:700;color:#111827;padding-bottom:10px;">${esc(heading)}</td></tr>`
     + `<tr><td style="font-size:15px;line-height:1.55;color:#3b4151;padding-bottom:18px;">${para(intro)}</td></tr>`
     + (rows.length || totalLabel ? `<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">${rows.map((r) => row(r[0], r[1])).join('')}${totalLabel ? row(totalLabel, totalValue, true) : ''}</table></td></tr>` : '')
     + (details.length ? `<tr><td style="padding-top:14px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#6b7280;">${details.map((d) => `<tr><td style="padding:3px 0;">${esc(d[0])}</td><td style="padding:3px 0;text-align:right;word-break:break-all;">${esc(d[1])}</td></tr>`).join('')}</table></td></tr>` : '')
-    + (buttonUrl ? `<tr><td style="padding:22px 0 6px;"><a href="${esc(buttonUrl)}" style="display:inline-block;background:#5b4bd6;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px;">${esc(buttonLabel || 'View receipt')}</a></td></tr>` : '')
+    + (buttonUrl ? `<tr><td style="padding:22px 0 6px;"><a href="${esc(buttonUrl)}" style="display:inline-block;background:#2B7A8C;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px;">${esc(buttonLabel || 'View receipt')}</a></td></tr>` : '')
     + `<tr><td style="font-size:13px;line-height:1.5;color:#6b7280;padding-top:16px;border-top:1px solid #f0f1f3;margin-top:12px;">${para(footer)}</td></tr>`
     + '</table><p style="font-size:12px;color:#9ca3af;margin:14px 0 0;">CoRoute ride safety. You get this e-mail because of a payment on your CoRoute account.</p>'
     + '</td></tr></table></body></html>';
@@ -179,7 +180,7 @@ class PurchaseEmail {
     const rows = rc.lines.filter((l) => !/^to pay now$/i.test(l.label)).map((l) => [l.label, inr(l.amountInr)]);
     const details = [['Plan', rc.planName], period ? ['Period', period] : null, ['Payment id', rc.paymentId || '-'], ['Order id', rc.orderId],
       ['Receipt no.', rc.receiptNo], ['Date', vars.date], ['Paid with', String(rc.method || '').toUpperCase() === 'RAZORPAY' ? 'Razorpay' : String(rc.method || '-')]].filter(Boolean);
-    const parts = { heading: t.heading, intro: t.intro, rows, totalLabel: 'Amount charged', totalValue: inr(rc.amountInr), details, buttonUrl: receiptUrl, buttonLabel: 'View receipt', footer: t.footer };
+    const parts = { heading: t.heading, intro: t.intro, rows, totalLabel: 'Amount charged', totalValue: inr(rc.amountInr), details, buttonUrl: receiptUrl, buttonLabel: 'View receipt', footer: t.footer, origin: this.origin() };
     return { subject: t.subject, html: layoutHtml(parts), text: layoutText(parts) };
   }
 
@@ -192,7 +193,7 @@ class PurchaseEmail {
     const rows = [['Paid', inr(rc.amountInr)]];
     const details = [['Plan', rc.planName], ['Payment id', vars.paymentId], ['Order id', rc.orderId], ['Refund id', vars.refundId], ['Date', vars.date],
       ['Status', order.fullyRefunded ? 'Full refund' : 'Part refund']];
-    const parts = { heading: t.heading, intro: t.intro, rows, totalLabel: 'Refunded', totalValue: inr(refunded), details, buttonUrl: receiptUrl, buttonLabel: 'View receipt', footer: t.footer };
+    const parts = { heading: t.heading, intro: t.intro, rows, totalLabel: 'Refunded', totalValue: inr(refunded), details, buttonUrl: receiptUrl, buttonLabel: 'View receipt', footer: t.footer, origin: this.origin() };
     return { subject: t.subject, html: layoutHtml(parts), text: layoutText(parts) };
   }
 

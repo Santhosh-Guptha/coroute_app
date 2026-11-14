@@ -35,7 +35,7 @@
   <script src="/assets/site.js" defer></script>
   <script src="/assets/home.js" defer></script>
   <script src="/assets/board.js" defer></script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CoRoute","operatingSystem":"Android 7.0 or newer","applicationCategory":"TravelApplication","applicationSubCategory":"Motorcycle riding safety","description":"Safety-first app for group and solo motorcycle riders: crash detection with a 30-second check, SOS that works without signal (SMS, phone to phone over a shared hotspot, server SMS to contacts), siren alerts for riders wearing earbuds, a live hands-free intercom, guardian live links with no app needed, live group map with lead and sweeper roles, trip reports.","featureList":["Crash detection with a 30-second check","SOS without mobile data","Emergency vehicle siren alerts","Live push-to-talk and hands-free intercom","Guardian live link in any browser","Live group map with lead and sweeper roles","Medical ID on the lock screen","Offline maps","Trip reports and replay"],"url":"__ORIGIN__/","downloadUrl":"__ORIGIN__/get","screenshot":"__ORIGIN__/og-image.png","publisher":{"@type":"Organization","name":"DevMonks"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CoRoute","operatingSystem":"Android 7.0 or newer","applicationCategory":"TravelApplication","applicationSubCategory":"Motorcycle riding safety","description":"Safety-first app for group and solo motorcycle riders: crash detection with a 30-second check, SOS that works without signal (SMS, phone to phone through the group, server SMS to contacts), a rescue beacon and finder for the last stretch, curve and speed-limit warnings, siren alerts for riders wearing earbuds, a live hands-free intercom with noise reduction, guardian live links with no app needed, live group map with lead and sweeper roles, trip reports.","featureList":["Crash detection with a 30-second check","SOS without mobile data","Offline link: the group's phones pass messages along, a few hundred metres per hop","Rescue beacon and finder for the last stretch","Curve warnings and speed limits (estimates marked est.)","Emergency vehicle siren alerts","Live push-to-talk and hands-free intercom with noise reduction","Guardian live link in any browser","Live group map with lead and sweeper roles","Ride stats: speed against the limit, distance by speed","Medical ID on the lock screen","Offline maps","Trip reports, ride summary e-mail and replay"],"url":"__ORIGIN__/","downloadUrl":"__ORIGIN__/get","screenshot":"__ORIGIN__/og-image.png","publisher":{"@type":"Organization","name":"DevMonks"}}</script>
 </head>
 <body data-page="home">
   <!--#include header-->
@@ -81,6 +81,121 @@
       </div>
     </section>
 
+    <!-- Round 12: "A ride with CoRoute", the scroll story. The text is here; assets/story.js (loaded by home.js as
+         the section comes near) draws the visuals: one sticky stage when motion is allowed, a static frame per chapter
+         with reduced motion. Without JavaScript each chapter shows a saved frame (/assets/story/*.svg). Fictional
+         crew, real features. Editing: docs/quality/ROUND12_WEBSITE_NOTES.md, section 3. -->
+    <section class="section st" id="story" aria-labelledby="story-title" data-story data-src="/assets/story.js">
+      <div class="container">
+        <div class="hp-head st__head">
+          <p class="eyebrow">A ride with CoRoute</p>
+          <h2 id="story-title">One Sunday, six riders, seven moments.</h2>
+          <p>Meera, Imran, Kiran, Asha, Dev and Ravi ride as the Sunday Sunrise Crew. They are made up; everything the app does for them is real. Scroll along.</p>
+          <a class="st__skip link-arrow" href="#standout">Skip the story<svg aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+        <div class="st__grid">
+          <div class="st__stage" aria-hidden="true">
+            <div class="st__stage-in" data-story-stage></div>
+            <ol class="st__dots"><li class="is-on"></li><li></li><li></li><li></li><li></li><li></li><li></li></ol>
+          </div>
+          <ol class="st__steps" role="list">
+            <li class="st__step" id="story-plan" data-scene="plan">
+              <div class="st__card">
+                <p class="st__when">Chapter 1 <span>Friday, 9 pm</span></p>
+                <h3>Planning the Sunday ride</h3>
+                <p>Meera opens a poll in the crew: Sunday at 5:30 am, or Saturday? Five of six pick Sunday. She plans the route up to the ghat with a fuel stop and a breakfast stop, and the ride gets its join code.</p>
+                <p>Before they leave, every phone runs the pre-ride check: location allowed all the time, battery, an emergency contact, and Nearby devices for SOS without signal.</p>
+              </div>
+              <figure class="st__fig" data-frame="plan" data-p="1">
+                <div class="st__box"><noscript><img src="/assets/story/plan.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: a map with the route drawn from home past a fuel stop and a breakfast stop to the ghat; a crew poll with five votes for Sunday and one for Saturday; six rider avatars; and a pre-ride check with location, battery, emergency contact and Nearby devices ticked.</figcaption>
+              </figure>
+            </li>
+            <li class="st__step" id="story-roll" data-scene="roll">
+              <div class="st__card">
+                <p class="st__when">Chapter 2 <span>Sunday, 5:40 am</span></p>
+                <h3>Rolling out together</h3>
+                <p>Six riders on one live map. Meera rides lead, Imran sweeps at the back, and everyone can see who is where without a phone call.</p>
+                <p>The intercom is hands-free. Noise reduction takes the wind and the engine out, so "fuel in 10 km" is heard the first time. Voice goes live to the group and nothing is recorded.</p>
+              </div>
+              <figure class="st__fig" data-frame="roll" data-p="0.8">
+                <div class="st__box"><noscript><img src="/assets/story/roll.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: six riders moving along a road on a live map, the lead marked Lead and the last rider marked Sweep, with an intercom card whose voice waveform turns clean when noise reduction is on.</figcaption>
+              </figure>
+            </li>
+            <li class="st__step" id="story-ghat" data-scene="ghat">
+              <div class="st__card">
+                <p class="st__when">Chapter 3 <span>6:50 am, on the ghat</span></p>
+                <h3>Bends, limits and a hazard ahead</h3>
+                <p>The road climbs in hairpins. Before each tight bend Asha hears it coming: "Hairpin right, comfortable 25". The speed limit stays in view; where no limit is posted, the estimate is marked est. and is never spoken.</p>
+                <p>A rider earlier reported gravel two bends up, so the warning comes before the corner, not in it.</p>
+              </div>
+              <figure class="st__fig" data-frame="ghat" data-p="0.7">
+                <div class="st__box"><noscript><img src="/assets/story/ghat.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: a switchback road with a rider climbing it; a warning card reads Hairpin right, comfortable speed 25, in 300 metres; a round speed sign shows about 40, marked est.; a hazard triangle further up reads Gravel reported.</figcaption>
+              </figure>
+            </li>
+            <li class="st__step" id="story-forest" data-scene="forest">
+              <div class="st__card">
+                <p class="st__when">Chapter 4 <span>7:30 am, in the forest</span></p>
+                <h3>The signal drops. The group still talks.</h3>
+                <p>Under the trees the bars go to zero. The offline link takes over: the group's phones pass messages along, a few hundred metres per hop.</p>
+                <p>Imran's "Fuel stop after the bridge" reaches Meera at the front through Asha, Dev and Kiran. The closer the group rides, the better it works. As soon as one phone finds signal, it sends the group's updates on.</p>
+              </div>
+              <figure class="st__fig" data-frame="forest" data-p="1">
+                <div class="st__box"><noscript><img src="/assets/story/forest.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: five riders on a forest road with no mobile signal, linked bike to bike by arcs of about 300 metres each; a message from the sweep at the back hops along the chain to the lead at the front.</figcaption>
+              </figure>
+            </li>
+            <li class="st__step" id="story-behind" data-scene="behind">
+              <div class="st__card">
+                <p class="st__when">Chapter 5 <span>8:10 am</span></p>
+                <h3>A rider falls behind</h3>
+                <p>Kiran stops for a photo and the gap grows. At about a kilometre the sweep and the lead are told, quietly, and the app suggests a regroup point: the fuel stop ahead.</p>
+                <p>Everyone meets there. Nobody is quietly dropped.</p>
+              </div>
+              <figure class="st__fig" data-frame="behind" data-p="0.62">
+                <div class="st__box"><noscript><img src="/assets/story/behind.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: the group riding ahead while Kiran falls 1.2 kilometres behind; an alert reads Kiran is falling behind, sweep and lead told; a pin marks the regroup point at the fuel stop.</figcaption>
+              </figure>
+            </li>
+            <li class="st__step st__step--long" id="story-crash" data-scene="crash">
+              <div class="st__card">
+                <p class="st__when">Chapter 6 <span>10:05 am, after breakfast</span></p>
+                <h3>The crash</h3>
+                <p>On a wet bend Ravi slides off the road into the trees, out of sight of the others. His phone notices the hard fall and asks "Are you OK?" for 30 seconds. No answer.</p>
+                <p>The SOS goes out: an SMS from his phone to his family contact, which needs no mobile data; an alert to the group, through the server and the offline link; and a live link his family can follow. The rescue beacon starts a siren that gets louder.</p>
+                <h4 class="st__sub">Find Ravi</h4>
+                <p>The crew turns back. GPS gets them close. In the last stretch, where a map pin is not enough, "Find Ravi" guides them with a hotter or colder meter from his phone's Bluetooth signal and the locator sound. They reach him, call 112 and stay with him.</p>
+                <p class="st__note">CoRoute adds to emergency services; it does not replace them. Beacon ranges are short and depend on the place: the siren carries tens of metres, Bluetooth roughly 30 to 100 m.</p>
+              </div>
+              <figure class="st__fig" data-frame="crash" data-p="0.42">
+                <div class="st__box"><noscript><img src="/assets/story/crash.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: a 30-second Are you OK countdown that reaches zero with no answer; SOS ripples spread from Ravi's position off the road, to an SMS for his family, an alert to the group and a live link.</figcaption>
+              </figure>
+              <figure class="st__fig" data-frame="crash" data-p="1">
+                <div class="st__box"><noscript><img src="/assets/story/finder.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Illustration: the Find Ravi screen, a colder to hotter meter close to hotter, an estimated distance of about 8 metres, and the note: found, call 112 and stay with him.</figcaption>
+              </figure>
+            </li>
+            <li class="st__step" id="story-home" data-scene="home">
+              <div class="st__card">
+                <p class="st__when">Chapter 7 <span>Evening</span></p>
+                <h3>Everyone home</h3>
+                <p>Ravi is fine: a sprained wrist and a scratched tank. By evening the whole crew is home. The trip report shows the day: the distance, the moving time, the stops and the speed against the group limit. A ride summary arrives by e-mail.</p>
+                <p>And Ravi's family had followed the live link all day, in a browser, with no app.</p>
+              </div>
+              <figure class="st__fig" data-frame="home" data-p="1">
+                <div class="st__box"><noscript><img src="/assets/story/home.svg" width="480" height="400" alt="" loading="lazy" decoding="async"></noscript></div>
+                <figcaption class="sr-only">Chart from the example trip report: speed over the ride in kilometres per hour across 128 km, mostly between 30 and 60, briefly just over the dashed group limit of 60; tiles for 128 km, 3 h 42 m moving and 3 stops; ride summary e-mailed; family followed the live link.</figcaption>
+              </figure>
+            </li>
+          </ol>
+        </div>
+        <p class="st__end">Ride together. Stay safe. <a class="link" href="/features">See every feature</a></p>
+      </div>
+    </section>
+
     <!-- What sets CoRoute apart: six true differentiators (docs/COMPETITOR_ANALYSIS_2026-11.md, section 5) -->
     <section class="section sx" id="standout" aria-labelledby="standout-title">
       <div class="container">
@@ -98,7 +213,7 @@
           <li class="sx-card sx-card--sos" data-reveal>
             <span class="fx-card__icon fx-card__icon--sos"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></span>
             <h3>SOS that works without signal</h3>
-            <p>No mobile data? Your phone texts your location by SMS. No network at all? Group phones on a shared hotspot pass the SOS along, phone to phone, until one gets through. Once it reaches us, our server also texts your emergency contacts.</p>
+            <p>No mobile data? Your phone texts your location by SMS. No network at all? The group's phones pass the SOS along, phone to phone over Bluetooth or a shared hotspot, a few hundred metres per hop, until one gets through. Once it reaches us, our server also texts your emergency contacts.</p>
           </li>
           <li class="sx-card sx-card--amber" data-reveal>
             <span class="fx-card__icon fx-card__icon--amber"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-siren"/></svg></span>

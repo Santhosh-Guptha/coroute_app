@@ -35,7 +35,7 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   assert.equal(nf.status, 404);
   assert.match(nf.headers.get('content-type'), /text\/html/);
   const nfHtml = await nf.text();
-  assert.ok(nfHtml.includes('Back to Coroute'));
+  assert.ok(nfHtml.includes('Back to CoRoute'));
   assert.ok(nfHtml.includes('class="site-header"') && !nfHtml.includes('<!--#include'), '404 uses the shared shell');
   const apiNf = await fetch(base + '/api/nope');
   assert.ok([401, 404].includes(apiNf.status)); // unknown API paths never return HTML
@@ -141,7 +141,7 @@ test('site pages: shared shell, unique head tags, active nav, no placeholders le
       // Count nav items only: the legal pages also mark their own tab in the Privacy / Terms switch.
       assert.equal((html.match(/data-nav="[^"]+" aria-current="page"/g) || []).length, 2, `${p}: only its own nav items are current`);
     }
-    assert.ok(html.includes('&copy; 2026 Coroute') && html.includes('openstreetmap.org/copyright'), `${p}: footer`);
+    assert.ok(html.includes('&copy; 2026 CoRoute') && html.includes('openstreetmap.org/copyright'), `${p}: footer`);
   }
   // .html aliases render the same page; the join page uses the shell too.
   assert.equal((await fetch(base + '/features.html')).status, 200);
@@ -277,7 +277,7 @@ test('product pages: shared page styles, real content anchors and honest safety 
   assert.equal(sprite.status, 200);
   const pages = {
     '/features': ['id="safety"', 'id="group"', 'id="talk"', 'id="community"', 'id="trips"', 'id="clubs"', 'href="/operators/apply"', 'href="/leaderboard"', 'Up to ', 'riders can join one group', '30-second check'],
-    '/safety': ['call 112', 'New in 3.15', 'does not replace', 'only when other Coroute groups are riding', 'id="false-alarms"'],
+    '/safety': ['call 112', 'New in 3.15', 'does not replace', 'only when other CoRoute groups are riding', 'id="false-alarms"'],
     '/how-it-works': ['id="create"', 'id="join"', 'id="ride"', 'class="pg-faq"', 'Allow all the time'],
     '/about': ['Built because riders needed it.', 'Clear and open by design.', 'href="/#feedback"'],
     '/get': ['Android 7.0 or newer', 'id="permissions"', 'href="/privacy"'],

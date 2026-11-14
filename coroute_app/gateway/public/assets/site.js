@@ -1,10 +1,12 @@
-/* Coroute website behaviour. No libraries, no third-party requests, no cookies.
+/* CoRoute website behaviour. No libraries, no third-party requests, no cookies.
    Data-attribute API is documented in FOUNDATION.md. */
 (function () {
   'use strict';
   var doc = document, root = doc.documentElement, win = window;
   root.classList.add('js');
   var mq = function (q) { return win.matchMedia ? win.matchMedia(q) : { matches: false, addEventListener: function () {} }; };
+  /* Safari < 14 has MediaQueryList.addListener only; calling addEventListener there threw and stopped this file. */
+  var onMQ = function (m, fn) { if (!m) return; if (m.addEventListener) m.addEventListener('change', fn); else if (m.addListener) m.addListener(fn); };
   var reduceMQ = mq('(prefers-reduced-motion: reduce)');
   var reduce = reduceMQ.matches;
   var finePointer = mq('(hover: hover) and (pointer: fine)').matches;
@@ -17,6 +19,31 @@
   var header = doc.querySelector('[data-header]');
   function updateHeader() {
     if (header) header.classList.toggle('is-scrolled', win.scrollY > 64);
+  }
+
+  /* ---------- Header fit: narrow phones (Galaxy Fold 280 px) and large system text ----------
+     When the header row does not fit, drop the theme button (also in the footer), then the "Get the app" button (also
+     in the menu), so the page never scrolls sideways. Re-checked on resize, font load and text-size changes. */
+  var headerInner = header && header.querySelector('.site-header__inner');
+  function fitHeader() {
+    if (!headerInner) return;
+    root.classList.remove('hdr-tight', 'hdr-tighter');
+    // The row may push the header box itself wider than the screen, so compare with the page width too.
+    var over = function () {
+      var w = root.clientWidth;
+      return headerInner.scrollWidth > headerInner.clientWidth + 1 || headerInner.getBoundingClientRect().right > w + 1 ||
+        root.scrollWidth > w + 1 && header.scrollWidth > w + 1;
+    };
+    if (!over()) return;
+    root.classList.add('hdr-tight');
+    if (over()) root.classList.add('hdr-tighter');
+  }
+  if (headerInner) {
+    fitHeader();
+    win.addEventListener('resize', fitHeader, passive);
+    win.addEventListener('load', fitHeader);
+    if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(fitHeader);
+    if ('ResizeObserver' in win) { var hro = new win.ResizeObserver(fitHeader); hro.observe(header); $$('.site-header__actions, .brand', header).forEach(function (n) { hro.observe(n); }); }
   }
 
   /* ---------- Mobile menu (disclosure) ---------- */
@@ -44,7 +71,7 @@
       if (toggle.getAttribute('aria-expanded') === 'true' && e.relatedTarget && !header.contains(e.relatedTarget)) setMenu(false, false);
     });
     menu.addEventListener('click', function (e) { if (e.target.closest('a')) setMenu(false, false); });
-    mq('(min-width: 1024px)').addEventListener('change', function (e) { if (e.matches) setMenu(false, false); });
+    onMQ(mq('(min-width: 1024px)'), function (e) { if (e.matches) setMenu(false, false); });
   }
 
   /* ---------- Visibility: which progress/animated elements are on screen ---------- */
@@ -315,7 +342,7 @@
           if (res.status === 201 || res.status === 204) {
             var keepTopic = topic ? topic.value : '';
             form.reset(); stamp(); pickTopic(keepTopic);
-            setState('sent', 'Thanks. Your feedback reached the Coroute team.');
+            setState('sent', 'Thanks. Your feedback reached the CoRoute team.');
             return;
           }
           var j = res.j || {};
@@ -1111,7 +1138,7 @@
   measureRoutes(doc);
   updateHeader();
   updateProgress(true);
-  reduceMQ.addEventListener && reduceMQ.addEventListener('change', function (e) { reduce = e.matches; progressEls.forEach(function (el) { el._cur = -1; }); updateProgress(true); });
+  onMQ(reduceMQ, function (e) { reduce = e.matches; progressEls.forEach(function (el) { el._cur = -1; }); updateProgress(true); });
   win.Coroute = { count: function (el, to) { el.setAttribute('data-count', String(to)); }, refresh: function () { measureRoutes(doc); updateProgress(true); } };
   win.__corouteReady = true;
 })();

@@ -43,7 +43,7 @@ test('live page: shell, rider data, calls to action, private by design', () => {
   assert.ok(html.includes('<meta name="robots" content="noindex, nofollow">'), 'noindex');
   assert.ok(html.includes('<meta name="referrer" content="no-referrer">'), 'no referrer');
   assert.ok(html.includes('<h1 id="live-title">Rider emergency</h1>'));
-  assert.ok(html.includes('<strong class="live__name">Kiran</strong> raised an SOS in Coroute and shared this link with you.'));
+  assert.ok(html.includes('<strong class="live__name">Kiran</strong> raised an SOS in CoRoute and shared this link with you.'));
   assert.ok(html.includes('<div class="live-map" data-lat="17.38500" data-lng="78.48670" data-at="2026-10-09T09:30:00.000Z"'), 'map data attributes');
   assert.ok(html.includes('data-expires="2026-10-09T10:00:00.000Z"'));
   assert.ok(html.includes('<span data-pos>17.38500, 78.48670</span>'), 'last position line');
@@ -66,7 +66,7 @@ test('expired page: plain copy, call 112, same shell and privacy rules', () => {
   const html = render('live_expired.html', SAMPLE);
   assert.ok(html.includes('class="site-header"') && !html.includes('<!--#include'));
   assert.ok(html.includes('<h1 id="live-title">This link has expired</h1>'));
-  assert.ok(html.includes('Live emergency links in Coroute last 30 minutes or until the rider\'s group closes the alert.'));
+  assert.ok(html.includes('Live emergency links in CoRoute last 30 minutes or until the rider\'s group closes the alert.'));
   assert.ok(html.includes('If someone is in danger, call 112.'));
   assert.ok(html.includes('href="tel:112"'));
   assert.ok(html.includes('href="/get"'), 'download CTA');

@@ -1,4 +1,4 @@
-/* Coroute legal pages: section navigation open on desktop / collapsible on mobile, current section, back to top.
+/* CoRoute legal pages: section navigation open on desktop / collapsible on mobile, current section, back to top.
    Everything works without this file: the navigation is a plain <details open> list of anchor links. */
 (function () {
   'use strict';

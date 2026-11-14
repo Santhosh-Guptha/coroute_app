@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Download for Android | Coroute</title>
+<title>Download for Android | CoRoute</title>
 <meta name="description" content="Download CoRoute, the group motorcycle touring safety app, for Android 7.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <link rel="canonical" href="__ORIGIN__/get">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="CoRoute">
-<meta property="og:title" content="Download for Android | Coroute">
+<meta property="og:title" content="Download for Android | CoRoute">
 <meta property="og:description" content="Download CoRoute, the group motorcycle touring safety app, for Android 7.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <meta property="og:url" content="__ORIGIN__/get">
 <meta property="og:image" content="__ORIGIN__/og-image.png">
@@ -16,7 +16,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Download for Android | Coroute">
+<meta name="twitter:title" content="Download for Android | CoRoute">
 <meta name="twitter:description" content="Download CoRoute, the group motorcycle touring safety app, for Android 7.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
@@ -70,6 +70,21 @@
     <!--#include route-motif-->
   </section>
 
+  <!-- Round 12: what the app looks like (v3.58 design renders) -->
+  <section class="section section--tight" aria-labelledby="look-title">
+    <div class="container">
+      <div class="pg-sec-head">
+        <h2 id="look-title">What you are installing</h2>
+        <p class="t-muted">Light and dark, big controls for gloves, and SOS on every ride screen. Demo data.</p>
+      </div>
+      <div class="pg-shots-row">
+        <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/welcome-320.avif 320w, /assets/screens/welcome-480.avif 480w, /assets/screens/welcome-636.avif 636w" sizes="(min-width: 600px) 230px, 62vw"><source type="image/webp" srcset="/assets/screens/welcome-320.webp 320w, /assets/screens/welcome-480.webp 480w, /assets/screens/welcome-636.webp 636w" sizes="(min-width: 600px) 230px, 62vw"><img src="/assets/screens/welcome-480.png" width="636" height="1386" alt="CoRoute welcome screen: Ride together. Stay safe. Get started, I already have an account and Emergency? Call 112" loading="lazy" decoding="async"></picture></div><figcaption>Sign up in a minute. Emergency? Call 112 is on the first screen.</figcaption></figure>
+        <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/home-320.avif 320w, /assets/screens/home-480.avif 480w, /assets/screens/home-636.avif 636w" sizes="(min-width: 600px) 230px, 62vw"><source type="image/webp" srcset="/assets/screens/home-320.webp 320w, /assets/screens/home-480.webp 480w, /assets/screens/home-636.webp 636w" sizes="(min-width: 600px) 230px, 62vw"><img src="/assets/screens/home-480.png" width="636" height="1386" alt="CoRoute home: rides near you, the safety strip with an Emergency button, and riding communities" loading="lazy" decoding="async"></picture></div><figcaption>Your safety status at a glance.</figcaption></figure>
+        <figure class="pg-shot"><div class="dev"><picture class="dev__shot"><source type="image/avif" srcset="/assets/screens/curve-320.avif 320w, /assets/screens/curve-480.avif 480w, /assets/screens/curve-636.avif 636w" sizes="(min-width: 600px) 230px, 62vw"><source type="image/webp" srcset="/assets/screens/curve-320.webp 320w, /assets/screens/curve-480.webp 480w, /assets/screens/curve-636.webp 636w" sizes="(min-width: 600px) 230px, 62vw"><img src="/assets/screens/curve-480.png" width="636" height="1386" alt="CoRoute night ride screen: offline link chip, turn card with a 60 sign, and Hairpin right, comfortable speed 25" loading="lazy" decoding="async"></picture></div><figcaption>Turn card, limit sign and curve warnings on the ride.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
   <!-- Requirements -->
   <section class="section section--tight" style="padding-top:var(--sp-24)" aria-labelledby="req-title">
     <div class="container">
@@ -91,7 +106,7 @@
       <div class="split" style="align-items:start">
         <div class="stack stack--16 pg-sticky" data-reveal>
           <p class="eyebrow">Permissions</p>
-          <h2 class="t-h2" id="perm-title">What Coroute asks for, and why.</h2>
+          <h2 class="t-h2" id="perm-title">What CoRoute asks for, and why.</h2>
           <p class="t-lead">In plain words. Location and microphone are used only while you are in an active ride. Audio privacy is built in: microphone is OFF by default.</p>
           <p class="t-small t-muted">If Android switches a permission off during a ride, a clear banner tells you and opens the right settings screen in one tap.</p>
         </div>
@@ -138,8 +153,8 @@
           </div>
           <div class="pg-perm">
             <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bluetooth"/></svg>
-            <span class="pg-perm__name">Bluetooth connect <span class="pg-tag">Never asked</span></span>
-            <span class="pg-perm__why">Listed in the app, but Coroute does not ask for it and no feature depends on it. On Android 12 and newer it shows as "Nearby devices: not allowed", and that is fine.</span>
+            <span class="pg-perm__name">Nearby devices (Bluetooth) <span class="pg-tag">Recommended</span></span>
+            <span class="pg-perm__why">Asked in the pre-ride check and by the rescue finder. It lets the group's phones pass messages along when there is no signal (the offline link), lets your phone send its rescue beacon after an unanswered crash, and routes voice to your helmet headset. It is not used to find your location. Without it, the siren and SOS by text still work.</span>
           </div>
           <div class="pg-perm">
             <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-signal"/></svg>

@@ -24,7 +24,7 @@
     var t = r.json.trip;
     box.removeAttribute('aria-busy');
     S.$('tr-title').textContent = String(t.tripName || 'Your ride').slice(0, 80);
-    document.title = String(t.tripName || 'Your ride').slice(0, 60) + ' | Coroute';
+    document.title = String(t.tripName || 'Your ride').slice(0, 60) + ' | CoRoute';
     var dl = S.$('tr-facts');
     var start = Number(t.startTimeEpochMs) || 0, end = Number(t.endTimeEpochMs) || 0;
     fact(dl, 'Date', S.date(start || end));

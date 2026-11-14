@@ -306,6 +306,8 @@ const config = {
   // Rider safety network and rider discovery (3.15). Distances in metres, times as named.
   safetyNetEnabled: int('SAFETY_NET_ENABLED', 1) === 1,
   discoveryEnabled: int('DISCOVERY_ENABLED', 1) === 1,
+  // v3.58 Explore: admin-curated destinations (src/destinations.js). 0 = the public list is empty.
+  destinationsEnabled: int('DESTINATIONS_ENABLED', 1) === 1,
   emergencyExpireMin: int('EMERGENCY_EXPIRE_MIN', 180),
   emergencyCancelGraceS: int('EMERGENCY_CANCEL_GRACE_S', 60),
   emergencyClusterM: int('EMERGENCY_CLUSTER_M', 150),

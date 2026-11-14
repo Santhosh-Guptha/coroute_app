@@ -37,6 +37,11 @@
   if (hero) {
     var reduceMQ = win.matchMedia ? win.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
     var saveData = !!(win.navigator && win.navigator.connection && win.navigator.connection.saveData);
+    // v3.58: low-end phones (2 GB RAM or less, 2 cores or fewer) keep the still poster instead of the 3D road, so the
+    // page stays smooth and the battery is spared. The poster shows the same scene.
+    var nav = win.navigator || {};
+    var lowEnd = (nav.deviceMemory && nav.deviceMemory <= 2) || (nav.hardwareConcurrency && nav.hardwareConcurrency <= 2);
+    if (lowEnd) saveData = true;
     var startHero = function () {
       if (hero.getAttribute('data-loading') || reduceMQ.matches) return;
       hero.setAttribute('data-loading', '1');
@@ -54,7 +59,28 @@
     else if (doc.readyState === 'complete') whenIdle();
     else win.addEventListener('load', whenIdle, { once: true });
     // Turning reduced motion off later starts the scene; turning it on is handled inside hero3d.js.
-    if (reduceMQ.addEventListener) reduceMQ.addEventListener('change', function (e) { if (!e.matches && !saveData) whenIdle(); });
+    if (reduceMQ.addEventListener) reduceMQ.addEventListener('change', function (e) { if (!e.matches && !saveData) whenIdle(); }); else if (reduceMQ.addListener) reduceMQ.addListener(function (e) { if (!e.matches && !saveData) whenIdle(); });
+  }
+
+  /* ---------- Round 12 scroll story: assets/story.js is fetched only when the story comes near (about two screens
+     ahead), so the first load stays light. If it fails, the chapters fall back to text only (no empty frames). */
+  var story = doc.querySelector('[data-story]');
+  if (story) {
+    var loadStory = function () {
+      if (story.getAttribute('data-loading')) return;
+      story.setAttribute('data-loading', '1');
+      var st = doc.createElement('script');
+      st.src = story.getAttribute('data-src');
+      st.async = true;
+      st.onerror = function () { story.setAttribute('data-state', 'fallback'); };
+      doc.body.appendChild(st);
+    };
+    if ('IntersectionObserver' in win) {
+      var sio = new IntersectionObserver(function (es) {
+        if (es[0].isIntersecting) { sio.disconnect(); loadStory(); }
+      }, { rootMargin: '1200px 0px' });
+      sio.observe(story);
+    } else loadStory();
   }
 
   /* ---------- Live now: GET /api/public/live-now -> { ridersOnRide, groupsRiding, updatedAt } ----------

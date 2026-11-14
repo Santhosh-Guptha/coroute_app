@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const el = (id) => document.getElementById(id);
+  const clearChildren = (node) => { if (node) while (node.firstChild) node.removeChild(node.firstChild); };
   const fragment = new URLSearchParams(location.hash.slice(1));
   let secret = fragment.get('token'), ticket = fragment.get('ticket');
   const readStored = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -15,7 +16,7 @@
   function clear() {
     el('ride-title').textContent = 'Personal ride'; el('ride-status').textContent = '';
     el('freshness').textContent = ''; el('incident').textContent = ''; el('expiry').textContent = '';
-    el('riders').replaceChildren(); el('timeline').replaceChildren();
+    clearChildren(el('riders')); clearChildren(el('timeline'));
     el('location').hidden = true; el('location').removeAttribute('href');
     const mapBox = el('guardian-map-box');
     if (mapBox) mapBox.hidden = true;
@@ -124,7 +125,7 @@
         const row = document.createElement('p');
         row.textContent = `${rider.name || 'Rider'}: ${states[rider.status] || states.UNAVAILABLE}`;
         if (rider.observedAt) row.append(` · reported ${new Date(rider.observedAt).toLocaleString()}`);
-        const position = rider.alerts?.[0]?.position || rider.position;
+        const position = (rider.alerts && rider.alerts[0] && rider.alerts[0].position) || rider.position;
         if (position) {
           const link = document.createElement('a'); link.textContent = ' View last reported location';
           link.rel = 'noreferrer noopener'; link.target = '_blank';
@@ -139,7 +140,7 @@
       item.textContent = `${new Date(event.at).toLocaleString()} · ${event.label}${event.open ? ' (ongoing)' : ''}`;
       el('timeline').append(item);
     }
-    const alert = data.alerts?.[0];
+    const alert = data.alerts && data.alerts[0];
     if (alert) el('incident').textContent = alert.type === 'POSSIBLE_ACCIDENT'
       ? 'A possible accident was reported. This is not confirmation of injury.' : 'An active request for help was reported.';
     // Medical info the rider entered, shown only while the alert is open (textContent only).
@@ -157,7 +158,7 @@
       const back = new Date(ahead.backAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       el('incident').textContent = `Entering a no-signal stretch${ahead.near ? ` near ${ahead.near}` : ''}, expected back online around ${back}. The last reported location is shown.`;
     }
-    const position = alert?.position || data.position;
+    const position = (alert && alert.position) || data.position;
     const mapBox = el('guardian-map-box');
     if (position && isFinite(position.lat) && isFinite(position.lng)) {
       el('location').href = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(position.lat)}&mlon=${encodeURIComponent(position.lng)}#map=16/${encodeURIComponent(position.lat)}/${encodeURIComponent(position.lng)}`;
@@ -211,7 +212,7 @@
     }
   }
   el('enable-alerts').addEventListener('click', async () => {
-    if (!sessionId || !pushConfig?.push) return;
+    if (!sessionId || !(pushConfig && pushConfig.push)) return;
     el('enable-alerts').disabled = true;
     try {
       if (await Notification.requestPermission() !== 'granted') throw new Error('Permission was not granted. You can continue using the live page.');

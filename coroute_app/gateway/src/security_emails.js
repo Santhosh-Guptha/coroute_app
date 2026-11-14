@@ -1,4 +1,5 @@
 'use strict';
+const { brandHeaderInner } = require('./email_brand');
 /**
  * Round 4 security e-mails (docs/features_355/sessions_and_security.md §9): ride sign-in code, "signed in during a
  * ride" notice, sign-up verification, "someone tried to create an account with your e-mail", account deletion
@@ -97,14 +98,14 @@ function render(id, vars = {}, { origin = '' } = {}) {
   const body = items.map((it) => {
     if (typeof it === 'string') return p(it);
     if (it.code) return `<p style="margin:6px 0 18px 0;font-size:30px;letter-spacing:6px;font-weight:700;font-family:Consolas,Menlo,monospace;color:#1b1f24">${esc(it.code)}</p>`;
-    return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 18px 0"><tr><td style="background:#d94f00;border-radius:6px">`
+    return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 18px 0"><tr><td style="background:#2B7A8C;border-radius:6px">`
       + `<a href="${esc(it.link)}" style="display:inline-block;padding:12px 20px;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none">${esc(it.label)}</a></td></tr></table>`;
   }).join('');
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + `<title>${esc(subject)}</title></head><body style="margin:0;padding:0;background:#f3f4f6">`
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6"><tr><td align="center" style="padding:24px 12px">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px"><tr><td style="padding:24px 24px 8px 24px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif">'
-    + `<p style="margin:0 0 18px 0;font-size:13px;font-weight:700;letter-spacing:1px;color:#d94f00">COROUTE</p>${body}`
+    + `<div style="margin:0 0 18px 0">${brandHeaderInner('')}</div>${body}`
     + `<p style="margin:18px 0 16px 0;font-size:12px;color:#5b6470">This is a security message about your CoRoute account.${footer ? ` <a href="${esc(footer)}" style="color:#5b6470">${esc(footer)}</a>` : ''}</p>`
     + '</td></tr></table></td></tr></table></body></html>';
   return { subject, text, html };

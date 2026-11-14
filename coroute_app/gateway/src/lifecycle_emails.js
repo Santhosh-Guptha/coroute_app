@@ -40,6 +40,7 @@ const rateLimit = require('express-rate-limit');
 const { validEmail } = require('./mailer');
 const { istDate } = require('./purchase_email');
 const { renderRoutePng } = require('./route_png');
+const { brandHeaderRow } = require('./email_brand');
 
 const LOG = 'mail_log';
 const PREFS = 'email_preferences';
@@ -84,20 +85,20 @@ function durText(ms) {
 }
 
 /** The calm, branded layout shared by both e-mails (every value escaped; table layout for mail apps). */
-function layout({ title, heading, blocks, footerHtml }) {
+function layout({ title, heading, blocks, footerHtml, origin = '' }) {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">'
     + `<title>${esc(title)}</title></head>`
     + '<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px;"><tr><td align="center">'
     + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:28px 28px 20px;">'
-    + '<tr><td style="font-size:15px;font-weight:700;color:#5b4bd6;letter-spacing:.2px;padding-bottom:18px;">CoRoute</td></tr>'
+    + brandHeaderRow(origin)
     + `<tr><td style="font-size:22px;font-weight:700;color:#111827;padding-bottom:10px;">${esc(heading)}</td></tr>`
     + blocks.join('')
     + `<tr><td style="font-size:12px;line-height:1.55;color:#6b7280;padding-top:16px;border-top:1px solid #f0f1f3;">${footerHtml}</td></tr>`
     + '</table></td></tr></table></body></html>';
 }
 const para = (t, style = 'font-size:15px;line-height:1.55;color:#3b4151;padding-bottom:14px;') => `<tr><td style="${style}">${esc(t).replace(/\n/g, '<br>')}</td></tr>`;
-const button = (url, label) => `<tr><td style="padding:6px 0 16px;"><a href="${esc(url)}" style="display:inline-block;background:#5b4bd6;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px;">${esc(label)}</a></td></tr>`;
+const button = (url, label) => `<tr><td style="padding:6px 0 16px;"><a href="${esc(url)}" style="display:inline-block;background:#2B7A8C;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px;">${esc(label)}</a></td></tr>`;
 
 class LifecycleEmails {
   constructor({ soda, repo, mailer, templates, offers = null, accessMode = null, config = {}, secret = '', logger = console, clock = Date.now,
@@ -404,7 +405,7 @@ class LifecycleEmails {
     const unsub = this.unsubscribeUrl('tips_news', user.userId);
     const steps = [w.step1, w.step2, w.step3];
     const stepsHtml = '<tr><td style="padding:0 0 14px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:15px;line-height:1.5;color:#3b4151;">'
-      + steps.map((s, i) => `<tr><td valign="top" style="width:30px;padding:6px 0;"><span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:11px;background:#ece9fb;color:#5b4bd6;font-weight:700;font-size:13px;">${i + 1}</span></td><td style="padding:6px 0;">${esc(s)}</td></tr>`).join('')
+      + steps.map((s, i) => `<tr><td valign="top" style="width:30px;padding:6px 0;"><span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:11px;background:#E3F0F2;color:#2B7A8C;font-weight:700;font-size:13px;">${i + 1}</span></td><td style="padding:6px 0;">${esc(s)}</td></tr>`).join('')
       + '</table></td></tr>';
     const blocks = [para(w.intro), stepsHtml,
       `<tr><td style="padding:2px 0 16px;"><div style="background:#eef7f2;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5;color:#1f5f43;">${esc(w.safetyLine)}</div></td></tr>`,
@@ -418,7 +419,7 @@ class LifecycleEmails {
     const footerHtml = `${esc(w.footer).replace(/\n/g, '<br>')}<br><br>You get this e-mail because you created a CoRoute account.`
       + (block ? ` <a href="${esc(unsub)}" style="color:#6b7280;">Unsubscribe from tips and news</a> ·` : '')
       + ` <a href="${esc(this.accountUrl())}" style="color:#6b7280;">Manage e-mails</a>`;
-    const html = layout({ title: w.subject, heading: w.heading, blocks, footerHtml });
+    const html = layout({ title: w.subject, heading: w.heading, blocks, footerHtml, origin: this.origin() });
     const text = [w.heading, '', w.intro, '', ...steps.map((s, i) => `${i + 1}. ${s}`), '', w.safetyLine, '', w.guideLine, `Quick start guide: ${vars.guideUrl}`]
       .concat(block ? ['', 'Group rides', block.text, ...(block.url ? [`See group plans: ${block.url}`] : [])] : [])
       .concat(['', w.footer, '', 'You get this e-mail because you created a CoRoute account.', ...(block ? [`Unsubscribe from tips and news: ${unsub}`] : []), `Manage e-mails: ${this.accountUrl()}`, '', '-- CoRoute'])
@@ -456,7 +457,7 @@ class LifecycleEmails {
     blocks.push(para(w.rateLine, 'font-size:14px;line-height:1.55;color:#3b4151;padding-bottom:6px;'));
     const footerHtml = `${esc(w.footer).replace(/\n/g, '<br>')}<br><br>You get ride summaries because you ride with CoRoute.`
       + ` <a href="${esc(unsub)}" style="color:#6b7280;">Unsubscribe from ride summaries</a> · <a href="${esc(this.accountUrl())}" style="color:#6b7280;">Manage e-mails</a>`;
-    const html = layout({ title: w.subject, heading: w.heading, blocks, footerHtml });
+    const html = layout({ title: w.subject, heading: w.heading, blocks, footerHtml, origin: this.origin() });
     const text = [w.heading, '', w.intro, '', ...facts.map(([l, v]) => `${l}: ${v}`), '', `View trip report: ${vars.reportUrl}`, '', w.rateLine, '', w.footer, '',
       'You get ride summaries because you ride with CoRoute.', `Unsubscribe from ride summaries: ${unsub}`, `Manage e-mails: ${this.accountUrl()}`, '', '-- CoRoute'].join('\n');
     const attachments = pic && !inlineImage ? [{ filename: 'route.png', content: pic.png, contentType: 'image/png', cid, contentDisposition: 'inline' }] : [];
@@ -552,7 +553,7 @@ const PAGE_HEADERS = { 'Cache-Control': 'no-store', 'Content-Security-Policy': "
 function page(title, bodyHtml) {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">'
     + `<title>${esc(title)} | CoRoute</title></head><body style="margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f4f5f7;color:#111827;">`
-    + `<main style="max-width:480px;margin:48px auto;background:#fff;border-radius:12px;padding:28px;"><p style="color:#5b4bd6;font-weight:700;margin:0 0 16px;">CoRoute</p>${bodyHtml}</main></body></html>`;
+    + `<main style="max-width:480px;margin:48px auto;background:#fff;border-radius:12px;padding:28px;"><p style="color:#2B7A8C;font-weight:700;margin:0 0 16px;">CoRoute</p>${bodyHtml}</main></body></html>`;
 }
 
 /**
@@ -570,7 +571,7 @@ function categoryUnsubscribeRouter({ lifecycle }) {
     res.set(PAGE_HEADERS);
     if (!categoryTokenOk(lifecycle.secret, c, u, t)) return bad(res);
     return res.type('html').send(page('Unsubscribe', `<h1 style="font-size:20px;">Stop ${esc(CATEGORY_LABEL[c])}?</h1><p>You will not get CoRoute ${esc(CATEGORY_LABEL[c])} any more. Receipts, account messages and safety alerts are not affected.</p>`
-      + `<form method="post" action="/email/unsubscribe?u=${encodeURIComponent(u)}&amp;c=${encodeURIComponent(c)}&amp;t=${encodeURIComponent(t)}"><button type="submit" style="background:#5b4bd6;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;">Unsubscribe</button></form>`));
+      + `<form method="post" action="/email/unsubscribe?u=${encodeURIComponent(u)}&amp;c=${encodeURIComponent(c)}&amp;t=${encodeURIComponent(t)}"><button type="submit" style="background:#2B7A8C;color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;">Unsubscribe</button></form>`));
   });
   r.post('/email/unsubscribe', (req, res, next) => (mine(req) ? next() : next('router')), limiter, express.urlencoded({ extended: false, limit: '2kb' }), async (req, res, next) => {
     try {

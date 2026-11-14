@@ -88,7 +88,7 @@ const hex = (s) => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), pa
  * The route picture: { png: Buffer, width, height, points } or null (no usable trail).
  * `trail`: the trip's breadcrumbTrail. Options: width, height, trimM, colours.
  */
-function renderRoutePng(trail, { width = 600, height = 300, trimM = 300, pad = 28, line = '#5b4bd6', bg = '#f4f5f7', start = '#2f9e6b', end = '#e9a55b', lineWidth = 4 } = {}) {
+function renderRoutePng(trail, { width = 600, height = 300, trimM = 300, pad = 28, line = '#2B7A8C', bg = '#f4f5f7', start = '#2f9e6b', end = '#e9a55b', lineWidth = 4 } = {}) {
   const pts = trimEnds(cleanTrail(trail), trimM);
   if (pts.length < 2) return null;
   // Equirectangular projection around the middle latitude, fitted into the box (aspect kept).

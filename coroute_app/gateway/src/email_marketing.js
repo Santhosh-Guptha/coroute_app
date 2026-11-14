@@ -60,6 +60,7 @@ const rateLimit = require('express-rate-limit');
 const { validEmail } = require('./mailer');
 const { cleanCouponCode } = require('./web_shop');
 const { effectivePrice } = require('./plan_pricing');
+const { EMAIL_BRAND, brandHeaderRow } = require('./email_brand');
 
 const C = Object.freeze({
   templates: 'email_studio_templates', campaigns: 'email_studio_campaigns', rules: 'email_studio_rules', settings: 'email_studio_settings',
@@ -333,10 +334,10 @@ function validateDesign(input, { category = 'marketing', mode = 'template', orig
 }
 
 // =================================================================== rendering (pure)
-const COLORS = { brand: '#5b4bd6', ink: '#111827', body: '#374151', muted: '#6b7280', bg: '#f4f5f7', card: '#ffffff', rule: '#e5e7eb', couponBg: '#f6f4ff' };
+const COLORS = { brand: EMAIL_BRAND.teal, ink: '#111827', body: '#374151', muted: '#6b7280', bg: '#f4f5f7', card: '#ffffff', rule: '#e5e7eb', couponBg: EMAIL_BRAND.tealTint };
 const DARK_RULES = '.cr-body{background:#0f1115!important}.cr-card{background:#1a1d24!important}.cr-ink{color:#f3f4f6!important}.cr-text{color:#d1d5db!important}'
   + '.cr-muted{color:#a7adbb!important}.cr-rule{border-color:#2f3440!important}.cr-coupon{background:#221f38!important;border-color:#9d93ff!important}'
-  + '.cr-code{color:#c9c2ff!important}.cr-link{color:#b3aaff!important}.cr-strike{color:#8b93a3!important}.cr-brand{color:#b3aaff!important}';
+  + '.cr-code{color:#8FCBD7!important}.cr-link{color:#8FCBD7!important}.cr-strike{color:#8b93a3!important}.cr-brand{color:#8FCBD7!important}';
 
 /** Inline markup of a line (already escaped) -> HTML; links via `link(path)`. */
 function inlineHtml(raw, origin, link) {
@@ -469,7 +470,7 @@ function renderDesign(design, ctx) {
     + (preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">${esc(preheader)}${'&#847;&zwnj;&nbsp;'.repeat(30)}</div>` : '')
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cr-body" style="background:${COLORS.bg};padding:24px 12px;"><tr><td align="center">`
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cr-card cr-pad" style="max-width:600px;background:${COLORS.card};border-radius:14px;padding:28px 28px 20px;">`
-    + `<tr><td class="cr-brand" style="font-size:16px;font-weight:800;color:${COLORS.brand};letter-spacing:.2px;padding-bottom:18px;">CoRoute</td></tr>`
+    + brandHeaderRow(o, 'cr-brand')
     + rows.join('')
     + '</table></td></tr></table></body></html>';
   return { subject, preheader, html, text: `${text.join('\n\n')}\n\n-- CoRoute\n`, links };

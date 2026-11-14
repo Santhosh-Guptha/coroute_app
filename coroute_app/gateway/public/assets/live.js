@@ -178,7 +178,7 @@
     gone.className = 'live__gone';
     gone.setAttribute('role', 'alert');
     var h = doc.createElement('h2'); h.textContent = 'This link has expired';
-    var p1 = doc.createElement('p'); p1.textContent = 'Live emergency links in Coroute last 30 minutes or until the rider\'s group closes the alert. The position above is the last one this page received and may be out of date.';
+    var p1 = doc.createElement('p'); p1.textContent = 'Live emergency links in CoRoute last 30 minutes or until the rider\'s group closes the alert. The position above is the last one this page received and may be out of date.';
     var p2 = doc.createElement('p'); p2.textContent = 'If someone is in danger, call 112.';
     gone.appendChild(h); gone.appendChild(p1); gone.appendChild(p2);
     var facts = card.querySelector('.live__facts');
