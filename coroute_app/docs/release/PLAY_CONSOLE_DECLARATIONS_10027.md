@@ -125,3 +125,48 @@ Permissions that need **no** Data safety change in 10027: `POST_PROMOTED_NOTIFIC
    team knows the gesture), or film a real shake-and-drop test with a team phone as the contact.
 2. The full-screen alarm appears over the lock screen with the 30-second countdown; tap "I'm OK" without unlocking.
 3. Optional: show another rider's SOS arriving as a full-screen alert on the second phone.
+
+## G. Round 10 offline group link: Nearby devices (Bluetooth) (appended for 3.55.0+10028)
+
+Feature: docs/features_355/offline_long_range_link.md; notes and device checks: docs/quality/ROUND10_MESH_NOTES.md.
+
+**Manifest.** No new entries for this feature. The rescue beacon round already declares the Bluetooth set once (see
+that agent's section if appended):
+- `BLUETOOTH_SCAN` with `android:usesPermissionFlags="neverForLocation"`;
+- `BLUETOOTH_ADVERTISE`;
+- `BLUETOOTH_CONNECT` (already there for helmet headsets);
+- legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` with `maxSdkVersion="30"`;
+- `<uses-feature android.hardware.bluetooth_le required="false">`.
+
+**What it does.** During a group ride only, phones advertise a small CoRoute beacon and connect to nearby riders'
+phones (Bluetooth LE, long-range Coded PHY when supported). They pass positions, SOS alerts and push-to-talk voice rider
+to rider when there is no mobile signal. A phone with signal forwards them to the CoRoute server. All data is encrypted
+for the ride (AES-256-GCM with a per-ride key). Off outside group rides.
+
+**Play Console actions.**
+- **No permissions declaration form**: Nearby devices permissions are not restricted permissions.
+- **`neverForLocation` is accurate**:
+  - the scan reads only CoRoute's own beacons;
+  - RSSI is used for link quality and the "chain stretching" warning only;
+  - no location is derived from Bluetooth (positions come from GPS, as declared under A);
+  - **no extra location justification is needed.** Android 11 and older need the location permission for any BLE
+    scan; CoRoute already holds it for ride tracking.
+- **Foreground service**: no new type. The radios run inside the existing `location` ride service (B). If review asks,
+  the Bluetooth work is part of the same core ride function (group safety and positions) and stops when the ride ends.
+- **Data safety (F)**: no new data type and no new purpose.
+  - Location, voice (not stored) and SOS data already declared as shared with the group for App functionality may now
+    travel phone to phone over Bluetooth.
+  - Through a bridge phone they reach the server exactly as from the rider's own phone.
+  - "Encrypted in transit" stays **Yes** (Bluetooth frames are encrypted end to end per ride; the socket uses TLS).
+- **Privacy policy / store listing**: add the Nearby devices paragraph from ROUND10_MESH_NOTES.md section 4 ("Privacy
+  wording").
+- **Review notes text** (if Play asks why the app needs Nearby devices):
+  "CoRoute is a group motorcycle safety app. During a group ride, when riders lose mobile signal, phones use Bluetooth
+  to pass each other's positions and SOS alerts rider to rider until one phone has signal. Bluetooth is not used to
+  determine location (neverForLocation) and is off outside group rides."
+- **Optional video V5 (only if asked), 30-45 s**:
+  1. Two phones in a group ride, both in flight mode with Bluetooth on.
+  2. The "Offline link: 1 rider" chip appears.
+  3. Rider B moves; rider A's map follows.
+  4. Rider B raises a test SOS (test contact); rider A's phone shows the SOS alert.
+  5. End the ride: the chip disappears (radios off).
