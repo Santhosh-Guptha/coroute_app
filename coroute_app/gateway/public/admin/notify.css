@@ -10,6 +10,7 @@
 .np-card--light { background: #F3F1F6; color: #1C1B1F; }
 .np-card--dark { background: #2B2930; color: #E6E1E5; }
 .np-card__top { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; opacity: 0.75; margin-bottom: 6px; }
+.no-flexgap .np-card__top > * + * {/* compat:generated */ margin-left: 6px; }
 .np-card__icon { width: 16px; height: 16px; border-radius: 50%; background: #2B7A8C; display: inline-block; }
 .np-card__title { font-weight: 600; font-size: 0.95rem; line-height: 1.3; overflow-wrap: anywhere; }
 .np-card__body { font-size: 0.88rem; line-height: 1.4; margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -19,7 +20,7 @@
 .tp-mail { background: #FFFFFF; color: #1F2328; border: 1px solid var(--c-border); border-radius: 12px; padding: 16px 18px; }
 .tp-mail p { margin: 8px 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tp-mail__subject { font-size: 0.85rem; border-bottom: 1px solid #ECEAE6; padding-bottom: 8px; margin-bottom: 10px; overflow-wrap: anywhere; }
-.tp-mail__brand { color: #5B4BD6; font-weight: 700; font-size: 0.85rem; }
+.tp-mail__brand { color: #2B7A8C; font-weight: 700; font-size: 0.85rem; }
 .tp-mail__heading { font-size: 1.2rem; font-weight: 700; margin-top: 6px; }
 .tp-mail__lines { border-top: 1px solid #ECEAE6; border-bottom: 1px solid #ECEAE6; padding: 10px 0; font-size: 0.8rem; color: #6B7280; }
 .tp-mail__text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 0.85rem; line-height: 1.5; }

@@ -1,18 +1,22 @@
 /* 3.56 "Latest from CoRoute" board (board.js): home page section and /updates. Light and dark come from the
    site tokens (site.css); nothing here sets a colour of its own. */
 .bd__head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-16); flex-wrap: wrap; margin-bottom: var(--sp-24); }
+.no-flexgap .bd__head > * {/* compat:generated */ margin-right: var(--sp-16); margin-bottom: var(--sp-16); }
 .bd__head h2 { font-size: var(--fs-h2); line-height: var(--lh-heading); }
 .bd__head p:not(.eyebrow) { margin-top: var(--sp-8); color: var(--c-text-2); max-width: 40rem; }
-.bd-list { display: grid; gap: var(--sp-20); grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); align-items: start; }
-.bd-list--page { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.bd-list { display: grid; gap: var(--sp-20); /* compat */ grid-template-columns: repeat(auto-fill, minmax(100%, 1fr)); grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); align-items: start; }
+.bd-list--page { /* compat */ grid-template-columns: repeat(auto-fill, minmax(100%, 1fr)); grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
 .bd-card { display: flex; flex-direction: column; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; min-width: 0; }
 .section--surface .bd-card { background: var(--c-bg); }
 .bd-card.is-pinned { border-color: var(--c-accent-line); box-shadow: 0 0 0 3px var(--c-brand-glow); }
 .bd-card__media { aspect-ratio: 16 / 9; background: var(--c-surface-2); overflow: hidden; }
 .bd-card__media img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .bd-card__inner { display: flex; flex-direction: column; gap: var(--sp-12); padding: var(--sp-20); min-width: 0; }
+.no-flexgap .bd-card__inner > * + * {/* compat:generated */ margin-top: var(--sp-12); }
 .bd-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--c-text-3); font-weight: 700; }
+.no-flexgap .bd-card__meta > * {/* compat:generated */ margin-right: 8px; margin-bottom: 8px; }
 .bd-kind { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; background: var(--c-accent-soft); color: var(--c-brand); font-weight: 800; }
+.no-flexgap .bd-kind > * + * {/* compat:generated */ margin-left: 6px; }
 .bd-kind .icon { width: 14px; height: 14px; }
 .bd-kind--offer { background: var(--c-safety-light); color: var(--c-safety-ink); }
 .bd-kind--safety-tip { background: var(--c-green-soft); color: var(--c-success); }
@@ -24,13 +28,16 @@
 .bd-card__link { align-self: flex-start; }
 .bd-card__ends { font-size: var(--fs-xs); color: var(--c-text-3); font-weight: 700; }
 .bd-coupon { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-12); border: 2px dashed var(--c-safety-line); border-radius: var(--r-md); background: var(--c-safety-light); }
+.no-flexgap .bd-coupon > * {/* compat:generated */ margin-right: var(--sp-12); margin-bottom: var(--sp-12); }
 .bd-coupon__code { display: flex; flex-direction: column; min-width: 0; }
 .bd-coupon__label { font-size: var(--fs-xs); font-weight: 800; color: var(--c-safety-ink); }
 .bd-coupon__code b { font-size: 1.25rem; letter-spacing: 0.06em; color: var(--c-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .bd-coupon__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.no-flexgap .bd-coupon__actions > * {/* compat:generated */ margin-right: 8px; margin-bottom: 8px; }
 .bd-coupon__copy.is-done { border-color: var(--c-success); color: var(--c-success); }
 .bd-coupon__until { flex-basis: 100%; font-size: var(--fs-xs); color: var(--c-text-2); font-weight: 600; }
 .bd-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-24); }
+.no-flexgap .bd-filters > * {/* compat:generated */ margin-right: 8px; margin-bottom: 8px; }
 .bd-filter { min-height: 44px; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--c-border-strong); background: var(--c-surface); color: var(--c-text); font: inherit; font-weight: 700; cursor: pointer; }
 .bd-filter[aria-pressed="true"] { background: var(--c-brand-fill); border-color: var(--c-brand-fill); color: #fff; }
 .bd-filter:focus-visible { outline: 3px solid var(--c-accent-line); outline-offset: 2px; }
@@ -39,4 +46,10 @@
 @media (max-width: 560px) {
   .bd-coupon { flex-direction: column; align-items: stretch; }
   .bd-coupon__actions .btn { flex: 1 1 auto; }
+}
+
+/* v3.58 device compatibility: browsers without aspect-ratio (Safari < 15) keep the 16:9 media box. */
+@supports not (aspect-ratio: 1 / 1) {
+  .bd-card__media { position: relative; height: 0; padding-top: 56.25%; }
+  .bd-card__media img { position: absolute; top: 0; left: 0; }
 }
