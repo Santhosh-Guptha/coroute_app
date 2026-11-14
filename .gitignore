@@ -27,10 +27,15 @@ VM_CONFIGURATIONS.md
 *.credentials*
 tmp/
 *.xml
-!coroute_app/android/app/src/main/res/xml/*.xml
+!coroute_app/android/app/src/main/res/**/*.xml
 qa_screenshots/
 *.png
 !coroute_app/gateway/public/**/*.png
+!coroute_app/android/app/src/main/res/**/*.png
+!coroute_app/docs/brand/**/*.png
+!coroute_app/docs/store/**/*.png
+!coroute_app/store/**/*.png
+!coroute_app/assets/**/*.png
 *.tar.gz
 *.tgz
 *.apk

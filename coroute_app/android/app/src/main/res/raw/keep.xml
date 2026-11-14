@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource shrinking: keep the notification icon that Dart refers to by name only
+     (flutter_local_notifications AndroidInitializationSettings('@drawable/ic_stat_coroute')). -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_coroute,@mipmap/ic_launcher,@mipmap/ic_launcher_round" />

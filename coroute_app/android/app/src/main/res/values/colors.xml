@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0B0F14</color>
+    <!-- v3.58 helmet logo: brand teal behind the helmet. -->
+    <color name="ic_launcher_background">#2B7A8C</color>
+    <!-- Accent colour Android applies to the notification small icon. -->
+    <color name="notification_accent">#2B7A8C</color>
     <!-- v3.55 light background token; values-night overrides with the dark background. -->
     <color name="splash_background">#F6F4F0</color>
 </resources>
