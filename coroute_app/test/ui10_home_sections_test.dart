@@ -93,7 +93,8 @@ void main() {
       expect(find.byKey(const Key('explore_hero')), findsOneWidget);
       expect(find.byKey(const Key('chip_ghats')), findsOneWidget, reason: 'a ghat place exists');
       expect(find.byKey(const Key('chip_twisty')), findsNothing, reason: 'no twisty place');
-      await tester.ensureVisible(find.byKey(const Key('chip_night')));
+      await tester.drag(find.byKey(const Key('explore_chips')), const Offset(-800, 0));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.byKey(const Key('chip_night')));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Mysuru Palace'), findsOneWidget);
@@ -136,7 +137,7 @@ void main() {
       expect(find.text(AccountScreen.checklistTitle), findsOneWidget);
       expect(find.byKey(const Key('check_emergency_contact')), findsOneWidget);
       expect(find.text(AccountScreen.settingsInfoTitle), findsOneWidget);
-      for (final k in [...AccountScreen.helpRowKeys, ...AccountScreen.accountRowKeys, 'profile_trips', 'profile_account', 'profile_notifications', 'profile_emergency', 'profile_advanced']) {
+      for (final k in [...AccountScreen.helpRowKeys, ...AccountScreen.accountRowKeys, 'profile_account', 'profile_emergency', 'profile_advanced']) {
         expect(find.byKey(Key(k)), findsOneWidget, reason: k);
       }
       expect(find.text('Your plan'), findsNothing, reason: 'no plan information');

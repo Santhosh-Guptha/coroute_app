@@ -262,8 +262,9 @@ void main() {
       }
       expect(s.voiceWarnings, isFalse);
       expect(s.batterySaver, isTrue);
-      expect(s.rideOnLockScreen, isFalse, reason: 'privacy choice kept');
-      expect(s.sirenAlerts, isFalse);
+      // v3.60: the lock-screen cockpit and siren alerts are always on (their switches were removed).
+      expect(s.rideOnLockScreen, isTrue);
+      expect(s.sirenAlerts, isTrue);
       expect(s.speedLimitWarningKmh, 80);
     });
 

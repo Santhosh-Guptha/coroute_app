@@ -128,7 +128,7 @@ void main() {
       expect(s.giveWaySide, 'auto');
       expect(prefs.getBool(RiderScoreService.prefsUseReport), isTrue);
       expect(prefs.getInt(RiderScoreService.prefsSendFrom), isNotNull, reason: 'rides from while it was off are never sent');
-      expect(s.sirenAlerts, isFalse, reason: 'v2 never re-runs the v1 siren step');
+      expect(s.sirenAlerts, isTrue, reason: 'v3.60: siren alerts are always on');
     });
 
     test('a rider who had the score report on gets no send-from cut-off', () async {
@@ -164,7 +164,7 @@ void main() {
       final again = SettingsService();
       await again.load();
       await again.loadSoundSettings();
-      expect(again.sirenAlerts, isFalse, reason: 'already migrated: never forced back on');
+      expect(again.sirenAlerts, isTrue, reason: 'v3.60: siren alerts always on');
       await again.setSirenAlerts(true);
       expect(again.sirenAlerts, isTrue);
     });
@@ -211,9 +211,11 @@ void main() {
       await pump(tester, s);
       expect(tester.takeException(), isNull);
       expect(find.byKey(const ValueKey('settings_always_on')), findsOneWidget);
-      expect(find.byKey(const ValueKey('settings_speed_warning')), findsOneWidget);
-      expect(find.byType(Switch), findsNWidgets(2), reason: 'siren alerts, data saver');
-      expect(find.byKey(const ValueKey('settings_siren_alerts')), findsOneWidget);
+      // v3.60: the speed warning moved into the ride (quick settings); siren alerts and the lock-screen cockpit are
+      // always on with no switch.
+      expect(find.byKey(const ValueKey('settings_speed_warning')), findsNothing);
+      expect(find.byType(Switch), findsNWidgets(1), reason: 'data saver');
+      expect(find.byKey(const ValueKey('settings_siren_alerts')), findsNothing);
       for (final gone in ['settings_crash', 'settings_sms', 'settings_auto_reroute', 'settings_voice_cleanup', 'settings_spoken_alerts', 'batterySaver',
         'settings_ride_idle', 'settings_keep_screen_on']) {
         expect(find.byKey(ValueKey(gone)), findsNothing, reason: gone);
@@ -228,10 +230,8 @@ void main() {
       for (final gone in ['settings_pause_music', 'settings_lower_music_speeding']) {
         expect(find.byKey(ValueKey(gone)), findsNothing, reason: gone);
       }
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_lock_screen_cockpit')), 120, scrollable: list);
-      await tester.tap(find.byKey(const ValueKey('settings_lock_screen_cockpit')));
-      await tester.pump();
-      expect(s.rideOnLockScreen, isFalse, reason: 'still the rider\'s choice (privacy)');
+      expect(find.byKey(const ValueKey('settings_lock_screen_cockpit')), findsNothing, reason: 'v3.60: always on, no switch');
+      expect(s.rideOnLockScreen, isTrue);
       expect(tester.takeException(), isNull);
     });
 
@@ -307,26 +307,27 @@ void main() {
       expect(labels, contains(SafetyTexts.askTitle));
     });
 
-    testWidgets('siren alerts switch turns off with one tap', (tester) async {
-      SharedPreferences.setMockInitialValues({});
+    testWidgets('v3.60: siren alerts and the lock-screen cockpit are always on, even if an old build stored off', (tester) async {
+      SharedPreferences.setMockInitialValues({SettingsService.keySirenAlerts: false, NetworkConstants.keyRideOnLockScreen: false});
       final s = SettingsService();
       await s.load();
       await s.loadSoundSettings();
       await pump(tester, s);
-      expect(find.text(SettingsScreen.sirenSubtitle), findsOneWidget);
-      expect(SettingsScreen.alwaysOn.map((e) => e.$2), isNot(contains(SettingsScreen.sirenTitle)));
-      await tester.tap(find.byKey(const ValueKey('settings_siren_alerts')));
-      await tester.pump();
-      expect(s.sirenAlerts, isFalse);
+      expect(find.byKey(const ValueKey('settings_siren_alerts')), findsNothing);
+      expect(s.sirenAlerts, isTrue);
+      expect(s.rideOnLockScreen, isTrue);
     });
 
-    testWidgets('the speed warning value stays mine', (tester) async {
+    testWidgets('v3.60: the speed warning is set in the ride quick settings and stays mine', (tester) async {
       SharedPreferences.setMockInitialValues({});
       final s = SettingsService();
       await s.load();
-      await pump(tester, s);
+      tester.view.physicalSize = const Size(390, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: GloveQuickSettingsModal(settingsService: s))));
       final chip = SafetyConstants.speedWarningChoices.lastWhere((v) => v > 0);
-      await tester.tap(find.text('$chip'));
+      await tester.tap(find.byKey(Key('quick_speed_$chip')));
       await tester.pump();
       expect(s.speedLimitWarningKmh, chip);
     });

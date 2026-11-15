@@ -23,11 +23,12 @@ void main() {
     expect(s.keepScreenOnMode, KeepScreenOnMode.whileMoving);
   });
 
-  test('a 3.54 "off" stays off through the 3.55 migrations (never forced on)', () async {
+  // v3.60: the owner made the lock-screen cockpit always on (the switch is gone): an old "off" is no longer kept.
+  test('v3.60: a stored "off" loads as on (always on now)', () async {
     SharedPreferences.setMockInitialValues({NetworkConstants.keyRideOnLockScreen: false});
     final s = SettingsService();
     await s.load();
-    expect(s.rideOnLockScreen, isFalse);
+    expect(s.rideOnLockScreen, isTrue);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool(NetworkConstants.keyRideOnLockScreen), isFalse);
     expect(prefs.getInt(SettingsService.keySafetyDefaultsVersion), SettingsService.safetyDefaultsVersion, reason: 'migrations ran');
@@ -37,7 +38,7 @@ void main() {
     // And on the next start.
     final again = SettingsService();
     await again.load();
-    expect(again.rideOnLockScreen, isFalse);
+    expect(again.rideOnLockScreen, isTrue);
   });
 
   test('a stored "on" stays on; an already migrated phone keeps its choice', () async {
@@ -51,7 +52,7 @@ void main() {
     await s.setRideOnLockScreen(false);
     final t = SettingsService();
     await t.load();
-    expect(t.rideOnLockScreen, isFalse);
+    expect(t.rideOnLockScreen, isTrue, reason: 'v3.60: always on at every start');
     await t.setRideOnLockScreen(true);
     final u = SettingsService();
     await u.load();

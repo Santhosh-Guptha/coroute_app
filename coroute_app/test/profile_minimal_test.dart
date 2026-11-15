@@ -99,15 +99,16 @@ void main() {
     expect(find.text(AccountScreen.garageTitle), findsOneWidget);
   });
 
-  testWidgets('Help has exactly three rows; Account has exactly Sign out and Delete account', (tester) async {
+  // v3.60: Rate CoRoute is inside Help & feedback (fewer profile rows).
+  testWidgets('Help has exactly two rows; Account has exactly Sign out and Delete account', (tester) async {
     final (auth, meta) = await services();
     await pump(tester, auth, meta);
-    expect(AccountScreen.helpRowKeys, hasLength(3));
+    expect(AccountScreen.helpRowKeys, hasLength(2));
     for (final k in AccountScreen.helpRowKeys) {
       expect(find.byKey(Key(k)), findsOneWidget, reason: k);
     }
     expect(find.text(RateAndFeedback.feedbackTitle), findsOneWidget);
-    expect(find.text(RateAndFeedback.rateTitle), findsOneWidget);
+    expect(find.text(RateAndFeedback.rateTitle), findsNothing);
     expect(find.text(PrivacyTermsSheet.title), findsOneWidget);
     expect(AccountScreen.accountRowKeys, hasLength(2));
     expect(find.text(AccountScreen.signOutTitle), findsOneWidget);

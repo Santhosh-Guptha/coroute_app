@@ -59,7 +59,7 @@ void main() {
 
   test('every known type routes somewhere', () {
     for (final t in PushRouting.knownTypes) {
-      final payload = {'crewId': 'cr_1', 'inviteId': 'ri_1', 'pollId': 'po_1', 'requestId': 'fr_1'};
+      final payload = {'crewId': 'cr_1', 'inviteId': 'ri_1', 'pollId': 'po_1', 'requestId': 'fr_1', 'chatId': 'dm_1'}; // v3.60 chatId for CHAT_MESSAGE
       expect(PushRouting.routeFor(t, payload).destination, isNot(PushDestination.none), reason: t);
     }
   });
