@@ -386,3 +386,215 @@ class _HudRoundButton extends StatelessWidget {
     );
   }
 }
+
+/// v3.61: the top of the ride screen in ONE bar (owner, 15 Nov 2026): back, the turn arrow, the
+/// distance and instruction, the destination line (tap: route options) and the limit sign. The
+/// "then ..." line and the route status stay as slim strips inside the same card; status chips
+/// (airbag, remote, GPS, offline) sit under it. Replaces [HudTopBar] + [HudTurnCard] in the cockpit
+/// and keeps their keys so the existing finders still work.
+class HudCombinedBar extends StatelessWidget {
+  const HudCombinedBar({
+    super.key,
+    required this.model,
+    required this.title,
+    this.subtitle,
+    this.connection,
+    this.onBack,
+    this.onRouteOptions,
+    this.limitSign,
+    this.routeStatus,
+    this.emergencyRoute = false,
+    this.onStopNavigation,
+    this.chips = const [],
+  });
+
+  final HudTurnModel model;
+
+  /// Destination ("Nandi Hills") and "48 km · 7:42 am".
+  final String title;
+  final String? subtitle;
+
+  /// "Reconnecting" etc.; null when connected (shown in place of the destination detail).
+  final String? connection;
+  final VoidCallback? onBack;
+  final VoidCallback? onRouteOptions;
+  final Widget? limitSign;
+  final String? routeStatus;
+  final bool emergencyRoute;
+  final VoidCallback? onStopNavigation;
+  final List<Widget> chips;
+
+  /// The destination line: "Nandi Hills · 48 km · 7:42 am" (or the connection state).
+  static String destinationLine(String title, String? subtitle, String? connection) {
+    final detail = connection ?? subtitle;
+    if (detail == null || detail.isEmpty) return title;
+    return '$title · $detail';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = model;
+    final dist = m.distanceM == null ? null : HudTurnText.distance(m.distanceM!);
+    final String headline;
+    final String body;
+    if (m.free) {
+      headline = m.title ?? 'Free ride';
+      body = '';
+    } else if (m.title != null) {
+      headline = dist ?? m.title!;
+      body = dist == null ? '' : m.title!;
+    } else {
+      headline = dist ?? '';
+      body = HudTurnText.instruction(m.direction, m.road);
+    }
+    final dest = destinationLine(title, subtitle, connection);
+    final then = m.thenLine;
+    final status = routeStatus;
+    final back = onBack;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        RepaintBoundary(
+          child: Material(
+            key: const Key('hud_turn_card'),
+            color: AppTheme.card,
+            borderRadius: Radii.xlAll,
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              decoration: BoxDecoration(borderRadius: Radii.xlAll, border: Border.all(color: AppTheme.border), boxShadow: dsFloatingShadow()),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.s4, Space.s4, Space.s8, Space.s4),
+                    child: Row(
+                      children: [
+                        if (back != null)
+                          Tooltip(
+                            message: 'Back',
+                            child: InkWell(
+                              key: const Key('hud_back_button'),
+                              customBorder: const CircleBorder(),
+                              onTap: back,
+                              child: SizedBox(width: 44, height: kHudGlove, child: Icon(Icons.arrow_back_rounded, color: AppTheme.text, size: 24)),
+                            ),
+                          )
+                        else
+                          const SizedBox(width: Space.s4),
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: m.free ? AppTheme.surfaceAlt : (emergencyRoute ? AppTheme.sos : AppTheme.primaryFill),
+                            borderRadius: Radii.mdAll,
+                          ),
+                          child: Icon(m.free ? Icons.edit_road_rounded : hudTurnIcon(m.direction), size: 32, color: m.free ? AppTheme.primary : Colors.white),
+                        ),
+                        const SizedBox(width: Space.s8),
+                        Expanded(
+                          child: Semantics(
+                            button: onRouteOptions != null,
+                            label: '${m.free ? headline : '$body${dist == null ? '' : ' in $dist'}'}. $dest${onRouteOptions == null ? '' : '. Route options'}',
+                            excludeSemantics: true,
+                            child: InkWell(
+                              key: const Key('hud_destination_pill'),
+                              borderRadius: Radii.mdAll,
+                              onTap: onRouteOptions,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(minHeight: kHudGlove),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                                      textBaseline: TextBaseline.alphabetic,
+                                      children: [
+                                        Text(headline,
+                                            maxLines: 1,
+                                            style: m.free
+                                                ? AppText.title.copyWith(fontSize: 18, height: 1.2)
+                                                : AppText.metric.copyWith(fontSize: 24, height: 1.15, fontFeatures: const [FontFeature.tabularFigures()])),
+                                        if (body.isNotEmpty) ...[
+                                          const SizedBox(width: Space.s8),
+                                          Expanded(
+                                            child: Text(body, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15, height: 1.2)),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    Row(children: [
+                                      Icon(emergencyRoute ? Icons.emergency_rounded : Icons.flag_outlined, size: 14, color: emergencyRoute ? AppTheme.sos : AppTheme.textMuted),
+                                      const SizedBox(width: Space.s4),
+                                      Flexible(
+                                        child: Text(dest,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: AppText.caption.copyWith(
+                                              color: connection != null ? AppTheme.accentStrong : AppTheme.textMuted,
+                                              fontWeight: connection != null ? FontWeight.w600 : FontWeight.w500,
+                                            )),
+                                      ),
+                                      if (onRouteOptions != null) Icon(Icons.expand_more_rounded, color: AppTheme.textMuted, size: 18),
+                                    ]),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (limitSign != null) ...[const SizedBox(width: Space.s8), limitSign!],
+                      ],
+                    ),
+                  ),
+                  if (then != null)
+                    Container(
+                      key: const Key('hud_turn_then'),
+                      color: AppTheme.surfaceAlt,
+                      padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s4),
+                      child: Row(children: [
+                        Icon(hudTurnIcon(m.thenDirection ?? HudTurnDir.straight), size: 18, color: AppTheme.text),
+                        const SizedBox(width: Space.s8),
+                        Expanded(child: Text(then, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(fontWeight: FontWeight.w600, color: AppTheme.text))),
+                      ]),
+                    ),
+                  if (status != null)
+                    Container(
+                      color: emergencyRoute ? AppTheme.sos.withValues(alpha: 0.12) : AppTheme.primarySoft,
+                      padding: const EdgeInsets.only(left: Space.s16, right: Space.s4),
+                      constraints: const BoxConstraints(minHeight: 40),
+                      child: Row(children: [
+                        Icon(emergencyRoute ? Icons.emergency_rounded : Icons.alt_route_rounded, size: 16, color: emergencyRoute ? AppTheme.sos : AppTheme.primary),
+                        const SizedBox(width: Space.s8),
+                        Expanded(
+                          child: Text(status, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: AppText.caption.copyWith(color: emergencyRoute ? AppTheme.sos : AppTheme.text, fontWeight: FontWeight.w600)),
+                        ),
+                        if (onStopNavigation != null)
+                          IconButton(
+                            tooltip: 'Stop navigation',
+                            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                            onPressed: onStopNavigation,
+                            icon: Icon(Icons.close_rounded, color: AppTheme.text, size: 20),
+                          ),
+                      ]),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (chips.isNotEmpty) ...[
+          const SizedBox(height: Space.s8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [for (var i = 0; i < chips.length; i++) ...[if (i > 0) const SizedBox(width: Space.s8), chips[i]]]),
+          ),
+        ],
+      ],
+    );
+  }
+}

@@ -187,4 +187,50 @@ void main() {
     await pump(false);
     expect(find.byKey(const Key('hud_recenter')), findsOneWidget);
   });
+
+  testWidgets('v3.61 combined top bar: back, turn, destination line and limit sign in one card', (tester) async {
+    var opened = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: HudCombinedBar(
+          model: const HudTurnModel.turn(direction: HudTurnDir.right, distanceM: 400, road: 'NH 44'),
+          title: 'Nandi Hills',
+          subtitle: '48 km · 7:42 am',
+          onBack: () {},
+          onRouteOptions: () => opened++,
+          limitSign: const SizedBox(key: Key('sign'), width: 44, height: 44),
+        ),
+      ),
+    ));
+    expect(find.byKey(const Key('hud_turn_card')), findsOneWidget);
+    expect(find.byKey(const Key('hud_back_button')), findsOneWidget);
+    expect(find.byKey(const Key('sign')), findsOneWidget);
+    expect(find.text('Nandi Hills · 48 km · 7:42 am'), findsOneWidget);
+    expect(tester.getSize(find.byKey(const Key('hud_destination_pill'))).height, greaterThanOrEqualTo(56));
+    await tester.tap(find.byKey(const Key('hud_destination_pill')));
+    expect(opened, 1);
+    // One card, not two: no separate HudTopBar pill.
+    expect(find.byType(HudTopBar), findsNothing);
+    expect(HudCombinedBar.destinationLine('A', null, 'Reconnecting'), 'A · Reconnecting');
+  });
+
+  testWidgets('v3.61 short sheet row: talk at the end, or at the start for the left hand', (tester) async {
+    Future<double> talkX(bool left) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: HudCollapsedRow(
+            speedKmh: 54, limitKmh: 60, hasFix: true, eta: '7:42', leftValue: '48', leftUnit: 'km',
+            groupValue: '5', dialSize: 64, controlsLeft: left,
+            talk: const SizedBox(key: Key('talk'), width: 104, height: 56),
+          ),
+        ),
+      ));
+      return tester.getTopLeft(find.byKey(const Key('talk'))).dx;
+    }
+    final right = await talkX(false);
+    final left = await talkX(true);
+    expect(left, lessThan(right));
+    expect(find.byKey(const Key('hud_group_metric')), findsOneWidget);
+    expect(find.byKey(const Key('hud_end_ride')), findsNothing);
+  });
 }

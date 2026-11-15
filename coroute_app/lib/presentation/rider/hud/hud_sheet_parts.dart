@@ -77,7 +77,21 @@ class HudCollapsedRow extends StatelessWidget {
     this.onTap,
     this.etaLabel = 'ETA',
     this.leftLabel = 'Left',
+    this.talk,
+    this.controlsLeft = false,
+    this.groupValue,
+    this.groupWarn = false,
+    this.dialSize = 76,
   });
+
+  /// v3.61: the compact talk button at the end of the row (or the start with [controlsLeft]).
+  final Widget? talk;
+  final bool controlsLeft;
+
+  /// v3.61: "5" riding (null: no group metric, e.g. a solo ride).
+  final String? groupValue;
+  final bool groupWarn;
+  final double dialSize;
 
   /// Without a destination the cockpit shows "Moving" time and "Ridden" km here instead.
   final String etaLabel;
@@ -102,15 +116,29 @@ class HudCollapsedRow extends StatelessWidget {
       onTap: onTap,
       child: Row(
         children: [
-          HudSpeedDial(key: const Key('hud_speed_dial'), speedKmh: speedKmh, limitKmh: limitKmh, hasFix: hasFix),
-          const SizedBox(width: Space.s12),
-          Expanded(child: HudMetric(value: eta, label: etaLabel, valueColor: etaLabel == 'ETA' ? AppTheme.primary : null)),
-          Container(width: 1, height: 36, color: AppTheme.border),
-          Expanded(child: HudMetric(value: leftValue, unit: leftUnit, label: leftLabel)),
+          if (talk != null && controlsLeft) ...[talk!, const SizedBox(width: Space.s8)],
+          HudSpeedDial(key: const Key('hud_speed_dial'), speedKmh: speedKmh, limitKmh: limitKmh, hasFix: hasFix, size: dialSize),
+          const SizedBox(width: Space.s8),
+          Expanded(child: HudMetric(value: eta, label: etaLabel, valueColor: etaLabel == 'ETA' ? AppTheme.primary : null, big: groupValue == null)),
+          Container(width: 1, height: 32, color: AppTheme.border),
+          Expanded(child: HudMetric(value: leftValue, unit: leftUnit, label: leftLabel, big: groupValue == null)),
+          if (groupValue != null) ...[
+            Container(width: 1, height: 32, color: AppTheme.border),
+            Expanded(
+              child: HudMetric(
+                key: const Key('hud_group_metric'),
+                value: groupValue!,
+                label: groupWarn ? 'Check' : 'Riding',
+                valueColor: groupWarn ? AppTheme.accentStrong : null,
+                big: false,
+              ),
+            ),
+          ],
           if (onHoldEnd != null) ...[
             const SizedBox(width: Space.s8),
             HudHoldButton(key: const Key('hud_end_ride'), label: endLabel, onHeld: onHoldEnd!),
           ],
+          if (talk != null && !controlsLeft) ...[const SizedBox(width: Space.s8), talk!],
         ],
       ),
     );
@@ -176,10 +204,13 @@ class _HudHoldButtonState extends State<HudHoldButton> with SingleTickerProvider
               child: Center(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.stop_rounded, color: AppTheme.danger, size: 26),
-                    Text(widget.label, style: AppText.caption.copyWith(color: AppTheme.danger, fontWeight: FontWeight.w600, height: 1.1)),
-                  ]),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.stop_rounded, color: AppTheme.danger, size: 26),
+                      Text(widget.label, style: AppText.caption.copyWith(color: AppTheme.danger, fontWeight: FontWeight.w600, height: 1.1)),
+                    ]),
+                  ),
                 ),
               ),
             ),
