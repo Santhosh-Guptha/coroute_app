@@ -26,6 +26,8 @@ import 'data/services/api_client.dart';
 import 'data/services/feature_flags_service.dart';
 import 'data/services/admin_warnings_service.dart';
 import 'data/services/friends_service.dart'; // 3.55 usernames, friends, profile pictures
+import 'data/services/chat_service.dart';
+import 'data/services/plan_features_service.dart';
 import 'data/services/crews_service.dart'; // 3.55 crews and crew polls
 import 'data/services/rider_score_service.dart'; // 3.55 rider score sync at ride end
 import 'presentation/social/friend_notice_host.dart'; // 3.55 friend request notices
@@ -77,7 +79,6 @@ import 'data/services/ride_invites_service.dart'; // 3.55 crew ride invites
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
-import 'data/services/nav_voice.dart';
 import 'data/services/voice_service.dart';
 import 'domain/audio/audio_diag_log.dart'; // 3.55 audio diagnostics (no personal data)
 import 'domain/diag/diag_log.dart'; // 3.55 persistent diagnostics log (no personal data)
@@ -298,6 +299,17 @@ class CoRouteApp extends StatelessWidget {
         // 3.55 crews and crew polls (GET /crews + socket pushes; switches crews / crewPolls).
         ChangeNotifierProvider<CrewsService>(lazy: false,
           create: (ctx) => CrewsService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
+        // v3.60 chat with friends and communities (text only, 90 days). No notices while riding.
+        ChangeNotifierProvider<ChatService>(lazy: false,
+          create: (ctx) => ChatService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>(), isRiding: () {
+            try {
+              return ctx.read<ConvoyService>().activeGroupId != null;
+            } catch (_) {
+              return false;
+            }
+          })),
+        // v3.60 features and limits by plan (admin console); hides what the plan does not include.
+        ChangeNotifierProvider<PlanFeaturesService>(lazy: false, create: (ctx) => PlanFeaturesService(ctx.read<ApiClient>())),
         // 3.55 "Start a ride with this crew": my ride invitations + socket RIDE_INVITE (switch crewRides).
         ChangeNotifierProvider<RideInvitesService>(lazy: false,
           create: (ctx) => RideInvitesService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
@@ -781,9 +793,10 @@ class CoRouteApp extends StatelessWidget {
               RouteEssentialsService(ctx.read<ApiClient>()),
               fetchRoute: geo.route,
               reverseGeocode: geo.reverse,
-              // Auto re-route: from where I am, in my direction of travel; short spoken lines.
+              // Auto re-route: from where I am, in my direction of travel.
               fetchRouteHeaded: (wp, heading) => geo.route(wp, startHeadingDeg: heading),
-              onPrompt: NavVoice(ctx.read<VoiceService>()).say,
+              // v3.60 owner decision: off-route and re-route lines are not spoken (the status line shows them).
+              onPrompt: null,
             );
           },
         ),

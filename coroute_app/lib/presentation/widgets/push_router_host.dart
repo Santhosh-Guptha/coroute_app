@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/services/chat_service.dart';
+import '../chat/chat_thread_screen.dart';
+
 import '../../data/services/admin_warnings_service.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/crews_service.dart';
@@ -102,10 +105,10 @@ class _PushRouterHostState extends State<PushRouterHost> {
     if (!mounted) return;
     final auth = context.read<AuthService?>();
     if (auth == null || !auth.isAuthenticated) return;
-    await _go(route);
+    await _go(route, title: m.title);
   }
 
-  Future<void> _go(PushRoute route) async {
+  Future<void> _go(PushRoute route, {String title = ''}) async {
     final navContext = widget.navigatorKey.currentContext;
     if (navContext == null) return;
     switch (route.destination) {
@@ -138,6 +141,11 @@ class _PushRouterHostState extends State<PushRouterHost> {
         await Navigator.of(navContext).push(MaterialPageRoute<void>(builder: (_) => const TripHistoryScreen()));
       case PushDestination.settings:
         await SettingsScreen.open(navContext);
+      case PushDestination.chat:
+        final chatId = route.chatId;
+        if (chatId == null) return;
+        context.read<ChatService?>()?.refresh().ignore();
+        await ChatThreadScreen.open(navContext, chatId: chatId, title: title.isNotEmpty ? title : 'Chat');
       case PushDestination.none:
         return;
     }
@@ -158,6 +166,11 @@ class _PushRouterHostState extends State<PushRouterHost> {
       case PushDestination.membership:
         // Plan changed while the app is open (its socket was not connected): unlock at once.
         context.read<MembershipService?>()?.fetchMyMembership().ignore();
+      case PushDestination.chat:
+        final chats = context.read<ChatService?>();
+        chats?.refresh().ignore();
+        // v3.60: no chat notice for the chat already open, and none while riding.
+        if (chats != null && (chats.openChatId == route.chatId || chats.quiet)) return;
       case PushDestination.rideInvite:
       case PushDestination.home:
       case PushDestination.rideHistory:
@@ -183,7 +196,7 @@ class _PushRouterHostState extends State<PushRouterHost> {
       behavior: SnackBarBehavior.floating,
       action: route.destination == PushDestination.adminWarnings
           ? null
-          : SnackBarAction(label: 'View', onPressed: () => _go(route).ignore()),
+          : SnackBarAction(label: 'View', onPressed: () => _go(route, title: m.title).ignore()),
     ));
   }
 

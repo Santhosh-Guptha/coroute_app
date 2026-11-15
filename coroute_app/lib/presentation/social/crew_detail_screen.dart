@@ -6,6 +6,9 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
+import '../../data/services/chat_service.dart';
+import '../../data/services/communities_service.dart';
+import '../../data/services/plan_features_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/crews_service.dart';
 import '../../data/services/feature_flags_service.dart';
@@ -13,6 +16,8 @@ import '../../domain/social/crew_rules.dart';
 import '../widgets/feature_switch.dart';
 import '../../data/services/ride_invites_service.dart';
 import '../../domain/social/ride_invite_rules.dart';
+import '../chat/chat_thread_screen.dart';
+import 'community_widgets.dart';
 import 'crew_create_flow.dart';
 import 'people_screen.dart';
 import 'ride_invite_screen.dart';
@@ -309,7 +314,7 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
   List<_CrewTab> _tabs(BuildContext context) => [
         _CrewTab.members,
         if (context.featureOn(CrewsService.pollsFlag)) _CrewTab.polls,
-        if (context.featureOn('crewRides')) _CrewTab.rides,
+        if (context.featureOn('crewRides') || context.featureOn(CommunitiesService.ridesFlag)) _CrewTab.rides,
       ];
 
   static String _tabLabel(_CrewTab t) => switch (t) {
@@ -359,6 +364,8 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
                   else if (_gone || c == null)
                     DsCard(child: Text(_gone ? 'You are not in this crew any more.' : 'This crew could not be loaded. Pull down to try again.', style: AppText.body))
                   else ...[
+                    _communityHeader(c),
+                    const SizedBox(height: Space.s16),
                     if (c.description.isNotEmpty) ...[
                       Text(c.description, style: AppText.body.copyWith(color: AppTheme.text2)),
                       const SizedBox(height: Space.s16),
@@ -387,7 +394,69 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
     );
   }
 
+  /// v3.60 communities: picture (admins change it), public / private, Chat and Join requests.
+  Widget _communityHeader(CrewDetail c) {
+    final plans = context.watch<PlanFeaturesService?>();
+    final chatOn = context.featureOn(ChatService.communityFlag) && c.members.length <= (plans?.chatMembersMax ?? 50);
+    return Row(
+      children: [
+        Semantics(
+          button: c.canManage,
+          label: c.canManage ? 'Change community picture' : null,
+          child: InkWell(
+            key: const Key('community_photo'),
+            borderRadius: BorderRadius.circular(18),
+            onTap: c.canManage ? () => _photo(c) : null,
+            child: CommunityAvatar(name: c.name, photoUrl: c.photoUrl, size: 60),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Wrap(spacing: 8, runSpacing: 6, children: [VisibilityChip(isPublic: c.isPublic), if (c.club) const InfoPill(icon: Icons.storefront_outlined, text: 'Club')])),
+        if (chatOn)
+          DsRoundButton(
+            key: const Key('community_chat'),
+            icon: Icons.chat_bubble_outline_rounded,
+            label: 'Community chat',
+            size: 48,
+            onTap: () => ChatThreadScreen.open(context, chatId: 'cc_${c.crewId.substring(3)}', title: c.name, avatarUrl: c.photoUrl),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _photo(CrewDetail c) async {
+    final has = c.photoUrl != null;
+    final choice = await showAppSheet<String>(
+      context,
+      title: 'Community picture',
+      builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, children: [
+        DsListRow(icon: Icons.photo_library_rounded, label: has ? 'Choose a new picture' : 'Choose a picture', divider: has, onTap: () => Navigator.pop(ctx, 'pick')),
+        if (has) DsListRow(icon: Icons.delete_outline_rounded, label: 'Remove picture', divider: false, onTap: () => Navigator.pop(ctx, 'remove')),
+      ]),
+    );
+    if (choice == null || !mounted) return;
+    final err = choice == 'remove' ? await communitiesOf(context).removePhoto(c.crewId) : await pickCommunityPhoto(context, c.crewId);
+    if (!mounted) return;
+    if (err != null) _say(err);
+    SwrCache.shared.remove(_cacheKey);
+    await _load();
+  }
+
   List<Widget> _membersTab(CrewDetail c) => [
+        // v3.60: private communities: riders ask to join, admins and co-admins let them in.
+        if (c.canManage && !c.isPublic && !c.club) ...[
+          DsButton(
+            key: const Key('community_requests'),
+            label: 'Join requests',
+            icon: Icons.how_to_reg_outlined,
+            tone: DsButtonTone.outline,
+            onPressed: () async {
+              await JoinRequestsScreen.open(context, c.crewId, c.name);
+              await _load();
+            },
+          ),
+          const SizedBox(height: Space.s12),
+        ],
         if (c.canInvite) ...[
           DsButton(key: const Key('crew_invite_friends'), label: 'Invite friends', icon: Icons.person_add_alt_1_rounded, onPressed: () => _invite(c)),
           const SizedBox(height: Space.s16),
@@ -463,6 +532,14 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
   List<Widget> _ridesTab(CrewDetail c) {
     final invites = (context.watch<RideInvitesService?>()?.pending ?? const <RideInvite>[]).where((i) => i.crewId == c.crewId).toList();
     return [
+      // v3.60 hosted rides: planned ahead, members answer Interested / Not interested.
+      if (context.featureOn(CommunitiesService.ridesFlag)) ...[
+        CommunityRidesSection(crewId: c.crewId),
+        const SizedBox(height: Space.s16),
+        if (context.featureOn('crewRides')) const Divider(height: 1),
+        const SizedBox(height: Space.s16),
+      ],
+      if (context.featureOn('crewRides')) ...[
       // 3.55 "Start a ride with this crew": any member can host (the plan rules decide the seats).
       DsButton(
         label: _ownsLiveRide(context) ? 'Invite crew to my ride' : 'Start a ride',
@@ -497,6 +574,7 @@ class _CrewDetailScreenState extends State<CrewDetailScreen> {
               ),
             ),
           ),
+      ],
     ];
   }
 }
@@ -992,6 +1070,7 @@ class _SettingsFormState extends State<_SettingsForm> {
   late final _name = TextEditingController(text: widget.crew.name);
   late final _desc = TextEditingController(text: widget.crew.description);
   late bool _membersPolls = widget.crew.membersCanCreatePolls;
+  late bool _public = widget.crew.isPublic;
   bool _busy = false;
   String? _error;
 
@@ -1006,7 +1085,7 @@ class _SettingsFormState extends State<_SettingsForm> {
     final err = CrewRules.checkName(_name.text) ?? CrewRules.checkDescription(_desc.text);
     if (err != null) return setState(() => _error = err);
     setState(() => _busy = true);
-    final res = await widget.service.update(widget.crew.crewId, name: _name.text, description: _desc.text, membersCanCreatePolls: _membersPolls);
+    final res = await widget.service.update(widget.crew.crewId, name: _name.text, description: _desc.text, membersCanCreatePolls: _membersPolls, isPublic: widget.crew.club ? null : _public);
     if (!mounted) return;
     setState(() => _busy = false);
     if (res != null) return setState(() => _error = res);
@@ -1023,6 +1102,14 @@ class _SettingsFormState extends State<_SettingsForm> {
         children: [
           TextField(controller: _name, maxLength: CrewLimits.nameMax, decoration: InputDecoration(labelText: 'Crew name', errorText: _error)),
           TextField(controller: _desc, maxLength: CrewLimits.descriptionMax, maxLines: 3, minLines: 1, decoration: const InputDecoration(labelText: 'Description')),
+          if (!widget.crew.club)
+            DsSwitchRow(
+              key: const Key('community_public_switch'),
+              label: 'Public community',
+              subtitle: _public ? 'Anyone can see it and join.' : 'Private: riders ask to join and you approve.',
+              value: _public,
+              onChanged: (v) => setState(() => _public = v),
+            ),
           if (context.featureOn(CrewsService.pollsFlag))
             DsSwitchRow(
               label: 'Members can create polls',

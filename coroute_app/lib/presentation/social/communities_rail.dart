@@ -84,8 +84,8 @@ class CommunitiesRail extends StatelessWidget {
       ),
       if (crewsOn)
         CommunityCard(
-          title: 'Start a crew',
-          meta: 'Your riding friends, polls and group rides',
+          title: 'Start a community',
+          meta: 'Public or private: members, rides, polls and chat',
           icon: Icons.add_circle_outline_rounded,
           action: 'Create',
           outlined: true,

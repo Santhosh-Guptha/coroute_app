@@ -31,6 +31,10 @@ class CrewSummary {
 
   /// When the open poll closing soonest closes (0 = none; "Poll closes in 5 h" in the list).
   final int nextPollClosesAt;
+
+  /// v3.60 communities: 'public' or 'private', and the community picture.
+  final String visibility;
+  final String? photoUrl;
   const CrewSummary({
     required this.crewId,
     required this.name,
@@ -41,7 +45,10 @@ class CrewSummary {
     this.openPolls = 0,
     this.pendingVotes = 0,
     this.nextPollClosesAt = 0,
+    this.visibility = 'private',
+    this.photoUrl,
   });
+  bool get isPublic => visibility == 'public';
   factory CrewSummary.fromJson(Map m) => CrewSummary(
         crewId: m['crewId']?.toString() ?? '',
         name: m['name']?.toString() ?? '',
@@ -52,6 +59,8 @@ class CrewSummary {
         openPolls: _i(m['openPolls']),
         pendingVotes: _i(m['pendingVotes']),
         nextPollClosesAt: _i(m['nextPollClosesAt']),
+        visibility: m['visibility']?.toString() == 'public' ? 'public' : 'private',
+        photoUrl: _avatar(m['photoUrl']),
       );
 }
 
@@ -154,6 +163,11 @@ class CrewDetail {
   final bool membersCanCreatePolls;
   final List<CrewMember> members;
   final List<CrewPendingInvite> invites;
+
+  /// v3.60 communities: 'public' or 'private', the picture, and whether it is an operator's club.
+  final String visibility;
+  final String? photoUrl;
+  final bool club;
   const CrewDetail({
     required this.crewId,
     required this.name,
@@ -165,8 +179,13 @@ class CrewDetail {
     this.membersCanCreatePolls = false,
     this.members = const [],
     this.invites = const [],
+    this.visibility = 'private',
+    this.photoUrl,
+    this.club = false,
   });
   bool get isAdmin => myRole == CrewRoles.admin;
+  bool get isPublic => visibility == 'public';
+  bool get canManage => myRole == CrewRoles.admin || myRole == CrewRoles.coAdmin;
   int get coAdmins => members.where((m) => m.role == CrewRoles.coAdmin).length;
 
   factory CrewDetail.fromJson(Map res) {
@@ -183,6 +202,9 @@ class CrewDetail {
       membersCanCreatePolls: s['membersCanCreatePolls'] == true,
       members: _list(res['members'], CrewMember.fromJson),
       invites: _list(res['invites'], CrewPendingInvite.fromJson),
+      visibility: c['visibility']?.toString() == 'public' ? 'public' : 'private',
+      photoUrl: _avatar(c['photoUrl']),
+      club: c['club'] is Map,
     );
   }
 }
@@ -302,7 +324,7 @@ class CrewsService extends ChangeNotifier {
 
   static const String crewsFlag = 'crews';
   static const String pollsFlag = 'crewPolls';
-  static const Set<String> pushTypes = {'CREW_INVITE', 'POLL_CREATED', 'POLL_UPDATED', 'CREW_UPDATED', 'CREW_REMOVED', 'CREW_DELETED'};
+  static const Set<String> pushTypes = {'CREW_INVITE', 'POLL_CREATED', 'POLL_UPDATED', 'CREW_UPDATED', 'CREW_REMOVED', 'CREW_DELETED', 'CREW_JOIN_REQUEST', 'CREW_JOIN_APPROVED', 'CREW_RIDE_NEW'};
 
   final ApiClient _api;
   final RealtimeService? _rt;
@@ -373,6 +395,12 @@ class CrewsService extends ChangeNotifier {
         _lastNotice = 'You were removed from $crew';
       case 'CREW_DELETED':
         _lastNotice = '$crew was deleted';
+      case 'CREW_JOIN_REQUEST':
+        _lastNotice = '$who asked to join $crew';
+      case 'CREW_JOIN_APPROVED':
+        _lastNotice = 'You are now a member of $crew';
+      case 'CREW_RIDE_NEW':
+        _lastNotice = 'New ride in $crew: ${msg['title'] ?? ''}';
       default:
         if (msg['event'] == 'YOU_ARE_ADMIN') _lastNotice = 'You are now the admin of $crew';
     }
@@ -422,11 +450,11 @@ class CrewsService extends ChangeNotifier {
   }
 
   /// POST /crews. Returns (crewId, error).
-  Future<(String?, String?)> create(String name, String description) async {
+  Future<(String?, String?)> create(String name, String description, {bool isPublic = false}) async {
     final err = CrewRules.checkName(name) ?? CrewRules.checkDescription(description);
     if (err != null) return (null, err);
     try {
-      final res = await _api.post('/crews', {'name': CrewRules.clean(name), 'description': CrewRules.clean(description)});
+      final res = await _api.post('/crews', {'name': CrewRules.clean(name), 'description': CrewRules.clean(description), 'visibility': isPublic ? 'public' : 'private'});
       await refresh();
       final crew = res is Map && res['crew'] is Map ? res['crew'] as Map : const {};
       return (crew['crewId']?.toString(), null);
@@ -441,10 +469,11 @@ class CrewsService extends ChangeNotifier {
     return CrewDetail.fromJson(res is Map ? res : const {});
   }
 
-  Future<String?> update(String crewId, {String? name, String? description, bool? membersCanCreatePolls}) => _act(() => _api.patch(_p(crewId), {
+  Future<String?> update(String crewId, {String? name, String? description, bool? membersCanCreatePolls, bool? isPublic}) => _act(() => _api.patch(_p(crewId), {
         if (name != null) 'name': CrewRules.clean(name),
         if (description != null) 'description': CrewRules.clean(description),
         'membersCanCreatePolls': ?membersCanCreatePolls,
+        if (isPublic != null) 'visibility': isPublic ? 'public' : 'private',
       }));
 
   Future<String?> deleteCrew(String crewId) => _act(() => _api.delete(_p(crewId)));

@@ -29,6 +29,9 @@ enum PushDestination {
   rideHistory,
   settings,
 
+  /// v3.60 a friend or community chat; needs [PushRoute.chatId].
+  chat,
+
   /// Unknown type or bad ids: nothing happens.
   none,
 }
@@ -39,8 +42,9 @@ class PushRoute {
   final String? pollId;
   final String? inviteId;
   final String? requestId;
+  final String? chatId;
 
-  const PushRoute(this.destination, {this.crewId, this.pollId, this.inviteId, this.requestId});
+  const PushRoute(this.destination, {this.crewId, this.pollId, this.inviteId, this.requestId, this.chatId});
 
   static const PushRoute nowhere = PushRoute(PushDestination.none);
 
@@ -60,6 +64,11 @@ class PushRouting {
     'RIDE_INVITE',
     'ADMIN_WARNING',
     'NEWS',
+    // v3.60 communities and chat
+    'CHAT_MESSAGE',
+    'CREW_JOIN_REQUEST',
+    'CREW_JOIN_APPROVED',
+    'CREW_RIDE_NEW',
   };
 
   /// Screens an admin push (NEWS) may open: the `target` data field. Anything else opens Home.
@@ -119,6 +128,14 @@ class PushRouting {
         return PushRoute(PushDestination.rideInvite, inviteId: inviteId);
       case 'ADMIN_WARNING':
         return const PushRoute(PushDestination.adminWarnings);
+      case 'CHAT_MESSAGE':
+        final chatId = idOf(payload['chatId']);
+        return chatId == null ? PushRoute.nowhere : PushRoute(PushDestination.chat, chatId: chatId);
+      case 'CREW_JOIN_REQUEST':
+      case 'CREW_JOIN_APPROVED':
+      case 'CREW_RIDE_NEW':
+        final crewId = idOf(payload['crewId']);
+        return crewId == null ? const PushRoute(PushDestination.crewInvites) : PushRoute(PushDestination.crewPoll, crewId: crewId);
       case 'NEWS':
         return PushRoute(newsTargets[payload['target']] ?? PushDestination.home);
     }

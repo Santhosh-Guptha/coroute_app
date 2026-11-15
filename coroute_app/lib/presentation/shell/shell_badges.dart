@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/ui/ui.dart';
+import '../../data/services/chat_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/timeline_service.dart';
@@ -27,13 +28,15 @@ class ShellBadges {
   /// Requests and votes waiting in Community (friend requests, crew and ride invites, open votes).
   static int community(BuildContext context) => peopleBadgesOf(context).total;
 
-  /// Unread messages of the live ride chat.
+  /// v3.60 Messages badge: unread chat from friends and communities, plus ride chat written by riders. Ride alerts
+  /// (automatic ride notices, SOS, hazards) are never counted here: they are on the Alerts badge.
   static int chat(BuildContext context) {
     final convoys = Provider.of<ConvoyService?>(context);
-    if (convoys == null) return 0;
-    return context.select<ConvoyService, int>((s) {
+    final chats = Provider.of<ChatService?>(context) == null ? 0 : context.select<ChatService, int>((c) => c.unread);
+    if (convoys == null) return chats;
+    return chats + context.select<ConvoyService, int>((s) {
       final gid = s.activeGroupId;
-      return gid == null ? 0 : s.unreadChat(gid);
+      return gid == null ? 0 : s.unreadRiderMessages(gid);
     });
   }
 }

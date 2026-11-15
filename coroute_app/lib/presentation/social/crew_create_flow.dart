@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/services/plan_features_service.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/crews_service.dart';
@@ -108,12 +110,19 @@ class _FriendPickerListState extends State<FriendPickerList> {
 class CreateCrewFlow extends StatefulWidget {
   const CreateCrewFlow({super.key});
 
-  static Future<String?> open(BuildContext context) => showAppSheet<String>(
-        context,
-        title: 'Create crew',
-        isScrollControlled: true,
-        builder: (_) => const CreateCrewFlow(),
-      );
+  static Future<String?> open(BuildContext context) async {
+    // v3.60 plans: the admin can leave "Create communities" out of a plan (joining is always free).
+    if (!(context.read<PlanFeaturesService?>()?.has('createCommunity') ?? true)) {
+      showAppToast(context, 'Creating communities is not included in your plan. You can join any community.');
+      return null;
+    }
+    return showAppSheet<String>(
+      context,
+      title: 'Create community',
+      isScrollControlled: true,
+      builder: (_) => const CreateCrewFlow(),
+    );
+  }
 
   @override
   State<CreateCrewFlow> createState() => _CreateCrewFlowState();
@@ -123,6 +132,7 @@ class _CreateCrewFlowState extends State<CreateCrewFlow> {
   final _name = TextEditingController();
   int _step = 0;
   Set<String> _picked = {};
+  bool _public = false;
   bool _busy = false;
   String? _error;
 
@@ -147,12 +157,12 @@ class _CreateCrewFlowState extends State<CreateCrewFlow> {
       _busy = true;
       _error = null;
     });
-    final (crewId, err) = await crews.create(_name.text, '');
+    final (crewId, err) = await crews.create(_name.text, '', isPublic: _public);
     if (!mounted) return;
     if (err != null || crewId == null) {
       setState(() {
         _busy = false;
-        _error = err ?? 'Could not create the crew. Try again.';
+        _error = err ?? 'Could not create the community. Try again.';
       });
       return;
     }
@@ -179,10 +189,22 @@ class _CreateCrewFlowState extends State<CreateCrewFlow> {
               maxLength: CrewLimits.nameMax,
               textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.next,
-              decoration: InputDecoration(labelText: 'Crew name', errorText: _error),
+              decoration: InputDecoration(labelText: 'Community name', errorText: _error),
               onSubmitted: (_) => _next(),
             ),
-            const SizedBox(height: Space.s8),
+            // v3.60: public (anyone can see and join) or private (riders ask, you approve).
+            SegmentedButton<bool>(
+              key: const Key('community_visibility'),
+              segments: const [
+                ButtonSegment(value: false, icon: Icon(Icons.lock_outline_rounded), label: Text('Private')),
+                ButtonSegment(value: true, icon: Icon(Icons.public_rounded), label: Text('Public')),
+              ],
+              selected: {_public},
+              onSelectionChanged: (v) => setState(() => _public = v.first),
+            ),
+            const SizedBox(height: 6),
+            Text(_public ? 'Anyone can find it, see members and rides, and join.' : 'Anyone can find it; riders ask to join and you approve.', style: AppText.caption),
+            const SizedBox(height: Space.s12),
             DsButton(label: 'Next', onPressed: _next),
           ] else ...[
             if (friends.isEmpty)
@@ -207,7 +229,7 @@ class _CreateCrewFlowState extends State<CreateCrewFlow> {
             const SizedBox(height: Space.s12),
             DsButton(
               key: const Key('crew_create_button'),
-              label: _busy ? 'Creating...' : (_picked.isEmpty ? 'Create crew' : 'Create and invite ${_picked.length}'),
+              label: _busy ? 'Creating...' : (_picked.isEmpty ? 'Create community' : 'Create and invite ${_picked.length}'),
               onPressed: _busy ? null : _create,
             ),
             TextButton(onPressed: _busy ? null : () => setState(() => _step = 0), child: const Text('Back')),
