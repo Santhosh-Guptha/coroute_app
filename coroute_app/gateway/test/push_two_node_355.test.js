@@ -81,8 +81,10 @@ test('a rider connected to the peer node gets the socket notice, not a push; off
     assert.equal(r.status, 202, JSON.stringify(r.json));
     const notice = await ws.next((m) => m.type === 'FRIEND_REQUEST');
     assert.match(notice.eventId, /^FRIEND_REQUEST:fr_/, 'the socket notice carries the eventId');
-    await sleep(150);
-    assert.equal(forToken(tok(1)).length, 0, 'connected on the peer node: no push');
+    // v3.60: friend notices always push (the app drops the second notice by eventId).
+    await until(() => forToken(tok(1)).length === 1, 'friend request pushed even while connected on the peer');
+    assert.equal(forToken(tok(1))[0].message.data.eventId, notice.eventId);
+    sent.length = 0;
 
     // skipConnected (notifyUsers) checks the peer too.
     const out = await A.gw.push.notifyUsers([target.user.userId, offline.user.userId], { type: 'POLL_CREATED', title: 't', body: 'b', skipConnected: true });

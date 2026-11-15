@@ -159,7 +159,7 @@ test('invalid tokens are pruned; 429 / 5xx retried with backoff; throttle per us
   assert.equal(res.reduce((n, r) => n + r.sent, 0), 2);
 });
 
-test('friend request and accept push the other rider when offline; nothing when a socket got it', async () => {
+test('friend request and accept push the other rider, offline or connected (v3.60: always, one notice per eventId)', async () => {
   const a = await rider('Arun Sender');
   const b = await rider('Bina Target');
   assert.equal((await register(b, tok(100))).status, 200);
@@ -184,15 +184,15 @@ test('friend request and accept push the other rider when offline; nothing when 
   assert.equal((await t.api('POST', `/friends/requests/${rid}/accept`, null, b.token)).status, 200);
   assert.ok(await waitFor(() => forToken(tok(101)).some((m) => m.message.data.type === 'FRIEND_ACCEPTED')));
 
-  // a connected: a friend request from c reaches a's socket, so no push.
+  // a connected: a friend request from c reaches a's socket AND is pushed with the same eventId.
   const c = await rider('Chetan Third');
   const wsA = await t.connect(a.token);
   await sleep(50);
   sent.length = 0;
   assert.equal((await t.api('POST', '/friends/requests', { username: a.user.username }, c.token)).status, 202);
-  await wsA.next((m) => m.type === 'FRIEND_REQUEST');
-  await sleep(100);
-  assert.equal(forToken(tok(101)).length, 0, 'socket delivered: no push');
+  const live = await wsA.next((m) => m.type === 'FRIEND_REQUEST');
+  assert.ok(await waitFor(() => forToken(tok(101)).length === 1), 'pushed while connected');
+  assert.equal(forToken(tok(101))[0].message.data.eventId, live.eventId);
   wsA.close(); wsB.close();
 });
 
@@ -229,7 +229,10 @@ test('RIDE_INVITE always pushes (even when connected); admin switch stops pushes
   const out = await t.gw.push.onSocketEvent(r.user.userId, { type: 'RIDE_INVITE', inviteId: 'ri_abc', username: 'SwiftFalcon482' }, { delivered: 1 });
   assert.equal(out.sent, 1);
   assert.equal(forToken(tok(300))[0].message.android.priority, 'HIGH');
-  const skip = await t.gw.push.onSocketEvent(r.user.userId, { type: 'FRIEND_REQUEST', requestId: 'fr_x', username: 'X' }, { delivered: 1 });
+  // v3.60: friend notices always push too (the app shows one notice per eventId); a support log request does not.
+  const social = await t.gw.push.onSocketEvent(r.user.userId, { type: 'FRIEND_REQUEST', requestId: 'fr_x', username: 'X' }, { delivered: 1 });
+  assert.equal(social.sent, 1);
+  const skip = await t.gw.push.onSocketEvent(r.user.userId, { type: 'DIAG_LOG_REQUEST', requestId: 'dl_x' }, { delivered: 1 });
   assert.equal(skip, null);
   ws.close();
 

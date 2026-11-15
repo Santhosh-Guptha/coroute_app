@@ -65,6 +65,11 @@ const DEFAULTS = Object.freeze({
   FRIEND_ACCEPTED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   CREW_INVITE: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   POLL_CREATED: { ttlSec: 24 * 3600, priority: 'normal' },
+  // v3.60 communities and chat (docs/features_355/communities_chat_v360.md)
+  CHAT_MESSAGE: { ttlSec: 24 * 3600, priority: 'high' },
+  CREW_JOIN_REQUEST: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
+  CREW_JOIN_APPROVED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
+  CREW_RIDE_NEW: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   DIAG_LOG_REQUEST: { ttlSec: 7 * 24 * 3600, priority: 'normal' },
   SUBSCRIPTION_ACTIVATED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   SUBSCRIPTION_EXPIRING: { ttlSec: 24 * 3600, priority: 'normal' },
@@ -148,10 +153,16 @@ const planEvent = (p) => ({ ...planNotice(p), data: {}, collapse: 'plan', always
 const FALLBACK = { ttlSec: 24 * 3600, priority: 'normal' };
 /** Socket events that become pushes (title + body from the event; ids only in data). */
 const SOCKET_EVENTS = Object.freeze({
-  FRIEND_REQUEST: (p) => ({ title: 'Friend request', body: `${p.username || 'A rider'} sent you a friend request`, data: { requestId: p.requestId } }),
-  FRIEND_ACCEPTED: (p) => ({ title: 'New friend', body: `${p.username || 'A rider'} accepted your friend request`, data: {}, collapse: 'friends' }),
-  CREW_INVITE: (p) => ({ title: 'Crew invite', body: `${p.username || 'A rider'} invited you to the crew ${p.crewName || ''}`.trim(), data: { inviteId: p.inviteId, crewId: p.crewId }, collapse: `crew_${p.crewId || ''}` }),
-  POLL_CREATED: (p) => ({ title: p.crewName ? `New poll in ${p.crewName}` : 'New crew poll', body: p.question ? `${p.username || 'A rider'} asks: ${p.question}` : `${p.username || 'A rider'} started a poll`, data: { crewId: p.crewId, pollId: p.pollId } }),
+  // v3.60: friend and community notices always push (the app shows one notice per eventId, so a live app does
+  // not show it twice). Chat messages are not pushed while the rider is on a ride (chat.js checks that first).
+  FRIEND_REQUEST: (p) => ({ title: 'Friend request', body: `${p.username || 'A rider'} sent you a friend request`, data: { requestId: p.requestId }, always: true }),
+  FRIEND_ACCEPTED: (p) => ({ title: 'New friend', body: `${p.username || 'A rider'} accepted your friend request`, data: {}, collapse: 'friends', always: true }),
+  CREW_INVITE: (p) => ({ title: 'Community invite', body: `${p.username || 'A rider'} invited you to ${p.crewName || 'a community'}`.trim(), data: { inviteId: p.inviteId, crewId: p.crewId }, collapse: `crew_${p.crewId || ''}`, always: true }),
+  POLL_CREATED: (p) => ({ title: p.crewName ? `New poll in ${p.crewName}` : 'New community poll', body: p.question ? `${p.username || 'A rider'} asks: ${p.question}` : `${p.username || 'A rider'} started a poll`, data: { crewId: p.crewId, pollId: p.pollId }, always: true }),
+  CHAT_MESSAGE: (p) => ({ title: p.crewName ? `${p.username || 'A rider'} in ${p.crewName}` : (p.username || 'New message'), body: p.preview || 'New message', data: { chatId: p.chatId, messageId: p.messageId }, collapse: `chat_${p.chatId || ''}`, always: true }),
+  CREW_JOIN_REQUEST: (p) => ({ title: 'Join request', body: `${p.username || 'A rider'} asked to join ${p.crewName || 'your community'}`, data: { crewId: p.crewId }, collapse: `crewreq_${p.crewId || ''}`, always: true }),
+  CREW_JOIN_APPROVED: (p) => ({ title: 'Welcome in', body: `You are now a member of ${p.crewName || 'the community'}`, data: { crewId: p.crewId }, collapse: `crew_${p.crewId || ''}`, always: true }),
+  CREW_RIDE_NEW: (p) => ({ title: p.crewName ? `New ride in ${p.crewName}` : 'New community ride', body: `${p.title || 'A ride'}${p.when ? `, ${p.when}` : ''}. Interested?`, data: { crewId: p.crewId, rideId: p.rideId }, always: true }),
   // 3.55 diagnostics: an admin asked for the rider's app log (the rider must tap Send in the app).
   DIAG_LOG_REQUEST: (p) => ({ title: 'CoRoute support', body: 'Support asked for your app log to fix a problem. Open CoRoute to send it.', data: { requestId: p.requestId }, collapse: 'diag_request' }),
   RIDE_INVITE: (p) => ({ title: 'Ride invitation', body: `${p.username || 'A rider'} invited you to a ride${p.rideName ? `: ${p.rideName}` : ''}`, data: { inviteId: p.inviteId, groupId: p.groupId }, collapse: `ride_${p.inviteId || ''}`, always: true }),
@@ -195,7 +206,7 @@ const PHONE_VALUE = /(?:\+?\d[\s-]?){9,}/;
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const cleanText = (v, n) => clip(String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim(), n);
 
-const EVENT_REF_KEYS = ['requestId', 'inviteId', 'pollId'];
+const EVENT_REF_KEYS = ['requestId', 'inviteId', 'pollId', 'messageId', 'rideId'];
 let eventSeq = 0;
 /**
  * Gives a notice payload a stable `eventId` (kept when already set): `TYPE:<requestId|inviteId|pollId>`,

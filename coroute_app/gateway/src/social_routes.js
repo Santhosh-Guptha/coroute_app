@@ -460,6 +460,30 @@ function registerSocialRoutes({ r, repo, auth, hub = null, wrap, requireAdmin, f
     res.set('Cache-Control', 'private, no-store').json({ ok: true, profile });
   }));
 
+  // v3.60: rides two friends were on together (same group ride), newest first. Friends only (and myself = none).
+  r.get('/users/:username/rides-together', profileLimiter, wrap(async (req, res) => {
+    const t = await visibleTarget(req, String(req.params.username || ''));
+    const noStore = () => res.set('Cache-Control', 'private, no-store');
+    if (!t || t.userId === req.user.userId) return noStore().status(404).json({ error: 'Rider not found.', code: 'NOT_FOUND' });
+    if (!isOn('friends') || await F.relationOf(soda, req.user.userId, t.userId) !== 'FRIENDS') {
+      return noStore().status(403).json({ error: 'Rides together are shown to friends.', code: 'NOT_FRIENDS' });
+    }
+    const mine = (await repo.listTripsForUser(req.user.userId, 200)).filter((x) => x.groupId);
+    const theirs = new Map((await repo.listTripsForUser(t.userId, 200)).filter((x) => x.groupId).map((x) => [x.groupId, x]));
+    const seen = new Set();
+    const rides = [];
+    for (const m of mine) {
+      if (seen.has(m.groupId) || !theirs.has(m.groupId)) continue;
+      seen.add(m.groupId);
+      rides.push({
+        groupId: m.groupId, tripId: m.tripId, name: String(m.tripName || '').slice(0, 80), from: String(m.startLocationName || '').slice(0, 80),
+        to: String(m.destinationName || '').slice(0, 80), endedAt: Number(m.endTimeEpochMs) || 0, myKm: Number(m.totalDistanceKm) || 0,
+        riders: Number(m.riderCount) || 0,
+      });
+    }
+    noStore().json({ ok: true, count: rides.length, rides: rides.slice(0, 30) });
+  }));
+
   const usersByIds = async (ids) => {
     const map = new Map();
     const list = [...new Set(ids)];
