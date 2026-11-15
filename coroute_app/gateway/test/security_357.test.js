@@ -184,7 +184,7 @@ test('sessions list ("Where you are signed in") and signing out one; another rid
   assert.equal(uaSummary('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Mobile Safari/604.1'), 'Safari on iPhone');
 });
 
-test('idle and absolute expiry: web 60 min idle / 7 days, admin 30 min; the app is extended past its limit while riding', async () => {
+test('idle and absolute expiry: web 60 min idle / 7 days, admin 30 min; the phone app has no time limit (v3.60)', async () => {
   const u = await rider('idle');
   const web = await login(u.email, 'Password#123', { 'X-CoRoute-Client': 'web' });
   const sid = web.json.sessionId;
@@ -201,21 +201,25 @@ test('idle and absolute expiry: web 60 min idle / 7 days, admin 30 min; the app 
   env.gw.sessions.cache.delete(web2.json.sessionId);
   assert.equal((await call('GET', '/me', null, web2.json.token)).status, 401, 'absolute limit (web) is hard');
 
-  // App: past its absolute lifetime, a refresh while riding extends it (audited); not riding ends it.
+  // App (v3.60): no time limit at all. A new app session has no idle or absolute date; an old one that still carries a
+  // date (made before v3.60) is never ended by it, riding or not.
   const app = await login(u.email, 'Password#123', APP2);
   const row3 = await env.gw.soda.findOne('auth_sessions', { sessionId: app.json.sessionId });
+  assert.equal(row3.value.absoluteExpiresAt, 0, 'no absolute limit for the app');
+  await env.gw.soda.replace('auth_sessions', row3.key, { ...row3.value, lastSeenAt: Date.now() - 400 * 86400000 });
+  env.gw.sessions.cache.delete(app.json.sessionId);
+  assert.equal((await call('GET', '/me', null, app.json.token)).status, 200, 'a year idle: still signed in');
   await env.gw.soda.replace('auth_sessions', row3.key, { ...row3.value, absoluteExpiresAt: Date.now() - 1 });
   env.gw.sessions.cache.delete(app.json.sessionId);
   assert.equal((await call('GET', '/me', null, app.json.token)).status, 200, 'an app session is never cut by the absolute limit between refreshes');
   await env.gw.repo.setActiveTrip(u.user.userId, { groupId: 'GRP-RIDING' });
   const ext = await call('POST', '/auth/refresh', { refreshToken: app.json.refreshToken });
-  assert.equal(ext.status, 200, 'riding: extended');
+  assert.equal(ext.status, 200, 'riding: refreshed');
   const s3 = await env.gw.sessions.get(app.json.sessionId);
-  assert.ok(s3.absoluteExpiresAt > Date.now() + 23 * 3600000);
   await env.gw.repo.releaseActiveTrip(u.user.userId);
   await env.gw.soda.replace('auth_sessions', s3.key, { ...s3, key: undefined, absoluteExpiresAt: Date.now() - 1 });
   env.gw.sessions.cache.delete(app.json.sessionId);
-  assert.equal((await call('POST', '/auth/refresh', { refreshToken: ext.json.refreshToken })).status, 401, 'not riding: ended');
+  assert.equal((await call('POST', '/auth/refresh', { refreshToken: ext.json.refreshToken })).status, 200, 'not riding: still signed in (v3.60)');
 });
 
 test('password change: every other session ends (socket too), this device continues; reset by e-mail is single use', async () => {

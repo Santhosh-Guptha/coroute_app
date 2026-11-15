@@ -10,7 +10,9 @@
  *
  * Kinds and lifetimes (config):
  *   app       Android app (>= 10025, X-CoRoute-Session: 2): 15 min access token + rotating refresh token;
- *             idle 30 days; absolute 60 days, but never ended during a ride (extended while riding).
+ *             v3.60: no idle or absolute limit by default (SESSION_APP_IDLE_DAYS / SESSION_APP_ABSOLUTE_DAYS = 0): a
+ *             phone stays signed in until the rider signs out, changes the password, or the session is revoked.
+ *             With a limit set, it is never ended during a ride (extended while riding).
  *   legacy    older app builds and API clients that did not opt in: the long sliding token of before (30 days),
  *             now bound to this record (logout / revoke work instantly); idle 30 days; no absolute limit
  *             (they are retired by raising MIN_APP_BUILD, never by signing riders out).
@@ -280,7 +282,8 @@ class SessionStore {
       throw new SessionError(MSG_EXPIRED);
     }
     const patch = {};
-    if (s.absoluteExpiresAt && t > s.absoluteExpiresAt) {
+    // v3.60: an app session made before "no time limit" still carries a date: ignored when the app limit is 0.
+    if (s.absoluteExpiresAt && (pol.absMs || pol.absHard) && t > s.absoluteExpiresAt) {
       let riding = false;
       if (!pol.absHard && this.isRiding) { try { riding = await this.isRiding(s.userId); } catch { riding = true; /* unsure: never end a ride */ } }
       if (!riding) {
