@@ -36,6 +36,23 @@ class GeoProxy {
   get weatherEnabled() { return !!config.weatherUrl; }
 
   /** Serialises upstream calls and spaces them out. */
+  /**
+   * v3.60 fast re-route: routing has its own polite queue (GEO_ROUTE_MIN_INTERVAL_MS, default 250 ms) so a rider's
+   * new route never waits behind address look-ups, place searches or weather in the shared 1.1 s queue.
+   */
+  _queuedRoute(fn) {
+    if (!this.routeChain) { this.routeChain = Promise.resolve(); this.routeLastAt = 0; }
+    this.queued++;
+    const run = this.routeChain.then(async () => {
+      const wait = this.routeLastAt + config.geoRouteMinIntervalMs - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      this.routeLastAt = Date.now();
+      return fn();
+    }).finally(() => { this.queued--; });
+    this.routeChain = run.catch(() => {});
+    return run;
+  }
+
   _queued(fn) {
     this.queued++;
     const run = this.chain.then(async () => {
@@ -223,13 +240,13 @@ class GeoProxy {
         if (bearing !== null) {
           // OSRM: one "value,range" per coordinate, empty for the others.
           const bearings = [`${bearing},60`, ...wp.slice(1).map(() => '')].join(';');
-          j = await this._queued(() => this._getOsrm(`${base}&bearings=${bearings}`)).catch((e) => {
+          j = await this._queuedRoute(() => this._getOsrm(`${base}&bearings=${bearings}`)).catch((e) => {
             if (e.osrmCode) return null; // no road that way near the rider: try without the direction
             throw e;
           });
           if (j && !j.routes?.length) j = null;
         }
-        if (!j) j = await this._queued(() => this._getOsrm(base));
+        if (!j) j = await this._queuedRoute(() => this._getOsrm(base));
         const r = j?.routes?.[0];
         if (!r) { failure = 'NO_ROUTE'; return null; }
         const line = (r.geometry?.coordinates || []).map(([x, y]) => ({ lat: y, lng: x }));
@@ -288,8 +305,8 @@ class GeoProxy {
           return j;
         };
         let j = null;
-        if (bearing !== null) j = await this._queued(() => fetchOne(bearing)).catch((e) => { if (e.osrmCode) return null; throw e; });
-        if (!j) j = await this._queued(() => fetchOne(null));
+        if (bearing !== null) j = await this._queuedRoute(() => fetchOne(bearing)).catch((e) => { if (e.osrmCode) return null; throw e; });
+        if (!j) j = await this._queuedRoute(() => fetchOne(null));
         const n = adapter.normalise('valhalla', j);
         if (!n) { failure = 'NO_ROUTE'; return null; }
         return { distanceM: n.distanceM, durationS: n.durationS, polyline: encodePolyline(n.line), legs: n.legs, steps: n.steps, router: 'valhalla' };

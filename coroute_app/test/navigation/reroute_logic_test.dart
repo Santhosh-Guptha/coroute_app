@@ -27,13 +27,14 @@ void main() {
       expect(RerouteRules.rejoinLimitFor(90), 40);
     });
 
-    test('beyond 40 m and heading away: off after 8 s of moving time, not before', () {
+    // v3.60: 6 s hold (was 8 s).
+    test('beyond 40 m and heading away: off after 6 s of moving time, not before', () {
       final m = OffRouteMonitor();
-      for (var s = 0; s < 8; s++) {
+      for (var s = 0; s < 6; s++) {
         expect(m.onFix(f(s, heading: 90), offM: 50 + s * 4.0, routeBearingDeg: 0), FollowEvent.none, reason: '$s s');
         expect(m.state, FollowState.leaving);
       }
-      expect(m.onFix(f(8, heading: 90), offM: 85, routeBearingDeg: 0), FollowEvent.wentOff);
+      expect(m.onFix(f(6, heading: 90), offM: 75, routeBearingDeg: 0), FollowEvent.wentOff);
       expect(m.isOff, isTrue);
     });
 
@@ -52,11 +53,11 @@ void main() {
 
     test('direction unknown: a distance that keeps growing counts as heading away', () {
       final m = OffRouteMonitor();
-      FollowEvent? last;
+      final seen = <FollowEvent>[];
       for (var s = 0; s <= 8; s++) {
-        last = m.onFix(f(s, heading: null), offM: 45 + s * 3.0);
+        seen.add(m.onFix(f(s, heading: null), offM: 45 + s * 3.0));
       }
-      expect(last, FollowEvent.wentOff);
+      expect(seen, contains(FollowEvent.wentOff));
     });
 
     test('GPS jitter around the limit never goes off (one fix back inside starts over)', () {
@@ -101,11 +102,11 @@ void main() {
         expect(m.onFix(f(s, kmh: 1, heading: 90), offM: 80, routeBearingDeg: 0), FollowEvent.none);
       }
       expect(m.state, FollowState.leaving, reason: 'not reset');
-      // Moving again: 4 s held before + 4 s now is 8 s.
-      for (var s = 300; s < 304; s++) {
+      // Moving again: 4 s held before + 2 s now is the 6 s hold.
+      for (var s = 300; s < 302; s++) {
         expect(m.onFix(f(s, heading: 90), offM: 60, routeBearingDeg: 0), FollowEvent.none);
       }
-      expect(m.onFix(f(304, heading: 90), offM: 60, routeBearingDeg: 0), FollowEvent.wentOff);
+      expect(m.onFix(f(302, heading: 90), offM: 60, routeBearingDeg: 0), FollowEvent.wentOff);
     });
 
     test('parked 250 m off the road: never off', () {
@@ -145,43 +146,47 @@ void main() {
   });
 
   group('RerouteScheduler', () {
-    test('single flight; at least 15 s between requests', () {
+    // v3.60: faster re-route: 8 s between requests (was 15 s), 10 s timeout (was 20 s). Expectations follow RerouteRules.
+    final gap = RerouteRules.minRerouteInterval.inMilliseconds;
+    final timeout = RerouteRules.requestTimeout.inMilliseconds;
+
+    test('single flight; at least the minimum interval between requests', () {
       final s = RerouteScheduler();
       expect(s.check(nowMs: 0, online: true), RerouteGate.go);
       final t = s.start(0);
-      expect(s.check(nowMs: 5000, online: true), RerouteGate.inFlight);
-      expect(s.finish(t, ok: true, nowMs: 6000), isTrue);
-      expect(s.check(nowMs: 14999, online: true), RerouteGate.tooSoon);
-      expect(s.check(nowMs: 15000, online: true), RerouteGate.go);
+      expect(s.check(nowMs: 3000, online: true), RerouteGate.inFlight);
+      expect(s.finish(t, ok: true, nowMs: 4000), isTrue);
+      expect(s.check(nowMs: gap - 1, online: true), RerouteGate.tooSoon);
+      expect(s.check(nowMs: gap, online: true), RerouteGate.go);
     });
 
-    test('back-off after failures (15 s, 15 s, 30 s), gives up after 3 in a row', () {
+    test('back-off after failures (gap, gap, 2 x gap), gives up after 3 in a row', () {
       final s = RerouteScheduler();
       var t = s.start(0);
       s.finish(t, ok: false, nowMs: 1000);
       expect(s.failures, 1);
-      expect(s.check(nowMs: 14999, online: true), RerouteGate.tooSoon);
-      expect(s.check(nowMs: 15000, online: true), RerouteGate.go);
-      t = s.start(15000);
-      s.finish(t, ok: false, nowMs: 16000);
-      expect(s.wait, const Duration(seconds: 30));
-      expect(s.check(nowMs: 44999, online: true), RerouteGate.tooSoon);
-      expect(s.check(nowMs: 45000, online: true), RerouteGate.go);
-      t = s.start(45000);
-      s.finish(t, ok: false, nowMs: 46000);
+      expect(s.check(nowMs: gap - 1, online: true), RerouteGate.tooSoon);
+      expect(s.check(nowMs: gap, online: true), RerouteGate.go);
+      t = s.start(gap);
+      s.finish(t, ok: false, nowMs: gap + 1000);
+      expect(s.wait, RerouteRules.minRerouteInterval * 2);
+      expect(s.check(nowMs: gap + 2 * gap - 1, online: true), RerouteGate.tooSoon);
+      expect(s.check(nowMs: gap + 2 * gap, online: true), RerouteGate.go);
+      t = s.start(3 * gap);
+      s.finish(t, ok: false, nowMs: 3 * gap + 1000);
       expect(s.gaveUp, isTrue);
       expect(s.check(nowMs: 100000, online: true), RerouteGate.gaveUp);
       // One quiet try after 5 minutes.
-      expect(s.check(nowMs: 46000 + RerouteRules.retryAfterGiveUp.inMilliseconds, online: true), RerouteGate.go);
+      expect(s.check(nowMs: 3 * gap + 1000 + RerouteRules.retryAfterGiveUp.inMilliseconds, online: true), RerouteGate.go);
     });
 
-    test('no answer within 20 s counts as a failure; the late answer is ignored', () {
+    test('no answer within the timeout counts as a failure; the late answer is ignored', () {
       final s = RerouteScheduler();
       final t = s.start(0);
-      expect(s.check(nowMs: 19999, online: true), RerouteGate.inFlight);
-      expect(s.check(nowMs: 20000, online: true), RerouteGate.go, reason: 'timed out (20 s) and 15 s passed');
+      expect(s.check(nowMs: timeout - 1, online: true), RerouteGate.inFlight);
+      expect(s.check(nowMs: timeout, online: true), RerouteGate.go, reason: 'timed out and the interval passed');
       expect(s.failures, 1);
-      expect(s.finish(t, ok: true, nowMs: 21000), isFalse);
+      expect(s.finish(t, ok: true, nowMs: timeout + 1000), isFalse);
       expect(s.failures, 1);
     });
 
@@ -260,11 +265,13 @@ void main() {
   });
 
   group('RerouteController', () {
-    // Leaves the route: 8 s heading east from a north-going route.
+    // Leaves the route: heading east from a north-going route until the monitor decides (v3.60: 6 s hold, was 8 s).
+    // Returns the step of the departure (the one that carries the line and the request).
     RerouteStep leave(RerouteController c, int from, {bool online = true, bool auto = true}) {
       RerouteStep? step;
       for (var s = from; s <= from + 8; s++) {
         step = c.onFix(f(s, heading: 90), offM: 50 + (s - from) * 5.0, routeBearingDeg: 0, online: online, autoReroute: auto);
+        if (step.event == FollowEvent.wentOff) return step;
       }
       return step!;
     }
@@ -275,10 +282,10 @@ void main() {
       expect(step.event, FollowEvent.wentOff);
       expect(step.request, isTrue);
       expect(step.prompts, [NavPrompt.offRouteFinding]);
-      c.begin(8000);
-      for (var s = 9; s < 19; s++) {
+      c.begin(6000);
+      for (var s = 7; s < 15; s++) {
         final st = c.onFix(f(s, heading: 90), offM: 100.0 + s, routeBearingDeg: 0, online: true);
-        expect(st.request, isFalse);
+        expect(st.request, isFalse, reason: '$s s: still on its way (timeout ${RerouteRules.requestTimeout.inSeconds} s)');
         expect(st.prompts, isEmpty);
       }
       expect(c.status, RerouteStatus.finding);

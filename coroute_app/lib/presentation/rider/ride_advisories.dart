@@ -41,6 +41,9 @@ class RideAdvisories {
   int heritageUntilMs = 0;
 
   /// How long a heritage notice stays (it has buttons, so longer than the 5 s auto-hide).
+  /// v3.60 owner decision: no spoken off-route / re-route lines (the cards and status line show them).
+  static const bool speakOffRoute = false;
+
   static const Duration heritageShowFor = Duration(seconds: 45);
 
   /// Heritage places are looked for at most this often.
@@ -93,7 +96,8 @@ class RideAdvisories {
         : OffRouteGroupDecision.none;
     offGroupShow = d.show && !sosOpen;
     offGroupSinceMs = offGroup.off ? (offGroupSinceMs == 0 ? nowMs : offGroupSinceMs) : 0;
-    if (d.speak && !sosOpen) {
+    // v3.60 owner decision: off-route / re-route lines are not spoken; the card on screen stays.
+    if (speakOffRoute && d.speak && !sosOpen) {
       final line = tapGate.canTap ? OffRouteGroupMonitor.spokenStopped : OffRouteGroupMonitor.spoken;
       out.add((text: line, key: 'OFF_GROUP:$offGroupSinceMs', heritage: false));
     }

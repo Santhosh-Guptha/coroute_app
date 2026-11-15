@@ -17,7 +17,7 @@ class RerouteRules {
   static const double accuracyFactor = 2.5;
 
   /// ...for at least this long while moving (and heading away from the route).
-  static const Duration offRouteHold = Duration(seconds: 8);
+  static const Duration offRouteHold = Duration(seconds: 6); // v3.60: was 8 s (faster re-route, still jitter-safe)
 
   /// Farther than this (or [accuracyFactor] x accuracy, if larger) on one
   /// good moving fix is off the route at once.
@@ -53,10 +53,10 @@ class RerouteRules {
   // -------------------------------------------------------------- reroute
 
   /// At most one new-route request per this interval (from its start).
-  static const Duration minRerouteInterval = Duration(seconds: 15);
+  static const Duration minRerouteInterval = Duration(seconds: 8); // v3.60: was 15 s
 
   /// A request with no answer after this long counts as failed.
-  static const Duration requestTimeout = Duration(seconds: 20);
+  static const Duration requestTimeout = Duration(seconds: 10); // v3.60: was 20 s
 
   /// After this many failed requests in a row, stop asking.
   static const int maxFailures = 3;

@@ -194,7 +194,7 @@ class GeoService {
       final res = await _api.post('/geo/route', {
         'waypoints': [for (final (lat, lng) in waypoints) {'lat': lat, 'lng': lng}],
         if (h != null && h.isFinite) 'startBearing': ((h % 360) + 360).round() % 360,
-      }, const Duration(seconds: 15));
+      }, const Duration(seconds: 10));
       if (res is! Map) return null;
       return await RouteModel.fromJsonAsync(Map<String, dynamic>.from(res));
     } catch (_) {

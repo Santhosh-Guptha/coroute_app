@@ -155,6 +155,7 @@ class AppPageTransitionsBuilder extends PageTransitionsBuilder {
       } catch (_) {}
       final name = topRoute?.settings.name;
       if (AppMotion.isInstantRoute(name)) return Duration.zero;
+      if (AppMotion.levelOf(nav.context) == MotionLevel.none) return Duration.zero;
     }
     if (AppMotion.levelOf() == MotionLevel.none) return Duration.zero;
     return AppMotion.page;

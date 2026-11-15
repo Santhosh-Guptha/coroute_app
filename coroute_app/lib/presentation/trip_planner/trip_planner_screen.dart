@@ -54,6 +54,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   late final GeoService _geo = GeoService(context.read<ApiClient>());
   final MapController _map = MapController();
   PickedPlace? _start;
+
+  /// v3.60 meet first: riders come from different places and gather at the start before the ride begins.
+  bool _gather = false;
   PickedPlace? _destination;
   final List<PickedPlace> _stops = [];
   List<PickedPlace> _recent = const [];
@@ -379,6 +382,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         start: _start,
         stops: List.of(_stops),
         speedLimitKmh: _speedLimit,
+        gatherAtStart: _gather,
       );
     } catch (e) {
       if (mounted) {
@@ -808,6 +812,17 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           onTap: _pickStart,
           trailing: Icon(Icons.edit_location_alt_outlined, size: 22, color: AppTheme.muted),
           semanticsLabel: 'Start: ${startName ?? 'not set'}. Pick on the map',
+        ),
+        // v3.60 meet first.
+        DsSwitchRow(
+          key: const ValueKey('planner_meet_first'),
+          label: 'Riders meet at the start first',
+          subtitle: _gather
+              ? 'Each rider gets their own route to the start. You start the ride when the group is there.'
+              : 'Riders coming from different places? Turn this on.',
+          value: _gather,
+          divider: false,
+          onChanged: (v) => setState(() => _gather = v),
         ),
         ReorderableListView.builder(
           shrinkWrap: true,

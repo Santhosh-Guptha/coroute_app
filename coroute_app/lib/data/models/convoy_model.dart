@@ -93,6 +93,10 @@ class ConvoyModel {
   /// 3.16: lower speed limit (km/h) within 1 km of planned stops, the start and the
   /// destination; 0 = off. Lead only.
   final int townLimitKmh;
+
+  /// v3.60 meet first: riders start from different places and gather at the meeting point; each rider is routed
+  /// there on their own; the host starts the ride from it. Null when the ride does not gather.
+  final RideGathering? gathering;
   final RideFeaturePolicy featurePolicy;
   final Map<String, dynamic> featureAnalytics;
 
@@ -162,6 +166,7 @@ class ConvoyModel {
     this.discovery = false,
     this.assistDefault = true,
     this.townLimitKmh = 0,
+    this.gathering,
     this.featurePolicy = const RideFeaturePolicy(),
     this.featureAnalytics = const {},
     this.capacity = 0,
@@ -203,6 +208,7 @@ class ConvoyModel {
     bool? discovery,
     bool? assistDefault,
     int? townLimitKmh,
+    RideGathering? gathering,
     RideFeaturePolicy? featurePolicy,
     Map<String, dynamic>? featureAnalytics,
     int? capacity,
@@ -242,6 +248,7 @@ class ConvoyModel {
       discovery: discovery ?? this.discovery,
       assistDefault: assistDefault ?? this.assistDefault,
       townLimitKmh: townLimitKmh ?? this.townLimitKmh,
+      gathering: gathering ?? this.gathering,
       featurePolicy: featurePolicy ?? this.featurePolicy,
       featureAnalytics: featureAnalytics ?? this.featureAnalytics,
       capacity: capacity ?? this.capacity,
@@ -283,6 +290,7 @@ class ConvoyModel {
       'discovery': discovery,
       'assistDefault': assistDefault,
       'townLimitKmh': townLimitKmh,
+      if (gathering != null) 'gathering': gathering!.toJson(),
       'featurePolicy': featurePolicy.toJson(),
       'featureAnalytics': featureAnalytics,
       if (capacity > 0) 'capacity': capacity,
@@ -369,10 +377,37 @@ class ConvoyModel {
       assistDefault: json['assistDefault'] != false,
       autoRoles: json['autoRoles'] == true,
       townLimitKmh: (json['townLimitKmh'] as num?)?.toInt() ?? 0,
+      gathering: RideGathering.fromJson(json['gathering']),
       featurePolicy: RideFeaturePolicy.fromJson(json['featurePolicy']),
       featureAnalytics: json['featureAnalytics'] is Map ? Map<String, dynamic>.from(json['featureAnalytics']) : const {},
       capacity: (json['capacity'] as num?)?.toInt() ?? 0,
       groupFeatures: groupFeaturesFromWire(json['groupFeatures']),
     );
   }
+}
+
+/// v3.60 meet first: the meeting point riders gather at before the ride starts.
+class RideGathering {
+  final double lat;
+  final double lng;
+  final String name;
+
+  /// When the host started the ride from the meeting point (epoch ms); 0 = still gathering.
+  final int startedAt;
+  const RideGathering({required this.lat, required this.lng, this.name = '', this.startedAt = 0});
+
+  /// A rider closer than this (metres) has arrived.
+  static const double arrivedM = 150;
+
+  bool get active => startedAt == 0;
+
+  static RideGathering? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final lat = (raw['lat'] as num?)?.toDouble();
+    final lng = (raw['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null || (lat == 0 && lng == 0)) return null;
+    return RideGathering(lat: lat, lng: lng, name: raw['name']?.toString() ?? '', startedAt: (raw['startedAt'] as num?)?.toInt() ?? 0);
+  }
+
+  Map<String, dynamic> toJson() => {'lat': lat, 'lng': lng, 'name': name, 'startedAt': startedAt};
 }

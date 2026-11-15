@@ -109,7 +109,7 @@ void main() {
     await again.load();
     expect(again.voiceWarnings, isFalse);
     expect(again.hazardAlerts, isTrue);
-    expect(again.rideOnLockScreen, isFalse, reason: '"Show cockpit on lock screen while riding" is kept');
+    expect(again.rideOnLockScreen, isTrue, reason: 'v3.60 lock-screen cockpit is always on');
     expect(again.autoReroute, isTrue);
     expect(again.hardwarePtt, isTrue);
     expect(again.netConsentSeen, isTrue);

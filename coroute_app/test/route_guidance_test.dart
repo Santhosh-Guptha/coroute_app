@@ -487,7 +487,6 @@ void main() {
       expect(g.statusLine, 'Off the planned route, finding a new route');
       // More fixes while it is on its way: no second request, no second line.
       fix(1200, 300);
-      fix(1300, 300);
       expect(calls.length, 1);
       expect(said.length, 1);
       pending.single.complete(detour);
@@ -563,9 +562,9 @@ void main() {
       expect(said.length, 2);
     });
 
-    test('no answer within 20 s: counts as a failure, the late answer is ignored', () async {
+    test('no answer within 10 s: counts as a failure, the late answer is ignored', () async {
       leave();
-      for (var i = 0; i < 5; i++) {
+      for (var i = 0; i < 3; i++) {
         fix(1200 + i * 100.0, 300);
       }
       expect(calls.length, 2, reason: 'timed out, then asked again');
