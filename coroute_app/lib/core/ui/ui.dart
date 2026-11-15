@@ -20,6 +20,7 @@ export 'optimistic.dart';
 export 'place_art.dart';
 export 'pressable.dart';
 export 'ride_alert.dart';
+export 'route_visuals.dart';
 export 'ride_metric.dart';
 export 'rider_avatar.dart';
 export 'rider_status.dart';

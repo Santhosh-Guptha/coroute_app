@@ -199,13 +199,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: Space.s12),
                 if (alert != null) ...[alert, const SizedBox(height: Space.s12)],
                 const AdminWarningCard(),
-                _HeroCarousel(
-                  key: Key(HomeScreen.sectionKeys[1]),
-                  cards: cards,
-                  nearest: ranked.isEmpty ? null : ranked.first,
-                  lastRide: last,
-                ),
-                const SizedBox(height: Space.s12),
+                // v3.59: safety first. CoRoute's home opens with the rider's safety panel (Emergency one tap away),
+                // then the ride ideas.
                 _SafetyStrip(key: Key(HomeScreen.sectionKeys[2]), setup: setup, onEmergency: _openEmergency),
                 if (nudge != null) ...[
                   const SizedBox(height: Space.s12),
@@ -213,12 +208,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 const OfflineSoloCard(showEntry: false),
                 const SizedBox(height: Space.s24),
+                const RoadSectionHeader('Your next ride'),
+                const SizedBox(height: Space.s12),
+                _HeroCarousel(
+                  key: Key(HomeScreen.sectionKeys[1]),
+                  cards: cards,
+                  nearest: ranked.isEmpty ? null : ranked.first,
+                  lastRide: last,
+                ),
+                const SizedBox(height: Space.s24),
                 CommunitiesRail(key: Key(HomeScreen.sectionKeys[3]), clubs: _clubs, loading: !_loadedOnce && _clubs == null, onClubsChanged: _load, onSeeAll: () => RiderHomeScreen.selectTab(context, HomeTab.people)),
                 const SizedBox(height: Space.s24),
                 _RideStats(key: Key(HomeScreen.sectionKeys[4]), trips: trips, score: _score, rank: _rank),
                 _Upcoming(clubs: _clubs),
                 const SizedBox(height: Space.s24),
-                SectionTitle('Bike status', key: Key(HomeScreen.sectionKeys[5])),
+                RoadSectionHeader('Bike status', key: Key(HomeScreen.sectionKeys[5])),
                 const SizedBox(height: Space.s8),
                 const BikeStatusCard(),
                 // After a ride the cockpit did not close itself: asks once for the post-trip review. Renders nothing.
@@ -504,7 +508,7 @@ class _HeroTile extends StatelessWidget {
                                 children: [
                                   Icon(icon, size: 20, color: AppPalette.light.text),
                                   const SizedBox(width: 8),
-                                  Text(button, style: TextStyle(color: AppPalette.light.text, fontSize: 15, fontWeight: FontWeight.w600)),
+                                  Text(button, maxLines: 1, style: TextStyle(color: AppPalette.light.text, fontSize: 15, fontWeight: FontWeight.w600)),
                                 ],
                               ),
                             ),
@@ -533,59 +537,95 @@ class _SafetyStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safety = context.watch<SafetyService?>();
-    final ok = AppTheme.success;
-    final warn = AppTheme.warnText;
-    Widget pill(bool good, IconData icon, String text) => InfoPill(icon: good ? icon : Icons.error_outline_rounded, text: text, color: good ? ok : warn);
-    return DsCard(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.shield_outlined, size: 20, color: AppTheme.accentText),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Ride safety',
-                  style: AppText.title.copyWith(fontSize: 15),
-                  overflow: TextOverflow.ellipsis,
+    final checks = <(bool, IconData, String)>[
+      (setup.crashDetectionOn, Icons.car_crash_outlined, setup.crashDetectionOn ? 'Crash detection on' : 'Crash detection off'),
+      (setup.hasEmergencyContact, Icons.contact_phone_outlined, setup.hasEmergencyContact ? 'Emergency contact set' : 'No emergency contact'),
+      (safety != null, Icons.sms_outlined, 'SOS works without data'),
+      if (setup.nearbyDevicesOk) (true, Icons.bluetooth_searching_rounded, 'Offline link ready'),
+    ];
+    final ready = checks.every((c) => c.$1);
+    // v3.59 safety panel: a road edge on the left, a readiness line, check rows, and a solid red Emergency key.
+    return Container(
+      decoration: BoxDecoration(color: AppTheme.card, borderRadius: BorderRadius.circular(22), border: Border.all(color: AppTheme.border), boxShadow: dsFloatingShadow()),
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 10, color: ready ? AppTheme.primaryFill : AppTheme.warnText, child: const SizedBox.shrink()),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Ride safety', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.overline.copyWith(color: AppTheme.accentText)),
+                              const SizedBox(height: 2),
+                              Text(ready ? 'Ready to ride' : 'Check before you ride', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Semantics(
+                          button: true,
+                          label: 'Emergency: call your contact or 112, share your location',
+                          excludeSemantics: true,
+                          child: Material(
+                            key: const Key('home_emergency'),
+                            color: AppTheme.sos,
+                            borderRadius: BorderRadius.circular(16),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: () {
+                                AppHaptics.medium();
+                                onEmergency();
+                              },
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(minWidth: 64, minHeight: 56),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.sos_rounded, color: Colors.white, size: 24),
+                                      Text('Emergency', maxLines: 1, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    for (final c in checks)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(
+                          children: [
+                            Icon(c.$1 ? Icons.check_circle_rounded : Icons.error_outline_rounded, size: 18, color: c.$1 ? AppTheme.success : AppTheme.warnText),
+                            const SizedBox(width: 8),
+                            Icon(c.$2, size: 16, color: AppTheme.text2),
+                            const SizedBox(width: 6),
+                            Expanded(child: Text(c.$3, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c.$1 ? AppTheme.text : AppTheme.warnText))),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              Semantics(
-                button: true,
-                label: 'Emergency: call your contact or 112, share your location',
-                excludeSemantics: true,
-                child: OutlinedButton.icon(
-                  key: const Key('home_emergency'),
-                  onPressed: () {
-                    AppHaptics.medium();
-                    onEmergency();
-                  },
-                  icon: Icon(Icons.sos_rounded, color: AppTheme.sos, size: 20),
-                  label: Text('Emergency', style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.w700)),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 48),
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    side: BorderSide(color: AppTheme.sos, width: 1.5),
-                    shape: const StadiumBorder(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              pill(setup.crashDetectionOn, Icons.car_crash_outlined, setup.crashDetectionOn ? 'Crash detection on' : 'Crash detection off'),
-              pill(setup.hasEmergencyContact, Icons.contact_phone_outlined, setup.hasEmergencyContact ? 'Emergency contact set' : 'No emergency contact'),
-              pill(safety != null, Icons.sms_outlined, 'SOS works without data'),
-              if (setup.nearbyDevicesOk) pill(true, Icons.bluetooth_searching_rounded, 'Offline link ready'),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -692,22 +732,9 @@ class _RideStats extends StatelessWidget {
                       children: [
                         Icon(Icons.emoji_events_outlined, color: AppTheme.accent, size: 22),
                         const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Leaderboard',
-                            style: AppText.body.copyWith(fontWeight: FontWeight.w600),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                        Expanded(child: Text('Leaderboard', style: AppText.body.copyWith(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
                         const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            r != null && (rank?.onLeaderboard ?? false) ? 'All India · #$r' : 'See where you stand',
-                            style: AppText.label,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.end,
-                          ),
-                        ),
+                        Flexible(child: Text(r != null && (rank?.onLeaderboard ?? false) ? 'All India · #$r' : 'See where you stand', style: AppText.label, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end)),
                         Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
                       ],
                     ),

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/coroute_logo.dart';
 import '../../core/ui/ui.dart';
 
 /// The four destinations of the bottom bar (the centre "+" is an action, not a destination).
 enum NavSlot { home, explore, community, chat }
 
-/// v3.58 bottom bar: Home · Explore · ( + ) · Community · Chat.
+/// v3.58 bottom bar: Home · Explore · ( Ride ) · Community · Chat (v3.59 look: road-shaped Ride key, lane marks).
 ///
 /// * Glove-friendly: every slot is at least 48 dp wide and 64 dp tall; the "+" is a 56 dp disc.
 /// * [selected] null = a screen that is not in the bar (Profile, Trips, Alerts): nothing is highlighted.
@@ -39,7 +40,14 @@ class CoRouteNavBar extends StatelessWidget {
     Widget slot(NavSlot s) => Expanded(child: _NavItem(slot: s, item: _items[s]!, selected: selected == s, badge: badges[s] ?? 0, badgeLabel: badgeLabels[s], onTap: () => onSelect(s)));
     return Container(
       key: const Key('coroute_nav_bar'),
-      decoration: BoxDecoration(color: AppTheme.card, border: Border(top: BorderSide(color: AppTheme.border))),
+      // v3.59: CoRoute's own bar: rounded top, soft lift, a road-shaped "Ride" key in the centre, and amber lane
+      // marks under the selected tab (not the usual pill or top line).
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        border: Border(top: BorderSide(color: AppTheme.border)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: AppTheme.isLight ? 0.06 : 0.3), blurRadius: 16, offset: const Offset(0, -4))],
+      ),
       padding: EdgeInsets.only(bottom: bottom),
       child: SizedBox(
         height: barHeight,
@@ -51,16 +59,28 @@ class CoRouteNavBar extends StatelessWidget {
               child: Center(
                 child: Semantics(
                   button: true,
-                  label: 'Quick actions: start a ride, join with a code, plan a trip, emergency',
+                  label: 'Ride: start a ride, join with a code, plan a trip, emergency',
+                  excludeSemantics: true,
                   child: Pressable(
                     key: const Key('nav_plus'),
                     haptic: AppHaptic.medium,
                     onTap: onPlus,
                     child: Container(
-                      width: plusSize,
-                      height: plusSize,
-                      decoration: BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
-                      child: Icon(Icons.add_rounded, size: 30, color: AppTheme.onPrimary),
+                      width: plusSize + 8,
+                      height: 52,
+                      decoration: BoxDecoration(color: AppTheme.primaryFill, borderRadius: BorderRadius.circular(18), boxShadow: dsFloatingShadow()),
+                      clipBehavior: Clip.antiAlias,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // A short road across the key: CoRoute's mark for "ride".
+                          Positioned(left: 8, right: 8, bottom: 7, child: RoadStripe(axis: Axis.horizontal, width: 4, road: Colors.white.withValues(alpha: 0.18))),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Icon(Icons.two_wheeler_rounded, size: 26, color: AppTheme.onPrimary),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -105,14 +125,6 @@ class _NavItem extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AnimatedContainer(
-                duration: Motion.tab,
-                curve: Motion.curve,
-                width: selected ? 24 : 0,
-                height: 3,
-                margin: const EdgeInsets.only(bottom: 6),
-                decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(2)),
-              ),
               icon,
               const SizedBox(height: 4),
               Text(
@@ -123,6 +135,18 @@ class _NavItem extends StatelessWidget {
                 // The bar keeps its height at large text: labels scale only a little.
                 textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.15),
                 style: TextStyle(fontSize: 12, height: 1.2, color: color, fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
+              ),
+              const SizedBox(height: 4),
+              // Selected: two amber lane marks (a road's centre line), not a pill.
+              AnimatedOpacity(
+                duration: Motion.tab,
+                opacity: selected ? 1 : 0,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  for (var i = 0; i < 2; i++) ...[
+                    if (i > 0) const SizedBox(width: 3),
+                    Container(width: 7, height: 3, decoration: BoxDecoration(color: CoRouteBrand.amber, borderRadius: BorderRadius.circular(2))),
+                  ],
+                ]),
               ),
             ],
           ),
