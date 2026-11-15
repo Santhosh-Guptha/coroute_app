@@ -7,7 +7,7 @@ You are the release agent for CoRoute (motorcycle group/solo riding SAFETY app: 
 website + web admin). Build 3.55.0+10030 is committed (latest commit 1a2356a). Two rounds are in the working tree,
 uncommitted: round 16 (3.55.0+10031, docs/NEXT_AGENT_PROMPT_v3.55_round16_explore_10031.md) and round 17 (this prompt).
 Ship them together as build 3.55.0+10032 (pubspec already 3.55.0+10032). Commit round 16 first exactly as its prompt
-section 2 says (skip its pubspec commit), then round 17 below (commits 1-15, including L and M in section 1). Then test, build, device QA, deploy, Play. Report after
+section 2 says (skip its pubspec commit), then round 17 below (commits 1-16, including L, M and N in section 1). Then test, build, device QA, deploy, Play. Report after
 each section. STOP at any failed safety gate.
 
 === 0. RULES ===
@@ -98,6 +98,22 @@ M) ROUND 18 (15 Nov, communities_chat_v360.md section 12): one combined cockpit 
    Widget tests that expect MinimalHoldToTalkBar, hud_end_ride or hud_group_pill in the COCKPIT collapsed sheet,
    or separate HudTopBar / HudTurnCard in the cockpit, must be updated on purpose (list them).
 
+N) ROUND 19 (communities_chat_v360.md section 13): SOS push to riders whose app is closed (GROUP_SOS /
+   GROUP_SOS_RESOLVED), late Medical ID (SOS_MEDICAL_LATE_MS 15000), HTTP SOS never refused (600/min abuse cap only).
+   Commit as:
+   16. fix(safety): SOS push to closed apps, late Medical ID, HTTP SOS never refused
+       gateway/src/push.js gateway/src/convoys.js gateway/src/config.js gateway/src/routes.js gateway/deploy/.env.example
+       gateway/test/sos_push_medical_362.test.js
+       android/app/src/main/kotlin/space/devmonks/coroute_app/CoRouteMessagingService.kt
+       lib/domain/notify/push_routing.dart lib/presentation/widgets/push_router_host.dart test/group_sos_push_362_test.dart
+   (make it right after 15, before 12). The Kotlin file could not be compiled where it was written: build it first
+   and fix any compile error without changing behaviour.
+   QA: v) phone B force-stops CoRoute (swipe away) during a ride; A raises SOS -> B gets "SOS: <A> needs help"
+   with the alarm sound within seconds, even in Do Not Disturb if alarms are allowed; tap -> app opens on the ride
+   with the SOS card. A cancels -> B's notification changes to "<A>'s SOS is closed". With app push muted in Android
+   for "Friends" the SOS still shows. w) slow network on A's profile (or a test account with Medical ID): the group
+   sees the Medical ID on the SOS card within ~15 s. x) 15 SOS presses within a minute over HTTP: none refused.
+
 === 2. COMMITS (round 17, after round 16's commits 1-8) ===
 1. feat(gateway): communities public/private, join requests, picture, hosted rides
    gateway/src/crews.js gateway/src/crew_routes.js gateway/src/community_routes.js gateway/src/crew_ride_invites.js
@@ -131,12 +147,12 @@ M) ROUND 18 (15 Nov, communities_chat_v360.md section 12): one combined cockpit 
     test/ui10_home_sections_test.dart
 11. docs(v3.60): communities_chat_v360.md and this prompt
     docs/features_355/communities_chat_v360.md docs/NEXT_AGENT_PROMPT_v3.55_round17_communities_10032.md
-    Before commit 12: make commits 13, 14 and 15 (section 1, L and M).
+    Before commit 12: make commits 13, 14, 15 and 16 (section 1, L, M and N).
 12. chore(release): 3.55.0+10032   pubspec.yaml (+ checksums as in 10030)
    After commit 12: `git status --short` shows only _incoming/ (and ignored caches).
 
 === 3. TESTS ===
-- cd gateway && npm test -> expect 1482 tests, 0 failures. If public_ride_mirror or two_node_failover time out,
+- cd gateway && npm test -> expect 1487 tests, 0 failures. If public_ride_mirror or two_node_failover time out,
   re-run those two files alone (timing tests); a repeat failure alone is a real bug.
 - node deploy/gen_caddy_routes.js -> no change after commit 2.
 - flutter analyze -> 0 issues. flutter test -> all pass. Expected intentional changes are already in the tests

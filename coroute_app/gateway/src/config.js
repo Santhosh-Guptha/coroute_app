@@ -81,6 +81,8 @@ const config = {
   // SOS never waits on a slow database: duplicate check and store each get this long before the alert goes out.
   sosLookupWaitMs: Math.max(200, int('SOS_LOOKUP_WAIT_MS', 1500)),
   sosStoreWaitMs: Math.max(200, int('SOS_STORE_WAIT_MS', 2000)),
+  // v3.61: a profile that answers after the SOS went out still adds its Medical ID up to this long after.
+  sosMedicalLateMs: int('SOS_MEDICAL_LATE_MS', 15000),
 
   // Auth
   jwtSecret: isTest ? 'test-secret-test-secret-test-secret-1234' : required('JWT_SECRET'),

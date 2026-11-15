@@ -129,7 +129,25 @@ updated settings, profile and push routing tests.
   (`SOS_STORE_WAIT_MS`) before the alert goes out; Medical ID fetched in parallel; no "0.00000, 0.00000" in SOS texts
   (server and phone); a waiting SOS keeps its last good position; HTTP backup even before the ride rejoin; helmet
   remote SOS before the first fix; group SMS after 20 s with no live link (45 s online); `CockpitSosButton` hold 3 s.
-* Known gaps (need new push / event types): no push to closed apps for a group member's SOS (live socket, reconnect
-  and texts cover it); Medical ID missing if the profile takes over 1.5 s; HTTP SOS limit 12/min (socket never refuses).
 * Tests: `test/talk_button_state_361_test.dart` (pure, 5), `test/safety_latency_361_test.dart` (3),
   `test/hud_ride_sheet_test.dart` (+2, Flutter), `gateway/test/sos_latency_361.test.js`, SMS text test.
+
+## 13. Safety gaps closed (round 19, 15 Nov 2026)
+
+* **SOS push to closed apps**: `convoys._pushSos` sends `GROUP_SOS` ("SOS: Ravi needs help" / "Crash alert: Ravi",
+  body "<ride name>. Open CoRoute to see where and help.") to every rider of the ride with no live socket (here or on
+  the peer node), right after the room fan-out, not awaited. Data: groupId and alertId only (never a position or
+  medical info). `urgent`: never held back by the per-rider push throttle or the admin push switch (push.js
+  `URGENT_TYPES`). Closing the SOS sends `GROUP_SOS_RESOLVED` with the same collapse key / notification id, so it
+  replaces the alarm. A resend of the same SOS pushes nothing new.
+  Android (`CoRouteMessagingService.kt`): always shown (even with app push muted or the app in front), channel
+  `coroute_sos_v2` (SOS alerts, alarm sound, bypass DND), category ALARM, lock-screen visible; the close uses
+  "Group alerts". App in front: `push_router_host` also reconnects the socket at once (`RealtimeService.retryNow`).
+  Tap: opens the app; the ride restores and its re-join brings the SOS card.
+* **Late Medical ID**: a profile slower than 1.5 s never holds the SOS; `_lateMedical` waits up to
+  `SOS_MEDICAL_LATE_MS` (15 s), adds the Medical ID to the still-open alert, stores it and sends the same ALERT again
+  to the room (the app updates the alert in place: no second alarm). Nothing is added after the SOS closed.
+* **HTTP SOS never refused**: the 12-a-minute limit is gone and the SOS route no longer counts toward the general
+  240-a-minute API limit; only abuse far beyond any phone (600 a minute per account) gets 429. Resends with the same
+  clientId and the storm guard keep the group from floods.
+* Tests: `gateway/test/sos_push_medical_362.test.js` (5), `test/group_sos_push_362_test.dart` (pure, 1).

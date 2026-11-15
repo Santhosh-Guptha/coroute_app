@@ -1039,7 +1039,10 @@ class ConvoyManager extends EventEmitter {
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const cid = clientId === undefined || clientId === null ? '' : String(clientId).slice(0, 64);
     // Medical info / owner settings are fetched next to the duplicate check (never one after the other).
-    const ownerP = withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null);
+    // v3.61: a profile slower than 1.5 s never holds the SOS back; its Medical ID is added when it lands (_lateMedical).
+    const ownerLate = Promise.resolve().then(() => this.repo.findUserById(user.userId));
+    ownerLate.catch(() => {});
+    const ownerP = withTimeout(ownerLate, 1500).catch(() => null);
     if (cid) {
       for (const a of room.alerts.values()) {
         if (a.userId === user.userId && a.clientId === cid) {
@@ -1091,7 +1094,58 @@ class ConvoyManager extends EventEmitter {
     alert.rescueId = rescueIdFor({ msgRescueId: msg.rescueId, clientId: cid, alertId: alert.alertId });
     const ownerDoc = await ownerP;
     await this._storeAlert(room, alert, ownerDoc, { sender: user.userId });
+    if (!ownerDoc) this._lateMedical(room.groupId, alert.alertId, ownerLate);
     return { alert, duplicate: false, persisted: !(room.unsaved && room.unsaved.has(alert.alertId)) };
+  }
+
+  /**
+   * v3.61: the rider's profile answered after the SOS went out (slower than 1.5 s): the Medical ID is added to the
+   * still-open alert, stored, and the room gets the same ALERT again (same alertId: the app updates it in place, no
+   * second alarm). Waits at most SOS_MEDICAL_LATE_MS. Never throws.
+   */
+  _lateMedical(groupId, alertId, ownerLate) {
+    withTimeout(ownerLate, config.sosMedicalLateMs)
+      .then(async (doc) => {
+        const m = medicalOf(doc);
+        if (!m) return;
+        const room = this.rooms.get(groupId);
+        const a = room?.alerts.get(alertId);
+        if (!a || a.resolved || a.medical) return;
+        a.medical = m;
+        await this.repo.updateAlert(groupId, alertId, { medical: m }).catch((e) => this.log.warn('[convoys] late medical save failed', e.message));
+        if (a.resolved) return;
+        const full = { type: 'ALERT', ts: now(), alert: publicAlert(a, { summary: this._summary(groupId, alertId) }) };
+        this.emit('event', groupId, full, { exceptUser: a.userId });
+        if (this.mirror) this.mirror.local(groupId, full);
+      })
+      .catch(() => {});
+  }
+
+  /**
+   * v3.61: push the SOS (or its close) to riders of this ride with no live socket (app closed or killed). Riders on a
+   * socket here or on the peer node already got the ALERT. Text only: first name and ride name, never a position or
+   * medical info. Not awaited; never throws.
+   */
+  _pushSos(room, a, kind) {
+    try {
+      const push = this.push;
+      if (!push || typeof push.notifyUsers !== 'function' || !room || !a) return;
+      const ids = [...room.riders.keys()].filter((id) => id && id !== a.userId);
+      if (!ids.length) return;
+      const first = String(a.userName || 'A rider').trim().split(/\s+/)[0] || 'A rider';
+      const ride = String((room.meta && room.meta.name) || 'your ride').slice(0, 60);
+      const crash = a.alertType === 'CRASH' || a.auto === true;
+      const raised = kind === 'RAISED';
+      push.notifyUsers(ids, {
+        type: raised ? 'GROUP_SOS' : 'GROUP_SOS_RESOLVED',
+        title: raised ? (crash ? `Crash alert: ${first}` : `SOS: ${first} needs help`) : `${first}'s SOS is closed`,
+        body: raised ? `${ride}. Open CoRoute to see where and help.` : `${ride}. No help needed now.`,
+        data: { groupId: room.groupId, alertId: a.alertId },
+        collapseKey: `sos_${a.alertId}`,
+        skipConnected: true,
+        urgent: true,
+      }).catch(() => {});
+    } catch (e) { this.log.warn('[convoys] sos push failed', e.message); }
   }
 
   /** Stores again an alert whose first store failed (a resend with its clientId). True once it is stored. */
@@ -1190,6 +1244,7 @@ class ConvoyManager extends EventEmitter {
       this.emit('emergency', room.groupId, alert, 'RAISED', { owner: ownerInfo(ownerDoc) });
     } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
     this._lookupHospital(room, alert);
+    this._pushSos(room, alert, 'RAISED');
     await delivered;
     return alert;
   }
@@ -1296,6 +1351,7 @@ class ConvoyManager extends EventEmitter {
       const delivered = this._durable(groupId, 'ALERT_RESOLVED', { alertId, by, status: next }, { sender: by && by !== 'SYSTEM' ? by : null, persisted });
       this.emit('fleet');
       this._hook('RESOLVED', groupId, a);
+      this._pushSos(room, a, 'RESOLVED');
       await delivered;
       return a;
     }

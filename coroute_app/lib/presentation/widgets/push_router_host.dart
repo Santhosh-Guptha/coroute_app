@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/services/realtime_service.dart';
 import '../../data/services/chat_service.dart';
 import '../chat/chat_thread_screen.dart';
 
@@ -155,6 +156,9 @@ class _PushRouterHostState extends State<PushRouterHost> {
   void _onForeground(PushMessage m) {
     if (!mounted) return;
     final route = m.route;
+    // v3.62: a group member's SOS came by push, so this phone's live link is down: reconnect at once (the
+    // re-join brings the SOS card and alarm). The system notification is shown as well (native side).
+    if (m.type == 'GROUP_SOS' || m.type == 'GROUP_SOS_RESOLVED') context.read<RealtimeService?>()?.retryNow();
     switch (route.destination) {
       case PushDestination.friends:
         context.read<FriendsService?>()?.refreshFriends().ignore();

@@ -77,7 +77,12 @@ const DEFAULTS = Object.freeze({
   SUBSCRIPTION_REVOKED: { ttlSec: 3 * 24 * 3600, priority: 'normal' },
   // 3.56 admin "News and updates" campaigns (src/push_campaigns.js): opt-out category, big picture.
   NEWS: { ttlSec: 2 * 24 * 3600, priority: 'normal' },
+  // v3.61: a rider in my ride raised an SOS / it was closed (src/convoys.js _pushSos), to riders with no live socket.
+  GROUP_SOS: { ttlSec: 3600, priority: 'high' },
+  GROUP_SOS_RESOLVED: { ttlSec: 3600, priority: 'high' },
 });
+/** v3.61: safety pushes: never held back by the per-rider throttle or the admin push switch (opts.urgent). */
+const URGENT_TYPES = new Set(['GROUP_SOS', 'GROUP_SOS_RESOLVED']);
 
 /*
  * 3.56 admin-editable plan notice texts (src/templates.js push_plan_active / push_plan_ending).
@@ -456,8 +461,9 @@ class PushService {
       if (!ids.length) return out;
       const type = String(opts.type || '');
       if (!TYPE_RE.test(type)) { out.skipped = ids.length; return out; }
+      const urgent = opts.urgent === true && URGENT_TYPES.has(type);
       const fl = this.flagsOf && this.flagsOf();
-      if (fl && typeof fl.isOn === 'function' && !fl.isOn('pushNotifications')) { out.skipped = ids.length; out.disabled = 'switch'; return out; }
+      if (!urgent && fl && typeof fl.isOn === 'function' && !fl.isOn('pushNotifications')) { out.skipped = ids.length; out.disabled = 'switch'; return out; }
       if (!this.transport) {
         if (!this.warned) { this.warned = true; this.logger.info?.('[push] FCM is not configured (FCM_SERVICE_ACCOUNT_JSON / FCM_PROJECT_ID): push notifications are off'); }
         out.skipped = ids.length; out.disabled = 'unconfigured';
@@ -467,7 +473,7 @@ class PushService {
         if (opts.skipConnected && this._connected(uid)) { out.skipped++; continue; }
         const tokens = await this.tokensOf(uid);
         if (!tokens.length) { out.skipped++; continue; }
-        if (!this._allow(uid)) { out.skipped++; continue; }
+        if (!urgent && !this._allow(uid)) { out.skipped++; continue; }
         for (const t of tokens) {
           const r = await this._sendOne(buildMessage(t.token, { ...opts, type }));
           if (r === 'sent') out.sent++; else { out.failed++; if (r === 'pruned') out.pruned = (out.pruned || 0) + 1; }
@@ -538,4 +544,4 @@ function attachPush({ app = null, repo, hub = null, convoys = null, featureFlags
   return push;
 }
 
-module.exports = { PushService, attachPush, registerPushRoutes, buildMessage, safeData, stampEvent, fcmErrorCode, serviceAccountFromEnv, COLLECTION, MAX_TOKENS_PER_USER, SOCKET_EVENTS, HOSTS, notifyPlanChange, planNotice, PLAN_TEXT_FORBIDDEN, setPlanTextProvider, NEWS_TARGETS, IMAGE_URL_RE };
+module.exports = { URGENT_TYPES, PushService, attachPush, registerPushRoutes, buildMessage, safeData, stampEvent, fcmErrorCode, serviceAccountFromEnv, COLLECTION, MAX_TOKENS_PER_USER, SOCKET_EVENTS, HOSTS, notifyPlanChange, planNotice, PLAN_TEXT_FORBIDDEN, setPlanTextProvider, NEWS_TARGETS, IMAGE_URL_RE };

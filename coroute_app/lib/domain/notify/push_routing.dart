@@ -69,6 +69,9 @@ class PushRouting {
     'CREW_JOIN_REQUEST',
     'CREW_JOIN_APPROVED',
     'CREW_RIDE_NEW',
+    // v3.62 a group member's SOS (and its close) while this phone had no live connection
+    'GROUP_SOS',
+    'GROUP_SOS_RESOLVED',
   };
 
   /// Screens an admin push (NEWS) may open: the `target` data field. Anything else opens Home.
@@ -138,6 +141,10 @@ class PushRouting {
         return crewId == null ? const PushRoute(PushDestination.crewInvites) : PushRoute(PushDestination.crewPoll, crewId: crewId);
       case 'NEWS':
         return PushRoute(newsTargets[payload['target']] ?? PushDestination.home);
+      // v3.62: back to the ride (the first screen restores the live ride; its re-join brings the SOS card).
+      case 'GROUP_SOS':
+      case 'GROUP_SOS_RESOLVED':
+        return const PushRoute(PushDestination.home);
     }
     if (type.startsWith('SUBSCRIPTION')) return const PushRoute(PushDestination.membership);
     return PushRoute.nowhere;

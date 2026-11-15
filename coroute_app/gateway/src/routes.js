@@ -35,7 +35,13 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.', code: 'RATE_LIMITED' } });
-  const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: 'draft-7', legacyHeaders: false });
+  // v3.61: an SOS over HTTP never counts against (or is refused by) the general limit: a busy app near 240
+  // requests a minute must still get its SOS through. Only abuse far beyond any phone (600 a minute) is refused.
+  const SOS_PATH = /^\/convoys\/[^/]+\/sos\/?$/;
+  const isSos = (req) => req.method === 'POST' && SOS_PATH.test(req.path || '');
+  const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: 'draft-7', legacyHeaders: false, skip: isSos });
+  const sosAbuseLimiter = rateLimit({ windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `sosabuse:${req.user?.userId || req.ip}`, message: { error: 'Too many requests. Call 112 directly.', code: 'RATE_LIMITED' } });
   const diagSubmitLimiter = rateLimit({
     windowMs: 24 * 60 * 60 * 1000,
     limit: 5,
@@ -539,9 +545,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Round 7 faster SOS: the same SOS over HTTP, sent by the phone next to the socket frame. convoys.raiseSos is
   // idempotent per (rider, clientId), so whichever copy arrives first raises the alert and the other is a duplicate
   // (one ALERT, one SMS round). Needs a clientId: without one the two lanes could not be told apart.
-  const sosHttpLimiter = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-7', legacyHeaders: false,
-    keyGenerator: (req) => `soshttp:${req.user?.userId || req.ip}`, message: { error: 'Too many requests.', code: 'RATE_LIMITED' } });
-  r.post('/convoys/:groupId/sos', sosHttpLimiter, wrap(async (req, res) => {
+  // v3.61: never refused. A resend with the same clientId is the same SOS, the storm guard in raiseSos caps what
+  // the group sees, and the account-wide API limiter still stops abuse. (Was 12 a minute: a 13th SOS got 429.)
+  r.post('/convoys/:groupId/sos', sosAbuseLimiter, wrap(async (req, res) => {
     const msg = req.body && typeof req.body === 'object' ? req.body : {};
     const cid = typeof msg.clientId === 'string' ? msg.clientId.trim() : '';
     if (!cid || cid.length > 64) return res.status(400).json({ error: 'clientId is required.', code: 'INVALID' });

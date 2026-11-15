@@ -52,6 +52,11 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         private const val CHANNEL_SAFETY_TIPS = "coroute_safety_tips"
         private const val CHANNEL_COMMUNITY = "coroute_community"
         private const val CHANNEL_PARTNER_PERKS = "coroute_partner_perks"
+        // v3.62: a group member's SOS while my app is closed (gateway GROUP_SOS). Same ids as the app's
+        // AlertService channels ("SOS alerts" on the alarm sound, "Group alerts"), created here if the app
+        // has not made them yet.
+        private const val CHANNEL_SOS = "coroute_sos_v2"
+        private const val CHANNEL_GROUP_ALERTS = "coroute_alerts"
         private const val MAX_PARTNER = 60
         private const val MAX_IMAGE_BYTES = 1024 * 1024
         private const val IMAGE_TIMEOUT_MS = 5000
@@ -73,13 +78,16 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         val data = message.data
         val type = data["type"] ?: return
         if (!TYPE_RE.matches(type)) return
-        if (!PushConfig.isEnabled(applicationContext)) return
+        // v3.62: a group member's SOS is never dropped by an app switch, and is shown even with the app in front
+        // (the push only comes when this phone had no live connection, so the in-app alarm may not have fired).
+        val sos = isSos(type)
+        if (!sos && !PushConfig.isEnabled(applicationContext)) return
         if (type == "NEWS" && !PushConfig.isNewsEnabled(applicationContext)) return
         if (type == "NEWS" && !PushConfig.isKindEnabled(applicationContext, newsKind(data))) return
         val live = PushChannel.active
         if (PushChannel.foreground && live != null) {
             live.deliverForeground(data)
-            return
+            if (!sos) return
         }
         showNotification(type, data)
     }
@@ -93,8 +101,11 @@ class CoRouteMessagingService : FirebaseMessagingService() {
 
         val rideInvite = type == "RIDE_INVITE"
         val news = type == "NEWS"
+        val groupSos = type == "GROUP_SOS"
         val kind = if (news) newsKind(data) else ""
         val channelId = when {
+            groupSos -> CHANNEL_SOS
+            type == "GROUP_SOS_RESOLVED" -> CHANNEL_GROUP_ALERTS
             rideInvite -> CHANNEL_RIDE_INVITES
             news -> when (kind) {
                 "event" -> CHANNEL_EVENTS
@@ -129,7 +140,11 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this).setPriority(
-                if (rideInvite) Notification.PRIORITY_HIGH else Notification.PRIORITY_DEFAULT
+                when {
+                    groupSos -> Notification.PRIORITY_MAX
+                    rideInvite || isSos(type) -> Notification.PRIORITY_HIGH
+                    else -> Notification.PRIORITY_DEFAULT
+                }
             )
         }
         // Big picture (NEWS with an image), else the full text when expanded.
@@ -152,12 +167,15 @@ class CoRouteMessagingService : FirebaseMessagingService() {
             .setContentIntent(pi)
             .setCategory(
                 when {
+                    groupSos -> Notification.CATEGORY_ALARM
+                    isSos(type) -> Notification.CATEGORY_STATUS
                     rideInvite -> Notification.CATEGORY_EVENT
                     news -> Notification.CATEGORY_RECOMMENDATION
                     else -> Notification.CATEGORY_SOCIAL
                 }
             )
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            // An SOS reads on the lock screen (first name and ride name only; never a place or medical info).
+            .setVisibility(if (isSos(type)) Notification.VISIBILITY_PUBLIC else Notification.VISIBILITY_PRIVATE)
         try {
             nm.notify(TAG, id, builder.build())
         } catch (_: SecurityException) {
@@ -228,8 +246,12 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         return if (k == "event" || k == "safety_tip" || k == "community" || k == "partner_perk") k else "update"
     }
 
+    private fun isSos(type: String): Boolean = type == "GROUP_SOS" || type == "GROUP_SOS_RESOLVED"
+
     /** One notification per thing (a later push about the same request / crew / ride replaces it). */
     private fun notificationId(type: String, data: Map<String, String>): Int {
+        // v3.62: the SOS and its close share one notification per alert (the close replaces the alarm).
+        if (isSos(type)) return ("GROUP_SOS|" + (data["alertId"] ?: data["groupId"] ?: "")).hashCode() and 0x7fffffff
         val ref = data["requestId"] ?: data["inviteId"] ?: data["pollId"] ?: data["crewId"] ?: data["groupId"] ?: data["campaignId"] ?: ""
         return (type + "|" + ref).hashCode() and 0x7fffffff
     }
@@ -238,6 +260,21 @@ class CoRouteMessagingService : FirebaseMessagingService() {
         if (Build.VERSION.SDK_INT < 26) return
         if (nm.getNotificationChannel(id) != null) return
         val channel = when (id) {
+            CHANNEL_SOS -> NotificationChannel(id, "SOS alerts", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "A rider in your convoy needs help."
+                setBypassDnd(true)
+                setSound(
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                enableVibration(true)
+            }
+            CHANNEL_GROUP_ALERTS -> NotificationChannel(id, "Group alerts", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "A rider stopped for long, fell behind or lost signal."
+            }
             CHANNEL_RIDE_INVITES -> NotificationChannel(id, "Ride invites", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "A friend or crew invites you to a ride."
             }
