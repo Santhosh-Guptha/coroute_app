@@ -190,6 +190,8 @@ class EmergencySmsGateway {
    */
   formatEmergencyMessage({ riderName, lat, lng, speedKmh, severity, bloodGroup, trackingUrl }) {
     const name = riderName || 'A CoRoute rider';
+    // No fix yet (0, 0): never text a point in the sea; the live link follows the rider's first fix.
+    const known = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) && (Number(lat) !== 0 || Number(lng) !== 0);
     const latStr = Number(lat || 0).toFixed(5);
     const lngStr = Number(lng || 0).toFixed(5);
     const speed = Number.isFinite(speedKmh) && speedKmh > 0 ? `${Math.round(speedKmh)} km/h` : 'Stopped';
@@ -198,7 +200,7 @@ class EmergencySmsGateway {
     const trackLine = trackingUrl ? `🔗 Live Track: ${trackingUrl}\n` : '';
 
     return `🚨 CoRoute EMERGENCY SOS: ${name} needs immediate assistance!\n` +
-      `📍 Location: ${latStr}, ${lngStr}\n` +
+      (known ? `📍 Location: ${latStr}, ${lngStr}\n` : `📍 Location: not known yet${trackingUrl ? ' (see the live link)' : ''}\n`) +
       `⚡ Speed: ${speed} | ⚠️ Severity: ${sev}\n` +
       bgLine +
       trackLine +

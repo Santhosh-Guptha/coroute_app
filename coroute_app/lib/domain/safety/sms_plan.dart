@@ -138,6 +138,14 @@ class SmsText {
     final link = AppConstants.mapsLink(lat, lng, digits: 5);
     final ride = (convoyName ?? '').trim();
     final live = (liveLink ?? '').trim();
+    if (!lat.isFinite || !lng.isFinite || (lat == 0 && lng == 0)) {
+      // 3.61: no fix yet. Never a map pin in the sea: the live link (when there is one) follows the rider.
+      final act = auto ? 'may have crashed' : 'needs help';
+      final where = live.isEmpty ? ' Location not known yet.' : ' Location not known yet. Live: $live';
+      final ridePart = ride.isEmpty ? '' : ' Ride: $ride.';
+      final help = indianCorridor ? ' NHAI: ${SafetyConstants.highwayHelpline}. ERSS: ${SafetyConstants.emergencyNumber}' : '';
+      return 'CoRoute SOS: $who $act at $time.$where$ridePart$help';
+    }
     if (indianCorridor) {
       final act = auto ? 'crashed' : 'needs help';
       final ridePart = ride.isEmpty ? '' : ' Ride: $ride.';

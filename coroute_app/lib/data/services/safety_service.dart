@@ -269,17 +269,26 @@ abstract class SafetyCheckInPort {
   bool sendCheckInWith(CheckInResult result, {double? awayM, CheckInContext? context});
 }
 
+/// Optional extension of [SafetyPort] (3.61): whether the live link to the server is up. With it
+/// down, a waiting SOS is texted to the group sooner ([SafetyConstants.smsFallbackOffline]).
+abstract class SafetyLinkPort {
+  bool get linkUp;
+}
+
 /// Optional extension of [SafetyPort]: updates telemetry status reason for safety escalation.
 abstract class SafetyStatusReasonPort {
   void updateStatusReason({required String userId, required String reason, String message = ''});
 }
 
 /// Adapts the real ConvoyService and AuthService.
-class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPort, SafetyStatusReasonPort {
+class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPort, SafetyStatusReasonPort, SafetyLinkPort {
   ConvoySafetyPort(this._convoys, this._auth);
 
   final ConvoyService _convoys;
   final AuthService _auth;
+
+  @override
+  bool get linkUp => _convoys.isOnline;
 
   @override
   void addListener(VoidCallback listener) => _convoys.addListener(listener);
@@ -2368,9 +2377,11 @@ class SafetyService extends ChangeNotifier {
     _smsTimer?.cancel();
     _smsTimerFor = p.clientId;
     final age = _now() - _pendingSeenAt;
-    final waitMs = (SafetyConstants.smsFallbackAfter.inMilliseconds - (age > 0 ? age : 0))
-        .clamp(0, SafetyConstants.smsFallbackAfter.inMilliseconds)
-        .toInt();
+    // No live link at all: the socket can not carry the SOS now, so the group is texted sooner.
+    final port = _port;
+    final offline = port is SafetyLinkPort && !(port as SafetyLinkPort).linkUp;
+    final after = offline ? SafetyConstants.smsFallbackOffline : SafetyConstants.smsFallbackAfter;
+    final waitMs = (after.inMilliseconds - (age > 0 ? age : 0)).clamp(0, after.inMilliseconds).toInt();
     _smsTimer = Timer(Duration(milliseconds: waitMs), () {
       _smsTimer = null;
       _smsRound(manual: false).ignore();

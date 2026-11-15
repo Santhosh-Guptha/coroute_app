@@ -63,6 +63,14 @@ describe('EmergencySmsGateway Unit & Driver Tests', () => {
     assert.match(msg, /Call 112/);
   });
 
+  test('no fix yet: the text never shows 0, 0 as the place', () => {
+    const gw = new EmergencySmsGateway();
+    const msg = gw.formatEmergencyMessage({ riderName: 'Ravi', lat: 0, lng: 0, trackingUrl: 'https://coroute.live/e/t1' });
+    assert.doesNotMatch(msg, /0\.00000, 0\.00000/);
+    assert.match(msg, /not known yet \(see the live link\)/);
+    assert.match(msg, /Call 112/);
+  });
+
   test('Twilio SMS provider dispatches with basic auth', async () => {
     let capturedUrl = '';
     let capturedAuth = '';

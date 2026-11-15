@@ -142,6 +142,9 @@ class SafetyConstants {
   /// An SOS that has not reached the group after this long is texted (when allowed).
   static const Duration smsFallbackAfter = Duration(seconds: 45);
 
+  /// The same when the phone has no live link to the server at all (3.61): texted sooner.
+  static const Duration smsFallbackOffline = Duration(seconds: 20);
+
   /// Text parts this phone sends in any [smsBudgetWindow] (Android asks the user at about 30).
   static const int smsMaxPartsPer30Min = 20;
   static const Duration smsBudgetWindow = Duration(minutes: 30);

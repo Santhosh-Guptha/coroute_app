@@ -256,10 +256,13 @@ test('hand-back: a restarted live node is 503 syncing until it has the snapshot,
     assert.equal((await fetch(`${B.base}/health/live`)).status, 200);
 
     // VM1 comes back (new process): syncing (503) until B's snapshot is applied.
-    A2 = await node(soda, 'vm1', 'live', { peerUrl: B.mirrorUrl, startupWaitMs: 2000 });
-    B.gw.mirror.setPeer(A2.mirrorUrl);
+    // Booted pointing at an address nobody answers, so the syncing window can be read reliably (with B's address a
+    // fast snapshot under load could finish before the first read: flaky); then the two are linked.
+    A2 = await node(soda, 'vm1', 'live', { peerUrl: 'ws://127.0.0.1:9/mirror', startupWaitMs: 5000 });
     const h0 = await fetch(`${A2.base}/health/live`);
     const b0 = await h0.json();
+    A2.gw.mirror.setPeer(B.mirrorUrl);
+    B.gw.mirror.setPeer(A2.mirrorUrl);
     assert.equal(h0.status, 503);
     assert.equal(b0.state, 'syncing');
     assert.equal(b0.ok, false);

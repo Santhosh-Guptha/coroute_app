@@ -358,14 +358,14 @@ class BleRemoteService extends ChangeNotifier {
     if (cs != null && ss?.alarm == null && !mineOpen) {
       final uid = cs.myUserId;
       final me = uid == null ? null : cs.activeConvoy?.riders[uid];
-      if (me != null && (me.lat != 0 || me.lng != 0)) {
-        cs.raiseSos(
-          type: 'MANUAL',
-          lat: me.lat,
-          lng: me.lng,
-          source: EmergencySource.manual,
-        );
-      }
+      // 3.61: raised even before the first fix (it used to be dropped silently): the group still hears it and the
+      // position follows with the next fix (ConvoyService never sends 0, 0 over a known position).
+      cs.raiseSos(
+        type: 'MANUAL',
+        lat: me?.lat ?? 0,
+        lng: me?.lng ?? 0,
+        source: EmergencySource.manual,
+      );
     }
   }
 

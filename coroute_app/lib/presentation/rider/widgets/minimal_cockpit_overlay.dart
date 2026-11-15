@@ -698,7 +698,8 @@ class CockpitSosButton extends StatefulWidget {
     super.key,
     required this.onTriggered,
     this.size = 60.0,
-    this.holdDuration = const Duration(milliseconds: 1500),
+    // The same 3 s hold as every other SOS button (3.55 false-SOS review), never a shorter default.
+    this.holdDuration = RideThresholds.sosHold,
     this.showLabel = false,
   });
 
