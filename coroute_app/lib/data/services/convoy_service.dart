@@ -326,6 +326,54 @@ class ConvoyService extends ChangeNotifier {
   String? get systemBroadcastMessage => _systemBroadcastMessage;
   String? get lastError => _lastError;
 
+  /// v3.60 join approval: the last code join is waiting for the host to let me in (null otherwise).
+  PendingJoin? _pendingJoin;
+  PendingJoin? get pendingJoin => _pendingJoin;
+  void clearPendingJoin() {
+    if (_pendingJoin == null) return;
+    _pendingJoin = null;
+    notifyListeners();
+  }
+
+  /// v3.60 meet first: the host (or ride head) starts the ride from the meeting point. Returns an error or null.
+  Future<String?> startFromMeetingPoint() async {
+    final gid = _activeGroupId;
+    if (gid == null) return 'You are not in a ride.';
+    try {
+      final res = await _api.post('/convoys/${Uri.encodeComponent(gid)}/gathering', {'start': true});
+      final c = _allConvoys[gid];
+      final g = res is Map ? RideGathering.fromJson(res['gathering']) : null;
+      if (c != null && g != null) {
+        _allConvoys[gid] = c.copyWith(gathering: g);
+        notifyListeners();
+      }
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'Could not reach CoRoute. Try again.';
+    }
+  }
+
+  /// v3.60: the host (or the ride head) lets a waiting rider in, or not. Returns an error message or null.
+  Future<String?> decideJoinRequest(String userId, bool approve) async {
+    final gid = _activeGroupId;
+    if (gid == null) return 'You are not in a ride.';
+    try {
+      await _api.post('/convoys/${Uri.encodeComponent(gid)}/join-requests/${Uri.encodeComponent(userId)}', {'approve': approve});
+      final c = _allConvoys[gid];
+      if (c != null) {
+        _allConvoys[gid] = c.copyWith(pendingMembers: Map<String, String>.from(c.pendingMembers)..remove(userId));
+        notifyListeners();
+      }
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'Could not reach CoRoute. Try again.';
+    }
+  }
+
   /// A join code received through a `coroute://join/CODE` or `/join/CODE` link, waiting for the UI.
   String? get pendingJoinCode => _pendingJoinCode;
   void setPendingJoinCode(String? code) {
@@ -1159,6 +1207,21 @@ class ConvoyService extends ChangeNotifier {
         // cockpit, the safety checks) are told ONCE for everything that arrived in this turn.
         _notifyRidersSoon();
         return;
+      // v3.60 meet first: the meeting point moved, or the host started the ride from it.
+      case 'GATHERING':
+        if (convoy == null) return;
+        final g = RideGathering.fromJson(e['gathering']);
+        if (g != null) _allConvoys[gid] = convoy.copyWith(gathering: g);
+        break;
+      // v3.60 join approval: riders waiting to be let in (the host / head sees them in the cockpit).
+      case 'JOIN_REQUEST':
+      case 'JOIN_REQUEST_UPDATE':
+        if (convoy == null) return;
+        final raw = e['pendingMembers'];
+        final pending = <String, String>{};
+        if (raw is Map) raw.forEach((k, v) => pending[k.toString()] = v?.toString() ?? 'Rider');
+        _allConvoys[gid] = convoy.copyWith(pendingMembers: pending);
+        break;
       case 'RIDER_LEFT':
         if (convoy == null) return;
         final riders = Map<String, RiderModel>.from(convoy.riders)..remove(e['userId']?.toString());
@@ -1634,6 +1697,7 @@ class ConvoyService extends ChangeNotifier {
     int speedLimitKmh = 0,
     PickedPlace? start,
     List<PickedPlace> stops = const [],
+    bool gatherAtStart = false,
   }) async {
     // 3.56 audit L-01: a second tap on "Start ride" while the first request is on its way gets the
     // same ride (two requests could create two rides and leave the rider in both).
@@ -1648,7 +1712,7 @@ class ConvoyService extends ChangeNotifier {
         destLat: destLat, destLng: destLng, vehicleType: vehicleType, vehicleNo: vehicleNo, phone: phone,
         routeBreadcrumbs: routeBreadcrumbs, distanceThresholdMeters: distanceThresholdMeters,
         stopThresholdSeconds: stopThresholdSeconds, voiceGuidanceEnabled: voiceGuidanceEnabled,
-        speedLimitKmh: speedLimitKmh, start: start, stops: stops,
+        speedLimitKmh: speedLimitKmh, start: start, stops: stops, gatherAtStart: gatherAtStart,
       );
       done.complete(convoy);
       return convoy;
@@ -1691,6 +1755,7 @@ class ConvoyService extends ChangeNotifier {
     required int speedLimitKmh,
     required PickedPlace? start,
     required List<PickedPlace> stops,
+    bool gatherAtStart = false,
   }) async {
     final pos = await _getCurrentPosition();
     await _refreshBatteryLevel();
@@ -1703,6 +1768,8 @@ class ConvoyService extends ChangeNotifier {
       else if (pos != null)
         'start': {'lat': pos.latitude, 'lng': pos.longitude, 'name': startPoint},
       if (stops.isNotEmpty) 'stops': stops.map((p) => p.toJson()).toList(),
+      // v3.60 meet first: riders come from different places and gather at the start.
+      if (gatherAtStart && start != null) 'gathering': true,
       'destination': destination,
       'destLat': destLat,
       'destLng': destLng,
@@ -1774,11 +1841,19 @@ class ConvoyService extends ChangeNotifier {
           if (vehicleKind.isNotEmpty) 'bikeComplete': bikeComplete,
         },
       });
+      // v3.60: 202 PENDING: the host has to let me in first. Nothing is activated; the caller shows the wait.
+      if (res is Map && res['pending'] == true) {
+        _pendingJoin = PendingJoin(groupId: res['groupId']?.toString() ?? '', rideName: res['name']?.toString() ?? '');
+        notifyListeners();
+        return null;
+      }
+      _pendingJoin = null;
       final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
       _myUserId ??= rider.userId;
       _activate(convoy);
       return convoy;
     } on ApiException catch (e) {
+      if (e.code == 'JOIN_DECLINED') _pendingJoin = null;
       if (e.isServerBusy) {
         // HTTP 503 SERVER_BUSY: plain words, the sheet offers "Try again". Nothing else changes.
         _lastError = ApiException.serverBusyMessage;
@@ -2878,6 +2953,17 @@ class ConvoyService extends ChangeNotifier {
     return _chatUnread.count(gid, [for (final m in _allConvoys[gid]?.messages ?? const <GroupMessageModel>[]) m.toLine()], myUserId: uid, hidden: _chatHidden);
   }
 
+  /// v3.60: unread ride chat written by riders. The gateway's automatic ride notices (SYSTEM cards such as a
+  /// regroup or a rider stopped, without a rider asking) are alerts: they never count on the Messages badge.
+  int unreadRiderMessages(String gid) {
+    if (_chatOpenGid == gid) return 0;
+    final uid = _myUserId ?? '';
+    return _chatUnread.count(gid, [
+      for (final m in _allConvoys[gid]?.messages ?? const <GroupMessageModel>[])
+        if (m.senderId != 'SYSTEM' || m.requestedBy.isNotEmpty) m.toLine(),
+    ], myUserId: uid, hidden: _chatHidden);
+  }
+
   /// The chat sheet of [gid] is open (null: closed): everything there counts as read.
   void setChatOpen(String? gid) {
     if (_disposed) return;
@@ -3509,6 +3595,17 @@ class ConvoyService extends ChangeNotifier {
       speed = me.speedKmh.isFinite ? me.speedKmh : null;
     }
     final accuracy = _lastFixAccuracyM;
+    // No fix passed in (0, 0): never send a point in the sea, and never overwrite a known position of a
+    // waiting SOS with it. Falls back to the waiting SOS's position, then my last known position.
+    if (lat == 0 && lng == 0) {
+      if (existing != null && existing.groupId == gid && (existing.lat != 0 || existing.lng != 0)) {
+        lat = existing.lat;
+        lng = existing.lng;
+      } else if (me != null && (me.lat != 0 || me.lng != 0)) {
+        lat = me.lat;
+        lng = me.lng;
+      }
+    }
     final PendingSos pending;
     if (existing != null && existing.groupId == gid) {
       // Still the same emergency (not confirmed yet): keep its id, use the newer position.
@@ -3954,7 +4051,13 @@ class ConvoyService extends ChangeNotifier {
   /// Sends the waiting SOS if there is one for the active convoy. Event-driven only (no timer).
   bool _sendPendingSos() {
     final p = _pendingSos;
-    if (p == null || p.groupId != _activeGroupId) return false;
+    if (p == null) return false;
+    if (p.groupId != _activeGroupId) {
+      // Restarted mid-ride, not re-joined yet: the socket frame waits for the re-join, but the HTTP lane can
+      // already reach the server (still a rider there), so the group hears the SOS without waiting.
+      if (p.groupId == _unconfirmedRideGid) _sendSosOverHttp(p);
+      return false;
+    }
     final sent = _rt.send(p.toMessage());
     if (sent) _sosSentAt = _clock();
     DiagLog.info(DiagCat.sos, 'send', {'ok': sent, 'ageMs': _clock() - p.createdAt});
@@ -4607,4 +4710,12 @@ class ConvoyService extends ChangeNotifier {
     _myFixes.close();
     super.dispose();
   }
+}
+
+/// v3.60: a code join waiting for the host's approval.
+@immutable
+class PendingJoin {
+  final String groupId;
+  final String rideName;
+  const PendingJoin({required this.groupId, this.rideName = ''});
 }

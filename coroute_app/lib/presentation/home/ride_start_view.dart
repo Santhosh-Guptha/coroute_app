@@ -14,6 +14,7 @@ import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
 import '../account/edit_profile_screen.dart';
 import '../onboarding/permissions_screen.dart';
+import 'join_waiting_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
 import '../trip/trip_feedback_sheet.dart';
@@ -822,7 +823,18 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
       rider: rider,
     );
     if (!mounted) return;
-    if (joined != null) {
+    // v3.60 join approval: the host lets me in first.
+    var inRide = joined != null;
+    final pending = convoyService.pendingJoin;
+    if (!inRide && pending != null) {
+      inRide = await JoinWaitingScreen.open(context, code: code, rider: rider, rideName: pending.rideName);
+      if (!mounted) return;
+      if (!inRide) {
+        setState(() => _busy = false);
+        return;
+      }
+    }
+    if (inRide) {
       if (gate == BikeGateResult.pillion) convoyService.requestPillionPick(); // 3.55 pillion seat
       Navigator.pop(context, true);
     } else {

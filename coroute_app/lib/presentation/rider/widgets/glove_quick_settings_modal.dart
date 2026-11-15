@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/constants/safety_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../../core/ui/ui.dart';
@@ -270,6 +271,48 @@ class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
             ),
             const SizedBox(height: 10),
             Text(emergencyNote, textAlign: TextAlign.center, style: AppText.caption),
+            // v3.60: my speed warning lives here, in the ride (it was removed from Settings and the profile).
+            if (settings != null) ...[
+              const SizedBox(height: 18),
+              Text('Speed warning (km/h)', style: AppText.label.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Wrap(
+                key: const Key('quick_setting_speed_warning'),
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final v in SafetyConstants.speedWarningChoices)
+                    ChoiceChip(
+                      key: Key('quick_speed_$v'),
+                      label: Text(v == 0 ? 'Group limit' : '$v'),
+                      selected: settings.speedLimitWarningKmh == v,
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
+                      onSelected: (_) {
+                        settings.setSpeedLimitWarningKmh(v);
+                        widget.onSettingToggled?.call(v == 0 ? 'Speed warning: group limit' : 'Speed warning: $v km/h', true);
+                      },
+                    ),
+                ],
+              ),
+            ],
+            // v3.61: thumb side for a phone in a holder (talk + map buttons, SOS mirrored).
+            if (settings != null) ...[
+              const SizedBox(height: 18),
+              Text('Controls side', style: AppText.label.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              SegmentedButton<bool>(
+                key: const Key('quick_setting_controls_side'),
+                segments: const [
+                  ButtonSegment(value: true, label: Text('Left'), icon: Icon(Icons.west_rounded)),
+                  ButtonSegment(value: false, label: Text('Right'), icon: Icon(Icons.east_rounded)),
+                ],
+                selected: {settings.cockpitControlsLeft},
+                onSelectionChanged: (v) {
+                  settings.setCockpitControlsLeft(v.first);
+                  widget.onSettingToggled?.call(v.first ? 'Controls on the left' : 'Controls on the right', true);
+                },
+              ),
+            ],
             const SizedBox(height: 18),
             // Minimal in-flight quick actions: Fuel and Ride Guardian (strictly gated)
             Row(

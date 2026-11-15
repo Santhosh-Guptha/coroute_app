@@ -135,7 +135,6 @@ import 'widgets/coroute_orbit_control.dart';
 import 'widgets/glove_quick_settings_modal.dart';
 import 'widgets/minimal_cockpit_overlay.dart';
 import 'widgets/minimal_cockpit_settings_cards.dart';
-import 'widgets/minimal_hold_to_talk_bar.dart';
 import 'widgets/ghost_rider_marker.dart';
 import 'widgets/smooth_rider_marker_layer.dart';
 import 'map/nav_camera_controller.dart';
@@ -165,6 +164,9 @@ import 'hud/hud_speed.dart';
 import '../../domain/ride/ride_stats_accumulator.dart';
 import '../../domain/road/road_ahead_engine.dart' show RoadAheadView;
 import '../map_places/place_chips.dart' show showPlacesSheet;
+import 'widgets/cockpit_talk_button.dart';
+import 'widgets/gathering_card.dart';
+import 'widgets/join_requests_card.dart';
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -293,6 +295,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   SettingsService? _settingsRef;
   Route<dynamic>? _reportedRoute;
   bool _aodOn = false;
+
+  /// v3.60 owner decision: the Ride AOD (black screen with speed and turns) is off; only the cockpit is shown.
+  static const bool rideAodEnabled = false;
   int _lastAlertMs = 0;
   String? _lastAlertKey;
   bool _pointerRouted = false;
@@ -304,6 +309,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   RouteObserver<ModalRoute<void>>? _subscribedObserver;
   ModalRoute<void>? _subscribedRoute;
   String? _selectedRiderId;
+
+  /// v3.60 "map only": one tap on the map hides every control and card (the map is never covered); one more tap
+  /// brings them back. The SOS button never hides, and an important alert or a rider waiting to join brings the
+  /// controls back at once.
+  bool _chromeHidden = false;
+  int _lastPendingCount = 0;
+
+  /// v3.60 meet first: the group I already routed to its meeting point (once per ride).
+  String? _gatherRoutedFor;
+  void _setChromeHidden(bool hidden) {
+    if (_chromeHidden == hidden || !mounted) return;
+    if (hidden) _sheetKey.currentState?.collapse();
+    setState(() => _chromeHidden = hidden);
+  }
 
   /// 3.56 the way each bike faces: a standing rider's GPS course is noise, so below walking speed
   /// (or without a course) the 3D bike keeps its last heading.
@@ -710,6 +729,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   /// An alert came (siren, a new important / critical card): the full cockpit at normal brightness at once.
   void _noteAlert() {
     _lastAlertMs = DateTime.now().millisecondsSinceEpoch;
+    if (_chromeHidden) scheduleMicrotask(() => _setChromeHidden(false));
     if ((_dimmed || _aodOn) && mounted) scheduleMicrotask(() { if (mounted) _syncWakelock(); });
   }
 
@@ -1079,7 +1099,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       batteryPercent: battery,
       charging: charging,
       emergencyOpen: emergency,
-      idleMode: settings?.rideIdleMode ?? RideIdleMode.aod,
+      // v3.60: the cockpit is never replaced by the black AOD; idle only dims it a little.
+      idleMode: rideAodEnabled ? (settings?.rideIdleMode ?? RideIdleMode.aod) : RideIdleMode.dim,
       keepOnMode: settings?.keepScreenOnMode ?? KeepScreenOnMode.whileMoving,
       lastAlertMs: _lastAlertMs,
       thermalStatus: _lockCockpit?.thermalStatus ?? 0,
@@ -1126,6 +1147,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
   /// The black Ride AOD over the cockpit (idle with the screen kept on).
   void _syncAod(bool on) {
+    // v3.60 owner decision: no black Ride AOD (speed and next turn on black). The cockpit itself stays on screen.
+    if (!rideAodEnabled) on = false;
     if (on == _aodOn) return;
     _aodOn = on;
     _lockCockpit?.aodShowing = on;
@@ -2111,13 +2134,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final target = _advice.rejoinTarget(convoy, me, DateTime.now().millisecondsSinceEpoch);
     setState(_advice.resolveOffGroup);
     if (target == null) return;
-    final voice = context.read<VoiceService?>();
     final messenger = ScaffoldMessenger.maybeOf(context);
     final ok = await _guide.routeToGroup(lat: target.lat, lng: target.lng, name: target.name);
     if (!mounted) return;
     messenger?.clearSnackBars();
     if (ok) {
-      voice?.speak('Routing you back to the group.', priority: VoicePriority.warning, key: 'ROUTE_TO_GROUP').ignore();
+      // v3.60: re-routing is not spoken (owner decision); the snackbar says it.
       messenger?.showSnackBar(SnackBar(content: Text('Routing you to the group near ${target.peer.name}. Only your route changed.')));
     } else {
       messenger?.showSnackBar(const SnackBar(content: Text('No route to the group yet (no signal). Trying again as you ride.')));
@@ -2797,6 +2819,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final timeline = context.watch<TimelineService?>();
     final guidance = context.watch<EmergencyGuidance?>();
     final lowData = context.select<SettingsService?, bool>((s) => s?.lowData ?? false);
+    // v3.61: the rider's thumb side (talk + map buttons left, SOS right when on).
+    final controlsLeft = context.select<SettingsService?, bool>((s) => s?.cockpitControlsLeft ?? false);
     // This phone's ride safety prompts ("Are you OK?", "Time for a break").
     final prompts = safetyPromptsOf(context);
     // 3.55 engine care: rebuild when the "give your engine a rest" notice comes or goes.
@@ -2912,6 +2936,23 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       guidance: guidance,
     );
     final topSlot = slots.isEmpty ? null : slots.first;
+    // v3.60 join approval: a new rider waiting to be let in shows the controls again (host / head only).
+    final pendingJoins = lead ? convoy.pendingMembers : const <String, String>{};
+    if (pendingJoins.length > _lastPendingCount && _chromeHidden) scheduleMicrotask(() => _setChromeHidden(false));
+    _lastPendingCount = pendingJoins.length;
+    // v3.60 meet first: while the group gathers, each rider is routed to the meeting point on their own.
+    final gather = convoy.gathering != null && convoy.gathering!.active ? convoy.gathering : null;
+    final gatherDistM = gather != null && RideFacts.hasPosition(me) ? GeoMath.haversine(me.lat, me.lng, gather.lat, gather.lng) : null;
+    final gatherArrived = gather == null
+        ? 0
+        : convoy.riders.values.where((r) => RideFacts.hasPosition(r) && GeoMath.haversine(r.lat, r.lng, gather.lat, gather.lng) <= RideGathering.arrivedM).length;
+    if (gather != null && gatherDistM != null && gatherDistM > RideGathering.arrivedM && _gatherRoutedFor != convoy.groupId) {
+      _gatherRoutedFor = convoy.groupId;
+      final name = gather.name.isEmpty ? 'Meeting point' : gather.name;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _guide.routeToGroup(lat: gather.lat, lng: gather.lng, name: name).ignore();
+      });
+    }
     // A new important / critical card (off-route, regroup, hazard...) brings the full cockpit back from the AOD.
     if (topSlot?.key != _lastAlertKey) {
       _lastAlertKey = topSlot?.key;
@@ -3011,7 +3052,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               bottom: 0,
               width: panelW,
               // Landscape: the panel's right edge is not the screen edge, so no right cutout inset.
-              child: MediaQuery.removePadding(
+              child: AnimatedSlide(
+                offset: _chromeHidden ? (side ? const Offset(-1, 0) : const Offset(0, 1)) : Offset.zero,
+                duration: Motion.screen,
+                curve: Motion.curve,
+                child: IgnorePointer(
+                ignoring: _chromeHidden,
+                child: MediaQuery.removePadding(
                 context: context,
                 removeRight: side,
                 child: RideSheet(
@@ -3025,6 +3072,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 maxFraction: sheetMax,
                 minFraction: null, // Anchors sheet to exact bottom of hands-free VOX/PTT bar; cannot drag down further
                 header: _sheetHeader(convoy, me, snap, stoppedFor, now,
+                    controlsLeft: controlsLeft,
                     guardianOn: guardianOn,
                     meshPeersCount: service.p2pMeshPeerCount,
                     limitKmh: speedLimit,
@@ -3039,6 +3087,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                     riddenKm: riddenKm,
                     weatherLine: weatherLine,
                     prefetcher: prefetcher),
+                ),
+              ),
                 ),
               ),
             ),
@@ -3057,13 +3107,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   left: (side ? panelW : leftInset) + Space.s12,
                   right: rightInset + Space.s12,
                   bottom: hudBottom,
-                  child: ClipRect(
-                    clipper: const _HudBottomClipper(),
-                    child: OverflowBox(
-                      alignment: Alignment.topCenter,
-                      minHeight: 0,
-                      maxHeight: double.infinity,
-                      child: hud,
+                  child: AnimatedOpacity(
+                    opacity: _chromeHidden ? 0 : 1,
+                    duration: Motion.screen,
+                    child: IgnorePointer(
+                      ignoring: _chromeHidden,
+                      child: ClipRect(
+                        clipper: const _HudBottomClipper(),
+                        child: OverflowBox(
+                          alignment: Alignment.topCenter,
+                          minHeight: 0,
+                          maxHeight: double.infinity,
+                          child: hud,
+                        ),
+                      ),
                     ),
                   ),
                 );
@@ -3074,13 +3131,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 children: [
                   // Round 11 HUD: back + destination pill, the turn card (road + limit sign without a
                   // route), the safety strip (one advisory at a time). Speed lives in the sheet.
-                  HudTopBar(
+                  // v3.61: one combined top bar (back, turn, destination, limit sign); owner 15 Nov 2026.
+                  HudCombinedBar(
+                    model: _hudTurnModel(convoy, snap),
                     title: _hudDestinationTitle(convoy, snap),
                     subtitle: _hudDestinationSubtitle(snap),
                     connection: connection,
-                    emergencyRoute: guidance?.statusLine != null,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
                     onRouteOptions: () => _popup<void>('route_options', () => _openRouteOptions(convoy, me, snap)),
+                    routeStatus: guidance?.statusLine ?? _guide.statusLine,
+                    emergencyRoute: guidance?.statusLine != null,
+                    onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     chips: [
                       if (SmartAirbagBridgeService().isConnected || SmartAirbagBridgeService().connectionState == AirbagConnectionState.connected)
                         const HudStatusChip(icon: Icons.shield_outlined, label: 'Airbag'),
@@ -3096,13 +3157,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                           onTap: () => _popup<void>('offline', () => _showOfflineExplainer(context, convoy, service)),
                         ),
                     ],
-                  ),
-                  const SizedBox(height: Space.s8),
-                  HudTurnCard(
-                    model: _hudTurnModel(convoy, snap),
-                    routeStatus: guidance?.statusLine ?? _guide.statusLine,
-                    emergencyRoute: guidance?.statusLine != null,
-                    onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     limitSign: _roadCareSafety == null
                         ? null
                         : RepaintBoundary(
@@ -3121,6 +3175,33 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                           ),
                   ),
                   HudSafetyStrip(view: _roadCareSafety?.roadCare.roadView),
+                  if (gather != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: Space.s8),
+                      child: GatheringCard(
+                        placeName: gather.name,
+                        arrived: gatherArrived,
+                        total: convoy.riders.length,
+                        myDistanceM: gatherDistM,
+                        canStart: lead,
+                        onStart: () async {
+                          final err = await service.startFromMeetingPoint();
+                          if (!mounted) return;
+                          _showHudToast(err ?? 'Ride started from the meeting point', err == null ? Icons.flag_rounded : Icons.error_outline_rounded, err == null ? AppTheme.accentText : AppTheme.sos);
+                        },
+                      ),
+                    ),
+                  if (pendingJoins.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: Space.s8),
+                      child: JoinRequestsCard(
+                        pending: pendingJoins,
+                        onDecide: (userId, approve) async {
+                          final err = await service.decideJoinRequest(userId, approve);
+                          if (err != null && mounted) _showHudToast(err, Icons.error_outline_rounded, AppTheme.sos);
+                        },
+                      ),
+                    ),
                   // HUD Toast Banner (cleanly positioned under top bar, never covering it)
                   if (_hudToastMessage != null)
                     Padding(
@@ -3308,10 +3389,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               listenable: _sheetMotion,
               builder: (_, column) {
                 final base = side ? bottomInset + Space.s16 : _sheetTop.value + Space.s12;
+                final mirror = controlsLeft && !side;
                 return Positioned(
-                  right: rightInset + Space.s12,
+                  right: mirror ? null : rightInset + Space.s12,
+                  left: mirror ? leftInset + Space.s12 : null,
                   bottom: _clampSafe(base, bottomInset + Space.s12, h - zoomH - topInset - Space.s16),
-                  child: _fade(floatingOpacity(), column!),
+                  child: _fade(_chromeHidden ? 0.0 : floatingOpacity(), column!),
                 );
               },
               child: ListenableBuilder(
@@ -3365,6 +3448,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
             ValueListenableBuilder<double>(
               valueListenable: _sheetTop,
               builder: (_, top, sos) {
+                // v3.60: SOS never hides; with the controls hidden it sits in the bottom corner of the map.
+                final mirror = controlsLeft && !side;
+                if (_chromeHidden) {
+                  if (mirror) return Positioned(right: rightInset + Space.s12, bottom: bottomInset + Space.s12, child: sos!);
+                  return Positioned(left: (side ? 0 : leftInset) + Space.s12, bottom: bottomInset + Space.s12, child: sos!);
+                }
                 if (side) {
                   return Positioned(
                     left: panelW + Space.s12,
@@ -3373,7 +3462,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   );
                 }
                 return Positioned(
-                  left: leftInset + Space.s12,
+                  left: mirror ? null : leftInset + Space.s12,
+                  right: mirror ? rightInset + Space.s12 : null,
                   bottom: _clampSafe(top + Space.s12, bottomInset + Space.s12, h - sosSize - topInset - Space.s8),
                   child: sos!,
                 );
@@ -3381,8 +3471,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               child: RideSosButton(onTriggered: () => _triggerSos(service, auth)),
             ),
 
-            // 8. Draggable CoRoute Orbit Control FAB & In-Cockpit Quick Access HUD Popup
-            CorouteOrbitControl(
+            // 8. Draggable CoRoute Orbit Control FAB & In-Cockpit Quick Access HUD Popup (hidden in map-only view)
+            if (!_chromeHidden) CorouteOrbitControl(
               sheetHeight: side ? null : _sheetTop,
               sheetExpansion: side ? null : _sheetExpansion,
               // Keeps the Orbit button clear of SOS (left) and the zoom / recenter stack (right).
@@ -3719,6 +3809,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   /// the group pill; the talk bar (group rides); the stopped details when standing still.
   Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now,
       {bool guardianOn = true,
+      bool controlsLeft = false,
       int meshPeersCount = 0,
       double bottomInset = 0.0,
       int limitKmh = 0,
@@ -3728,12 +3819,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     void toggle() => _sheetKey.currentState?.toggle();
     final next = snap.nextStop;
     final (leftValue, leftUnit) = metricDistance(snap.remainingM);
-    final svc = service;
-    // End or leave, as RideLifecycleBar: the lead / owner ends, others leave. The hold starts the
-    // existing flow (confirm dialog, offline queue, lock-screen gate), never ends at once.
-    final VoidCallback? onEnd = svc == null
-        ? null
-        : (svc.canEndTrip ? () => _endRide(svc) : () => _leaveRide(svc, uid));
     final (pillText, pillWarn) = _hudGroupPill(convoy, me, snap, connection, now);
     final hasDest = RideFacts.hasDestination(convoy);
     final rideStats = hasDest ? null : context.read<SafetyService?>()?.hudStats;
@@ -3745,22 +3830,30 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // v3.61 short sheet (owner, 15 Nov 2026): one row with speed, ETA, km left, riders and the
+          // talk button (hold / hands-free / private) on the rider's side. End and leave stay in the
+          // open sheet (RideLifecycleBar). The group pill shows only when something needs a look.
           HudCollapsedRow(
             speedKmh: me.speedKmh,
             limitKmh: limitKmh,
             hasFix: RideFacts.hasPosition(me),
+            dialSize: 64,
             // No destination: moving time and km ridden (the ride's own numbers) instead of ETA / left.
             eta: hasDest ? (snap.eta == null ? '-' : _eta(snap.eta)) : HudFormat.clock(rideStats?.movingMs ?? 0),
             etaLabel: hasDest ? 'ETA' : 'Moving',
             leftValue: hasDest ? leftValue : HudFormat.km(rideStats?.distanceM ?? 0),
             leftUnit: hasDest ? leftUnit : 'km',
             leftLabel: hasDest ? 'Left' : 'Ridden',
-            onHoldEnd: onEnd,
-            endLabel: svc?.canEndTrip ?? true ? 'End' : 'Leave',
+            groupValue: convoy.isSolo || convoy.riders.length <= 1 ? null : '${RideFacts.ridingCount(convoy.riders.values, nowMs: now)}',
+            groupWarn: pillWarn,
             onTap: toggle,
+            controlsLeft: controlsLeft,
+            talk: convoy.hasGroupFeatures ? CockpitTalkButton(convoy: convoy, me: me) : null,
           ),
-          const SizedBox(height: Space.s8),
-          HudGroupPillView(text: pillText, warn: pillWarn, solo: convoy.isSolo, onTap: toggle),
+          if (pillWarn) ...[
+            const SizedBox(height: Space.s8),
+            HudGroupPillView(text: pillText, warn: pillWarn, solo: convoy.isSolo, onTap: toggle),
+          ],
           if (stoppedFor != null) ...[
             const SizedBox(height: Space.s8),
             StoppedDetails(
@@ -3774,14 +3867,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               onTellWhy: () => _popup<void>('status', () => RiderStatusSheet.show(context, userId: me.userId)),
               onTap: toggle,
               isSolo: convoy.isSoloRide,
-            ),
-          ],
-          // Talk is a group feature: no talk bar in a solo ride (Community host).
-          if (convoy.hasGroupFeatures) ...[
-            const SizedBox(height: Space.s8),
-            MinimalHoldToTalkBar(
-              convoy: convoy,
-              me: me,
             ),
           ],
         ],
@@ -4172,8 +4257,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           if (hasGesture && _autoFollow) _setAutoFollow(false);
         },
         onTap: (_, _) {
-          _sheetKey.currentState?.collapse();
-          if (_selectedRiderId != null) setState(() => _selectedRiderId = null);
+          if (_selectedRiderId != null) {
+            setState(() => _selectedRiderId = null);
+            return;
+          }
+          // v3.60: one tap hides every control, the next brings them back.
+          _setChromeHidden(!_chromeHidden);
         },
         // Long-press anywhere: the lead sets a meeting point or adds a stop there, anyone else suggests a stop.
         onLongPress: (_, point) => _onLongPress(service, point),
