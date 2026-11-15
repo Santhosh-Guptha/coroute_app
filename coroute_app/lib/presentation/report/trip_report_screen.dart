@@ -35,6 +35,7 @@ import '../../domain/engagement/engagement_config.dart';
 import '../../domain/engagement/ride_wrapup_flow.dart';
 import '../widgets/feature_switch.dart';
 import 'ride_safety_summary_card.dart';
+import '../explore/share_route_card.dart';
 
 /// Full report of a finished trip, in two tabs:
 ///  * Summary: the key numbers first (shown at once from the saved trip, no
@@ -626,6 +627,13 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                   child: Text('From your phone. The full report is ready a minute after the ride.', style: AppText.caption),
                 ),
             ],
+            // v3.59 Explore: offer to share this ride's route when it reached an Explore place (opt-in).
+            if (!widget.adminView && context.featureOn('exploreRoutes') && sketch.points.length >= 2)
+              ShareRouteCard(
+                track: [for (final p in sketch.points) (p.latitude, p.longitude)],
+                endedAt: t.endTimeEpochMs > 0 ? DateTime.fromMillisecondsSinceEpoch(t.endTimeEpochMs) : null,
+                durationMin: moving > 0 ? (moving / 60000).round() : null,
+              ),
             // 3.55 follow-up: the place questions of this ride not answered yet (kept on the phone
             // for 7 days, at most 2; admin switches placeReviews and reviewPrompt).
             if (!widget.adminView && t.groupId.isNotEmpty) _afterRidePlaces(t.groupId),

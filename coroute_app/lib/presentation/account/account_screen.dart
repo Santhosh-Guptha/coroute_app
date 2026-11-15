@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/theme/theme_controller.dart';
 import '../../core/ui/ui.dart';
 import '../../data/local/rider_prefs_store.dart';
 import '../../data/models/trip_history_model.dart';
@@ -26,18 +24,17 @@ import '../onboarding/welcome_screen.dart';
 import '../report/trip_report_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../rider/trip_history_screen.dart';
-import '../score/leaderboard_screen.dart';
 import '../score/rider_score_card.dart';
-import '../settings/push_notifications_tile.dart';
 import '../settings/settings_screen.dart';
 import '../social/profile_screen.dart';
 import '../social/ride_invite_screen.dart';
 import '../social/user_avatar.dart';
 import '../widgets/feature_switch.dart';
-import 'appearance_sheet.dart';
 import 'edit_profile_screen.dart';
+import 'operator_apply_screen.dart';
 import 'privacy_terms_sheet.dart';
 import 'sign_out_flow.dart';
+import '../explore/share_route_card.dart' show MySharedRoutesScreen;
 
 /// The Profile (v3.58, docs/design/REDESIGN_v3.58.md), opened from the avatar on Home:
 ///  * cover photo (new: owner-only original + public cover, same pipeline as the picture) behind the avatar,
@@ -66,7 +63,8 @@ class AccountScreen extends StatefulWidget {
   static const String checklistTitle = 'Complete your riding profile';
 
   /// Keys of the Help rows, in order (tests check there are exactly these).
-  static const List<String> helpRowKeys = ['profile_send_feedback', 'profile_rate_coroute', 'profile_privacy_terms'];
+  // v3.60: Rate CoRoute moved into Help & feedback (fewer rows).
+  static const List<String> helpRowKeys = ['profile_send_feedback', 'profile_privacy_terms'];
 
   /// Keys of the Account rows, in order.
   static const List<String> accountRowKeys = ['profile_sign_out', 'profile_delete_account'];
@@ -118,16 +116,6 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  Future<void> _share() async {
-    final svc = context.read<FriendsService?>();
-    if (svc == null) return;
-    if (svc.profile?.shareText == null) await svc.refreshProfile();
-    final text = svc.profile?.shareText;
-    if (!mounted) return;
-    if (text == null) return showAppToast(context, 'Could not load your invite link. Try again.', error: true);
-    await SharePlus.instance.share(ShareParams(text: text, subject: 'Ride with me on CoRoute'));
-  }
-
   Future<void> _editPreferences() async {
     final saved = await showAppSheet<(List<String>, String)>(
       context,
@@ -145,25 +133,6 @@ class _AccountScreenState extends State<AccountScreen> {
       });
     }
   }
-
-  Future<void> _notifications() => showAppSheet<void>(
-        context,
-        title: 'Notifications',
-        builder: (ctx) => Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const PushNotificationsTile(),
-            const SizedBox(height: Space.s8),
-            Text('SOS, crash and ride alerts always arrive.', style: AppText.caption),
-            const SizedBox(height: Space.s12),
-            DsButton(label: 'More in Settings', tone: DsButtonTone.outline, height: 48, fontSize: 15, onPressed: () {
-              Navigator.pop(ctx);
-              SettingsScreen.open(context);
-            }),
-          ],
-        ),
-      );
 
   /// v3.58 cover photo: pick, cut the wide middle on the phone (no metadata), keep the original privately.
   Future<void> _cover(FriendsService svc) async {
@@ -246,7 +215,6 @@ class _AccountScreenState extends State<AccountScreen> {
     final contactPhone = (auth.emergencyContact ?? '').trim();
     final contactSet = contactPhone.length >= 7;
     final medicalSet = auth.bloodGroup.isNotEmpty || auth.medicalNotes.isNotEmpty;
-    final leaderboardOn = context.featureOn('leaderboard');
     final garage = Provider.of<GarageService?>(context, listen: false) ?? GarageService.shared;
     final checklist = RidingChecklist.of(ProfileFacts(
       hasEmergencyContact: contactSet,
@@ -262,7 +230,6 @@ class _AccountScreenState extends State<AccountScreen> {
     final since = RidingChecklist.ridingSince(profile?.memberSince ?? 0);
     final trips = [...context.watch<TripStorageService?>()?.trips ?? const <TripHistoryModel>[]]..sort((a, b) => b.startTimeEpochMs.compareTo(a.startTimeEpochMs));
     final invites = context.watch<RideInvitesService?>()?.pending ?? const [];
-    final theme = Provider.of<ThemeController?>(context);
 
     Widget card(List<Widget> rows) => DsCard(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), child: Column(children: rows));
 
@@ -369,12 +336,10 @@ class _AccountScreenState extends State<AccountScreen> {
                     const SizedBox(height: Space.s24),
                     const SectionTitle(AccountScreen.settingsInfoTitle),
                     const SizedBox(height: Space.s8),
+                    // v3.60: fewer rows. My trips is the "All trips" link above; notifications are always on; theme,
+                    // invite and leaderboard live in Settings and Community; Rate CoRoute is inside Help & feedback.
                     card([
-                      _SettingsRow(key: const Key('profile_trips'), icon: Icons.map_outlined, title: 'My trips', onTap: () => _push(const TripHistoryScreen())),
                       _SettingsRow(key: const Key('profile_account'), icon: Icons.account_circle_outlined, title: AccountScreen.accountTitle, subtitle: 'Name, phone and vehicle', onTap: () => _push(const EditProfileScreen())),
-                      _SettingsRow(key: const Key('profile_notifications'), icon: Icons.notifications_none_rounded, title: 'Notifications', onTap: _notifications),
-                      if (theme != null)
-                        _SettingsRow(key: const Key('profile_theme'), icon: Icons.contrast_rounded, title: 'Theme', subtitle: AppearanceSheet.summary(theme), onTap: () => AppearanceSheet.show(context)),
                       _SettingsRow(
                         key: const Key('profile_emergency'),
                         icon: contactSet ? Icons.contact_emergency_rounded : Icons.person_add_alt_1_rounded,
@@ -385,19 +350,19 @@ class _AccountScreenState extends State<AccountScreen> {
                         color: contactSet ? null : AppTheme.warnText,
                         onTap: () => _push(const EditProfileScreen()),
                       ),
+                      // v3.59: routes I shared on Explore (delete any time).
+                      if (context.featureOn('exploreRoutes'))
+                        _SettingsRow(key: const Key('profile_shared_routes'), icon: Icons.alt_route_rounded, title: 'My shared routes', onTap: () => MySharedRoutesScreen.open(context)),
+                      // v3.60 operators: run a riding club or tour company on CoRoute (apply, status, console).
+                      if (context.featureOn('operators'))
+                        _SettingsRow(key: const Key('profile_operator'), icon: Icons.storefront_outlined, title: OperatorApplyScreen.rowTitle, onTap: () => OperatorApplyScreen.open(context)),
+                      _SettingsRow(key: Key(AccountScreen.helpRowKeys[0]), icon: Icons.help_outline_rounded, title: RateAndFeedback.feedbackTitle, subtitle: 'Help, report a problem, rate CoRoute', onTap: () => RateAndFeedback.openFeedback(context)),
                       _SettingsRow(
-                        key: Key(AccountScreen.helpRowKeys[2]),
+                        key: Key(AccountScreen.helpRowKeys[1]),
                         icon: Icons.privacy_tip_outlined,
                         title: PrivacyTermsSheet.title,
                         onTap: () => PrivacyTermsSheet.show(context, meta),
                       ),
-                      if (social != null) _SettingsRow(key: const Key('profile_invite'), icon: Icons.share_outlined, title: 'Invite friends', onTap: _share),
-                      // 3.55 ratings & reviews: straight to Google Play's in-app review (no "do you like us?").
-                      _SettingsRow(key: Key(AccountScreen.helpRowKeys[1]), icon: Icons.star_outline_rounded, title: RateAndFeedback.rateTitle, onTap: () => RateAndFeedback.rate(context)),
-                      // One screen: report a problem, suggest a safety feature, other (+ diagnostics log).
-                      _SettingsRow(key: Key(AccountScreen.helpRowKeys[0]), icon: Icons.help_outline_rounded, title: RateAndFeedback.feedbackTitle, subtitle: 'Help & support', onTap: () => RateAndFeedback.openFeedback(context)),
-                      if (leaderboardOn)
-                        _SettingsRow(key: const Key('profile_tab_leaderboard'), icon: Icons.emoji_events_outlined, title: AccountScreen.leaderboardTitle, onTap: () => LeaderboardScreen.open(context)),
                       if (auth.isMasterAdmin)
                         _SettingsRow(
                           icon: Icons.admin_panel_settings_rounded,
@@ -406,7 +371,7 @@ class _AccountScreenState extends State<AccountScreen> {
                           // One admin console for phones and tablets (it adapts its layout).
                           onTap: () => _push(const MasterAdminDashboard()),
                         ),
-                      _SettingsRow(key: const Key('profile_advanced'), icon: Icons.tune_rounded, title: SettingsScreen.moreTitle, subtitle: 'All settings', divider: false, onTap: () => SettingsScreen.open(context)),
+                      _SettingsRow(key: const Key('profile_advanced'), icon: Icons.tune_rounded, title: SettingsScreen.moreTitle, divider: false, onTap: () => SettingsScreen.open(context)),
                     ]),
                     const SizedBox(height: Space.s24),
                     card([

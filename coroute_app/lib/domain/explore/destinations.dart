@@ -65,6 +65,11 @@ class Destination {
   /// `/api/public/destinations/<id>/photo` when the admin uploaded one, else null (gradient art is drawn).
   final String? photoUrl;
 
+  /// v3.59: the category id as the gateway sent it (custom admin categories have no enum value; [category] then
+  /// falls back to one-day for icons), and the raw tag ids.
+  final String categoryKey;
+  final List<String> tagKeys;
+
   const Destination({
     required this.id,
     required this.name,
@@ -75,7 +80,16 @@ class Destination {
     this.tags = const [],
     this.description = '',
     this.photoUrl,
-  });
+    String? categoryKey,
+    List<String>? tagKeys,
+  })  : categoryKey = categoryKey ?? '',
+        tagKeys = tagKeys ?? const [];
+
+  /// The category id to filter and label by: the raw gateway id, else the enum's.
+  String get catId => categoryKey.isNotEmpty ? categoryKey : category.key;
+
+  /// v3.59 filter by a category id from the admin's list (built-in or custom). '' or 'all' = every place.
+  bool fitsKey(String id) => id.isEmpty || id == 'all' || catId == id || tagKeys.contains(id) || tags.any((t) => t.key == id);
 
   /// Null when the row is unusable (no id / name / valid coordinates).
   static Destination? fromJson(Object? j) {
@@ -99,6 +113,8 @@ class Destination {
       description: j['description'] is String ? (j['description'] as String).trim() : '',
       // Only our own gateway's photo route; never a third-party URL.
       photoUrl: photo is String && photo.startsWith('/api/public/destinations/') ? photo : null,
+      categoryKey: j['category'] is String ? (j['category'] as String).trim() : '',
+      tagKeys: [if (rawTags is List) for (final t in rawTags) if (t is String) t],
     );
   }
 
@@ -108,8 +124,8 @@ class Destination {
         'region': region,
         'lat': lat,
         'lng': lng,
-        'category': category.key,
-        'tags': [for (final t in tags) t.key],
+        'category': catId,
+        'tags': tagKeys.isNotEmpty ? tagKeys : [for (final t in tags) t.key],
         'description': description,
         if (photoUrl != null) 'photoUrl': photoUrl,
       };
@@ -162,11 +178,14 @@ class ExploreRanking {
     double? lng,
     DestinationCategory category = DestinationCategory.all,
     String query = '',
+
+    /// v3.59: an admin category id (built-in or custom); when set it replaces [category].
+    String? categoryId,
   }) {
     final hasFix = lat != null && lng != null && lat.isFinite && lng.isFinite && !(lat == 0 && lng == 0);
     final picked = [
       for (var i = 0; i < all.length; i++)
-        if (all[i].fits(category) && matches(all[i], query)) (i, all[i], hasFix ? roadKmBetween(lat, lng, all[i].lat, all[i].lng) : null),
+        if ((categoryId != null ? all[i].fitsKey(categoryId) : all[i].fits(category)) && matches(all[i], query)) (i, all[i], hasFix ? roadKmBetween(lat, lng, all[i].lat, all[i].lng) : null),
     ];
     if (hasFix) {
       picked.sort((a, b) {

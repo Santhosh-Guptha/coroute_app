@@ -8,7 +8,9 @@ import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/explore_service.dart';
+import '../../core/ui/coroute_logo.dart';
 import '../../domain/explore/destinations.dart';
+import '../../domain/explore/explore_config.dart';
 import '../home/ride_start_view.dart';
 import '../ride/navigate_to.dart';
 import '../trip_planner/trip_planner_screen.dart';
@@ -17,13 +19,20 @@ import 'explore_screen.dart';
 /// v3.58 ride detail: photo or illustration, ~km / ~time / category, a route preview, what CoRoute riders' road
 /// intel says about the way (hazard hotspots, rough road, twistiness, where riders stop, risky times, fuel), and
 /// three ways to go: Ride solo, Plan group ride (the planner with the destination filled in) and Navigate.
+///
+/// v3.59: "Ridden by CoRoute riders": the routes real riders chose to share to this place (opt-in, first and last km
+/// left out), drawn on the map with their username, day, distance, riding time and tip. With none yet, an invitation
+/// to be the first to guide others.
 class RideDetailScreen extends StatefulWidget {
   final RankedDestination ranked;
   final (double, double)? from;
-  const RideDetailScreen({super.key, required this.ranked, this.from});
 
-  static Future<void> open(BuildContext context, RankedDestination r, {(double, double)? from}) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RideDetailScreen(ranked: r, from: from)));
+  /// Shared routes known from the Explore list (0 = none known; the screen still asks the server).
+  final int routeCount;
+  const RideDetailScreen({super.key, required this.ranked, this.from, this.routeCount = 0});
+
+  static Future<void> open(BuildContext context, RankedDestination r, {(double, double)? from, int routeCount = 0}) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RideDetailScreen(ranked: r, from: from, routeCount: routeCount)));
 
   @override
   State<RideDetailScreen> createState() => _RideDetailScreenState();
@@ -32,13 +41,35 @@ class RideDetailScreen extends StatefulWidget {
 class _RideDetailScreenState extends State<RideDetailScreen> {
   DestinationIntel? _intel;
   bool _intelLoading = true;
+  List<RiderRoute>? _routes;
+  bool _routesLoading = true;
+  int _selected = 0;
 
   Destination get _d => widget.ranked.destination;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadIntel());
+    _routes = ExploreService.cachedRoutes(_d.id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadIntel();
+      _loadRoutes();
+    });
+  }
+
+  Future<void> _loadRoutes() async {
+    final api = context.read<ApiClient?>();
+    if (api == null || !api.hasToken) {
+      setState(() => _routesLoading = false);
+      return;
+    }
+    final list = await ExploreService(api).routesFor(_d.id);
+    if (!mounted) return;
+    setState(() {
+      _routes = list;
+      _routesLoading = false;
+      if (_selected >= list.length) _selected = 0;
+    });
   }
 
   Future<void> _loadIntel() async {
@@ -134,18 +165,30 @@ class _RideDetailScreenState extends State<RideDetailScreen> {
                       Text(_d.description, style: AppText.body),
                     ],
                     const SizedBox(height: Space.s24),
-                    const SectionTitle('Route preview'),
+                    RoadSectionHeader((_routes ?? const []).isNotEmpty ? 'The way riders went' : 'Route preview'),
                     const SizedBox(height: Space.s8),
-                    _RoutePreview(dest: _d, from: widget.from),
+                    _RoutePreview(dest: _d, from: widget.from, routes: _routes ?? const [], selected: _selected),
                     const SizedBox(height: 6),
                     Text(
-                      widget.from == null
-                          ? 'Turn on location to see the way from you. The planner finds the road.'
-                          : 'Straight guide line from you. The planner and your maps app find the road; ~km is an estimate.',
+                      (_routes ?? const []).isNotEmpty
+                          ? 'A route a CoRoute rider shared (the first and last kilometre are left out). The planner finds the road from you.'
+                          : widget.from == null
+                              ? 'Turn on location to see the way from you. The planner finds the road.'
+                              : 'Straight guide line from you. The planner and your maps app find the road; ~km is an estimate.',
                       style: AppText.caption,
                     ),
                     const SizedBox(height: Space.s24),
-                    const SectionTitle('Road intel on the way'),
+                    const RoadSectionHeader('Ridden by CoRoute riders', subtitle: 'Routes riders chose to share after their ride.'),
+                    const SizedBox(height: Space.s8),
+                    _RiderRoutes(
+                      routes: _routes,
+                      loading: _routesLoading && _routes == null,
+                      selected: _selected,
+                      onSelect: (i) => setState(() => _selected = i),
+                      onPlan: _planGroup,
+                    ),
+                    const SizedBox(height: Space.s24),
+                    const RoadSectionHeader('Road intel on the way'),
                     const SizedBox(height: 2),
                     Text('From CoRoute riders, anonymous and only where enough riders passed.', style: AppText.caption),
                     const SizedBox(height: Space.s8),
@@ -201,19 +244,23 @@ class _RideDetailScreenState extends State<RideDetailScreen> {
 class _RoutePreview extends StatelessWidget {
   final Destination dest;
   final (double, double)? from;
-  const _RoutePreview({required this.dest, this.from});
+  final List<RiderRoute> routes;
+  final int selected;
+  const _RoutePreview({required this.dest, this.from, this.routes = const [], this.selected = 0});
 
   @override
   Widget build(BuildContext context) {
     final to = LatLng(dest.lat, dest.lng);
-    final start = from == null ? null : LatLng(from!.$1, from!.$2);
-    final bounds = start == null ? null : LatLngBounds.fromPoints([start, to]);
+    final sel = routes.isEmpty ? null : routes[selected.clamp(0, routes.length - 1)];
+    final start = sel != null ? null : (from == null ? null : LatLng(from!.$1, from!.$2));
+    final selPts = sel == null ? const <LatLng>[] : [for (final p in sel.points) LatLng(p.$1, p.$2)];
+    final bounds = sel != null ? LatLngBounds.fromPoints([...selPts, to]) : (start == null ? null : LatLngBounds.fromPoints([start, to]));
     return ClipRRect(
       borderRadius: Radii.lgAll,
       child: SizedBox(
-        height: 190,
+        height: sel != null ? 230 : 190,
         child: Semantics(
-          label: start == null ? 'Map of ${dest.name}' : 'Map from your position to ${dest.name}',
+          label: sel != null ? 'Map of the route @${sel.username} took to ${dest.name}' : (start == null ? 'Map of ${dest.name}' : 'Map from your position to ${dest.name}'),
           image: true,
           excludeSemantics: true,
           child: AbsorbPointer(
@@ -227,6 +274,12 @@ class _RoutePreview extends StatelessWidget {
               ),
               children: [
                 appTileLayer(),
+                if (sel != null)
+                  PolylineLayer(polylines: [
+                    for (final r in routes)
+                      if (r != sel) Polyline(points: [for (final p in r.points) LatLng(p.$1, p.$2)], strokeWidth: 3, color: AppTheme.primary.withValues(alpha: 0.28)),
+                    Polyline(points: selPts, strokeWidth: 6, color: AppTheme.primaryFill, borderStrokeWidth: 2, borderColor: Colors.white),
+                  ]),
                 if (start != null)
                   PolylineLayer(polylines: [
                     Polyline(points: [start, to], strokeWidth: 4, color: AppTheme.primary, pattern: StrokePattern.dashed(segments: const [12, 10])),
@@ -303,6 +356,116 @@ class _IntelCard extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The shared routes: one card each (username, day, distance, time, tip, a small drawing). Tap to show it on the map.
+class _RiderRoutes extends StatelessWidget {
+  final List<RiderRoute>? routes;
+  final bool loading;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onPlan;
+  const _RiderRoutes({required this.routes, required this.loading, required this.selected, required this.onSelect, required this.onPlan});
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) return const SkeletonCard(lines: 2);
+    final list = routes ?? const <RiderRoute>[];
+    if (list.isEmpty) {
+      return DsCard(
+        key: const Key('detail_be_first'),
+        dashed: true,
+        child: Row(
+          children: [
+            const RoadStripe(width: 6, height: 64),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('No rider has shared a route here yet', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                  const SizedBox(height: 4),
+                  Text('Ride it and be the first to guide others: after the ride, share your route from the trip report.', maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.label),
+                  const SizedBox(height: 8),
+                  TextButton.icon(onPressed: onPlan, style: TextButton.styleFrom(minimumSize: const Size(48, 44), padding: EdgeInsets.zero), icon: const Icon(Icons.route_outlined), label: const Text('Plan this ride')),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      key: const Key('detail_rider_routes'),
+      children: [
+        for (var i = 0; i < list.length; i++) ...[
+          if (i > 0) const SizedBox(height: Space.s8),
+          _RouteCard(route: list[i], selected: i == selected, onTap: () => onSelect(i)),
+        ],
+      ],
+    );
+  }
+}
+
+class _RouteCard extends StatelessWidget {
+  final RiderRoute route;
+  final bool selected;
+  final VoidCallback onTap;
+  const _RouteCard({required this.route, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final facts = [
+      '${route.distanceKm.toStringAsFixed(route.distanceKm < 100 ? 1 : 0)} km',
+      if (route.durationLabel.isNotEmpty) route.durationLabel,
+      if (route.dayLabel.isNotEmpty) route.dayLabel,
+    ].join(' · ');
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Route by @${route.username}: $facts.${route.note.isEmpty ? '' : ' Tip: ${route.note}'} ${selected ? 'Shown on the map.' : 'Show on the map.'}',
+      excludeSemantics: true,
+      child: Material(
+        color: selected ? AppTheme.tint : AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: selected ? AppTheme.primaryFill : AppTheme.border, width: selected ? 1.5 : 1)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 72, child: RouteSparkline(points: route.points, height: 56, color: selected ? AppTheme.primaryFill : AppTheme.primary)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('@${route.username}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                      Text(facts, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
+                      if (route.bike.isNotEmpty) Text(route.bike, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                      if (route.note.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.tips_and_updates_outlined, size: 16, color: CoRouteBrand.amber),
+                            const SizedBox(width: 6),
+                            Expanded(child: Text(route.note, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text))),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

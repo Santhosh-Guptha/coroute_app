@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import 'admin_crews_screen.dart';
 import 'admin_diag_logs_screen.dart';
+import 'admin_explore_screen.dart';
 import 'admin_features_screen.dart';
 import 'admin_insights_screen.dart';
 import 'admin_place_reviews_screen.dart';
+import 'admin_plan_features_screen.dart';
 import 'admin_reviews_screen.dart';
 import 'admin_ride_history_screen.dart';
 import 'admin_safety_screen.dart';
@@ -43,7 +45,9 @@ enum AdminPage {
   reviews(AdminSection.content, 'Ride reviews'),
   places(AdminSection.content, 'Place photos'),
   crews(AdminSection.content, 'Crews'),
+  explore(AdminSection.content, 'Explore'),
   features(AdminSection.system, 'Features'),
+  planFeatures(AdminSection.system, 'By plan'),
   usage(AdminSection.system, 'Usage'),
   diagnostics(AdminSection.system, 'Diagnostics'),
   settings(AdminSection.system, 'Settings');
@@ -69,8 +73,12 @@ Widget adminPageScreen(AdminPage page) {
       return const AdminPlaceReviewsScreen();
     case AdminPage.crews:
       return const AdminCrewsScreen();
+    case AdminPage.explore:
+      return const AdminExploreScreen(); // v3.59 Explore layout, places, rider routes
     case AdminPage.features:
       return const AdminFeaturesScreen();
+    case AdminPage.planFeatures:
+      return const AdminPlanFeaturesScreen(); // v3.60 features and limits per plan
     case AdminPage.usage:
       return const AdminInsightsScreen();
     case AdminPage.diagnostics:

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/ui/optimistic.dart';
 import '../../domain/explore/destinations.dart';
+import '../../domain/explore/explore_config.dart';
 import '../../domain/intel/geohash.dart';
 import '../../domain/intel/hazard_ahead.dart';
 import 'api_client.dart';
@@ -36,6 +37,17 @@ class DestinationIntel {
   });
 
   bool get isEmpty => hazardSpots == 0 && roughSpots == 0 && twistiness == 0 && stops.isEmpty && riskyTimes == null;
+}
+
+/// v3.59: everything the Explore tab needs in one call.
+@immutable
+class ExploreData {
+  final ExploreConfig config;
+  final List<Destination> destinations;
+
+  /// Live shared rider routes per destination id.
+  final Map<String, int> routeCounts;
+  const ExploreData(this.config, this.destinations, this.routeCounts);
 }
 
 /// v3.58 Explore data: the admin-curated destinations (cached on the phone for offline / instant start) and
@@ -123,4 +135,123 @@ class ExploreService {
     SwrCache.shared.put<DestinationIntel>(key, out);
     return out;
   }
+
+  // ------------------------------------------------------------------ v3.59 config + rider routes
+  static const String dataKey = 'explore:data';
+  static const String dataPrefsKey = 'explore_data_v2';
+
+  /// The last Explore data at once (memory, then the copy on the phone), or null.
+  static Future<ExploreData?> cachedData() async {
+    final mem = SwrCache.shared.peek<ExploreData>(dataKey);
+    if (mem != null) return mem;
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(dataPrefsKey);
+      if (raw == null) return null;
+      return _dataFrom(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static ExploreData? _dataFrom(Object? j) {
+    if (j is! Map) return null;
+    final raw = j['destinations'], counts = j['routeCounts'];
+    final out = ExploreData(
+      ExploreConfig.fromJson(j['config']),
+      [if (raw is List) for (final d in raw) ?Destination.fromJson(d)],
+      {if (counts is Map) for (final e in counts.entries) if (e.key is String && e.value is num) e.key as String: (e.value as num).toInt()},
+    );
+    SwrCache.shared.put<ExploreData>(dataKey, out);
+    SwrCache.shared.put<List<Destination>>(cacheKey, out.destinations);
+    return out;
+  }
+
+  /// GET /api/public/explore (admin layout + destinations + route counts). An older gateway without it: the
+  /// plain destination list with the built-in layout. Throws on a network error.
+  Future<ExploreData> loadData() async {
+    try {
+      final res = await _api.get('/public/explore');
+      final d = _dataFrom(res);
+      if (d != null) {
+        try {
+          await (await SharedPreferences.getInstance()).setString(dataPrefsKey, jsonEncode(res));
+        } catch (_) {}
+        return d;
+      }
+    } on ApiException catch (e) {
+      if (e.statusCode != 404) rethrow;
+    }
+    final list = await load();
+    final out = ExploreData(ExploreConfig.fallback, list, const {});
+    SwrCache.shared.put<ExploreData>(dataKey, out);
+    return out;
+  }
+
+  /// Shared routes of one destination, newest first (riders only). Empty when sharing is off or offline.
+  Future<List<RiderRoute>> routesFor(String destId) async {
+    final key = 'explore:routes:$destId';
+    try {
+      final r = await _api.get('/explore/destinations/$destId/routes', timeout: const Duration(seconds: 12));
+      final list = r is Map ? r['routes'] : null;
+      final out = [if (list is List) for (final x in list) ?RiderRoute.fromJson(x)];
+      SwrCache.shared.put<List<RiderRoute>>(key, out);
+      return out;
+    } catch (_) {
+      return SwrCache.shared.peek<List<RiderRoute>>(key) ?? const [];
+    }
+  }
+
+  static List<RiderRoute>? cachedRoutes(String destId) => SwrCache.shared.peek<List<RiderRoute>>('explore:routes:$destId');
+
+  /// Shares a finished ride's route (the rider ticked the consent box). Returns (route, first rider to share it).
+  /// Throws ApiException with the gateway's message (NOT_REACHED, TOO_SHORT, USERNAME_REQUIRED, FEATURE_OFF).
+  Future<(RiderRoute?, bool)> shareRoute({
+    required String destId,
+    required List<(double, double)> track,
+    int? durationMin,
+    DateTime? endedAt,
+    String note = '',
+    String bike = '',
+  }) async {
+    final pts = RouteSharing.payload(track);
+    if (pts.length < 2) throw ApiException(422, 'This ride is too short to share once the first and last kilometre are left out.', 'TOO_SHORT');
+    final r = await _api.post('/explore/routes', {
+      'destId': destId,
+      'points': pts,
+      'consent': true,
+      if (durationMin != null && durationMin > 0) 'durationMin': durationMin,
+      if (endedAt != null) 'rideEndedAt': endedAt.millisecondsSinceEpoch,
+      if (note.trim().isNotEmpty) 'note': note.trim(),
+      if (bike.trim().isNotEmpty) 'bike': bike.trim(),
+    });
+    SwrCache.shared.remove('explore:routes:$destId');
+    return (r is Map ? RiderRoute.fromJson(r['route']) : null, r is Map && r['first'] == true);
+  }
+
+  Future<List<RiderRoute>> myRoutes() async {
+    final r = await _api.get('/explore/routes/mine');
+    final list = r is Map ? r['routes'] : null;
+    return [if (list is List) for (final x in list) ?RiderRoute.fromJson(x)];
+  }
+
+  Future<void> deleteRoute(String id) async => _api.delete('/explore/routes/$id');
+
+  // ------------------------------------------------------------------ v3.59 in-app admin (MASTER_ADMIN)
+  Future<Map<String, dynamic>> adminConfig() async => Map<String, dynamic>.from(await _api.get('/admin/explore/config') as Map);
+  Future<void> adminSaveConfig(Map<String, dynamic> cfg) async => _api.put('/admin/explore/config', cfg);
+  Future<List<Map<String, dynamic>>> adminDestinations() async {
+    final r = await _api.get('/admin/destinations');
+    final list = r is Map ? r['destinations'] : null;
+    return [if (list is List) for (final d in list) if (d is Map) Map<String, dynamic>.from(d)];
+  }
+
+  Future<void> adminPatchDestination(String id, Map<String, dynamic> fields) async => _api.patch('/admin/destinations/$id', fields);
+  Future<List<Map<String, dynamic>>> adminRoutes({String status = ''}) async {
+    final r = await _api.get('/admin/explore/routes${status.isEmpty ? '' : '?status=$status'}');
+    final list = r is Map ? r['routes'] : null;
+    return [if (list is List) for (final d in list) if (d is Map) Map<String, dynamic>.from(d)];
+  }
+
+  Future<void> adminSetRouteStatus(String id, String status) async => _api.patch('/admin/explore/routes/$id', {'status': status});
+  Future<void> adminDeleteRoute(String id) async => _api.delete('/admin/explore/routes/$id');
 }
