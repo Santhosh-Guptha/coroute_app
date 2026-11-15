@@ -78,6 +78,9 @@ const config = {
   oracleUser: isTest ? 'test' : required('ORACLE_USER'),
   oraclePassword: isTest ? 'test' : required('ORACLE_PASSWORD'),
   oracleTimeoutMs: int('ORACLE_TIMEOUT_MS', 6000),
+  // SOS never waits on a slow database: duplicate check and store each get this long before the alert goes out.
+  sosLookupWaitMs: Math.max(200, int('SOS_LOOKUP_WAIT_MS', 1500)),
+  sosStoreWaitMs: Math.max(200, int('SOS_STORE_WAIT_MS', 2000)),
 
   // Auth
   jwtSecret: isTest ? 'test-secret-test-secret-test-secret-1234' : required('JWT_SECRET'),
@@ -100,8 +103,10 @@ const config = {
   // Clients that opt in (app builds >= 10025 with X-CoRoute-Session: 2, the website, /admin, /operator) get a short
   // access token plus a rotating refresh token; older app builds keep a long sliding token bound to a session record.
   accessTokenTtlMin: int('ACCESS_TOKEN_TTL_MIN', 15),
-  sessionAppAbsoluteDays: int('SESSION_APP_ABSOLUTE_DAYS', 60),
-  sessionAppIdleDays: int('SESSION_APP_IDLE_DAYS', 30),
+  // v3.60: the phone app is never signed out by time (0 = no limit). Sign-out, password change, "sign out everywhere",
+  // reuse detection and admin revoke still end a session at once.
+  sessionAppAbsoluteDays: int('SESSION_APP_ABSOLUTE_DAYS', 0),
+  sessionAppIdleDays: int('SESSION_APP_IDLE_DAYS', 0),
   sessionWebAbsoluteDays: int('SESSION_WEB_ABSOLUTE_DAYS', 7),
   sessionWebIdleMin: int('SESSION_WEB_IDLE_MIN', 60),
   sessionAdminAbsoluteHours: int('SESSION_ADMIN_ABSOLUTE_HOURS', 12),
@@ -214,6 +219,9 @@ const config = {
 
   // Joining by code: failed attempts allowed per window, per rider and per network (brute-force guard).
   joinWindowMin: int('JOIN_WINDOW_MIN', 15),
+  // v3.60: a rider joining a ride by code waits for the host (or ride head) to approve. On unless RIDE_JOIN_APPROVAL=false;
+  // off by default under NODE_ENV=test so older tests join directly (the v3.60 tests switch it on).
+  rideJoinApproval: process.env.RIDE_JOIN_APPROVAL === 'true' || (process.env.NODE_ENV !== 'test' && process.env.RIDE_JOIN_APPROVAL !== 'false'),
   joinMaxFailures: int('JOIN_MAX_FAILURES', 10),
   joinMaxFailuresPerIp: int('JOIN_MAX_FAILURES_PER_IP', 30),
   // Riders in one convoy (live fan-out is per rider per second; this keeps the small VM healthy).
@@ -438,6 +446,8 @@ const config = {
   geoContact: (process.env.GEO_CONTACT || SUPPORT_EMAIL).trim(),
   geoCacheDays: int('GEO_CACHE_DAYS', 30),
   geoMinIntervalMs: int('GEO_MIN_INTERVAL_MS', 1100),
+  // v3.60 fast re-route: spacing of route calls in their own queue (route_policy of the routing server allows it).
+  geoRouteMinIntervalMs: int('GEO_ROUTE_MIN_INTERVAL_MS', 250),
 
   // Website: where the "Download" buttons send people. Play Store URL once the listing is live,
   // otherwise the APKs served by this gateway from public/ (see deploy/RUNBOOK.md section 4).

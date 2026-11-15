@@ -140,7 +140,7 @@ test('convoy lifecycle: create, join by code, per-rider telemetry (no overwrite)
   const created = await api('POST', '/convoys', { name: 'Hyd → Goa', destination: 'Goa', rider: { lat: 17.3, lng: 78.4 } }, lead.token);
   assert.equal(created.status, 201);
   const convoy = created.json;
-  assert.match(convoy.joinCode, /^\d{6}$/);
+  assert.match(convoy.joinCode, /^[A-HJ-NP-Z2-9]{6}$/); // v3.60: letters and digits, no look-alikes
   assert.equal(convoy.riders[lead.user.userId].role, 'LEAD');
 
   const notMember = await api('GET', `/convoys/${convoy.groupId}`, null, pack.token);

@@ -102,6 +102,22 @@ class ConvoyError extends Error {
 const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate', 'micMuted', 'isSpeaking', 'fatigueLevel'];
 
 const shortId = (n = 4) => crypto.randomBytes(n).toString('hex').toUpperCase();
+// v3.60 join codes: 6 letters and digits, never the look-alikes 0/O, 1/I/L (at least one letter and one digit).
+const CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+const CODE_DIGITS = '23456789';
+const CODE_ALPHABET = CODE_LETTERS + CODE_DIGITS;
+function newJoinCode() {
+  for (;;) {
+    let c = '';
+    for (let i = 0; i < 6; i++) c += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
+    if (/[A-Z]/.test(c) && /[0-9]/.test(c)) return c;
+  }
+}
+// v3.60 join approval: a waiting request lasts 30 minutes; a declined rider can ask again after 10 minutes.
+const JOIN_REQUEST_TTL_MS = 30 * 60000;
+const JOIN_DECLINE_COOLDOWN_MS = 10 * 60000;
+const JOIN_REQUESTS_MAX = 20;
+const firstNameOfUser = (n) => String(n || '').trim().split(/\s+/)[0].slice(0, 40) || 'Rider';
 const now = () => Date.now();
 
 function num(v, def = 0) { const n = Number(v); return Number.isFinite(n) ? n : def; }
@@ -250,13 +266,15 @@ class ConvoyManager extends EventEmitter {
       activeAlerts: [...room.alerts.values()].filter((a) => !a.resolved).map((a) => publicAlert(a, { medical: !admin, summary: this._summary(room.groupId, a.alertId) })),
       messages: room.messages.slice(-200),
       stopPoints: m.stopPoints || [],
-      pendingMembers: {},
+      // v3.60: riders waiting for the host to let them in (userId -> first name).
+      pendingMembers: this._pendingMembers(m),
       waitRequests: m.waitRequests || {},
       distanceThresholdMeters: m.distanceThresholdMeters ?? 1000,
       stopThresholdSeconds: m.stopThresholdSeconds ?? 180,
       voiceGuidanceEnabled: m.voiceGuidanceEnabled ?? true,
       speedLimitKmh: m.speedLimitKmh || 0,
       townLimitKmh: m.townLimitKmh || 0,
+      gathering: m.gathering ? { lat: m.gathering.lat, lng: m.gathering.lng, name: m.gathering.name || '', startedAt: m.gathering.startedAt || 0 } : null,
       featurePolicy: featurePolicy(m.featurePolicy),
       featureAnalytics: roomAnalytics(room),
       routeBreadcrumbs: m.routeBreadcrumbs || [],
@@ -473,7 +491,7 @@ class ConvoyManager extends EventEmitter {
     const riderInput = { ...clientRiderInput(p.rider), ...profileOf(await this.repo.findUserById(user.userId)) };
 
     let joinCode;
-    do { joinCode = String(100000 + crypto.randomInt(900000)); } while (await this.repo.joinCodeInUse(joinCode));
+    do { joinCode = newJoinCode(); } while (await this.repo.joinCodeInUse(joinCode));
 
     const t = now();
     const groupId = `GRP-${shortId(4)}`;
@@ -505,6 +523,8 @@ class ConvoyManager extends EventEmitter {
       groupFeatures,
       freeTierHost,
       ...(opts.operator ? { operatorId: String(opts.operator.operatorId), operatorRideId: String(opts.operator.rideId) } : {}),
+      // v3.60 meet first: riders come from different places and gather at the start; the host starts from there.
+      ...(p.gathering === true && sanitizePlace(p.start) ? { gathering: { ...sanitizePlace(p.start), startedAt: 0, createdAt: t } } : {}),
       members: { [user.userId]: memberRecord(user, { ...riderInput, role: 'LEAD' }, t) },
     });
     const rider = buildRider(user, { ...riderInput, role: 'LEAD' }, t);
@@ -525,13 +545,110 @@ class ConvoyManager extends EventEmitter {
     return this.snapshot(room);
   }
 
-  async joinByCode(user, code, riderProfile = {}) {
+  /** userId -> first name of the riders waiting for approval (expired ones left out). */
+  _pendingMembers(m, t = now()) {
+    const out = {};
+    for (const [uid, r] of Object.entries(m.joinRequests || {})) if (r && t - r.at < JOIN_REQUEST_TTL_MS) out[uid] = r.name || 'Rider';
+    return out;
+  }
+
+  /** True when this rider must wait for the host: a new rider joining by code (v3.60). */
+  _needsApproval(room, userId, { invited = false } = {}) {
+    if (config.rideJoinApproval === false || invited) return false;
+    const m = room.meta;
+    if (room.riders.has(userId)) return false;
+    if (userId === (m.tripOwnerUserId || m.createdByUserId) || userId === m.tripHeadUserId) return false;
+    if (m.operatorId) return false; // operator rides: the operator already approved the sign-up
+    if (m.members && m.members[userId]) return false; // rode in this ride before (re-join after a drop)
+    return !(m.approvedJoins && m.approvedJoins[userId]);
+  }
+
+  /** Records (or refreshes) a join request and tells the ride. Returns the PENDING answer for the joiner. */
+  async _requestJoin(room, user) {
+    const m = room.meta;
+    const t = now();
+    const declined = m.declinedJoins && m.declinedJoins[user.userId];
+    if (declined && t - declined < JOIN_DECLINE_COOLDOWN_MS) {
+      throw new ConvoyError('The host did not let you in. You can ask again in a few minutes.', 403, 'JOIN_DECLINED');
+    }
+    const live = this._pendingMembers(m, t);
+    if (!live[user.userId] && Object.keys(live).length >= JOIN_REQUESTS_MAX) {
+      throw new ConvoyError('Too many riders are waiting to join. Try again in a few minutes.', 429, 'JOIN_QUEUE_FULL');
+    }
+    const fresh = !live[user.userId];
+    const requests = {};
+    for (const [uid, r] of Object.entries(m.joinRequests || {})) if (live[uid]) requests[uid] = r;
+    requests[user.userId] = { at: fresh ? t : requests[user.userId].at, name: firstNameOfUser(user.name) };
+    m.joinRequests = requests;
+    this._touch(room);
+    await this.repo.saveConvoyMeta(m);
+    if (fresh) this._emit(room.groupId, 'JOIN_REQUEST', { userId: user.userId, name: requests[user.userId].name, pendingMembers: this._pendingMembers(m, t) });
+    return { pending: true, status: 'PENDING', groupId: room.groupId, name: m.name, message: 'Waiting for the host to let you in.' };
+  }
+
+  /**
+   * v3.60: the host or the ride head lets a waiting rider in (approve) or not. The rider is told over their socket
+   * (JOIN_APPROVED / JOIN_DECLINED) and joins with the same code; approved riders are not asked again in this ride.
+   */
+  async decideJoin(groupId, byUser, targetUserId, approve) {
+    const room = await this.getRoom(groupId);
+    const m = room.meta;
+    const by = byUser.userId;
+    if (by !== (m.tripOwnerUserId || m.createdByUserId) && by !== m.tripHeadUserId) {
+      throw new ConvoyError('Only the host or the ride head can let riders in.', 403, 'NOT_HOST');
+    }
+    const pending = this._pendingMembers(m);
+    if (!pending[targetUserId]) throw new ConvoyError('This rider is no longer waiting.', 404, 'NO_REQUEST');
+    const requests = { ...(m.joinRequests || {}) };
+    delete requests[targetUserId];
+    m.joinRequests = requests;
+    if (approve) m.approvedJoins = { ...(m.approvedJoins || {}), [targetUserId]: now() };
+    else m.declinedJoins = { ...(m.declinedJoins || {}), [targetUserId]: now() };
+    this._touch(room);
+    await this.repo.saveConvoyMeta(m);
+    this._emit(groupId, 'JOIN_REQUEST_UPDATE', { userId: targetUserId, approved: !!approve, pendingMembers: this._pendingMembers(m) });
+    this.emit('userMessage', groupId, targetUserId, { type: approve ? 'JOIN_APPROVED' : 'JOIN_DECLINED', groupId, name: m.name, ts: now() });
+    return { ok: true, approved: !!approve, pendingMembers: this._pendingMembers(m) };
+  }
+
+  /**
+   * v3.60 meet first: the host (or ride head) starts the ride from the meeting point (everyone there, or ready to go).
+   * `meetingPoint` {lat, lng, name} moves the meeting point while still gathering.
+   */
+  async updateGathering(groupId, byUser, { start = false, meetingPoint = null } = {}) {
+    const room = await this.getRoom(groupId);
+    const m = room.meta;
+    if (byUser.userId !== (m.tripOwnerUserId || m.createdByUserId) && byUser.userId !== m.tripHeadUserId) {
+      throw new ConvoyError('Only the host or the ride head can do this.', 403, 'NOT_HOST');
+    }
+    if (!m.gathering) throw new ConvoyError('This ride does not meet first.', 409, 'NO_GATHERING');
+    if (m.gathering.startedAt) throw new ConvoyError('The ride has already started.', 409, 'ALREADY_STARTED');
+    if (meetingPoint) {
+      const place = sanitizePlace(meetingPoint);
+      if (!place) throw new ConvoyError('Pick a meeting point on the map.', 400, 'BAD_PLACE');
+      m.gathering = { ...m.gathering, ...place };
+      m.start = place;
+      m.startLocationName = place.name || m.startLocationName;
+    }
+    if (start) m.gathering = { ...m.gathering, startedAt: now() };
+    this._touch(room);
+    await this.repo.saveConvoyMeta(m);
+    this._emit(groupId, 'GATHERING', { gathering: { lat: m.gathering.lat, lng: m.gathering.lng, name: m.gathering.name || '', startedAt: m.gathering.startedAt || 0 } });
+    if (meetingPoint) this.recomputeRoute(groupId).catch((e) => this.log.warn('[convoys] route failed', e.message));
+    return { ok: true, gathering: m.gathering };
+  }
+
+  async joinByCode(user, code, riderProfile = {}, { invited = false } = {}) {
     const clean = String(code || '').trim().toUpperCase();
     if (!/^[A-Z0-9]{4,10}$/.test(clean)) throw new ConvoyError('Invalid join code.');
     const meta = await this.repo.getActiveConvoyByJoinCode(clean);
     if (!meta) throw new ConvoyError('No active convoy found for that code.', 404);
 
     const room = await this.getRoom(meta.groupId);
+    if (!room.riders.has(user.userId) && room.meta.joinBlocked && room.meta.joinBlocked[user.userId]) {
+      throw new ConvoyError('The Trip owner removed you from this group.', 403, 'JOIN_BLOCKED');
+    }
+    if (this._needsApproval(room, user.userId, { invited })) return this._requestJoin(room, user);
     // Live-rider cap: a rider already in this ride (re-join, re-sync) is never refused.
     if (!room.riders.has(user.userId)) this._admitNewRider(user.userId);
     // Concurrency-safe single active trip check: cannot participate in multiple active trips simultaneously
@@ -576,6 +693,9 @@ class ConvoyManager extends EventEmitter {
       const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
       record.firstJoinedAt = prev?.firstJoinedAt || prev?.joinedAt || record.joinedAt;
       room.meta.members = { ...(room.meta.members || {}), [rider.userId]: record };
+      if (room.meta.joinRequests && room.meta.joinRequests[rider.userId]) {
+        const rest = { ...room.meta.joinRequests }; delete rest[rider.userId]; room.meta.joinRequests = rest;
+      }
       await this.repo.upsertRider(room.groupId, rider);
       this._touch(room);
       await this.repo.saveConvoyMeta(room.meta);
@@ -918,6 +1038,8 @@ class ConvoyManager extends EventEmitter {
     const room = await this.getRoom(groupId);
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const cid = clientId === undefined || clientId === null ? '' : String(clientId).slice(0, 64);
+    // Medical info / owner settings are fetched next to the duplicate check (never one after the other).
+    const ownerP = withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null);
     if (cid) {
       for (const a of room.alerts.values()) {
         if (a.userId === user.userId && a.clientId === cid) {
@@ -928,7 +1050,8 @@ class ConvoyManager extends EventEmitter {
       }
       // Already resolved and no longer in memory: still the same SOS, never a new one. Stored but open and
       // not in this room's memory (the gateway that took it went down before the peer heard of it): adopted.
-      const stored = await this.repo.findAlertByClientId(groupId, user.userId, cid);
+      // A slow or failing database never holds back (or loses) an SOS: after the wait it is treated as new.
+      const stored = await withTimeout(this.repo.findAlertByClientId(groupId, user.userId, cid), config.sosLookupWaitMs).catch(() => null);
       if (stored) return { alert: this._adoptStoredAlert(room, stripKey(stored), user.userId), duplicate: true, persisted: true };
     }
     const t = now();
@@ -966,13 +1089,18 @@ class ConvoyManager extends EventEmitter {
     };
     // Round 10 rescue beacon: the 16-bit id the phone's locator sound / BLE carries (src/rescue_beacon.js).
     alert.rescueId = rescueIdFor({ msgRescueId: msg.rescueId, clientId: cid, alertId: alert.alertId });
-    const ownerDoc = await withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null);
+    const ownerDoc = await ownerP;
     await this._storeAlert(room, alert, ownerDoc, { sender: user.userId });
     return { alert, duplicate: false, persisted: !(room.unsaved && room.unsaved.has(alert.alertId)) };
   }
 
   /** Stores again an alert whose first store failed (a resend with its clientId). True once it is stored. */
   async _retryUnsavedAlert(room, a) {
+    // Its first write is still running (slow database): wait for that one instead of writing a second row.
+    const inflight = this.pendingAlertStores && this.pendingAlertStores.get(a.alertId);
+    if (inflight) {
+      try { await inflight; this._setUnsaved(room, a.alertId, false); return true; } catch { /* failed: written again below */ }
+    }
     try {
       const there = a.clientId ? await this.repo.findAlertByClientId(room.groupId, a.userId, a.clientId) : null;
       if (!there) await this.repo.addAlert(room.groupId, a);
@@ -1031,11 +1159,30 @@ class ConvoyManager extends EventEmitter {
     if (this.mirror && typeof this.mirror.sosPending === 'function') { try { this.mirror.sosPending(room.groupId, alert); } catch (e) { this.log.warn('[convoys] sos pending replicate failed', e.message); } }
     // Stored first. A failed store is logged and the alert still goes out (safety first); the sender gets
     // no echo, so the phone resends with the same clientId and the store is tried again.
+    // A slow store never delays the fan-out past SOS_STORE_WAIT_MS: the alert goes out as unsaved and is marked
+    // saved when the late write lands (a resend with the same clientId retries a failed one).
     let persisted = true;
-    try { await this.repo.addAlert(room.groupId, alert); } catch (e) {
+    const store = Promise.resolve().then(() => this.repo.addAlert(room.groupId, alert));
+    let waitTimer;
+    const outcome = await Promise.race([
+      store.then(() => 'ok', (e) => { this.log.warn('[convoys] alert store failed', e && e.message); return 'fail'; }),
+      new Promise((resolve) => { waitTimer = setTimeout(() => resolve('slow'), config.sosStoreWaitMs); if (waitTimer.unref) waitTimer.unref(); }),
+    ]).finally(() => clearTimeout(waitTimer));
+    if (outcome !== 'ok') {
       persisted = false;
       this._setUnsaved(room, alert.alertId, true);
-      this.log.warn('[convoys] alert store failed', e.message);
+      if (outcome === 'slow') {
+        this.log.warn('[convoys] alert store slow, sent first');
+        const pending = this.pendingAlertStores || (this.pendingAlertStores = new Map());
+        pending.set(alert.alertId, store);
+        store.catch(() => {}).finally(() => { if (pending.get(alert.alertId) === store) pending.delete(alert.alertId); });
+        store.then(() => {
+          if (room.unsaved && room.unsaved.has(alert.alertId)) {
+            this._setUnsaved(room, alert.alertId, false);
+            if (this.mirror && typeof this.mirror.replicate === 'function') this.mirror.replicate(room.groupId, { saved: [alert.alertId] });
+          }
+        }, () => {});
+      }
     }
     const delivered = this._durable(room.groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(room.groupId, alert.alertId) }) }, { sender, persisted });
     this.emit('fleet');

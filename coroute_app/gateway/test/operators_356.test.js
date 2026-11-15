@@ -323,7 +323,7 @@ test('public sign-up page: capacity and approval; join code only for approved ri
   assert.equal(st.status, 200, JSON.stringify(st.json));
   const meC = await t.api('GET', `/rides/${ride2.slug}/me`, null, c.token);
   assert.equal(meC.json.status, 'APPROVED');
-  assert.match(meC.json.join.code, /^\d{6}$/);
+  assert.match(meC.json.join.code, /^[A-Z0-9]{6}$/); // v3.60: letters and digits
   assert.equal((await t.api('GET', `/rides/${ride2.slug}/me`, null, e.token)).json.join, null);
 });
 
