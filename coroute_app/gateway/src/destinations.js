@@ -75,7 +75,7 @@ function cleanCoord(v, lim, field) {
  * The fields of a create (prev = null: name, lat, lng and category required) or a change (prev = the stored
  * place: only the fields present are checked). Throws DestinationError.
  */
-function cleanFields(body, prev = null) {
+function cleanFields(body, prev = null, allowed = CATEGORIES) {
   const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
   const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
   const out = {};
@@ -84,12 +84,12 @@ function cleanFields(body, prev = null) {
   if (!prev || has('lat')) out.lat = cleanCoord(b.lat, 90, 'lat');
   if (!prev || has('lng')) out.lng = cleanCoord(b.lng, 180, 'lng');
   if (!prev || has('category')) {
-    if (!CATEGORIES.includes(b.category)) throw new DestinationError(`category must be one of ${CATEGORIES.join(', ')}.`, 'category');
+    if (!allowed.includes(b.category)) throw new DestinationError(`category must be one of ${allowed.join(', ')}.`, 'category');
     out.category = b.category;
   }
   if (!prev || has('tags')) {
     const t = b.tags == null ? [] : b.tags;
-    if (!Array.isArray(t) || t.some((x) => !CATEGORIES.includes(x))) throw new DestinationError(`tags must be a list of ${CATEGORIES.join(', ')}.`, 'tags');
+    if (!Array.isArray(t) || t.some((x) => !allowed.includes(x))) throw new DestinationError(`tags must be a list of ${allowed.join(', ')}.`, 'tags');
     const cat = out.category || (prev && prev.category);
     out.tags = [...new Set(t)].filter((x) => x !== cat).slice(0, LIMITS.tagsMax);
   }
@@ -225,14 +225,17 @@ function registerDestinationAdminRoutes({ r, repo, wrap, requireAdmin }) {
     throw e;
   };
   const notFound = (res) => res.status(404).json({ error: 'Destination not found.', code: 'NOT_FOUND' });
+  // v3.59: built-in categories plus the admin's custom ones (Explore configuration, src/explore.js).
+  const explore = require('./explore');
+  const allowed = async () => explore.allowedCategories(await explore.stateFor(repo).cfg.get().catch(() => null));
 
   r.get('/admin/destinations', requireAdmin, wrap(async (req, res) => {
     await store.seedOnce().catch(() => false);
-    res.set('Cache-Control', 'no-store').json({ destinations: (await store.list()).map(adminView), categories: CATEGORIES, limits: LIMITS, enabled: config.destinationsEnabled !== false });
+    res.set('Cache-Control', 'no-store').json({ destinations: (await store.list()).map(adminView), categories: await allowed(), limits: LIMITS, enabled: config.destinationsEnabled !== false });
   }));
   r.post('/admin/destinations', requireAdmin, writeLimit, wrap(async (req, res) => {
     let fields;
-    try { fields = cleanFields(req.body); } catch (e) { return fail(res, e); }
+    try { fields = cleanFields(req.body, null, await allowed()); } catch (e) { return fail(res, e); }
     if ((await store.list()).length >= LIMITS.maxPlaces) return res.status(409).json({ error: `At most ${LIMITS.maxPlaces} destinations.`, code: 'TOO_MANY' });
     const now = Date.now();
     const doc = await store.save({ destId: newId(), ...fields, createdAt: now, updatedAt: now, by: by(req), photo: null });
@@ -244,7 +247,7 @@ function registerDestinationAdminRoutes({ r, repo, wrap, requireAdmin }) {
     const prev = await store.get(String(req.params.id || ''));
     if (!prev) return notFound(res);
     let fields;
-    try { fields = cleanFields(req.body, prev); } catch (e) { return fail(res, e); }
+    try { fields = cleanFields(req.body, prev, await allowed()); } catch (e) { return fail(res, e); }
     const doc = await store.save({ ...prev, ...fields, updatedAt: Date.now(), by: by(req) });
     reader.clear();
     await audit(req, 'destination.update', doc.destId, { fields: Object.keys(fields) });
@@ -302,7 +305,13 @@ function registerDestinationAdminRoutes({ r, repo, wrap, requireAdmin }) {
   }));
 }
 
+/** v3.59 accessors for src/explore.js (same store and cache as the routes above). */
+function destinationAccess(repo) {
+  const { store, reader } = stateFor(repo);
+  return { get: (id) => store.get(id), list: () => store.list(), visible: () => reader.visible() };
+}
+
 module.exports = {
-  COLL, CATEGORIES, LIMITS, SEED, DestinationError, cleanFields, publicView, isId,
+  destinationAccess, COLL, CATEGORIES, LIMITS, SEED, DestinationError, cleanFields, publicView, isId,
   registerDestinationPublicRoutes, registerDestinationAdminRoutes,
 };

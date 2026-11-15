@@ -109,8 +109,14 @@ const CATALOG = Object.freeze([
   f('crews', 'Community', 'Crews', 'Riders create crews and invite their friends. Off: crews and crew invites are hidden.'),
   f('crewPolls', 'Community', 'Crew polls', 'Crew admins (and members, if allowed) ask the crew a question with fixed options. No chat.'),
   f('crewRides', 'Community', 'Start a ride with this crew', 'The host of a ride invites chosen crew members; they accept or decline. Off: no crew ride invites.'),
+  // v3.60 communities and chat (docs/features_355/communities_chat_v360.md)
+  f('communityRides', 'Community', 'Community rides', 'Community admins plan rides; members answer Interested or Not interested. Off: rides hidden.'),
+  f('friendChat', 'Community', 'Friend chat', 'One-to-one text chat between friends (no photos or videos; messages kept 90 days).'),
+  f('communityChat', 'Community', 'Community chat', 'Text chat inside a community of up to the plan limit (default 50 members; kept 90 days).'),
   // 3.55 rider score (docs/features_355/rider_score.md)
   f('riderScore', 'Community', 'Rider score', 'A private 0-100 score of safe riding (speed discipline, smoothness, safety habits, regular riding) with tips.'),
+  // 3.59 Explore rider routes (src/explore.js): off = sharing refused, no rider routes listed.
+  f('exploreRoutes', 'Community', 'Explore rider routes', 'Riders can share the route of a finished ride (opt-in, first and last km left out) to guide others to a destination. Off: nothing is shared or shown.'),
   f('leaderboard', 'Community', 'Public leaderboard', 'Top riders by score, distance, hours and rides, by username only. Off: the lists are empty.'),
   // ---- Platform ----
   f('offlineMesh', 'Platform', 'No-internet link', 'Phone-to-phone link for positions when there is no network.'),

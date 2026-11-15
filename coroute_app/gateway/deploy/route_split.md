@@ -39,6 +39,8 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | LIVE | * | /api/guardian/* | guardian_routes.js | `GuardianService.viewGrant` -> `convoys.getRoom` (loads/reads rooms); push subscriptions |
 | LIVE | POST | /api/convoys | routes.js | `convoys.createConvoy` creates the room |
 | LIVE | POST | /api/convoys/join | routes.js | `convoys.joinByCode` (room membership, join limits in memory) |
+| LIVE | POST | /api/convoys/:groupId/gathering | routes.js | v3.60 meet first: start from the meeting point / move it (`convoys.updateGathering`, room meta) |
+| LIVE | POST | /api/convoys/:groupId/join-requests/:userId | routes.js | v3.60 host approves / declines a waiting rider (`convoys.decideJoin`, room meta) |
 | LIVE | GET | /api/convoys/active | routes.js | `convoys.getSnapshot` |
 | LIVE | GET | /api/convoys/:groupId | routes.js | `convoys.getSnapshot` / `isMember` |
 | LIVE | GET | /api/convoys/:groupId/emergency-roster | routes.js | `convoys.emergencyRoster` |
@@ -114,6 +116,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | * | /api/me/cover/* | social_routes.js, covers.js | v3.58 profile cover photo: upload, private original, delete (database / object storage) |
 | WEB | GET | /api/covers/:coverId | social_routes.js | v3.58 cover photo bytes |
 | WEB | GET | /api/users/* | social_routes.js | username check, search, public profile (database) |
+| WEB | GET | /api/users/:username/rides-together | social_routes.js | v3.60 rides two friends shared (database) |
 | WEB | * | /api/friends/* | social_routes.js | friends, requests, suggestions (database; `hub.sendToUser` notices are relayed to VM1 by the mirror) |
 | WEB | * | /api/blocks/* | social_routes.js | blocks (database) |
 | WEB | GET | /api/join/friend/:code | social_routes.js | friend invite lookup (database) |
@@ -129,6 +132,15 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | PATCH,DELETE | /api/crews/:crewId/members/:username | crew_routes.js | database |
 | WEB | POST | /api/crews/:crewId/transfer | crew_routes.js | database |
 | WEB | * | /api/crews/:crewId/polls/* | crew_routes.js | polls and votes (database) |
+| WEB | * | /api/crews/:crewId/requests/* | community_routes.js | v3.60 join requests of private communities (database; notices relayed by the mirror) |
+| WEB | GET | /api/crews/:crewId/requests | community_routes.js | database |
+| WEB | POST,DELETE | /api/crews/:crewId/photo | community_routes.js | community picture (database) |
+| WEB | * | /api/crews/:crewId/rides/* | community_routes.js | v3.60 hosted community rides and interest answers (database) |
+| WEB | GET,POST | /api/crews/:crewId/rides | community_routes.js | database |
+| WEB | * | /api/communities/* | community_routes.js | v3.60 find / view / join communities (database) |
+| WEB | * | /api/chats/* | chat.js | v3.60 friend and community chat, text only, 90 days (database; CHAT_MESSAGE relayed by the mirror) |
+| WEB | GET | /api/chats | chat.js | database |
+| WEB | GET | /api/me/plan-features | plans.js | v3.60 the rider's features and limits by plan (database, 30 s cache) |
 | WEB | GET | /api/operators/application | operator_routes.js | the rider's operator application (database) |
 | WEB | POST | /api/operators/apply | operator_routes.js | database, mailer |
 | WEB | * | /api/clubs/* | operator_routes.js | club membership and broadcasts (database) |
@@ -185,6 +197,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | GET | /api/places/reviews | road_and_places.js | database |
 | WEB | GET | /api/places/review-summary | road_and_places.js | database |
 | WEB | GET | /api/places/reviews/:reviewId/photo/:photoId | road_and_places.js | database / object storage |
+| WEB | * | /api/explore/* | explore.js | v3.59 riders' shared Explore routes (database) |
 | WEB | POST | /api/road-risk/brakes | road_risk.js | database |
 | WEB | GET | /api/road-risk/near | road_risk.js | database |
 | WEB | POST | /api/diagnostics/submit | routes.js | database |

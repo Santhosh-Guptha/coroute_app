@@ -260,6 +260,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./board').registerBoardPublicRoutes({ r, repo, wrap });
   // v3.58 Explore: admin-curated destinations (public list + photos; distances are worked out on the phone).
   require('./destinations').registerDestinationPublicRoutes({ r, repo, wrap });
+  // v3.59 Explore: config + destinations + rider route counts in one public call (src/explore.js).
+  require('./explore').registerExplorePublicRoutes({ r, repo, wrap, flagsOf, visibleDestinations: () => require('./destinations').destinationAccess(repo).visible() });
   // Aggregated, PII-free usage numbers for the website (cached 5 min).
   registerPublicUsageRoutes({ r, repo, wrap, store: publicStats });
   // Rounded count of riders on a ride right now for the website (cached 30 s, no PII).
@@ -281,12 +283,18 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // 3.55 admin feature switches: GET /features (riders), /admin/features (console) and the 403
   // FEATURE_OFF guards in front of the REST features (registered before the routes they guard).
   require('./feature_flags').registerFeatureFlagRoutes({ r, flagsOf, repo, wrap, requireAdmin });
+  // v3.60 admin features and limits by plan (src/plans.js; never safety).
+  require('./plans').registerPlanRoutes({ r, repo, wrap, requireAdmin });
   // 3.55 platform: admin warnings for the rider (GET /me/warnings, POST /me/warnings/:id/ack).
   if (hub && hub.publicRides && hub.publicRides.adminWarnings) require('./admin_warnings').registerAdminWarningRoutes({ r, warnings: hub.publicRides.adminWarnings, wrap });
   // 3.55 usernames, profiles, friends, blocks, profile pictures (src/social_routes.js).
   require('./social_routes').registerSocialRoutes({ r, repo, auth, hub, wrap, requireAdmin, flagsOf });
   // 3.55 crews and crew polls (src/crews.js, src/crew_routes.js; switches crews / crewPolls).
   require('./crew_routes').registerCrewRoutes({ r, repo, hub, wrap, requireAdmin, flagsOf });
+  // v3.60 communities: public/private, join requests, picture, hosted rides with interest answers.
+  require('./community_routes').registerCommunityRoutes({ r, repo, hub, wrap, flagsOf, plans: require('./plans').forRepo(repo) });
+  // v3.60 chat: friends and communities (<= plan limit, default 50 members), text only, 90 days (src/chat.js).
+  require('./chat').registerChatRoutes({ r, repo, hub, wrap, flagsOf });
   // 3.55 "Start a ride with this crew": ride invites to chosen crew members (src/crew_ride_invites.js; switch crewRides).
   require('./crew_ride_invites').registerCrewRideInviteRoutes({ r, repo, hub, convoys, wrap, flagsOf, ensureProfileComplete: (req) => ensureProfileComplete(req) });
   // 3.55 push notifications: POST / DELETE /me/push-tokens (src/push.js).
@@ -400,8 +408,20 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     await ensureProfileComplete(req);
     if (rideLock) await rideLock.assertCanRide(req.user.userId, req.sessionSid, { reason: 'join' });
     const snap = await convoys.joinByCode(req.user, req.body?.code, req.body?.rider || {});
+    // v3.60: a new rider waits for the host to let them in (202 PENDING); the app asks again with the same code.
+    if (snap && snap.pending) return res.status(202).set('Cache-Control', 'no-store').json(snap);
     markRiding(req, snap);
     res.json(snap);
+  }));
+  // v3.60 meet first: start the ride from the meeting point, or move the meeting point (host / head).
+  r.post('/convoys/:groupId/gathering', wrap(async (req, res) => {
+    const b = req.body || {};
+    res.json(await convoys.updateGathering(String(req.params.groupId || ''), req.user, { start: b.start === true, meetingPoint: b.meetingPoint || null }));
+  }));
+  // v3.60 join approval: the host or the ride head lets a waiting rider in, or not.
+  r.post('/convoys/:groupId/join-requests/:userId', wrap(async (req, res) => {
+    const out = await convoys.decideJoin(String(req.params.groupId || ''), req.user, String(req.params.userId || ''), req.body?.approve === true);
+    res.json(out);
   }));
   r.get('/convoys/active', wrap(async (req, res) => {
     const meta = await repo.findActiveMembership(req.user.userId);
@@ -1218,6 +1238,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./board').registerBoardAdminRoutes({ r, repo, wrap, requireAdmin });
   // v3.58 Explore destinations: admin CRUD + photo upload (MASTER_ADMIN).
   require('./destinations').registerDestinationAdminRoutes({ r, repo, wrap, requireAdmin });
+  {
+    const dx = require('./destinations').destinationAccess(repo);
+    require('./explore').registerExploreRoutes({ r, repo, wrap, requireAdmin, flagsOf, getDestination: dx.get, listDestinations: dx.list });
+  }
   // 3.55: saved road reports along a ride, CoRoute rider place reviews (+ admin moderation).
   require('./road_and_places').registerRoadAndPlaceRoutes({ r, repo, convoys, wrap, requireAdmin });
   // 3.55 risky-stretch heads-up: anonymous hard-brake cells, served only with k >= 10 riders.

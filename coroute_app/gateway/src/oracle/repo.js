@@ -280,6 +280,8 @@ class Repo {
     await this.soda.removeWhere(C.riders, { userId: uid });
     await this.soda.removeWhere(C.trips, { userId: uid });
     await this.soda.removeWhere(C.trackChunks, { userId: uid });
+    // v3.59: routes the rider shared to guide others on Explore (src/explore.js).
+    await this.soda.removeWhere('explore_routes', { userId: uid }).catch(() => 0);
     await this.soda.removeWhere(C.events, { userId: uid });
     await this.soda.removeWhere(C.messages, { senderId: uid });
     await this.soda.removeWhere(C.messages, { senderId: 'SYSTEM', requestedBy: uid });
