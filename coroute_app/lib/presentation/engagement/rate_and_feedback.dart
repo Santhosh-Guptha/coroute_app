@@ -193,6 +193,14 @@ class _SendFeedbackScreenState extends State<SendFeedbackScreen> {
                   label: const Text(SendFeedbackScreen.diagnosticsLink),
                   style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
                 ),
+                // v3.60: Rate CoRoute lives here (the separate profile row was removed).
+                TextButton.icon(
+                  key: const ValueKey('feedback_rate'),
+                  onPressed: () => RateAndFeedback.rate(context),
+                  icon: const Icon(Icons.star_outline_rounded, size: 18),
+                  label: Text(RateAndFeedback.rateTitle),
+                  style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                ),
               ],
             ),
           ),

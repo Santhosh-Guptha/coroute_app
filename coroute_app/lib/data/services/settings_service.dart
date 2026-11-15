@@ -254,6 +254,19 @@ class SettingsService extends ChangeNotifier {
   /// Auto re-route: a new route from where I am when I leave the planned one (always on, 3.55).
   bool get autoReroute => _autoReroute;
 
+  /// v3.61: the cockpit's thumb side. Off (default): talk and the map buttons on the right, SOS on
+  /// the left. On: mirrored, for a phone in a holder reached with the left hand. Only positions
+  /// change; SOS keeps its hold and stays on screen either way.
+  static const String keyCockpitControlsLeft = 'cockpit_controls_left_v1';
+  bool _cockpitControlsLeft = false;
+  bool get cockpitControlsLeft => _cockpitControlsLeft;
+  Future<void> setCockpitControlsLeft(bool value) async {
+    if (_cockpitControlsLeft == value) return;
+    _cockpitControlsLeft = value;
+    notifyListeners();
+    await _save(keyCockpitControlsLeft, value);
+  }
+
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
   /// Reads the saved settings. Safe to call more than once.
@@ -271,7 +284,8 @@ class SettingsService extends ChangeNotifier {
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
       _hazardAlerts = true;
-      _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
+      // v3.60: the lock-screen cockpit is always on (the setting was removed); an old "off" is not kept.
+      _rideOnLockScreen = true;
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
@@ -287,6 +301,7 @@ class SettingsService extends ChangeNotifier {
       }
       _batterySaver = prefs.getBool(keyBatterySaver) ?? false;
       _hardwarePtt = prefs.getBool(keyHardwarePtt) ?? false;
+      _cockpitControlsLeft = prefs.get(keyCockpitControlsLeft) == true;
       // Round 9: a corrupt value (wrong type from an old build or a restored backup) never breaks loading.
       final speed = prefs.get(SafetyConstants.keySpeedLimitWarningKmh);
       _speedLimitWarningKmh = speed is int ? speed.clamp(0, SafetyConstants.speedWarningMaxKmh) : 0;
@@ -622,7 +637,8 @@ class SettingsService extends ChangeNotifier {
   Future<void> loadSoundSettings() async {
     try {
       final prefs = await _p();
-      _sirenAlerts = prefs.getBool(keySirenAlerts) ?? true; // rider's choice, default on
+      // v3.60: siren alerts are always on (the setting was removed; the admin switch 'sirenDetector' still applies).
+      _sirenAlerts = true;
       if (prefs.containsKey(legacyKeyHornAlerts)) await prefs.remove(legacyKeyHornAlerts); // horn alerts removed
       _voiceCleanup = true; // always on (3.55)
     } catch (e) {

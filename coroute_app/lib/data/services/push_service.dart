@@ -122,7 +122,9 @@ class PushService extends ChangeNotifier {
     if (!_android) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      _enabled = prefs.getBool(prefKey) ?? true;
+      // v3.60: push notifications are always on (the switch was removed from Settings); an old "off" is cleared.
+      _enabled = true;
+      if (prefs.getBool(prefKey) == false) await prefs.setBool(prefKey, true);
       _newsEnabled = prefs.getBool(newsPrefKey) ?? true;
       for (final k in PushKinds.all) {
         if (k != PushKinds.update) _kinds[k.id] = prefs.getBool(k.localKey) ?? k.defaultOn;

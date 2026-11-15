@@ -4,10 +4,7 @@ import 'package:provider/provider.dart';
 import '../../data/services/app_lock_service.dart';
 import '../../domain/security/app_lock_policy.dart';
 import '../../domain/security/lock_screen_cockpit_policy.dart';
-import '../../domain/safety/effective_speed_limit.dart';
-import '../../data/services/convoy_service.dart';
 
-import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_controller.dart';
@@ -16,7 +13,6 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/nav_handoff_service.dart';
 import '../../domain/navigation/nav_handoff.dart';
-import '../../domain/notify/push_kinds.dart';
 import '../../data/services/push_service.dart';
 import '../../data/services/settings_service.dart';
 import '../account/appearance_sheet.dart';
@@ -26,7 +22,6 @@ import '../onboarding/permissions_screen.dart';
 import '../ride/fuel_sheet.dart';
 import '../ride/messages_sheet.dart' show QuickActionOrderView, showQuickActionOrderSheet;
 import '../safety/safety_settings_sheet.dart';
-import '../widgets/feature_switch.dart';
 import 'features_guide_screen.dart';
 import 'push_notifications_tile.dart';
 import 'road_safety_screen.dart';
@@ -254,7 +249,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onTap: () => PreRidePhoneCheckScreen.open(context),
                       ),
                       if (auth != null) _EmergencyRow(auth: auth, onTap: () => _push(const EditProfileScreen())),
-                      _SpeedWarning(settings: s),
+                      // v3.60: the speed warning is set in the ride (cockpit quick settings), not here.
                       // "Help make roads safer" (opt-in consent), private places and road data. Round 9: the
                       // warnings themselves are always on (no switches there any more).
                       _Row(
@@ -265,17 +260,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onTap: () => _push(const RoadSafetyScreen()),
                       ),
                     ]),
+                    // v3.60: siren alerts are always on (no switch); the admin switch 'sirenDetector' still applies.
                     _Section('Ride', [
-                      // Admin switch 'sirenDetector'. Off releases the microphone at once.
-                      if (context.featureOn('sirenDetector'))
-                        _Row(
-                          key: const ValueKey('settings_siren_alerts'),
-                          icon: Icons.emergency_rounded,
-                          title: SettingsScreen.sirenTitle,
-                          subtitle: SettingsScreen.sirenSubtitle,
-                          value: s.sirenAlerts,
-                          onChanged: s.setSirenAlerts,
-                        ),
                       _LanguageRow(settings: s),
                       _Row(
                         key: const ValueKey('settings_data_saver'),
@@ -315,17 +301,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           subtitle: AppearanceSheet.summary(theme),
                           onTap: () => AppearanceSheet.show(context),
                         ),
-                      // Hidden when the build has no push set up.
+                      // v3.60: push notifications are always on (no master switch). The opt-out for admin news stays;
+                      // safety and ride alerts are never in it.
                       if (push != null && push.available)
-                        _Row(
-                          key: const ValueKey('settings_push_notifications'),
-                          icon: Icons.notifications_active_rounded,
-                          title: PushNotificationsTile.title,
-                          value: push.enabled,
-                          onChanged: (on) => push.setEnabled(on),
-                        ),
-                      // 3.56: the opt-out category for admin pushes; safety and ride alerts are not in it.
-                      if (push != null && push.available && push.enabled)
                         _Row(
                           key: const ValueKey('settings_push_news'),
                           icon: Icons.campaign_rounded,
@@ -334,22 +312,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: push.newsEnabled,
                           onChanged: (on) => push.setNewsEnabled(on),
                         ),
-                      // 3.56 one switch per push kind (own Android channel each); partner perks start off.
-                      if (push != null && push.available && push.enabled)
-                        for (final kind in PushKinds.all.where((k) => k != PushKinds.update))
-                          _Row(
-                            key: ValueKey('settings_push_kind_${kind.id}'),
-                            icon: switch (kind.id) {
-                              'event' => Icons.event_rounded,
-                              'safety_tip' => Icons.health_and_safety_rounded,
-                              'community' => Icons.groups_rounded,
-                              _ => Icons.handshake_rounded,
-                            },
-                            title: kind.title,
-                            subtitle: kind.subtitle,
-                            value: push.kindEnabled(kind),
-                            onChanged: (on) => push.setKindEnabled(kind, on),
-                          ),
                       if (friends != null && profile != null)
                         _Row(
                           key: const ValueKey('settings_public_leaderboard'),
@@ -380,19 +342,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Default on; the same stored key as 3.54's "Show ride on lock screen". A choice for privacy: the
-        // cockpit shows the group's positions and names to whoever holds the locked phone.
-        if (s != null)
-          _Section(null, [
-            _Row(
-              key: const ValueKey('settings_lock_screen_cockpit'),
-              icon: Icons.screen_lock_portrait_rounded,
-              title: SettingsScreen.lockScreenCockpitTitle,
-              subtitle: SettingsScreen.lockScreenCockpitSubtitle,
-              value: s.rideOnLockScreen,
-              onChanged: s.setRideOnLockScreen,
-            ),
-          ]),
+        // v3.60: the lock-screen cockpit is always on during a ride (no switch).
         _Section(null, [
           if (s != null)
             _Row(
@@ -685,33 +635,6 @@ class _EmergencyRow extends StatelessWidget {
   }
 }
 
-/// My own speed warning: the group limit, or one of a few speeds. Always on; the value is mine.
-/// Round 9: one line says which limit warns now (the stricter of mine and the group's), so a change
-/// made during a ride visibly applies, or says why it does not (a stricter group limit).
-class _SpeedWarning extends StatelessWidget {
-  final SettingsService settings;
-  const _SpeedWarning({required this.settings});
-
-  @override
-  Widget build(BuildContext context) {
-    final (inRide, groupKmh) = context.select<ConvoyService?, (bool, int)>((c) {
-      final convoy = c?.activeConvoy;
-      final on = convoy != null && convoy.tripStatus != 'ENDED';
-      return (on, on ? convoy.speedLimitKmh : 0);
-    });
-    return _ChoiceRow<int>(
-      key: const ValueKey('settings_speed_warning'),
-      icon: Icons.speed_rounded,
-      title: SettingsScreen.speedTitle,
-      subtitle: speedWarningLine(groupKmh: groupKmh, personalKmh: settings.speedLimitWarningKmh, inRide: inRide),
-      value: settings.speedLimitWarningKmh,
-      choices: {for (final v in SafetyConstants.speedWarningChoices) v: v == 0 ? 'Group limit' : '$v'},
-      onChanged: settings.setSpeedLimitWarningKmh,
-    );
-  }
-}
-
-/// Language of the safety screens and spoken alerts, as a compact dropdown row.
 class _LanguageRow extends StatelessWidget {
   final SettingsService settings;
   const _LanguageRow({required this.settings});
