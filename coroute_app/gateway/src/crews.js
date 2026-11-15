@@ -30,7 +30,9 @@ const crypto = require('crypto');
 const F = require('./friends');
 
 const DAY = 86400000;
-const C = Object.freeze({ crews: 'crews', members: 'crew_members', invites: 'crew_invites', polls: 'crew_polls', votes: 'crew_votes' });
+const C = Object.freeze({ crews: 'crews', members: 'crew_members', invites: 'crew_invites', polls: 'crew_polls', votes: 'crew_votes',
+  // v3.60 communities (docs/features_355/communities_chat_v360.md): join requests, hosted rides and interest answers.
+  requests: 'crew_requests', rides: 'crew_rides', rsvps: 'crew_ride_rsvps' });
 const LIMITS = Object.freeze({
   NAME_MIN: 3,
   NAME_MAX: 40,
@@ -50,7 +52,18 @@ const LIMITS = Object.freeze({
   POLL_MAX_MS: 30 * DAY,
   POLL_KEEP_CLOSED: 50,
   MAX_OPEN_POLLS: 10,
+  // v3.60 communities
+  REQUESTS_PENDING_MAX: 200, // waiting join requests per community
+  RIDE_TITLE_MAX: 60,
+  RIDE_PLACE_MAX: 80,
+  RIDE_NOTES_MAX: 300,
+  RIDES_UPCOMING_MAX: 10, // planned rides per community at a time
+  RIDE_MAX_AHEAD_MS: 180 * DAY,
+  RIDE_KEEP_PAST_MS: 30 * DAY,
 });
+const VISIBILITY = Object.freeze(['public', 'private']);
+const RSVP = Object.freeze(['INTERESTED', 'NOT_INTERESTED']);
+const RIDE_RE = /^crd_[a-f0-9]{16}$/;
 const ROLES = Object.freeze({ ADMIN: 'ADMIN', CO_ADMIN: 'CO_ADMIN', MEMBER: 'MEMBER' });
 const POLL_TEMPLATES = Object.freeze(['RIDE_DATE_PLACE']);
 const CREW_RE = /^cr_[a-f0-9]{16}$/;
@@ -82,6 +95,16 @@ async function ensureCrewStore(soda) {
   await idx(C.votes, 'crew_votes_poll_ix', ['pollId']);
   await idx(C.votes, 'crew_votes_user_ix', ['userId']);
   await idx(C.votes, 'crew_votes_crew_ix', ['crewId']);
+  await idx(C.requests, 'crew_requests_ux', ['requestKey'], true);
+  await idx(C.requests, 'crew_requests_crew_ix', ['crewId']);
+  await idx(C.requests, 'crew_requests_user_ix', ['userId']);
+  await idx(C.rides, 'crew_rides_id_ux', ['rideId'], true);
+  await idx(C.rides, 'crew_rides_crew_ix', ['crewId']);
+  await idx(C.rides, 'crew_rides_host_ix', ['hostId']);
+  await idx(C.rsvps, 'crew_rsvps_ux', ['rsvpKey'], true);
+  await idx(C.rsvps, 'crew_rsvps_ride_ix', ['rideId']);
+  await idx(C.rsvps, 'crew_rsvps_user_ix', ['userId']);
+  await idx(C.rsvps, 'crew_rsvps_crew_ix', ['crewId']);
   migrated.add(soda);
 }
 
@@ -274,7 +297,7 @@ async function syncCount(soda, crew) {
   return { ...next, key: fresh.key };
 }
 
-async function createCrew(soda, adminId, { name, description } = {}, now = Date.now()) {
+async function createCrew(soda, adminId, { name, description, visibility } = {}, now = Date.now()) {
   await ensureCrewStore(soda);
   const n = validateCrewName(name);
   if (!n.ok) bad(n);
@@ -285,7 +308,7 @@ async function createCrew(soda, adminId, { name, description } = {}, now = Date.
   const joined = await membershipsOf(soda, adminId);
   if (joined.length >= LIMITS.MAX_JOINED) throw new CrewError(`You can be in up to ${LIMITS.MAX_JOINED} crews.`, 'TOO_MANY_CREWS', 409);
   const crew = {
-    crewId: `cr_${hex(8)}`, name: n.value, description: d.value, adminId,
+    crewId: `cr_${hex(8)}`, name: n.value, description: d.value, adminId, visibility: visibilityOf({ visibility }),
     settings: { membersCanCreatePolls: false }, memberCount: 1, createdAt: now, updatedAt: now,
   };
   crew.key = await soda.insert(C.crews, stripKey(crew));
@@ -298,6 +321,10 @@ async function updateCrew(soda, crew, patch = {}) {
   const next = { ...stripKey(crew), settings: { ...(crew.settings || {}) }, updatedAt: Date.now() };
   if (patch.name !== undefined) { const n = validateCrewName(patch.name); if (!n.ok) bad(n); next.name = n.value; }
   if (patch.description !== undefined) { const d = validateDescription(patch.description); if (!d.ok) bad(d); next.description = d.value; }
+  if (patch.visibility !== undefined) {
+    if (!VISIBILITY.includes(patch.visibility)) throw new CrewError('Choose public or private.', 'BAD_VISIBILITY', 400);
+    next.visibility = patch.visibility;
+  }
   if (patch.membersCanCreatePolls !== undefined) {
     if (typeof patch.membersCanCreatePolls !== 'boolean') throw new CrewError('membersCanCreatePolls must be on or off.', 'BAD_REQUEST', 400);
     next.settings.membersCanCreatePolls = patch.membersCanCreatePolls;
@@ -308,6 +335,12 @@ async function updateCrew(soda, crew, patch = {}) {
 
 async function deleteCrew(soda, crewId) {
   await ensureCrewStore(soda);
+  const doc = await soda.findOne(C.crews, { crewId });
+  if (doc && doc.value.photoId) await require('./avatars').deleteAvatarDoc(soda, doc.value.photoId).catch(() => {});
+  await require('./chat').deleteCrewChat(soda, crewId).catch(() => {});
+  await soda.removeWhere(C.rsvps, { crewId });
+  await soda.removeWhere(C.rides, { crewId });
+  await soda.removeWhere(C.requests, { crewId });
   await soda.removeWhere(C.votes, { crewId });
   await soda.removeWhere(C.polls, { crewId });
   await soda.removeWhere(C.invites, { crewId });
@@ -606,6 +639,170 @@ async function forgetCrewUser(soda, userId) {
   }
   const polls = (await soda.query(C.polls, { createdBy: userId }, { limit: 5000 })).map(withKey);
   for (const p of polls) await soda.replace(C.polls, p.key, { ...stripKey(p), createdBy: null });
+  await soda.removeWhere(C.requests, { userId });
+  await soda.removeWhere(C.rsvps, { userId });
+  const hosted = (await soda.query(C.rides, { hostId: userId }, { limit: 500 })).map(withKey);
+  for (const r of hosted) { await soda.removeWhere(C.rsvps, { rideId: r.rideId }); await soda.remove(C.rides, r.key); }
+}
+
+// ------------------------------------------------------------------ v3.60 communities
+/** Crews made before v3.60 were invite-only circles of friends: they stay private. */
+const visibilityOf = (crew) => (crew && crew.visibility === 'public' ? 'public' : 'private');
+const isRideId = (v) => typeof v === 'string' && RIDE_RE.test(v);
+
+/** Adds `userId` as a MEMBER (joining a public community, or an approved request). */
+async function addMember(soda, crew, userId, addedBy, now = Date.now()) {
+  await ensureCrewStore(soda);
+  if (await memberOf(soda, crew.crewId, userId)) return { status: 'ALREADY_MEMBER', crew };
+  if (await F.blockedEither(soda, userId, crew.adminId)) throw new CrewError('You cannot join this community.', 'JOIN_REFUSED', 403);
+  if ((await membersOf(soda, crew.crewId)).length >= capOf(crew)) throw new CrewError(`This community is full (${capOf(crew)} riders).`, 'CREW_FULL', 409);
+  if ((await membershipsOf(soda, userId)).length >= LIMITS.MAX_JOINED) throw new CrewError(`You can be in up to ${LIMITS.MAX_JOINED} communities. Leave one first.`, 'TOO_MANY_CREWS', 409);
+  try {
+    await soda.insert(C.members, { memberKey: `${crew.crewId}|${userId}`, crewId: crew.crewId, userId, role: ROLES.MEMBER, joinedAt: now, addedBy });
+  } catch (e) { if (!isConflict(e)) throw e; }
+  await soda.removeWhere(C.requests, { requestKey: `${crew.crewId}|${userId}` });
+  await soda.removeWhere(C.invites, { inviteKey: `${crew.crewId}|${userId}` });
+  return { status: 'JOINED', crew: await syncCount(soda, crew) };
+}
+
+async function requestOf(soda, crewId, userId) {
+  await ensureCrewStore(soda);
+  return withKey(await soda.findOne(C.requests, { requestKey: `${crewId}|${userId}` }));
+}
+
+/** A join request to a private community. Returns { status: REQUESTED | ALREADY_REQUESTED | ALREADY_MEMBER }. */
+async function requestJoin(soda, crew, userId, now = Date.now()) {
+  await ensureCrewStore(soda);
+  if (await memberOf(soda, crew.crewId, userId)) return { status: 'ALREADY_MEMBER' };
+  if (await F.blockedEither(soda, userId, crew.adminId)) throw new CrewError('You cannot join this community.', 'JOIN_REFUSED', 403);
+  if (await requestOf(soda, crew.crewId, userId)) return { status: 'ALREADY_REQUESTED' };
+  const pending = await soda.query(C.requests, { crewId: crew.crewId }, { limit: LIMITS.REQUESTS_PENDING_MAX + 1 });
+  if (pending.length >= LIMITS.REQUESTS_PENDING_MAX) throw new CrewError('This community has too many waiting requests. Try again later.', 'REQUESTS_FULL', 409);
+  if ((await membershipsOf(soda, userId)).length >= LIMITS.MAX_JOINED) throw new CrewError(`You can be in up to ${LIMITS.MAX_JOINED} communities. Leave one first.`, 'TOO_MANY_CREWS', 409);
+  try {
+    await soda.insert(C.requests, { requestKey: `${crew.crewId}|${userId}`, crewId: crew.crewId, userId, createdAt: now });
+  } catch (e) { if (!isConflict(e)) throw e; return { status: 'ALREADY_REQUESTED' }; }
+  return { status: 'REQUESTED' };
+}
+
+async function cancelRequest(soda, crewId, userId) {
+  await ensureCrewStore(soda);
+  await soda.removeWhere(C.requests, { requestKey: `${crewId}|${userId}` });
+}
+
+async function requestsOf(soda, crewId) {
+  await ensureCrewStore(soda);
+  return (await soda.query(C.requests, { crewId }, { limit: LIMITS.REQUESTS_PENDING_MAX + 10 })).map(withKey).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+async function requestsBy(soda, userId) {
+  await ensureCrewStore(soda);
+  return (await soda.query(C.requests, { userId }, { limit: 200 })).map(withKey);
+}
+
+/** Public and private communities whose name matches `q` (empty: the biggest), excluding clubs' private details. */
+async function discover(soda, { q = '', limit = 30 } = {}) {
+  await ensureCrewStore(soda);
+  const k = cleanText(q).toLowerCase();
+  const rows = (await soda.query(C.crews, {}, { limit: 2000 })).map(withKey);
+  return rows.filter((c) => !k || c.name.toLowerCase().includes(k) || (c.description || '').toLowerCase().includes(k))
+    .sort((a, b) => (visibilityOf(b) === 'public') - (visibilityOf(a) === 'public') || (b.memberCount || 0) - (a.memberCount || 0) || a.name.localeCompare(b.name))
+    .slice(0, Math.max(1, Math.min(50, limit)));
+}
+
+/** Clean fields of a hosted community ride. */
+function validateRide(body, now = Date.now(), prev = null) {
+  const b = body && typeof body === 'object' ? body : {};
+  const out = {};
+  const text = (raw, max, code, label, required) => {
+    if (raw === undefined && !required) return undefined;
+    const v = cleanText(raw);
+    if (required && !v) bad({ code, message: `Add ${label}.` });
+    if (charLen(v) > max) bad({ code, message: `${label[0].toUpperCase()}${label.slice(1)} has up to ${max} characters.` });
+    if (v && hasProfanity(v)) bad({ code: 'RIDE_NOT_ALLOWED', message: 'Please change the wording.' });
+    if (v && looksLikeContact(v)) bad({ code: 'CREW_TEXT_CONTACT', message: 'Rides cannot have phone numbers, e-mail addresses or links.' });
+    return v;
+  };
+  const isNew = !prev;
+  const t = text(b.title, LIMITS.RIDE_TITLE_MAX, 'RIDE_TITLE', 'a title', isNew); if (t !== undefined) out.title = t;
+  const m = text(b.meetName, LIMITS.RIDE_PLACE_MAX, 'RIDE_PLACE', 'a meeting place', isNew); if (m !== undefined) out.meetName = m;
+  const d = text(b.destName, LIMITS.RIDE_PLACE_MAX, 'RIDE_PLACE', 'a destination', false); if (d !== undefined) out.destName = d;
+  const n = text(b.notes, LIMITS.RIDE_NOTES_MAX, 'RIDE_NOTES', 'notes', false); if (n !== undefined) out.notes = n;
+  if (b.startAt !== undefined || isNew) {
+    const at = Number(b.startAt);
+    if (!Number.isFinite(at) || at < now + 15 * 60000 || at > now + LIMITS.RIDE_MAX_AHEAD_MS) {
+      bad({ code: 'RIDE_TIME', message: 'Pick a start time from 15 minutes to 6 months from now.' });
+    }
+    out.startAt = Math.round(at);
+  }
+  return out;
+}
+
+async function getRide(soda, crewId, rideId) {
+  if (!isRideId(rideId)) return null;
+  await ensureCrewStore(soda);
+  const r = withKey(await soda.findOne(C.rides, { rideId }));
+  return r && r.crewId === crewId ? r : null;
+}
+
+/** Planned rides (upcoming first) plus rides of the last 30 days; older ones are removed. */
+async function ridesOf(soda, crewId, now = Date.now()) {
+  await ensureCrewStore(soda);
+  const rows = (await soda.query(C.rides, { crewId }, { limit: 500 })).map(withKey);
+  const keep = [];
+  for (const r of rows) {
+    if (r.startAt < now - LIMITS.RIDE_KEEP_PAST_MS) { await soda.removeWhere(C.rsvps, { rideId: r.rideId }); await soda.remove(C.rides, r.key); } else keep.push(r);
+  }
+  return keep.sort((a, b) => a.startAt - b.startAt);
+}
+
+async function createRide(soda, crew, hostId, body, now = Date.now()) {
+  const fields = validateRide(body, now);
+  const upcoming = (await ridesOf(soda, crew.crewId, now)).filter((r) => r.status === 'PLANNED' && r.startAt > now);
+  if (upcoming.length >= LIMITS.RIDES_UPCOMING_MAX) throw new CrewError(`A community can plan up to ${LIMITS.RIDES_UPCOMING_MAX} rides at a time.`, 'RIDE_LIMIT', 409);
+  const ride = { rideId: `crd_${hex(8)}`, crewId: crew.crewId, hostId, destName: '', notes: '', ...fields, status: 'PLANNED', createdAt: now, updatedAt: now };
+  ride.key = await soda.insert(C.rides, stripKey(ride));
+  // The host is interested in their own ride.
+  await soda.insert(C.rsvps, { rsvpKey: `${ride.rideId}|${hostId}`, rideId: ride.rideId, crewId: crew.crewId, userId: hostId, answer: 'INTERESTED', at: now });
+  return ride;
+}
+
+async function updateRide(soda, ride, body, now = Date.now()) {
+  if (ride.status !== 'PLANNED') throw new CrewError('This ride was cancelled.', 'RIDE_CANCELLED', 409);
+  const fields = validateRide(body, now, ride);
+  const next = { ...stripKey(ride), ...fields, updatedAt: now };
+  await soda.replace(C.rides, ride.key, next);
+  return { ...next, key: ride.key };
+}
+
+async function cancelRide(soda, ride, now = Date.now()) {
+  const next = { ...stripKey(ride), status: 'CANCELLED', updatedAt: now };
+  await soda.replace(C.rides, ride.key, next);
+  return { ...next, key: ride.key };
+}
+
+async function rsvpsOf(soda, rideId) {
+  await ensureCrewStore(soda);
+  return (await soda.query(C.rsvps, { rideId }, { limit: CLUB_MAX_MEMBERS + 50 })).map(withKey);
+}
+
+async function answerRide(soda, ride, userId, answer, now = Date.now()) {
+  if (!RSVP.includes(answer)) throw new CrewError('Answer interested or not interested.', 'BAD_ANSWER', 400);
+  if (ride.status !== 'PLANNED') throw new CrewError('This ride was cancelled.', 'RIDE_CANCELLED', 409);
+  if (ride.startAt < now - 6 * 3600000) throw new CrewError('This ride is over.', 'RIDE_OVER', 409);
+  await ensureCrewStore(soda);
+  const rsvpKey = `${ride.rideId}|${userId}`;
+  const prev = withKey(await soda.findOne(C.rsvps, { rsvpKey }));
+  const doc = { rsvpKey, rideId: ride.rideId, crewId: ride.crewId, userId, answer, at: now };
+  if (prev) await soda.replace(C.rsvps, prev.key, doc); else await soda.insert(C.rsvps, doc);
+  return doc;
+}
+
+/** Leaving a community drops my answers and my waiting request there. */
+async function forgetMemberActivity(soda, crewId, userId) {
+  await ensureCrewStore(soda);
+  const mine = (await soda.query(C.rsvps, { userId }, { limit: 2000 })).map(withKey).filter((r) => r.crewId === crewId);
+  for (const r of mine) await soda.remove(C.rsvps, r.key);
 }
 
 module.exports = {
@@ -616,5 +813,7 @@ module.exports = {
   inviteToCrew, invitesFor, respondInvite, cancelInvite, changeRole, transferAdmin, successorOf, leaveCrew,
   getPoll, pollsOf, createPoll, votesOf, castVote, retractVote, closePoll, deletePoll, forgetCrewUser,
   setRole, syncCount, capOf, CLUB_MAX_MEMBERS,
+  VISIBILITY, RSVP, visibilityOf, isRideId, addMember, requestOf, requestJoin, cancelRequest, requestsOf, requestsBy, discover,
+  validateRide, getRide, ridesOf, createRide, updateRide, cancelRide, rsvpsOf, answerRide, forgetMemberActivity,
   _resetForTests: () => { migrated = new WeakSet(); },
 };

@@ -22,6 +22,7 @@ const A = require('./avatars');
 const CR = require('./crews');
 const { firstNameOf } = require('./social_routes');
 const { stampEvent } = require('./push');
+const PL = require('./plans');
 
 const FEATURE_OFF = { error: 'This feature is turned off for now.', code: 'FEATURE_OFF' };
 const NOT_FOUND = { error: 'Crew not found.', code: 'CREW_NOT_FOUND' };
@@ -30,6 +31,7 @@ const DAY = 86400000;
 
 function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf = () => null }) {
   const soda = repo.soda;
+  const plans = PL.forRepo(repo);
   const perUser = (req) => req.user?.userId || req.ip;
   const limiter = (windowMs, limit, message) => rateLimit({ windowMs, limit, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: perUser, message: { error: message, code: 'RATE_LIMITED' } });
   const readLimiter = limiter(60 * 1000, 120, 'Too many requests. Wait a minute.');
@@ -128,6 +130,8 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     crewId: crew.crewId, name: crew.name, description: crew.description || '',
     club: crew.club ? { operatorId: crew.club.operatorId, type: crew.club.type || null } : null,
     memberCount: crew.memberCount || 0, createdAt: crew.createdAt,
+    // v3.60 communities: public (anyone can view and join) or private (join requests the admins approve), picture.
+    visibility: CR.visibilityOf(crew), photoUrl: crew.photoId ? A.avatarUrlOf(crew.photoId) : null,
     settings: { membersCanCreatePolls: !!(crew.settings && crew.settings.membersCanCreatePolls) },
     myRole: me ? me.role : null,
     canInvite: CR.canManage(me), canCreatePoll: isOn('crewPolls') && CR.canCreatePoll(crew, me),
@@ -209,8 +213,15 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
 
   r.post('/crews', createLimiter, wrap(async (req, res) => {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
+    // v3.60 plans (src/plans.js): creating communities and how many a rider can run.
+    const eff = await plans.effectiveFor(req.user.userId);
+    if (!eff.features.createCommunity) return res.status(403).json(PL.PLAN_OFF('Creating communities'));
+    const owned = await soda.query(CR.COLLECTIONS.crews, { adminId: req.user.userId }, { limit: 50 });
+    if (owned.length >= eff.limits.communitiesOwnedMax) {
+      return res.status(409).json({ error: `Your plan lets you run up to ${eff.limits.communitiesOwnedMax} communities.`, code: 'CREW_LIMIT' });
+    }
     try {
-      const crew = await CR.createCrew(soda, req.user.userId, { name: b.name, description: b.description });
+      const crew = await CR.createCrew(soda, req.user.userId, { name: b.name, description: b.description, visibility: b.visibility });
       res.status(201).json({ ok: true, crew: crewView(crew, { role: CR.ROLES.ADMIN }) });
     } catch (e) { sendErr(res, e); }
   }));
@@ -260,7 +271,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     if (found.crew.club) return res.status(409).json(CLUB_MANAGED);
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     try {
-      const crew = await CR.updateCrew(soda, found.crew, { name: b.name, description: b.description, membersCanCreatePolls: b.membersCanCreatePolls });
+      const crew = await CR.updateCrew(soda, found.crew, { name: b.name, description: b.description, membersCanCreatePolls: b.membersCanCreatePolls, visibility: b.visibility });
       await toMembers(crew.crewId, { type: 'CREW_UPDATED', crewId: crew.crewId, event: 'SETTINGS' }, req.user.userId);
       res.json({ ok: true, crew: crewView(crew, found.me) });
     } catch (e) { sendErr(res, e); }
@@ -363,6 +374,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     }
     let out;
     try { out = await CR.leaveCrew(soda, found.crew, req.user.userId, { transferTo }); } catch (e) { return sendErr(res, e); }
+    await CR.forgetMemberActivity(soda, found.crew.crewId, req.user.userId).catch(() => {});
     if (out.newAdminId) notify(out.newAdminId, { type: 'CREW_UPDATED', crewId: found.crew.crewId, event: 'YOU_ARE_ADMIN', crewName: found.crew.name });
     if (!out.deleted) await toMembers(found.crew.crewId, { type: 'CREW_UPDATED', crewId: found.crew.crewId, event: 'LEFT' });
     res.json({ ok: true, left: out.left, deleted: out.deleted });
@@ -376,6 +388,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
     if (!t) return res.status(404).json({ error: 'This rider is not in the crew.', code: 'NOT_A_MEMBER' });
     if (t.u.userId === req.user.userId) return res.status(409).json({ error: 'Use Leave crew instead.', code: 'NOT_ALLOWED' });
     await CR.leaveCrew(soda, found.crew, t.u.userId);
+    await CR.forgetMemberActivity(soda, found.crew.crewId, t.u.userId).catch(() => {});
     notify(t.u.userId, { type: 'CREW_REMOVED', crewId: found.crew.crewId, crewName: found.crew.name });
     await toMembers(found.crew.crewId, { type: 'CREW_UPDATED', crewId: found.crew.crewId, event: 'REMOVED' }, req.user.userId);
     res.json({ ok: true, removed: true });
@@ -433,6 +446,7 @@ function registerCrewRoutes({ r, repo, hub = null, wrap, requireAdmin, flagsOf =
   r.post('/crews/:crewId/polls', pollsFeature, pollCreateLimiter, wrap(async (req, res) => {
     const found = await mine(req);
     if (!found) return res.status(404).json(NOT_FOUND);
+    if (!(await plans.featureFor(req.user.userId, 'crewPolls'))) return res.status(403).json(PL.PLAN_OFF('Community polls'));
     let poll;
     try { poll = await CR.createPoll(soda, found.crew, found.me, req.body); } catch (e) { return sendErr(res, e); }
     const meDoc = await U.ensureUsername(repo, await repo.findUserById(req.user.userId));

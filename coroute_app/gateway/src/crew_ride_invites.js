@@ -355,7 +355,7 @@ function registerCrewRideInviteRoutes({ r, repo, hub = null, convoys, wrap, flag
     let snapshot;
     try {
       // The normal join: capacity of the host's plan, one active trip, removed riders, bike details.
-      snapshot = await convoys.joinByCode(req.user, found.meta.joinCode, (req.body && req.body.rider) || {});
+      snapshot = await convoys.joinByCode(req.user, found.meta.joinCode, (req.body && req.body.rider) || {}, { invited: true });
     } catch (e) {
       if (e instanceof ConvoyError) return res.status(e.status || 400).json({ error: e.message, reason: e.reason, code: e.reason || 'JOIN_FAILED' });
       throw e;
