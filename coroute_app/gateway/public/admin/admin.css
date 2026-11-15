@@ -688,3 +688,18 @@ details.es-more[open] summary { margin-bottom: 6px; }
 .srv-metric__hint { font-size: 0.78rem; color: var(--c-text-3); }
 .srv-notes { margin: 12px 0 0; padding-left: 18px; font-size: 0.9rem; color: var(--c-text-2); }
 .chart-grid + .card { margin-top: 16px; }
+
+/* v3.59 Explore page (explore.js) */
+.xp-body { display: grid; gap: 16px; margin-top: 16px; }
+.xp-thumb { width: 72px; height: 48px; border-radius: 8px; overflow: hidden; background: var(--c-surface-2, #eee); display: grid; place-items: center; color: var(--c-text-3, #888); }
+.xp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.xp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--c-border, #e5e5e5); }
+.xp-row input[type="text"] { min-width: 180px; flex: 1 1 200px; }
+.xp-move { display: inline-flex; gap: 4px; }
+.xp-switch { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.xp-tags { flex-wrap: wrap; gap: 8px; }
+.xp-tag { display: inline-flex; align-items: center; gap: 4px; }
+.xp-add { flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.xp-save { justify-content: flex-end; }
+.xp-map { height: 340px; }
+.xp-form textarea { width: 100%; }
