@@ -239,7 +239,7 @@ class _PlaceRiderReviewsState extends State<PlaceRiderReviews> {
             padding: const EdgeInsets.only(bottom: Space.s8),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
-                Text(r.firstName, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                Flexible(child: Text(r.firstName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
                 const SizedBox(width: Space.s8),
                 _stars(r.rating),
                 const Spacer(),

@@ -193,11 +193,14 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                     // Reports Header
                     Row(
                       children: [
-                        Text(
-                          'Reports ($_totalCount)',
-                          style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 15),
+                        Expanded(
+                          child: Text(
+                            'Reports ($_totalCount)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 15),
+                          ),
                         ),
-                        const Spacer(),
                         if (_totalPages > 1)
                           Text(
                             'Page $_page of $_totalPages',
@@ -526,9 +529,13 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         title: Row(
           children: [
-            Text(
-              '$mfg $model',
-              style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 14),
+            Flexible(
+              child: Text(
+                '$mfg $model',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppTheme.palette.text, fontWeight: FontWeight.w600, fontSize: 14),
+              ),
             ),
             const SizedBox(width: 8),
             Container(
@@ -765,7 +772,7 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                   Row(
                     children: [
                       Text('Overall Compatibility: ', style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12)),
-                      Text(overall, style: TextStyle(color: AppTheme.palette.primary, fontWeight: FontWeight.w600, fontSize: 12)),
+                      Expanded(child: Text(overall, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppTheme.palette.primary, fontWeight: FontWeight.w600, fontSize: 12))),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -913,8 +920,8 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
       child: Row(
         children: [
           Text(label, style: TextStyle(color: AppTheme.palette.textMuted, fontSize: 12)),
-          Spacer(),
-          Text(value, style: TextStyle(color: AppTheme.palette.text, fontSize: 12, fontWeight: FontWeight.w500)),
+          const SizedBox(width: 12),
+          Expanded(child: Text(value, textAlign: TextAlign.end, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppTheme.palette.text, fontSize: 12, fontWeight: FontWeight.w500))),
         ],
       ),
     );

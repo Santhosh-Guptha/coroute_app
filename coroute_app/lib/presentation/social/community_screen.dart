@@ -13,6 +13,7 @@ import '../score/leaderboard_screen.dart';
 import '../score/rider_score_card.dart';
 import '../widgets/feature_switch.dart';
 import 'communities_rail.dart';
+import 'community_widgets.dart';
 import 'people_screen.dart';
 import 'rider_profile_screen.dart';
 import 'user_avatar.dart';
@@ -115,7 +116,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         child: Container(
                           height: 52,
                           padding: const EdgeInsets.symmetric(horizontal: 14),
-                          child: Row(children: [Icon(Icons.search_rounded, color: AppTheme.text2), const SizedBox(width: 10), Text('Search riders by username', style: AppText.body.copyWith(color: AppTheme.textFaint))]),
+                          child: Row(children: [Icon(Icons.search_rounded, color: AppTheme.text2), const SizedBox(width: 10), Expanded(child: Text('Search riders by username', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: AppTheme.textFaint)))]),
                         ),
                       ),
                     ),
@@ -134,6 +135,23 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
                       ],
                     ),
+                  ),
+                ],
+                // v3.60: find public and private communities to join.
+                if (crewsOn) ...[
+                  const SizedBox(height: Space.s12),
+                  DsCard(
+                    key: const Key('community_find'),
+                    onTap: () async {
+                      await FindCommunitiesScreen.open(context);
+                      await _refresh();
+                    },
+                    child: Row(children: [
+                      Icon(Icons.travel_explore_rounded, color: AppTheme.accentText),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text('Find communities', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15))),
+                      Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
+                    ]),
                   ),
                 ],
                 const SizedBox(height: Space.s24),

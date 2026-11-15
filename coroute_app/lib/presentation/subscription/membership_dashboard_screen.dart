@@ -267,9 +267,11 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             children: [
               Icon(Icons.lock_clock_rounded, color: AppTheme.warnText, size: 22),
               SizedBox(width: 8),
-              Text(
-                'You are already in a ride',
-                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.bold, fontSize: 15),
+              Expanded(
+                child: Text(
+                  'You are already in a ride',
+                  style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.bold, fontSize: 15),
+                ),
               ),
             ],
           ),
@@ -302,10 +304,15 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                mem.capacity == 1 ? 'Your seat' : 'Group seats',
-                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
+              Flexible(
+                child: Text(
+                  mem.capacity == 1 ? 'Your seat' : 'Group seats',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
+                ),
               ),
+              const SizedBox(width: 8),
               Text(
                 '$used of $total ${total == 1 ? "seat" : "seats"}',
                 style: TextStyle(color: isFull ? AppTheme.sos : AppTheme.brand, fontWeight: FontWeight.bold),
@@ -351,10 +358,15 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Riders on your plan',
-                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
+              Flexible(
+                child: Text(
+                  'Riders on your plan',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
+                ),
               ),
+              const SizedBox(width: 8),
               ElevatedButton.icon(
                 icon: const Icon(Icons.person_add_rounded, size: 16, color: Colors.black),
                 label: const Text('Invite', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),

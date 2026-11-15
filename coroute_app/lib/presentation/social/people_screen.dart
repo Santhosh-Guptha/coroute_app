@@ -849,7 +849,7 @@ class _RequestTileState extends State<_RequestTile> {
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(Radii.lg), border: Border.all(color: AppTheme.border)),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          children: [Icon(icon, color: fg), const SizedBox(width: 6), Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w600))],
+          children: [Icon(icon, color: fg), const SizedBox(width: 6), Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontWeight: FontWeight.w600)))],
         ),
       );
 }

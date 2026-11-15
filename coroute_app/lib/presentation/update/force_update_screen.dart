@@ -167,15 +167,17 @@ class ForceUpdateScreen extends StatelessWidget {
                           children: [
                             Icon(Icons.download_rounded, color: Colors.white, size: 22),
                             SizedBox(width: 8),
-                            Text(
+                            Flexible(child: Text(
                               'UPDATE NOW',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 15,
                                 letterSpacing: 0.5,
                               ),
-                            ),
+                            )),
                           ],
                         ),
                       ),

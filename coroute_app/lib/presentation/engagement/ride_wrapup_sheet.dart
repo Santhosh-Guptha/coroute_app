@@ -453,7 +453,7 @@ class _Stars extends StatelessWidget {
             ),
         ],
       ),
-      SizedBox(height: 20, child: Text(_words[value.clamp(0, 5)], style: AppText.label)),
+      ConstrainedBox(constraints: const BoxConstraints(minHeight: 20), child: Text(_words[value.clamp(0, 5)], maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label)),
     ]);
   }
 }
