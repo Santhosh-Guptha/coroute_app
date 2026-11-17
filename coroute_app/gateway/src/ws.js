@@ -22,6 +22,7 @@
 const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
 const config = require('./config');
+const { sanitize: sanitizeInput } = require('./input_guard');
 const { verifyTokenDetailed, ROLE_ADMIN, AuthError, identityOf } = require('./auth');
 const { ConvoyError, publicRider, publicAlert } = require('./convoys');
 const { RescuePings } = require('./rescue_beacon'); // Round 10 rescue beacon
@@ -1072,7 +1073,7 @@ class Hub {
     if (!(await ws.ready)) return;
     ws.lastInAt = Date.now();
     let msg; let bad = false;
-    try { msg = JSON.parse(data.toString()); } catch { bad = true; }
+    try { msg = sanitizeInput(JSON.parse(data.toString())); } catch { bad = true; } // v3.62: no "$" / prototype keys
     // Round 8 'pos2': a compact position frame carries "t":"P2" instead of a type.
     if (!bad && msg && typeof msg === 'object' && msg.type === undefined && msg.t === 'P2') msg.type = 'P2';
     // Round 8 per-socket buckets before any async work (safety messages always pass).

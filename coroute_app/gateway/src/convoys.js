@@ -52,6 +52,8 @@ const LIVE_STATUSES = ['STARTED', 'PAUSED'];
  * further presses (any clientId, any socket) are answered as duplicates of the latest one. */
 const SOS_DEDUPE_MS = (() => { const n = parseInt(process.env.SOS_DEDUPE_MS || '', 10); return Number.isFinite(n) && n >= 0 ? n : 60000; })();
 const SOS_STORM_MAX = 2;
+/** v3.62: closed-app SOS pushes per rider per 10 minutes (the SOS itself is never limited). */
+const SOS_PUSH_MAX = 6;
 /** Telemetry alone touches the convoy document at most this often (ride liveness for the stale-convoy job). */
 const META_TOUCH_MS = 10 * 60000;
 
@@ -1132,6 +1134,20 @@ class ConvoyManager extends EventEmitter {
       if (!push || typeof push.notifyUsers !== 'function' || !room || !a) return;
       const ids = [...room.riders.keys()].filter((id) => id && id !== a.userId);
       if (!ids.length) return;
+      // v3.62 security: these pushes skip every push throttle, so one rider raising and closing SOS over and over could
+      // flood the group's phones. At most SOS_PUSH_MAX per rider per 10 min go by push; the SOS itself (sockets, texts,
+      // contacts) is never limited. A close is pushed only when its SOS was.
+      const t = now();
+      const book = this._sosPushAt || (this._sosPushAt = new Map());
+      const sent = this._sosPushed || (this._sosPushed = new Set());
+      if (kind === 'RAISED') {
+        const list = (book.get(a.userId) || []).filter((x) => t - x < 10 * 60000);
+        if (list.length >= SOS_PUSH_MAX) { book.set(a.userId, list); return; }
+        list.push(t); book.set(a.userId, list);
+        sent.add(a.alertId);
+        if (sent.size > 5000) sent.delete(sent.values().next().value);
+        if (book.size > 5000) book.delete(book.keys().next().value);
+      } else if (!sent.delete(a.alertId)) return;
       const first = String(a.userName || 'A rider').trim().split(/\s+/)[0] || 'A rider';
       const ride = String((room.meta && room.meta.name) || 'your ride').slice(0, 60);
       const crash = a.alertType === 'CRASH' || a.auto === true;
