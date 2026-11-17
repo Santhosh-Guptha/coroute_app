@@ -281,3 +281,20 @@ was failing at night), `job_lease.test.js` real-timer test tolerant of a busy ma
 * Tests: `share_card_363`, `guest_join_363`, `expenses_363`, `privacy_zones_363` (gateway); `ride_card_363`,
   `trip_planning_lite_363`, `privacy_zones_363` (Dart, pure). Changed on purpose: `share_card_quick_reply_test`,
   `round6_wiring_356_test`, `access_control_and_admin_regression_test`.
+
+## 20. Round 25: web admin without duplicates (17 Nov 2026)
+
+Owner: "remove all duplicate screens and configurations in website only". One place per screen and per setting:
+
+| Was (duplicate) | Now (one place) |
+|---|---|
+| Overview + Command center (both: riders, live rides, open SOS, needs attention, quick actions) + Business > Overview | Command center (live, landing page); **Trends** (Business group: charts and period totals only); **Business summary** |
+| "All settings" (portal) + Admin > "Settings" (tabs) | **Settings** (the portal) in Configuration; old `#/settings` opens it |
+| Access mode in Settings tab AND in Plans & pricing | Plans & pricing only |
+| Pricing in Settings > Pricing AND Plans & pricing | Plans & pricing only (`#/settings/pricing` redirects) |
+| E-mail settings in Settings > E-mail AND E-mail > Settings | E-mail > Settings only (`#/settings/email` redirects) |
+| Settings tabs | only what has no page of its own: Message words, SOS SMS, Weekly summary |
+
+Old links and bookmarks redirect. The public website pages were reviewed: /privacy (policy), /privacy-and-security
+(summary), /security (report a vulnerability), /how-it-works (overview) and /guide (step-by-step manual) serve different
+purposes and stay.

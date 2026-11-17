@@ -182,19 +182,19 @@
   // ==================================================================== configuration portal
   var CONFIG = [
     ['Riders and access', [
-      ['Access mode', 'Paid, free for everyone, or free up to limits for hosting group rides.', '#/settings', 'plans', 'access'],
+      ['Access mode', 'Paid, free for everyone, or free up to limits for hosting group rides.', '#/plans', 'plans', 'access'],
       ['Phone sign-in', 'How long riders stay signed in on the app. Changes never sign anyone out.', '#/phonesignin', 'phonesignin', 'session'],
       ['Feature switches', 'Turn app features on or off for everyone. Safety stays on.', '#/features', 'features', 'features'],
     ]],
     ['Plans and money', [
       ['Pricing model', 'Group plans (host buys) or Rider Pass (every rider, all features, monthly).', '#/pricingmodel', 'plans', 'pricingmodel'],
       ['Features by plan', 'What Community, Small Group, Large Group and Rider Pass include, and their limits.', '#/planfeatures', 'planfeatures', 'planfeatures'],
-      ['Pricing and payments', 'Plan prices, offers and the payment gateway keys.', '#/settings/pricing', 'payments', null],
+      ['Plans and pricing', 'Plan prices, offers and the access mode.', '#/plans', 'payments', null],
       ['Coupons', 'Codes, limits and who may use them.', '#/coupons', 'coupons', null],
     ]],
     ['Messages', [
       ['Push notifications', 'Campaigns, kinds and whether push is configured.', '#/push', 'push', 'push'],
-      ['E-mail', 'Weekly limit, quiet hours, sender and blocked addresses.', '#/settings/email', 'email', null],
+      ['E-mail', 'Weekly limit, quiet hours, sender and blocked addresses.', '#/email/settings', 'email', null],
       ['Message words', 'Receipts, welcome, plan assigned, SMS and push notices.', '#/settings/templates', 'board', null],
       ['SOS SMS', 'The SMS provider for emergency texts.', '#/settings/sms', 'sos', null],
       ['Weekly summary', 'The Monday e-mail to the administrators.', '#/settings/summary', 'audit', null],
@@ -222,10 +222,10 @@
   };
 
   CR.sections.config = {
-    title: 'Configuration',
+    title: 'Settings',
     render: function (view) {
       var q = h('input.cfg-search', { type: 'search', placeholder: 'Find a setting', 'aria-label': 'Find a setting' });
-      view.appendChild(h('div.cc-hero', h('div', h('p.cc-eyebrow', { text: 'Configuration portal' }), h('h1', { text: 'Configuration' }), h('p.muted', { text: 'Every setting in one place, with what it is set to now.' })), h('span.spacer'), q));
+      view.appendChild(h('div.cc-hero', h('div', h('p.cc-eyebrow', { text: 'Configuration' }), h('h1', { text: 'Settings' }), h('p.muted', { text: 'Every setting in one place, with what it is set to now.' })), h('span.spacer'), q));
       var wrap = h('div');
       view.appendChild(wrap);
       var cards = [];

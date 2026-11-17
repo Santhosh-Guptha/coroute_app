@@ -1,6 +1,7 @@
 /* CoRoute web admin shell extras (3.57 round 3, docs/features_355/web_admin.md):
-   #/overview   simple KPIs and charts from existing endpoints (/admin/analytics/overview, /admin/analytics/trends, /admin/web/revenue)
-   #/settings   one place for settings: Access mode, Pricing (Plans & pricing), Templates (message words), SMS, E-mail
+   #/overview   Trends: charts from existing endpoints (/admin/analytics/trends, /admin/web/revenue). The live numbers, what
+                needs attention and quick actions are on the Command center only (v3.63, no duplicates).
+   #/settings   message words, SOS SMS, weekly summary (the rest has its own page; #/settings alone opens #/config)
    #/audit      the audit log (GET /admin/audit) with a filter by action and a search
    Global search (top bar, "/" to focus): riders by username / e-mail, order ids, coupon codes (GET /admin/search).
    Tablet: the menu is a drawer (Menu button, Escape closes). Text is set as text only. */
@@ -20,10 +21,10 @@
     return a;
   }
   CR.sections.overview = {
-    title: 'Overview',
+    title: 'Trends',
     render: function (view) {
       var range = ui.select([['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']], '30', { 'aria-label': 'Period' });
-      view.appendChild(ui.pageHead('Overview', 'How CoRoute is doing. Staff accounts are left out.', range));
+      view.appendChild(ui.pageHead('Trends', 'How CoRoute is doing over time. Staff accounts are left out. Live numbers: Command center.', range));
       var body = h('div', ui.loading());
       view.appendChild(body);
       function load() {
@@ -36,29 +37,16 @@
         ]).then(function (r) {
           clear(body);
           var o = r[0] || {}; var tr = r[1]; var rev = r[2];
-          var riders = o.riders || {}; var att = o.attention || {};
           var sum = function (a) { return (a || []).reduce(function (x, y) { return x + (Number(y) || 0); }, 0); };
           var netDays = rev ? rev.daily.reduce(function (a, x) { return a + x.netInr; }, 0) : 0;
           var tiles = h('div.tiles');
-          tiles.appendChild(kpiTile('Riders', String(riders.total || 0), (riders.activeToday || 0) + ' active today', '#/riders'));
           if (tr) {
             tiles.appendChild(kpiTile('Rides', String(sum(tr.series.rides)), 'group rides ended, ' + days + ' days'));
             tiles.appendChild(kpiTile('New riders', String(sum(tr.series.signups)), days + ' days', '#/riders'));
           }
           tiles.appendChild(kpiTile('Net revenue', inr(netDays, 0), days + ' days, after refunds', '#/revenue'));
           tiles.appendChild(kpiTile('Paid plans', String(rev && rev.totals ? rev.totals.activePaidPlans || 0 : 0), 'active now', '#/riders'));
-          tiles.appendChild(kpiTile('Live rides', String(att.liveRides || 0), (att.openSos || 0) + ' open SOS'));
           body.appendChild(tiles);
-          var todo = [];
-          if (att.openSos) todo.push([att.openSos + ' open SOS', 'Handle in the app admin console.', 'bad']);
-          if (att.onHold) todo.push([att.onHold + ' riders on hold', 'Review on Riders.', 'warn', '#/riders']);
-          if (att.reportsOpen) todo.push([att.reportsOpen + ' open reports', 'Public ride reports in the app admin.', 'warn']);
-          if (att.reviewsPending || att.photosPending) todo.push([(att.reviewsPending || 0) + ' reviews, ' + (att.photosPending || 0) + ' photos waiting', 'Moderate in the app admin.', '']);
-          if (todo.length) {
-            var tl = h('ul.todo');
-            todo.forEach(function (x) { tl.appendChild(h('li', ui.chip(x[0], x[2]), h('span.small.muted', { text: ' ' + x[1] }), x[3] ? h('a.small', { href: x[3], text: ' Open' }) : null)); });
-            body.appendChild(h('div.card.section-gap', h('div.card__head', h('h2', { text: 'Needs attention' })), tl));
-          }
           var grid = h('div.chart-grid.section-gap');
           var tick = function (labels) { return function (i) { var step = Math.ceil(labels.length / 7); return (labels.length - 1 - i) % step === 0 ? labels[i] : ''; }; };
           if (tr && CR.chart) {
@@ -77,9 +65,6 @@
               CR.chart({ kind: 'bar', title: 'Group rides per day', labels: tr.labels, values: tr.series.rides, format: function (i) { return tr.series.rides[i] + ' rides'; }, tick: tick(tr.labels) })));
           }
           if (grid.firstChild) body.appendChild(grid);
-          body.appendChild(h('div.card.section-gap.quick', h('h2', { text: 'Quick actions' }), h('div.row',
-            h('a.btn', { href: '#/riders', text: 'Find a rider' }), h('a.btn', { href: '#/email', text: 'Send an e-mail' }), h('a.btn', { href: '#/coupons', text: 'New coupon' }),
-            h('a.btn', { href: '#/push', text: 'Send a push' }), h('a.btn', { href: '#/board', text: 'Post on the board' }))));
           if (!r[0] && !r[1] && !r[2]) body.insertBefore(h('div.banner.banner--bad', { text: 'The numbers could not load. Refresh to try again.' }), body.firstChild);
         });
       }
@@ -89,28 +74,27 @@
   };
 
   // ==================================================================== settings
-  var SETTINGS_TABS = [['', 'Access mode', 'Paid, free for everyone, or free up to limits'], ['pricing', 'Pricing & payments', 'Plan prices, offers and Razorpay keys'],
-    ['templates', 'Templates', 'Words of receipts, welcome, plan assigned, coupon for you, SMS and push notices'], ['sms', 'SMS', 'SOS SMS provider'], ['email', 'E-mail', 'Weekly limit, quiet hours, sender, blocked addresses'], ['summary', 'Weekly summary', 'The Monday e-mail to the administrators']];
+  // v3.63: only the settings that have no page of their own. Access mode and pricing: Plans & pricing. E-mail: E-mail >
+  // Settings. Settings home (#/settings) is the configuration portal (#/config).
+  var SETTINGS_TABS = [['templates', 'Message words', 'Words of receipts, welcome, plan assigned, coupon for you, SMS and push notices'], ['sms', 'SOS SMS', 'SOS SMS provider'], ['summary', 'Weekly summary', 'The Monday e-mail to the administrators']];
   CR.sections.settings = {
     title: 'Settings',
     render: function (view, arg) {
       var sub = arg || '';
-      view.appendChild(ui.pageHead('Settings', 'Access mode, pricing, message words, SMS, e-mail and the weekly summary.'));
+      if (!sub || sub === 'pricing' || sub === 'email') { CR.go(sub === 'pricing' ? '#/plans' : sub === 'email' ? '#/email/settings' : '#/config'); return; }
+      view.appendChild(ui.pageHead('Settings', 'Message words, the SOS SMS provider and the weekly summary. Everything else: Settings in the menu.'));
       var nav = h('div.row.eng-tabs.es-tabs', { role: 'tablist', 'aria-label': 'Settings' });
       SETTINGS_TABS.forEach(function (t) {
         nav.appendChild(h('button.btn.btn--sm', { type: 'button', role: 'tab', title: t[2], 'aria-selected': String(sub === t[0]), 'aria-pressed': String(sub === t[0]), text: t[1],
-          onclick: function () { CR.go('#/settings' + (t[0] ? '/' + t[0] : '')); } }));
+          onclick: function () { CR.go('#/settings/' + t[0]); } }));
       });
       view.appendChild(nav);
       var inner = h('div.settings-body');
       view.appendChild(inner);
-      if (sub === 'pricing') { if (CR.sections.plans) CR.sections.plans.render(inner, ''); return; }
       if (sub === 'templates') { if (CR.sections.templates) CR.sections.templates.render(inner, ''); return; }
       if (sub === 'sms') { if (CR.renderSms) CR.renderSms(inner); return; }
-      if (sub === 'email') { if (CR.emailStudio) CR.emailStudio.renderSettings(inner); return; }
       if (sub === 'summary') { if (CR.renderWeeklySummary) CR.renderWeeklySummary(inner); return; }
-      inner.appendChild(h('p.muted', { text: 'Who may host group rides, and whether it needs a plan. The app gets only the result, never prices.' }));
-      if (CR.accessModeCard) inner.appendChild(CR.accessModeCard());
+      CR.go('#/config');
     },
   };
 

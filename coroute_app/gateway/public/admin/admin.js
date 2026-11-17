@@ -429,9 +429,12 @@
     [/^#\/notifications\/email\/(templates|settings)/, '#/email/$1'], [/^#\/notifications\/email/, '#/email'],
     [/^#\/notifications\/sms/, '#/settings/sms'], [/^#\/notifications\/history/, '#/push/history'], [/^#\/notifications$/, '#/push'],
     [/^#\/templates$/, '#/settings/templates'],
+    // v3.63 one place per setting: Settings home is the configuration portal; pricing and access mode live in Plans &
+    // pricing; e-mail settings live in E-mail.
+    [/^#\/settings\/?$/, '#/config'], [/^#\/settings\/pricing/, '#/plans'], [/^#\/settings\/email/, '#/email/settings'],
   ];
   /** Which menu item a section belongs to (sub-pages light up their parent). */
-  var NAV_OF = { templates: 'settings' };
+  var NAV_OF = { templates: 'config', settings: 'config' };
   function route() {
     if (!token()) return;
     for (var i = 0; i < MOVED.length; i++) {
@@ -661,7 +664,7 @@
       var plansBox = h('div', loadingNode());
       var gwBox = h('div.card', loadingNode());
       var auditBox = h('div.card', loadingNode());
-      view.appendChild(pageHead('Plans & pricing', 'What riders pay on the website. Community is free and always on; Small Group and Large Group are sold. Changes are recorded in the audit log below.'));
+      view.appendChild(pageHead('Plans & pricing', 'Prices, offers and the access mode. Community is free and always on; which paid plans are sold follows the Pricing model (Group plans or Rider Pass). Changes are recorded in the audit log below.'));
       // 3.56 access mode (public/admin/access.js): paid / free for everyone / free up to limits.
       if (CR.accessModeCard) view.appendChild(CR.accessModeCard());
       view.appendChild(plansBox);

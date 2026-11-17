@@ -30,6 +30,9 @@ Round 24:
   D) Privacy zones (Profile > Privacy zones): position hidden near home / work; exact position always in an emergency.
   E) Admins: the app opens straight into the admin console (no "Admin" row in the rider profile); the website sends
      admins from /signin and /account to /admin.
+  G) Web admin without duplicates (communities_chat_v360.md section 20): one Command center (Overview removed;
+     Trends + Business summary in Business), one Settings (the portal), access mode and pricing only in Plans & pricing,
+     e-mail settings only in E-mail. Old links redirect. Commit with 27.
   F) Download page: the 32-bit APK is labelled "old phones only" (64-bit-only phones like Galaxy S23/S24/S25 cannot
      install it).
 
@@ -112,6 +115,8 @@ z17) Privacy zone: save Home 500 m on phone A, start a ride at home: phone B and
      EXACT position at once. Trip report / share card draw nothing inside the zone.
 z18) Admin: sign in on the app with the admin account -> admin console directly (no rider home); profile has no Admin
      row. Website /signin as admin -> /admin. /account as admin -> /admin.
+z20) Web admin: menu has one Settings (Configuration group), no Overview at the top, Business has Business summary +
+     Trends; #/settings, #/settings/pricing, #/settings/email open Settings, Plans & pricing and E-mail > Settings.
 z19) Pricing model (STAGING only): switch to Rider Pass -> /plans shows Community + Rider Pass Rs 9; test purchase;
      the pass holder hosts a ride that 15+ riders join; every feature works; switch back to Group plans; the pass
      keeps working until it ends. Production stays on Group plans until the owner decides.
