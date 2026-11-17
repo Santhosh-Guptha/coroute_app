@@ -44,6 +44,14 @@ const HAZARD_TYPES = new Set(['crash', 'sos', 'skid', 'swerve', 'hard_brake']);
 const ROAD_TYPES = new Set(['pothole', 'rough']);
 const EVENT_TYPES = new Set([...HAZARD_TYPES, ...ROAD_TYPES]);
 const RS_CAP = 64;
+
+/** v3.62: adds one raw row to the monthly trend tally { 'YYYY-MM': { km, hours, ev: { type: n } } }. */
+function trendTally(tally, row) {
+  const m = row.m || M.monthKey(row.t || Date.now());
+  const x = tally[m] || (tally[m] = { km: 0, hours: 0, ev: {} });
+  if (row.k === 'evs') for (const e of (row.d?.e || [])) x.ev[e[0]] = (x.ev[e[0]] || 0) + 1;
+  else if (row.k === 'ride') for (const c of (row.d?.c || [])) { x.km += (Number(c[2]) || 0) / 1000; x.hours += (Number(c[3]) || 0) / 3600; }
+}
 const RAW_QUEUE_MAX = 500;
 const IDLE_MS = 30 * 60000;
 const MOVING_KMH = 8;
@@ -90,6 +98,7 @@ class IntelEngine {
     await this.soda.ensureIndex(RAW, { name: `${RAW}_rh_ix`, fields: [{ path: 'rh' }] });
     await this.soda.ensureIndex(META, { name: `${META}_id_ux`, unique: true, fields: [{ path: 'id' }] });
     await this.consent.init();
+    if (this.insights) await this.insights.init();
   }
 
   /** Per-node timers: the raw queue is written every 30 s, idle accumulators are closed every 5 min. */
@@ -104,6 +113,8 @@ class IntelEngine {
     const min = 60000;
     lease.run('intel-aggregate', this.cfg.jobEveryMin * min, ({ signal } = {}) => this.aggregate({ signal }), { firstDelayMs: 2 * min });
     lease.run('intel-daily', 24 * 60 * min, ({ signal } = {}) => this.daily({ signal }), { firstDelayMs: 25 * min });
+    // v3.62 insights (corridors, stop demand, rider risk counts), daily, after the daily job.
+    if (this.insights) lease.run('intel-insights', 24 * 60 * min, ({ signal } = {}) => this.insights.run({ signal }), { firstDelayMs: 40 * min });
   }
 
   async stop() {
@@ -364,6 +375,7 @@ class IntelEngine {
     ];
     const ctx = { now, cells: new Map(), dirty: new Set(), budget: cfg.jobMaxCells, cfg };
     const done = [];
+    const tally = {}; // v3.62 monthly trends: counted while folding (no raw scans later)
     let i = 0;
     for (const row of rows) {
       if (signal?.aborted) break;
@@ -372,6 +384,7 @@ class IntelEngine {
       if (ctx.dirty.size + ids.length > ctx.budget && done.length) break; // next run
       await this._load(ctx, ids);
       this._fold(ctx, row.value, sign);
+      if (sign > 0) trendTally(tally, row.value);
       done.push(row);
       if (++i % 10 === 0) await M.yieldNow();
     }
@@ -381,6 +394,7 @@ class IntelEngine {
       else await this.soda.replace(RAW, row.key, { ...row.value, p: 1 }).catch(() => {});
       if (row.value.k === 'crash' && row.value.p !== 2) await this._trainCopy(row.value).catch(() => {});
     }
+    if (this.insights) await this.insights.addTrends(tally).catch((e) => this.log.warn?.(`[intel] trends: ${e.message}`));
     this.stats.aggregateRuns++; this.stats.rowsFolded += done.length; this.stats.lastAggregateAt = now;
     if (done.length) this.cache.clear();
     await this._setMeta('status', { lastAggregateAt: now, lastFolded: done.length, lastCells: ctx.dirty.size, node: process.pid }).catch(() => {});
@@ -1003,6 +1017,8 @@ class IntelEngine {
       enabled: cfg.enabled && !cfg.killed, killed: cfg.killed, kMin: cfg.kMin, rawDays: cfg.rawDays, crashBrainMode: cfg.crashBrainMode, router: cfg.routerKind,
       lastAggregateAt: status?.lastAggregateAt || 0, lastDailyAt: status?.lastDailyAt || 0, aggregates: status?.counts || null,
       accumulators: this.acc.size, rawQueue: this.rawQueue.length, memoryKB: Math.round(this.memoryEstimate() / 1024),
+      // v3.62: own intelligence database (main only, or separate with its switch state).
+      database: await require('../oracle/intel_store').intelDbHealth(this.intelDb || null).catch(() => null),
     };
   }
 

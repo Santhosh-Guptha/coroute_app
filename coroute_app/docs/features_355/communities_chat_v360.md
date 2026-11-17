@@ -151,3 +151,70 @@ updated settings, profile and push routing tests.
   240-a-minute API limit; only abuse far beyond any phone (600 a minute per account) gets 429. Resends with the same
   clientId and the storm guard keep the group from floods.
 * Tests: `gateway/test/sos_push_medical_362.test.js` (5), `test/group_sos_push_362_test.dart` (pure, 1).
+
+## 14. Phones stay signed in (round 20, 17 Nov 2026)
+
+Owner: "still in mobile session is logging out". Causes found and fixed (no VM change needed):
+
+| Cause | Fix |
+|---|---|
+| The 6-hourly session sweep deleted EVERY session record not used for 30 days, live phone sessions too: a phone unused for a month was signed out | `sessions.sweep` removes only records that ended (signed out / revoked, or past their own idle / hard limit) 30+ days ago. Live phone sessions are never removed |
+| A refresh reply lost on a bad mobile network (or a new token the phone could not save before it was closed) was "theft" after 60 s: the whole session was revoked | Phone sessions accept the previous refresh token at any time (`REFRESH_REUSE_GRACE_APP_SEC`, 0 = any time). A token two rotations old is still theft. Web keeps 60 s |
+| Older builds: the long token (JWT_TTL_DAYS 30) ran out and the rider was signed out even though the server session was fine | An expired long token that names a live phone session is accepted and renewed (`X-CoRoute-Token`); revoked / signed-out sessions still end |
+| Android secure storage (flutter_secure_storage 11) wipes all stored values on any keystore error (`resetOnError` default true): a busy keystore after boot deleted the tokens | `lib/data/local/secure_store.dart` `kSecureStorage` with `resetOnError: false` for every secure store; token read retried up to ~10 s |
+
+**Web admin > Admin > Phone sign-in** (`src/session_settings.js`, `public/admin/session_settings.js`): days without
+opening the app and days after sign-in (0 = never, the default). A saved rule applies ONLY to phone sign-ins made after
+saving (each new phone session keeps a copy, `appPol`); riders already signed in keep their rule, and sessions made
+before v3.62 have no time limit whatever the VM .env says. MASTER_ADMIN saves; audited. `GET|PUT /api/admin/session-settings`.
+Sign-out, password change, sign out everywhere, hold / block and admin revoke still end a session at once.
+
+Tests: `gateway/test/sessions_stay_362.test.js` (6).
+
+## 15. Web admin: command center and configuration portal (round 20)
+
+* **Command center** (`#/command`, the new landing page; `public/admin/command.js`, `command.css`): live view that
+  refreshes every 15 s while the tab is visible (Pause button): status strip (servers, push, feature switches, phone
+  sign-in, safety locked on), live numbers (riders online over both nodes, live rides, open SOS (red, pulsing when
+  above 0), active today, riders), Needs attention, Recent admin actions (audit), both servers (online, lag, memory,
+  requests), quick actions. Uses existing endpoints only.
+* **Configuration** (`#/config`): every setting as a card with its current value (access mode, phone sign-in, feature
+  switches, features by plan, pricing, coupons, push, e-mail, message words, SOS SMS, weekly summary, Explore,
+  operators, ratings, servers, audit log) and a filter box.
+* **Feature switches on the web** (`#/features`, was app admin only): grouped switches with the last change and a
+  reason asked on every change (audited, `PUT /api/admin/features/:id`); safety switches show "Always on".
+* **Phone sign-in** page restyled (status card with phones signed in now).
+* **Command palette**: Ctrl/Cmd + K or "Jump to" in the top bar: any page, theme switch, search.
+* Menu icons, a Configuration group in the menu, smooth page entry; light and dark; respects reduced motion; phone
+  width works (2-column numbers).
+
+## 16. QA, security and intelligence round (round 21, 17 Nov 2026)
+
+Done by three parallel workers (QA tester, security tester, intelligence), merged and run together.
+
+**QA** (`gateway/test/qa_e2e_timing_362.test.js`, `test/qa_double_tap_362_test.dart`): ride flows end to end
+(sign-in, join + approval, SOS, chat, reconnect, same account on two phones), double requests at once (one pending
+join, one member, one alert, one message), 25 website pages at 360 to 1440 px, web admin and operator console with
+2-step (authenticator, recovery codes, e-mailed codes). Test-gateway timings p50 / p95: sign-in 8 / 16 ms, join 8 /
+16 ms, SOS 2 / 10 ms, chat send 3 / 3 ms. Fixed: operator console had no menu button below 1100 px (top bar + drawer);
+admin inline styles dropped by the CSP (now applied through CSSOM); double clicks repeated admin / operator actions
+(busy state until the server answers); double Enter on 2-step and password forms (operator, website, account);
+cockpit "Let in" / "Not now" and "Start ride" acted twice; Garage "Save service" double save + controller disposed
+twice; People Add / Accept sent twice.
+
+**Security** (`gateway/test/security_362_hardening.test.js`, `src/input_guard.js`): `$`-keys and `__proto__` /
+`constructor` stripped from every query, body and socket message (query parser `simple`); 2-step code checks for one
+account run one at a time (no double use of a recovery / authenticator code in a race); a phone's previous refresh
+token works at most 3 times after the 60 s window (`PREV_LATE_MAX`), then counts as theft; closed-app SOS pushes at
+most 6 per rider per 10 min (the SOS itself is never limited); live phone session count cached 5 min. Reviewed and
+sound: admin separation, IDOR on chat / communities / rides / operator routes, PATCH /me allow-list, no innerHTML,
+CSP, SSRF host allow-lists, uploads, dependencies, secrets, Android exported components, pinning, cleartext off.
+Open (low): 2-step race across two nodes at the same instant; Host header fallback when PUBLIC_ORIGIN is unset;
+ride lock not re-checked on renewing an expired long token (old builds, same as the 24 h re-sign).
+
+**Intelligence** (docs/intelligence/INTEL_DATABASE.md, INSIGHTS_v3.62.md): optional own database for intelligence
+(`INTEL_SODA_URL`, `INTEL_ORACLE_USER`, `INTEL_ORACLE_PASSWORD`; unset = main database, no change), leased resumable
+copy (`INTEL_DB_MIGRATE=1`: main -> dual writes -> intel), erase / export / backups follow the data. New: popular
+roads (k >= 5 riders per cell chain), route difficulty (Easy / Moderate / Challenging + reasons,
+`POST /api/intel/route-difficulty`, chip in Plan a ride), where and when riders stop, monthly trends, rider risk
+(aggregate; one rider for MASTER_ADMIN only, audited). Web admin > Road & safety intelligence > Insights.

@@ -28,6 +28,7 @@ import 'trip_review_sheet.dart';
 import '../../data/services/tile_cache_service.dart';
 import '../../data/services/membership_service.dart';
 import '../garage/complete_bike_sheet.dart'; // 3.55 mandatory bike details
+import '../../domain/intel/route_difficulty.dart'; // v3.62 route difficulty chip
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
 /// (picked on the map or by long-pressing it), then Review and Start Ride.
@@ -591,6 +592,26 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     );
   }
 
+  // v3.62 route difficulty (Easy / Moderate / Challenging) from rider data, fetched once per route line.
+  String? _difficultyKey;
+  RouteDifficulty? _difficulty;
+
+  RouteDifficulty? _difficultyFor(RouteModel r) {
+    final key = r.polyline;
+    if (key.isEmpty || key == _difficultyKey) return key.isEmpty ? null : _difficulty;
+    _difficultyKey = key;
+    _difficulty = null;
+    final api = context.read<ApiClient?>();
+    if (api != null && api.hasToken) {
+      api.post('/intel/route-difficulty', {'polyline': key, 'departAt': DateTime.now().millisecondsSinceEpoch}, const Duration(seconds: 8)).then((j) {
+        if (!mounted || _difficultyKey != key) return;
+        final d = RouteDifficulty.fromJson(j);
+        if (d != null) setState(() => _difficulty = d);
+      }).catchError((_) {}); // offline or older gateway: no chip
+    }
+    return null;
+  }
+
   String? _gapKey;
   List<FuelGap> _gapList = const [];
 
@@ -788,6 +809,34 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
               key: const ValueKey('planner_eta_riders'),
               padding: const EdgeInsets.only(top: 8),
               child: Text('ETA based on riders', style: AppText.caption),
+            ),
+          // v3.62: how hard the route is, from what riders met on these roads.
+          if (_difficultyFor(r) case final d?)
+            Padding(
+              key: const ValueKey('planner_route_difficulty'),
+              padding: const EdgeInsets.only(top: 8),
+              child: Semantics(
+                label: 'Route difficulty: ${d.label}. ${d.detail}',
+                excludeSemantics: true,
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: d.level == RouteDifficultyLevel.challenging
+                            ? AppTheme.sos.withValues(alpha: 0.12)
+                            : d.level == RouteDifficultyLevel.moderate
+                                ? AppTheme.warning.withValues(alpha: 0.15)
+                                : AppTheme.accentText.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                      child: Text(d.label, style: AppText.caption.copyWith(fontWeight: FontWeight.w700, color: AppTheme.text)),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(d.detail, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption)),
+                  ],
+                ),
+              ),
             ),
           // Round 4 (feature 9): long stretches without known fuel.
           for (final g in _fuelGaps(r).take(2))

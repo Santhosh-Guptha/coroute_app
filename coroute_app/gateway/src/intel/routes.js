@@ -13,6 +13,7 @@
  *   GET  /api/intel/hazards|road-quality|stops|twisty?bbox=s,w,n,e | ?tiles=tdr1,tdr4
  *   GET  /api/intel/ride-tip?lat=&lng=      pre-ride tip for the region and hour, or { tip: null }
  *   POST /api/intel/fuel-gaps               { polyline | points, fuel?, gapKm? }
+ *   POST /api/intel/route-difficulty        { polyline | points, departAt? }  v3.62 Easy / Moderate / Challenging
  *   GET  /api/intel/me/contributions        export my contributions (raw rows ≤ 90 days)
  *   DELETE /api/intel/me/contributions      delete my contributions
  * Admin (MASTER_ADMIN): /api/admin/intel/* (overview, layers with filters and CSV, crash brain, purge, rider requests).
@@ -21,6 +22,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requireAdmin } = require('../auth');
 const { IntelEngine } = require('./engine');
+const { IntelInsights } = require('./insights');
 const { intelConfig } = require('./config');
 const gh = require('./geohash');
 const { decodePolyline } = require('../geo_math');
@@ -66,6 +68,8 @@ function codedErrors(err, req, res, next) {
 
 function attachIntel({ app, soda, repo, gate, lease, convoys, mirror, poiCells = null, logger = console, jwtSecret, clock, audit = null }) {
   const intel = new IntelEngine({ soda, repo, logger, jwtSecret, poiCells, ...(clock ? { clock } : {}) });
+  // v3.62 insights: corridors, route difficulty, stop demand, monthly trends, rider risk (admin) (src/intel/insights.js).
+  intel.insights = new IntelInsights({ engine: intel, soda, logger, ...(clock ? { clock } : {}) });
   if (mirror) mirror.register('ic', intel.consent);
   if (convoys) {
     convoys.on('telemetry', (gid, rider) => intel.onTelemetry(gid, rider));
@@ -129,6 +133,14 @@ function attachIntel({ app, soda, repo, gate, lease, convoys, mirror, poiCells =
     if (line.length < 2) return res.status(400).json({ error: 'A route line is required.', code: 'INVALID' });
     const gapKm = Number(req.body?.gapKm);
     res.json(await intel.fuelGaps(line, { fuel: req.body?.fuel, ...(Number.isFinite(gapKm) && gapKm >= 20 && gapKm <= 400 ? { gapKm } : {}) }));
+  }));
+  // v3.62: Easy / Moderate / Challenging for a planned line, with reasons (k-anonymous cells only).
+  r.post('/route-difficulty', readLimiter, wrap(async (req, res) => {
+    const line = lineOf(req.body);
+    if (line.length < 2) return res.status(400).json({ error: 'A route line is required.', code: 'INVALID' });
+    const dep = Number(req.body?.departAt);
+    const departAt = Number.isFinite(dep) && dep > 0 ? dep : Date.now();
+    res.set('Cache-Control', 'private, max-age=600').json(await intel.insights.routeDifficulty(line, { departAt }));
   }));
   r.get('/me/contributions', readLimiter, wrap(async (req, res) => {
     res.set('Content-Disposition', 'attachment; filename="coroute-road-contributions.json"').json({ exportedAt: Date.now(), rows: await intel.exportContributions(req.user.userId),
@@ -200,6 +212,26 @@ function attachIntel({ app, soda, repo, gate, lease, convoys, mirror, poiCells =
       return res.status(409).json({ error: 'Aggregation runs on the other node (job lease). It runs within 5 minutes by itself.', code: 'NOT_LEASE_HOLDER' });
     }
     res.json(await intel.aggregate());
+  }));
+  // v3.62 insights for the web admin (aggregate only).
+  a.get('/insights', wrap(async (req, res) => {
+    const [corridors, stopDemand, trends, risk] = await Promise.all(['corridors', 'stopDemand', 'trends', 'risk'].map((id) => intel.insights.get(id).catch(() => null)));
+    res.set('Cache-Control', 'no-store').json({ corridors, stopDemand, trends, risk, database: await require('../oracle/intel_store').intelDbHealth(intel.intelDb || null).catch(() => null), kMin: intelConfig().kMin });
+  }));
+  a.post('/insights/run', wrap(async (req, res) => {
+    const st = lease ? lease.status()['intel-insights'] : null;
+    if (st && !st.holding) return res.status(409).json({ error: 'Insights run on the other node (job lease). They run daily by themselves.', code: 'NOT_LEASE_HOLDER' });
+    res.json(await intel.insights.run());
+  }));
+  // One rider's event rate: MASTER_ADMIN only, every view audited, never shown to riders.
+  a.get('/rider-risk/:userId', wrap(async (req, res) => {
+    if (!req.user || req.user.role !== 'MASTER_ADMIN') return res.status(403).json({ error: 'Only a master admin can see one rider.', code: 'FORBIDDEN' });
+    const userId = String(req.params.userId || '').slice(0, 120);
+    if (!/^[A-Za-z0-9_-]{3,120}$/.test(userId)) return res.status(400).json({ error: 'Invalid rider id.', code: 'INVALID' });
+    const by = req.user.email || req.user.userId;
+    if (repo && typeof repo.addAuditEntry === 'function') await repo.addAuditEntry({ by, byUserId: req.user.userId, action: 'intel.rider_risk.view', target: userId, details: {}, at: Date.now() }).catch(() => {});
+    try { audit?.record?.('INTEL_RIDER_RISK_VIEW', { by, target: userId }); } catch { /* best effort */ }
+    res.set('Cache-Control', 'no-store').json(await intel.insights.riderRisk(userId));
   }));
   a.get('/rider/:userId/export', wrap(async (req, res) => res.json({ rows: await intel.exportContributions(String(req.params.userId)) })));
   a.post('/rider/:userId/delete', wrap(async (req, res) => res.json(await intel.deleteContributions(String(req.params.userId)))));

@@ -7,7 +7,7 @@ You are the release agent for CoRoute (motorcycle group/solo riding SAFETY app: 
 website + web admin). Build 3.55.0+10030 is committed (latest commit 1a2356a). Two rounds are in the working tree,
 uncommitted: round 16 (3.55.0+10031, docs/NEXT_AGENT_PROMPT_v3.55_round16_explore_10031.md) and round 17 (this prompt).
 Ship them together as build 3.55.0+10032 (pubspec already 3.55.0+10032). Commit round 16 first exactly as its prompt
-section 2 says (skip its pubspec commit), then round 17 below (commits 1-16, including L, M and N in section 1). Then test, build, device QA, deploy, Play. Report after
+section 2 says (skip its pubspec commit), then round 17 below (commits 1-21, including L to P in section 1). Then test, build, device QA, deploy, Play. Report after
 each section. STOP at any failed safety gate.
 
 === 0. RULES ===
@@ -114,6 +114,45 @@ N) ROUND 19 (communities_chat_v360.md section 13): SOS push to riders whose app 
    for "Friends" the SOS still shows. w) slow network on A's profile (or a test account with Medical ID): the group
    sees the Medical ID on the SOS card within ~15 s. x) 15 SOS presses within a minute over HTTP: none refused.
 
+O) ROUND 20 (communities_chat_v360.md sections 14 and 15): phones stay signed in (sweep keeps live phone sessions,
+   lost-reply refresh grace on phones, expired long tokens renewed, secure storage never wiped, admin Phone sign-in
+   rule for new sign-ins only) and the web admin command center / configuration portal / feature switches / palette.
+   Commit as:
+   17. fix(sessions): phones stay signed in; admin phone sign-in rule for new sign-ins
+       gateway/src/sessions.js gateway/src/session_settings.js gateway/src/auth.js gateway/src/config.js
+       gateway/src/app.js gateway/src/routes.js gateway/deploy/.env.example gateway/test/sessions_stay_362.test.js
+       lib/data/local/secure_store.dart lib/data/services/api_client.dart lib/data/local/roster_store.dart
+       lib/data/local/sensitive_prefs.dart lib/data/services/offline_link/offline_link_service.dart
+   18. feat(admin): command center, configuration portal, feature switches on the web, command palette
+       gateway/public/admin/command.js gateway/public/admin/command.css gateway/public/admin/session_settings.js
+       gateway/public/admin/index.html gateway/public/admin/admin.js
+   QA: z1) a phone signed in today is still signed in after: airplane mode for an hour mid-refresh, force stop and
+   reopen, a reboot, 31 days unused (set lastSeenAt back on a test session), and an app update. z2) web admin opens on
+   Command center; numbers update every 15 s; Pause works; Ctrl+K finds "Feature switches"; turning a non-safety switch
+   off asks a reason and shows in Recent admin actions; SOS / crash show "Always on". z3) Phone sign-in: save 30 / 0 ->
+   a NEW phone sign-in gets the rule; a phone signed in before keeps working after 31 days; save 0 / 0 again.
+
+P) ROUND 21 (communities_chat_v360.md section 16; docs/intelligence/INTEL_DATABASE.md, INSIGHTS_v3.62.md): QA fixes,
+   security hardening, own intelligence database + insights. Commit as (use `git status` to place every changed file;
+   nothing may be left out):
+   19. fix(qa): double taps / double submits, operator console on phones, admin styles under CSP
+       gateway/public/operator/* gateway/public/admin/* (except intel.js) gateway/public/assets/signin.js
+       gateway/public/assets/account.js lib/presentation/rider/widgets/join_requests_card.dart
+       lib/presentation/rider/widgets/gathering_card.dart lib/presentation/garage/garage_screen.dart
+       lib/presentation/social/people_screen.dart gateway/test/qa_e2e_timing_362.test.js test/qa_double_tap_362_test.dart
+   20. fix(security): input guard, 2-step race, refresh replay cap, SOS push cap
+       gateway/src/input_guard.js gateway/src/ws.js gateway/src/auth.js gateway/src/sessions.js gateway/src/convoys.js
+       gateway/test/security_362_hardening.test.js
+   21. feat(intel): own intelligence database, insights (popular roads, route difficulty, stops, trends, risk)
+       gateway/src/oracle/intel_store.js gateway/src/intel/* gateway/src/app.js gateway/src/config.js
+       gateway/deploy/.env.example gateway/public/admin/intel.js lib/domain/intel/route_difficulty.dart
+       lib/presentation/trip_planner/trip_planner_screen.dart gateway/test/intel_362_*.test.js
+       test/route_difficulty_362_test.dart docs/intelligence/*
+   QA: z4) every cockpit / admin / operator button double tapped: one action. z5) operator console on a phone: menu
+   opens and closes. z6) Plan a ride with a route: the difficulty chip shows (or nothing without data). z7) web admin
+   Insights loads; with INTEL_SODA_URL set on a staging pair, run INTEL_DB_MIGRATE=1 and watch Main -> Copying ->
+   Own database; then remove INTEL_DB_MIGRATE. z8) a recovery code used twice at once: one succeeds.
+
 === 2. COMMITS (round 17, after round 16's commits 1-8) ===
 1. feat(gateway): communities public/private, join requests, picture, hosted rides
    gateway/src/crews.js gateway/src/crew_routes.js gateway/src/community_routes.js gateway/src/crew_ride_invites.js
@@ -147,12 +186,12 @@ N) ROUND 19 (communities_chat_v360.md section 13): SOS push to riders whose app 
     test/ui10_home_sections_test.dart
 11. docs(v3.60): communities_chat_v360.md and this prompt
     docs/features_355/communities_chat_v360.md docs/NEXT_AGENT_PROMPT_v3.55_round17_communities_10032.md
-    Before commit 12: make commits 13, 14, 15 and 16 (section 1, L, M and N).
+    Before commit 12: make commits 13 to 21 (section 1, L to P).
 12. chore(release): 3.55.0+10032   pubspec.yaml (+ checksums as in 10030)
    After commit 12: `git status --short` shows only _incoming/ (and ignored caches).
 
 === 3. TESTS ===
-- cd gateway && npm test -> expect 1487 tests, 0 failures. If public_ride_mirror or two_node_failover time out,
+- cd gateway && npm test -> expect 1508 tests, 0 failures. If public_ride_mirror or two_node_failover time out,
   re-run those two files alone (timing tests); a repeat failure alone is a real bug.
 - node deploy/gen_caddy_routes.js -> no change after commit 2.
 - flutter analyze -> 0 issues. flutter test -> all pass. Expected intentional changes are already in the tests

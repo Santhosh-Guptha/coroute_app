@@ -314,4 +314,123 @@
       load();
     },
   };
+  // ==================================================================== v3.62 insights (src/intel/insights.js)
+  var SLOTS = ['0-4', '4-8', '8-12', '12-16', '16-20', '20-24'];
+  function bars(values, labels, fmt) {
+    var max = Math.max.apply(null, values.concat([1]));
+    var wrap = h('div.ins-bars', { role: 'img', 'aria-label': labels.map(function (l, i) { return l + ' ' + values[i]; }).join(', ') });
+    values.forEach(function (v, i) {
+      wrap.appendChild(h('div.ins-bar', h('span.ins-bar__fill', { style: 'height:calc((100% - 20px) * ' + (v / max).toFixed(3) + ')' }), h('span.ins-bar__val', { text: fmt ? fmt(v) : Number(v).toLocaleString('en-IN') }), h('span.ins-bar__lbl', { text: labels[i] })));
+    });
+    return wrap;
+  }
+  function dbCard(db) {
+    if (!db) return null;
+    var mode = !db.separate ? 'Main database' : db.mode === 'intel' ? 'Own database' : db.mode === 'dual' ? 'Copying' : 'Main database (own one ready)';
+    var state = !db.separate ? 'ok' : db.intelDb !== 'UP' ? 'bad' : db.mode === 'intel' ? 'ok' : 'warn';
+    var lines = [h('div.cc-pill', h('span.cc-dot.cc-dot--' + state), h('span.cc-pill__label', { text: 'Intelligence data' }), h('span.cc-pill__text', { text: mode }))];
+    var note = !db.separate ? 'INTEL_SODA_URL is not set: intelligence lives in the main database.'
+      : db.mode === 'dual' ? 'Copying to the intelligence database: ' + (db.copiedTotal || 0) + ' documents so far (pass ' + ((db.progress && db.progress.pass) || 1) + '). Writes go to both until it finishes.'
+      : db.mode === 'intel' ? 'Reads and writes use the intelligence database (since ' + fmtDate(db.doneAt) + '). The old copies in the main database can be removed later.'
+      : 'The intelligence database is connected. Set INTEL_DB_MIGRATE=1 on one node to copy the data and switch.';
+    return h('div.card.cc-card', h('div.cc-card__head', h('h2', { text: 'Intelligence database' })), h('div.cc-strip', lines), h('p.muted.small', { text: note }),
+      db.mirrorErrors ? h('p.small', ui.chip(db.mirrorErrors + ' mirror errors', 'warn')) : null);
+  }
+  CR.sections.insights = {
+    title: 'Insights',
+    teardown: teardown,
+    render: function (view) {
+      teardown();
+      var runBtn = h('button.btn.btn--sm', { type: 'button', text: 'Recompute now' });
+      view.appendChild(h('div.cc-hero', h('div', h('p.cc-eyebrow', { text: 'Road & safety intelligence' }), h('h1', { text: 'Insights' }),
+        h('p.muted', { text: 'Popular roads, where riders stop, monthly trends and rider risk. Anonymous, k-anonymous totals only.' })), h('span.spacer'), runBtn));
+      var body = h('div', ui.loading());
+      view.appendChild(body);
+      runBtn.addEventListener('click', function () {
+        runBtn.disabled = true;
+        api('POST', '/admin/intel/insights/run', {}).then(function () { ui.toast('Insights recomputed.'); load(); }).catch(function (e) { ui.toast(e.message, true); }).then(function () { runBtn.disabled = false; });
+      });
+      function load() {
+        api('GET', '/admin/intel/insights').then(function (r) {
+          clear(body);
+          var db = dbCard(r.database); if (db) body.appendChild(db);
+          // Monthly trends.
+          var tr = r.trends && r.trends.months ? r.trends.months : {};
+          var months = Object.keys(tr).sort().slice(-12);
+          var tcard = h('section.card.cc-card.section-gap', h('div.cc-card__head', h('h2', { text: 'Monthly trends' })));
+          if (!months.length) tcard.appendChild(h('p.muted', { text: 'No months yet. Trends count while ride data is processed (every 5 minutes).' }));
+          else {
+            tcard.appendChild(h('h3.small.muted', { text: 'Km ridden (riders who share road data)' }));
+            tcard.appendChild(bars(months.map(function (m) { return Math.round(tr[m].km); }), months.map(function (m) { return m.slice(2); })));
+            tcard.appendChild(h('h3.small.muted', { text: 'Hard braking, swerves and skids per 1000 km' }));
+            tcard.appendChild(bars(months.map(function (m) { var e = tr[m].ev || {}; var n = (e.hard_brake || 0) + (e.swerve || 0) + (e.skid || 0); return tr[m].km > 0 ? Math.round((n / tr[m].km) * 1000) : 0; }), months.map(function (m) { return m.slice(2); })));
+            var last = tr[months[months.length - 1]];
+            var ev = last.ev || {};
+            body.appendChild(h('div.cc-kpis.section-gap',
+              h('div.cc-kpi', h('div.cc-kpi__top', h('span.cc-kpi__label', { text: 'Km this month' })), h('div.cc-kpi__value', { text: Math.round(last.km).toLocaleString('en-IN') }), h('div.cc-kpi__note', { text: Math.round(last.hours) + ' riding hours' })),
+              h('div.cc-kpi', h('div.cc-kpi__top', h('span.cc-kpi__label', { text: 'Hazard signals' })), h('div.cc-kpi__value', { text: String((ev.hard_brake || 0) + (ev.swerve || 0) + (ev.skid || 0)) }), h('div.cc-kpi__note', { text: 'this month' })),
+              h('div.cc-kpi', h('div.cc-kpi__top', h('span.cc-kpi__label', { text: 'Road quality reports' })), h('div.cc-kpi__value', { text: String((ev.pothole || 0) + (ev.rough || 0)) }), h('div.cc-kpi__note', { text: 'potholes and rough road' })),
+              h('div.cc-kpi', h('div.cc-kpi__top', h('span.cc-kpi__label', { text: 'SOS and crash' })), h('div.cc-kpi__value', { text: String((ev.sos || 0) + (ev.crash || 0)) }), h('div.cc-kpi__note', { text: 'from riders sharing road data' }))));
+          }
+          body.appendChild(tcard);
+          // Corridors.
+          var cor = r.corridors && r.corridors.list ? r.corridors.list : [];
+          var ccard = h('section.card.cc-card.section-gap', h('div.cc-card__head', h('h2', { text: 'Popular roads' }), h('span.muted.small', { text: cor.length ? 'computed ' + fmtDate(r.corridors.computedAt) : '' })));
+          if (!cor.length) ccard.appendChild(h('p.muted', { text: 'Not enough shared rides yet: a road shows here once at least ' + Math.max(5, r.kMin) + ' different riders rode each part of it.' }));
+          else {
+            var mapBox = h('div.intel-map', { style: 'height:340px' });
+            ccard.appendChild(mapBox);
+            var map = newMap(mapBox);
+            var tb = h('tbody');
+            cor.forEach(function (c, i) {
+              if (map && window.L) window.L.polyline(c.path, { color: '#2B7A8C', weight: 4, opacity: 0.8 }).addTo(map).bindPopup(popupText(['Road ' + (i + 1), c.lengthKm + ' km long', c.riddenKm + ' km ridden', c.weekendShare + '% at weekends']));
+              tb.appendChild(h('tr', h('td', { text: String(i + 1) }), h('td', { text: c.start[0] + ', ' + c.start[1] }), h('td', { text: c.end[0] + ', ' + c.end[1] }), h('td', { text: c.lengthKm + ' km' }),
+                h('td', { text: String(c.riddenKm) }), h('td', { text: c.weekendShare + '%' }), h('td', { text: c.minRiders + '+' })));
+            });
+            if (map && cor[0]) { try { map.fitBounds(cor.reduce(function (a, c) { return a.concat(c.path); }, []), { padding: [20, 20] }); } catch (e) { /* empty */ } }
+            ccard.appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', { text: '#' }), h('th', { text: 'From' }), h('th', { text: 'To' }), h('th', { text: 'Length' }), h('th', { text: 'Km ridden' }), h('th', { text: 'Weekend' }), h('th', { text: 'Riders' }))), tb)));
+          }
+          body.appendChild(ccard);
+          // Stop demand.
+          var sd = r.stopDemand && r.stopDemand.list ? r.stopDemand.list : [];
+          var scard = h('section.card.cc-card.section-gap', h('div.cc-card__head', h('h2', { text: 'Where and when riders stop' })));
+          if (!sd.length) scard.appendChild(h('p.muted', { text: 'No stop areas with enough riders yet.' }));
+          else {
+            var tot = [0, 0, 0, 0, 0, 0];
+            sd.forEach(function (a) { a.bySlot.forEach(function (x, i) { tot[i] += x; }); });
+            scard.appendChild(h('h3.small.muted', { text: 'Stops by time of day (all areas)' }));
+            scard.appendChild(bars(tot, SLOTS));
+            var st = h('tbody');
+            sd.slice(0, 15).forEach(function (a) { st.appendChild(h('tr', h('td.mono', { text: a.area }), h('td', { text: a.lat + ', ' + a.lng }), h('td', { text: String(a.stops) }), h('td', { text: String(a.fuel) }), h('td', { text: String(a.food) }), h('td', { text: a.peak || '-' }))); });
+            scard.appendChild(h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', { text: 'Area' }), h('th', { text: 'Centre' }), h('th', { text: 'Stops' }), h('th', { text: 'Fuel' }), h('th', { text: 'Food' }), h('th', { text: 'Busiest' }))), st)));
+          }
+          body.appendChild(scard);
+          // Rider risk (aggregate) + one rider (MASTER_ADMIN, audited).
+          var rk = r.risk || {};
+          var rcard = h('section.card.cc-card.section-gap', h('div.cc-card__head', h('h2', { text: 'Rider risk (last 30 days)' })));
+          if (!rk.counts) rcard.appendChild(h('p.muted', { text: rk.note || 'Not computed yet.' }));
+          else rcard.appendChild(bars([rk.counts.low, rk.counts.medium, rk.counts.high], ['Low', 'Medium', 'High']));
+          rcard.appendChild(h('p.muted.small', { text: 'Hard braking, swerves and skids per 100 km, for riders with 50 km or more who share road data. Low under 2, medium 2 to 6, high 6 or more. A signal for a conversation or a safety tip, never an automatic action, and never shown to riders.' }));
+          var uid = h('input', { type: 'text', placeholder: 'Rider user id', maxlength: '120', 'aria-label': 'Rider user id' });
+          var out = h('div');
+          var look = h('button.btn', { type: 'button', text: 'Look up one rider' });
+          look.addEventListener('click', function () {
+            var v = uid.value.trim(); if (!v) return;
+            api('GET', '/admin/intel/rider-risk/' + encodeURIComponent(v)).then(function (x) {
+              clear(out).appendChild(h('div.cc-strip', h('div.cc-pill', h('span.cc-dot.cc-dot--' + (x.bucket === 'high' ? 'bad' : x.bucket === 'medium' ? 'warn' : 'ok')), h('span.cc-pill__label', { text: 'Level' }), h('span.cc-pill__text', { text: x.bucket })),
+                h('div.cc-pill', h('span.cc-pill__label', { text: 'Rate' }), h('span.cc-pill__text', { text: x.rate === null ? '-' : x.rate + ' / 100 km' })),
+                h('div.cc-pill', h('span.cc-pill__label', { text: 'Km' }), h('span.cc-pill__text', { text: String(x.km) })),
+                h('div.cc-pill', h('span.cc-pill__label', { text: 'SOS / crash' }), h('span.cc-pill__text', { text: x.sos + ' / ' + x.crash }))));
+              out.appendChild(h('p.muted.small', { text: x.note + ' This lookup is in the audit log.' }));
+            }).catch(function (e) { ui.toast(e.message, true); });
+          });
+          rcard.appendChild(h('div.row', uid, look));
+          rcard.appendChild(out);
+          body.appendChild(rcard);
+          body.appendChild(kNote(Math.max(5, r.kMin)));
+        }).catch(function (e) { clear(body).appendChild(ui.error(e)); });
+      }
+      load();
+    },
+  };
 })();
