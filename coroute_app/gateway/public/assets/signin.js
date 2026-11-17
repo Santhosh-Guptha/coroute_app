@@ -272,6 +272,16 @@
     S.$('si-pw').focus();
   });
 
+
+  /** v3.62 QA: one request per form at a time (a double click / double Enter sent the same code or link twice). */
+  function once(formEl, run) {
+    if (formEl.dataset.busy === '1') return;
+    formEl.dataset.busy = '1';
+    var btns = formEl.querySelectorAll('button[type=submit], button:not([type])');
+    btns.forEach(function (b) { b.disabled = true; });
+    var done = function () { formEl.dataset.busy = ''; btns.forEach(function (b) { b.disabled = false; }); };
+    Promise.resolve().then(run).then(done, done);
+  }
   S.$('si-change').addEventListener('submit', function (e) {
     e.preventDefault();
     var a = S.$('si-new').value;
@@ -279,11 +289,11 @@
     var st = S.$('si-change-status');
     if (a.length < 8) { say(st, 'Use at least 8 characters.'); return; }
     if (a !== b) { say(st, 'The two passwords are not the same.'); return; }
-    S.api('POST', '/me/password', { newPassword: a }).then(function (r) {
+    once(S.$('si-change'), function () { return S.api('POST', '/me/password', { newPassword: a }).then(function (r) {
       if (!r.ok) { say(st, r.json.error || 'Could not save the new password.'); return; }
       if (r.json.token) S.setToken(r.json.token);
       go();
-    });
+    }); });
   });
 
   // 2-step code (or a recovery code).
@@ -321,7 +331,7 @@
     var body = useRc ? { mfaToken: mfaToken, recoveryCode: v, client: 'web' }
       : mfaEmail ? { mfaToken: mfaToken, emailCode: v.replace(/\s+/g, ''), client: 'web' }
         : { mfaToken: mfaToken, code: v.replace(/\s+/g, ''), client: 'web' };
-    S.api('POST', '/auth/mfa/verify', body, { auth: false }).then(function (r) {
+    once(S.$('si-mfa'), function () { return S.api('POST', '/auth/mfa/verify', body, { auth: false }).then(function (r) {
       if (!r.ok) {
         if (r.json.code === 'MFA_EXPIRED') { show('si-form'); say(status, 'That took too long. Sign in again.'); return; }
         if (rideLocked(r)) return;
@@ -329,7 +339,7 @@
         return;
       }
       signedIn(r.json);
-    });
+    }); });
   });
 
   // Reset by e-mail link.
@@ -340,14 +350,15 @@
     var st = S.$('si-reset-status');
     if (a.length < 8) { say(st, 'Use at least 8 characters.'); return; }
     if (a !== b) { say(st, 'The two passwords are not the same.'); return; }
-    S.api('POST', '/auth/password/reset', { token: resetToken, newPassword: a }, { auth: false }).then(function (r) {
+    if (!resetToken) return;
+    once(S.$('si-reset'), function () { return S.api('POST', '/auth/password/reset', { token: resetToken, newPassword: a }, { auth: false }).then(function (r) {
       if (!r.ok) { say(st, r.json.error || 'Could not save the new password.'); return; }
       resetToken = '';
       S.$('si-reset').hidden = true;
       form.hidden = false;
       notice('Your password was changed and every device was signed out. Sign in with the new password.', 'ok');
       S.$('si-id').focus();
-    });
+    }); });
   });
 
   var forgot = S.$('si-forgot');

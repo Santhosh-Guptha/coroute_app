@@ -44,8 +44,9 @@
       body.appendChild(h('div.table-wrap', h('table.table', h('thead', head), tb)));
       body.appendChild(h('p.muted.small', { text: 'Ride seats come from the plan (Small Group 6, Large Group 12) and are not changed here. When payments are off, every rider gets the Large Group column.' }));
       body.appendChild(h('div.row', h('button.btn.btn--primary', { type: 'button', text: 'Save', onclick: function () {
+        var btn = this; if (btn.disabled) return; btn.disabled = true; // v3.62 QA: one save per click
         api('PUT', '/admin/plan-features', { plans: cfg }).then(function () { ui.toast('Saved. Riders get it within a minute.'); render(view); })
-          .catch(function (e) { ui.toast(e.message, true); });
+          .catch(function (e) { btn.disabled = false; ui.toast(e.message, true); });
       } })));
     }).catch(function (e) { clear(body).appendChild(ui.error(e)); });
   }

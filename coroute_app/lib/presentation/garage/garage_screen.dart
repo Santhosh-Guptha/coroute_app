@@ -69,7 +69,10 @@ class _GarageScreenState extends State<GarageScreen> {
     final controller = TextEditingController(
       text: bike.totalOdometerKm.round().toString(),
     );
-    showAppDialog(
+    // v3.62 QA: one save per tap, and the text controller is disposed after the dialog has closed (it was disposed
+    // while the closing dialog still used it, and a double tap saved the service twice and disposed it twice).
+    var saving = false;
+    showAppDialog<void>(
       context, // round 7: app motion (spring scale + fade, reduce-motion aware)
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppTheme.card,
@@ -106,21 +109,21 @@ class _GarageScreenState extends State<GarageScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.of(dialogContext).maybePop();
-              controller.dispose();
-            },
+            onPressed: () => Navigator.of(dialogContext).maybePop(),
             child: Text('Cancel', style: TextStyle(color: AppTheme.muted)),
           ),
           ElevatedButton(
             onPressed: () async {
+              if (saving) return;
               final val = double.tryParse(controller.text.trim());
               if (val != null && val >= 0) {
-                await _garageService.recordServiceCompleted(bike.id, val);
-                if (dialogContext.mounted) {
-                  Navigator.of(dialogContext).maybePop();
-                  controller.dispose();
+                saving = true;
+                try {
+                  await _garageService.recordServiceCompleted(bike.id, val);
+                } finally {
+                  saving = false;
                 }
+                if (dialogContext.mounted) Navigator.of(dialogContext).maybePop();
               }
             },
             style: ElevatedButton.styleFrom(
@@ -131,7 +134,7 @@ class _GarageScreenState extends State<GarageScreen> {
           ),
         ],
       ),
-    );
+    ).whenComplete(() => Future<void>.delayed(const Duration(milliseconds: 600), controller.dispose));
   }
 
   @override

@@ -173,7 +173,20 @@ class _PeopleScreenState extends State<PeopleScreen> {
   }
 
   /// One tap on a person's chip: Add or Accept.
+  /// v3.62 QA: people whose Add / Accept is on its way (a double tap sent the request twice and toasted twice).
+  final Set<String> _acting = {};
+
   Future<void> _act(String username, String relation) async {
+    final key = username.toLowerCase();
+    if (!_acting.add(key)) return;
+    try {
+      await _actOnce(username, relation);
+    } finally {
+      _acting.remove(key);
+    }
+  }
+
+  Future<void> _actOnce(String username, String relation) async {
     final svc = context.read<FriendsService>();
     final chip = RelationChip.of(relation);
     if (chip.action == PeopleAction.accept) {

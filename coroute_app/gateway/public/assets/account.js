@@ -338,7 +338,12 @@
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) { st.textContent = 'Enter the new e-mail address.'; return; }
       if (!pw) { st.textContent = 'Enter your password to confirm it is you.'; return; }
       st.textContent = '';
+      // v3.62 QA: one link per click (a double click e-mailed two links).
+      if (f.dataset.busy === '1') return;
+      f.dataset.busy = '1';
+      var sb = f.querySelector('button[type=submit], button:not([type])'); if (sb) sb.disabled = true;
       S.api('POST', '/me/email', { newEmail: to, currentPassword: pw }).then(function (r) {
+        f.dataset.busy = ''; if (sb) sb.disabled = false;
         S.$('ac-email-pw').value = '';
         if (!r.ok) { st.textContent = (r.json && r.json.error) || 'Could not send the link.'; return; }
         var n = S.$('ac-email-notice');
@@ -346,7 +351,7 @@
         n.className = 'sh-notice sh-notice--ok';
         n.hidden = false;
         f.reset();
-      });
+      }, function () { f.dataset.busy = ''; if (sb) sb.disabled = false; st.textContent = 'Could not reach CoRoute. Check your connection.'; });
     });
   }
 

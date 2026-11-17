@@ -69,3 +69,10 @@ a.btn { text-decoration: none; }
 .contact + .privacy-note { margin-top: 10px; }
 @media (max-width: 1100px) { .shell { grid-template-rows: auto 1fr; } }
 .grid2 + .card, .tiles + .grid2 { margin-top: 16px; }
+.btn[aria-busy="true"] { opacity: .7; cursor: progress; }
+/* v3.62 QA: phones and tablets had no way to open the menu (the side panel is a drawer below 1100 px): top bar with
+   a menu button, a scrim, and one column for paired cards on phones. */
+.op-topbar { display: none; }
+.op-topbar__title { font-weight: 800; }
+@media (max-width: 1100px) { .op-topbar { display: flex; } }
+@media (max-width: 760px) { .grid2, .grid3 { grid-template-columns: minmax(0, 1fr); } }

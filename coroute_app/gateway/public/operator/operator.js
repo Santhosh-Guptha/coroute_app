@@ -133,6 +133,21 @@
       .then(function (j) { refreshing = null; if (j) store(TOKEN_KEY, j.token); return j; });
     return refreshing;
   }
+
+  // v3.62 QA: a write started by a button click keeps that button busy until the answer, and further clicks on a
+  // busy button are ignored: a double click never sends a broadcast, a refund or a campaign twice.
+  var clickBtn = null;
+  document.addEventListener('click', function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+    if (b && b.dataset.busy === '1') { ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+    clickBtn = b; setTimeout(function () { clickBtn = null; }, 0);
+  }, true);
+  function holdButton(method) {
+    var b = clickBtn;
+    if (!b || method === 'GET' || method === 'HEAD') return function () {};
+    b.dataset.busy = '1'; b.setAttribute('aria-busy', 'true');
+    return function () { delete b.dataset.busy; b.removeAttribute('aria-busy'); };
+  }
   function api(method, path, body, opts) {
     opts = opts || {};
     function send() {
@@ -165,7 +180,8 @@
         return j;
       });
     }
-    return send().then(function (res) { return handle(res, false); });
+    var release = holdButton(String(method).toUpperCase());
+    return send().then(function (res) { return handle(res, false); }).then(function (v) { release(); return v; }, function (e) { release(); throw e; });
   }
   function lastActive() { try { return Number(localStorage.getItem(ACTIVE_KEY)) || 0; } catch (e) { return Number(read(ACTIVE_KEY)) || 0; } }
   function touch() { var n = String(Date.now()); try { localStorage.setItem(ACTIVE_KEY, n); } catch (e) { store(ACTIVE_KEY, n); } }
@@ -260,23 +276,47 @@
         mfaByEmail = true; b.textContent = 'Send another e-mail code'; $('mfa-code').focus();
       });
   });
+  var mfaBusy = false;
   $('mfa-form').addEventListener('submit', function (e) {
     e.preventDefault();
+    // v3.62 QA: a double Enter sent the same one-time code twice (the second was refused as used and showed an error).
+    if (mfaBusy) return;
     var v = $('mfa-code').value.trim();
+    if (!v) { $('mfa-error').hidden = false; $('mfa-error').textContent = 'Enter the code.'; return; }
+    mfaBusy = true;
+    var mbtn = $('mfa-form').querySelector('button[type=submit]'); if (mbtn) mbtn.disabled = true;
+    var release = function () { mfaBusy = false; if (mbtn) mbtn.disabled = false; };
     var digits = /^\d[\d\s]{5,6}$/.test(v);
     var body = digits ? (mfaByEmail ? { emailCode: v.replace(/\s+/g, '') } : { code: v.replace(/\s+/g, '') }) : { recoveryCode: v };
     body.mfaToken = mfaToken; body.client = 'operator';
     fetch('/api/auth/mfa/verify', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CoRoute-Client': 'operator' }, body: JSON.stringify(body) })
       .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { return { res: res, j: j }; }); })
       .then(function (r) {
+        release();
         if (!r.res.ok || !r.j.token) { $('mfa-error').hidden = false; $('mfa-error').textContent = r.j.error || 'That code is not right.'; if (r.j.code === 'MFA_EXPIRED') signOut('That took too long. Sign in again.'); return; }
         store(TOKEN_KEY, r.j.token); touch();
         $('mfa-form').hidden = true; $('signin-form').hidden = false;
+        $('mfa-code').value = '';
         start();
-      });
+      }, function () { release(); $('mfa-error').hidden = false; $('mfa-error').textContent = 'Could not reach CoRoute. Check your connection.'; });
   });
   // Sign out: the server session ends and the cookie is cleared, then the home page (Back cannot return).
   $('signout').addEventListener('click', function () { signOut('', { server: true, home: true }); });
+  // v3.62 QA: the menu drawer on phones and tablets (Escape and a link close it).
+  (function () {
+    var btn = $('menu-btn'); var scrim = $('side-scrim');
+    if (!btn) return;
+    function set(open) {
+      document.body.classList.toggle('nav-open', open);
+      btn.setAttribute('aria-expanded', String(open));
+      if (scrim) scrim.hidden = !open;
+      if (open) { var a = document.querySelector('#nav a[aria-current="page"]') || document.querySelector('#nav a'); if (a) a.focus(); }
+    }
+    btn.addEventListener('click', function () { set(!document.body.classList.contains('nav-open')); });
+    if (scrim) scrim.addEventListener('click', function () { set(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { set(false); btn.focus(); } });
+    document.querySelectorAll('#nav a').forEach(function (a) { a.addEventListener('click', function () { set(false); }); });
+  })();
   $('noop-out').addEventListener('click', function () { signOut('', { server: true, home: true }); });
 
   function start() {
@@ -329,6 +369,7 @@
     current = name;
     var view = clear($('view'));
     document.title = sections[name].title + ' · ' + S.op.name + ' · CoRoute Operator';
+    var tt = document.getElementById('op-topbar-title'); if (tt) tt.textContent = sections[name].title;
     if (S.op.status === 'EXPIRED') view.appendChild(h('div.banner', { text: 'This operator account expired on ' + date(S.op.validUntil) + '. You can read your reports; ask CoRoute to extend it to run rides again.' }));
     try { sections[name].render(view, m && m[2] ? decodeURIComponent(m[2]) : ''); } catch (e) { view.appendChild(errorNode(e)); }
     view.focus({ preventScroll: true });

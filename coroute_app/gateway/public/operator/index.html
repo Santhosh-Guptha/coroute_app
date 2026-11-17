@@ -48,7 +48,7 @@
 </main>
 
 <div id="shell" class="shell" hidden>
-  <aside class="side">
+  <aside class="side" id="side" aria-label="Menu">
     <div class="brandline"><img src="/favicon.svg" alt="" width="28" height="28"><span>CoRoute <b>Operator</b></span></div>
     <select id="op-switch" class="select--sm" aria-label="Operator" hidden></select>
     <nav id="nav" class="nav" aria-label="Sections">
@@ -71,7 +71,14 @@
       </div>
     </div>
   </aside>
-  <main id="view" class="view" tabindex="-1"></main>
+  <div class="side-scrim" id="side-scrim" hidden></div>
+  <div class="maincol">
+    <header class="topbar op-topbar">
+      <button id="menu-btn" class="btn btn--ghost btn--icon menu-btn" type="button" aria-label="Open menu" aria-controls="side" aria-expanded="false">&#9776;</button>
+      <span class="op-topbar__title" id="op-topbar-title">CoRoute Operator</span>
+    </header>
+    <main id="view" class="view" tabindex="-1"></main>
+  </div>
 </div>
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
