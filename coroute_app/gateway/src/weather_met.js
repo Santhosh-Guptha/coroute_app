@@ -84,11 +84,13 @@ function cellOf(json) {
   const t0 = Date.parse(ts[0] && ts[0].time);
   if (!Number.isFinite(t0)) return null;
   const from = Math.floor(t0 / 3600000) * 3600;
-  const probs = [], mm = [], codes = [], temps = [];
+  const probs = [], mm = [], codes = [], temps = [], winds = [];
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  const put = (i, p, m, c, t) => {
+  const put = (i, p, m, c, t, w = null) => {
     if (i < 0 || i >= MAX_HOURS || probs[i] !== undefined) return;
     probs[i] = p; mm[i] = m == null ? null : Math.round(m * 10) / 10; codes[i] = c; temps[i] = t == null ? null : Math.round(t * 10) / 10;
+    // v3.63: wind for the stop weather (MET wind_speed m/s -> km/h, whole numbers).
+    winds[i] = w == null ? null : Math.round(w * 3.6);
   };
   for (const e of ts) {
     const at = Date.parse(e && e.time);
@@ -96,24 +98,25 @@ function cellOf(json) {
     if (!Number.isFinite(at) || !d) continue;
     const i = Math.round((at / 1000 - from) / 3600);
     const temp = num(d.instant && d.instant.details && d.instant.details.air_temperature);
+    const wind = num(d.instant && d.instant.details && d.instant.details.wind_speed);
     const h1 = d.next_1_hours, h6 = d.next_6_hours;
     const p6 = num(h6 && h6.details && h6.details.probability_of_precipitation);
     if (h1) {
       const m = num(h1.details && h1.details.precipitation_amount);
       const c = wmoOf(h1.summary && h1.summary.symbol_code);
       const p1 = num(h1.details && h1.details.probability_of_precipitation);
-      put(i, p1 != null ? Math.round(p1) : hourProb(m, c, p6), m, c, temp);
+      put(i, p1 != null ? Math.round(p1) : hourProb(m, c, p6), m, c, temp, wind);
     } else if (h6) {
       const total = num(h6.details && h6.details.precipitation_amount);
       const m = total == null ? null : total / 6;
       const c = wmoOf(h6.summary && h6.summary.symbol_code);
-      for (let k = 0; k < 6; k++) put(i + k, hourProb(m, c, p6), m, c, temp);
+      for (let k = 0; k < 6; k++) put(i + k, hourProb(m, c, p6), m, c, temp, wind);
     }
   }
   const n = probs.length;
   if (!n) return null;
   const fill = (a) => Array.from({ length: n }, (_, i) => (a[i] === undefined ? null : a[i]));
-  return { hourlyFrom: from, probs: fill(probs), mm: fill(mm), codes: fill(codes), temps: fill(temps) };
+  return { hourlyFrom: from, probs: fill(probs), mm: fill(mm), codes: fill(codes), temps: fill(temps), winds: fill(winds) };
 }
 
 /** `Expires` header -> epoch ms, at most 6 hours ahead (a broken header never pins a cell), or 0. */

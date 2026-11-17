@@ -405,7 +405,7 @@ class GeoProxy {
    * 500 cells in front of geo_cache), so every rider on the same road shares one forecast. Missing
    * cells go upstream within a global budget of WEATHER_PER_MIN calls a minute; over budget, cached
    * cells are answered and the rest are null. Returns
-   * { points: [{lat, lng, at, precipProb, precipMm, code, tempC} | null], source, attribution }
+   * { points: [{lat, lng, at, precipProb, precipMm, code, tempC, windKmh} | null], source, attribution }
    * or null when disabled. Nothing about the points is logged.
    *
    * 3.56 provider (WEATHER_PROVIDER, src/weather_met.js): 'metno' (default; MET Norway, free for
@@ -465,7 +465,7 @@ class GeoProxy {
       if (idx < 0 || idx >= f.probs.length) return null;
       const n = (v) => (Number.isFinite(v) ? v : null);
       if (n(f.probs[idx]) === null && n(f.codes[idx]) === null) return null;
-      return { lat: round(p.lat, 5), lng: round(p.lng, 5), at: p.at, precipProb: n(f.probs[idx]), precipMm: n(f.mm[idx]), code: n(f.codes[idx]), tempC: n(f.temps[idx]) };
+      return { lat: round(p.lat, 5), lng: round(p.lng, 5), at: p.at, precipProb: n(f.probs[idx]), precipMm: n(f.mm[idx]), code: n(f.codes[idx]), tempC: n(f.temps[idx]), windKmh: Array.isArray(f.winds) ? n(f.winds[idx]) : null };
     });
     return provider === 'metno'
       ? { points: out, source: wxMet.SOURCE, attribution: wxMet.ATTRIBUTION }

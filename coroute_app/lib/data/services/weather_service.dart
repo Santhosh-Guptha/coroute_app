@@ -30,7 +30,10 @@ class WeatherReading {
   final double precipMm;
   final int code;
   final double? tempC;
-  const WeatherReading({required this.precipProb, required this.precipMm, required this.code, this.tempC});
+
+  /// v3.63: wind at that hour (km/h; null when the source does not give it).
+  final int? windKmh;
+  const WeatherReading({required this.precipProb, required this.precipMm, required this.code, this.tempC, this.windKmh});
 
   /// WMO codes 51..67 (drizzle, rain) and 80..82 (showers).
   bool get rainCode => (code >= 51 && code <= 67) || (code >= 80 && code <= 82);
@@ -46,6 +49,7 @@ class WeatherReading {
       precipMm: (j['precipMm'] as num?)?.toDouble() ?? 0,
       code: (j['code'] as num?)?.toInt() ?? 0,
       tempC: (j['tempC'] as num?)?.toDouble(),
+      windKmh: (j['windKmh'] as num?)?.round(),
     );
   }
 }
@@ -95,6 +99,16 @@ class WeatherService extends ChangeNotifier {
 
   /// The latest answer (the ride sheet shows its line while [WeatherSummary.rain]).
   WeatherSummary? get last => _last;
+
+  List<WeatherPoint> _lastPoints = const [];
+  List<WeatherReading?> _lastReadings = const [];
+
+  /// v3.63 weather at stops: the named points (planned stops and the destination) of the latest answer with their
+  /// reading at the expected time. Empty before the first answer or when no point is named.
+  List<(WeatherPoint, WeatherReading)> get lastStops => [
+        for (var i = 0; i < _lastPoints.length && i < _lastReadings.length; i++)
+          if (_lastPoints[i].name.isNotEmpty && _lastReadings[i] != null) (_lastPoints[i], _lastReadings[i]!),
+      ];
 
   /// A request is on its way ("Checking weather...").
   bool get checking => _checking;
@@ -222,6 +236,10 @@ class WeatherService extends ChangeNotifier {
         }
         final attribution = res['attribution']?.toString() ?? L10n.t('weather.by');
         out = summarise(pts, readings, fetchedAt: _clock(), attribution: attribution);
+        if (out != null) {
+          _lastPoints = List.unmodifiable(pts);
+          _lastReadings = List.unmodifiable(readings);
+        }
       }
     } on ApiException catch (e) {
       _weatherUnavailable = true;

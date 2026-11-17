@@ -29,6 +29,8 @@ import '../../data/services/tile_cache_service.dart';
 import '../../data/services/membership_service.dart';
 import '../garage/complete_bike_sheet.dart'; // 3.55 mandatory bike details
 import '../../domain/intel/route_difficulty.dart'; // v3.62 route difficulty chip
+import '../checklist/pre_ride_checklist_screen.dart'; // v3.63 trip planning lite
+import 'stop_weather_list.dart';
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
 /// (picked on the map or by long-pressing it), then Review and Start Ride.
@@ -851,6 +853,17 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
                 ],
               ),
             ),
+          // v3.63 trip planning lite: weather at the stops (after the review sheet asked) and the optional checklist.
+          const StopWeatherList(),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('planner_checklist'),
+              onPressed: () => PreRideChecklistScreen.open(context),
+              icon: const Icon(Icons.checklist_rounded, size: 20),
+              label: const Text('Pre-ride checklist'),
+            ),
+          ),
         ],
         const SizedBox(height: 16),
         _TimelineRow(

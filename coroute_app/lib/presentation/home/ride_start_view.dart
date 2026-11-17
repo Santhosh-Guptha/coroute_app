@@ -26,6 +26,7 @@ import '../../data/services/device_diagnostic_service.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../garage/garage_screen.dart';
 import '../garage/complete_bike_sheet.dart'; // 3.55 mandatory bike details
+import '../checklist/pre_ride_checklist_screen.dart'; // v3.63 trip planning lite
 
 /// The Home tab when no ride is active: greeting, the "No active ride" hero
 /// card with [Start Ride], the "Plan a route" / "Join Ride" tiles, the bike
@@ -942,6 +943,16 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
                     ),
                   )
                 : Text(_serverBusy && err != null ? 'Try again' : 'Join'),
+          ),
+          // v3.63: optional pre-ride checklist (never blocks joining).
+          const SizedBox(height: Space.s8),
+          Align(
+            child: TextButton.icon(
+              key: const Key('join_checklist'),
+              onPressed: () => PreRideChecklistScreen.open(context),
+              icon: const Icon(Icons.checklist_rounded, size: 20),
+              label: const Text('Pre-ride checklist'),
+            ),
           ),
         ],
       ),

@@ -1,4 +1,6 @@
 import '../ride/essentials_sheet.dart';
+import '../checklist/pre_ride_checklist_screen.dart';
+import 'stop_weather_list.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
@@ -236,6 +238,8 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                     // The credit the gateway sent for its provider (MET Norway by default), else the built-in line.
                     child: Text(_weather?.attribution.isNotEmpty == true ? _weather!.attribution : L10n.t('weather.by'), style: AppText.caption),
                   ),
+                // v3.63 trip planning lite: rain chance, temperature and wind at each named stop at its ETA.
+                if (!_checking && _weather != null) const Padding(padding: EdgeInsets.only(left: 32), child: StopWeatherList()),
               ],
               if (dark != null) ...[
                 const SizedBox(height: Space.s12),
@@ -245,6 +249,16 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
               const _Note(
                 icon: Icons.group_add_outlined,
                 text: 'After you start, share the ride code so your group can join.',
+              ),
+              // v3.63: optional pre-ride checklist (never blocks the start).
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const Key('trip_review_checklist'),
+                  onPressed: () => PreRideChecklistScreen.open(context),
+                  icon: const Icon(Icons.checklist_rounded),
+                  label: const Text('Pre-ride checklist'),
+                ),
               ),
               const SizedBox(height: 18),
               Row(
