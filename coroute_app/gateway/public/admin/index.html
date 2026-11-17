@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="/admin/notify.css">
 <link rel="stylesheet" href="/admin/email_studio.css">
 <link rel="stylesheet" href="/admin/leaflet.css">
+<link rel="stylesheet" href="/admin/command.css">
 <script defer src="/admin/qr.js"></script>
 <script defer src="/admin/studio_core.js"></script>
 <script defer src="/admin/admin.js"></script>
@@ -30,8 +31,10 @@
 <script defer src="/admin/intel.js"></script>
 <script defer src="/admin/explore.js"></script>
 <script defer src="/admin/plan_features.js"></script>
+<script defer src="/admin/session_settings.js"></script>
 <script defer src="/admin/business.js"></script>
 <script defer src="/admin/console.js"></script>
+<script defer src="/admin/command.js"></script>
 </head>
 <body>
 <noscript><p class="noscript">The CoRoute admin console needs JavaScript.</p></noscript>
@@ -75,8 +78,13 @@
   <aside class="side" id="side" aria-label="Menu">
     <div class="brandline"><img src="/favicon.svg" alt="" width="28" height="28"><span>CoRoute <b>Admin</b></span></div>
     <nav id="nav" class="nav" aria-label="Sections">
+      <a href="#/command" data-section="command">Command center</a>
       <a href="#/overview" data-section="overview">Overview</a>
       <a href="#/riders" data-section="riders">Riders</a>
+      <p class="nav__group">Configuration</p>
+      <a href="#/config" data-section="config">All settings</a>
+      <a href="#/features" data-section="features">Feature switches</a>
+      <a href="#/phonesignin" data-section="phonesignin">Phone sign-in</a>
       <p class="nav__group">Plans &amp; coupons</p>
       <a href="#/payments" data-section="payments">Payments</a>
       <a href="#/plans" data-section="plans">Plans &amp; pricing</a>
@@ -93,6 +101,7 @@
       <a href="#/operators" data-section="operators">Operators</a>
       <a href="#/engagement" data-section="engagement">Ratings &amp; feedback</a>
       <p class="nav__group">Road &amp; safety intelligence</p>
+      <a href="#/insights" data-section="insights">Insights</a>
       <a href="#/hazards" data-section="hazards">Hazard map</a>
       <a href="#/crashbrain" data-section="crashbrain">Crash brain</a>
       <a href="#/riderstops" data-section="riderstops">Rider stops</a>

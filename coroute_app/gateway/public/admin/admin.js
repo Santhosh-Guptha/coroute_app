@@ -29,6 +29,8 @@
       else if (k === 'dataset') Object.keys(v).forEach(function (d) { el.dataset[d] = v[d]; });
       else if (k === 'value') el.value = v;
       else if (k === 'checked' || k === 'disabled' || k === 'selected' || k === 'hidden') el[k] = !!v;
+      // The console CSP is style-src 'self': a style attribute is refused, CSSOM is not (v3.62 QA: widths and meters were lost).
+      else if (k === 'style') el.style.cssText = String(v);
       else el.setAttribute(k, v === true ? '' : v);
     });
     append(el, kids);
@@ -156,6 +158,21 @@
   }
 
   /** fetch /api + path with the admin's token. opts: { raw: true } returns the Response. A 401 refreshes once, then signs out. */
+
+  // v3.62 QA: a write started by a button click keeps that button busy until the answer, and further clicks on a
+  // busy button are ignored: a double click never sends a broadcast, a refund or a campaign twice.
+  var clickBtn = null;
+  document.addEventListener('click', function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+    if (b && b.dataset.busy === '1') { ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+    clickBtn = b; setTimeout(function () { clickBtn = null; }, 0);
+  }, true);
+  function holdButton(method) {
+    var b = clickBtn;
+    if (!b || method === 'GET' || method === 'HEAD') return function () {};
+    b.dataset.busy = '1'; b.setAttribute('aria-busy', 'true');
+    return function () { delete b.dataset.busy; b.removeAttribute('aria-busy'); };
+  }
   function api(method, path, body, opts) {
     opts = opts || {};
     function send() {
@@ -187,7 +204,8 @@
       });
     }
     // (No touch() here: background polls must not keep an unattended console signed in.)
-    return send().then(function (res) { return handle(res, false); });
+    var release = holdButton(String(method).toUpperCase());
+    return send().then(function (res) { return handle(res, false); }).then(function (v) { release(); return v; }, function (e) { release(); throw e; });
   }
   CR.api = api;
   CR.token = token;
@@ -420,7 +438,7 @@
       if (MOVED[i][0].test(location.hash)) { location.replace(location.hash.replace(MOVED[i][0], MOVED[i][1])); return; }
     }
     var m = /^#\/([a-z]+)(?:\/(.*))?$/.exec(location.hash || '');
-    var name = m && CR.sections[m[1]] ? m[1] : (CR.sections.overview ? 'overview' : 'payments');
+    var name = m && CR.sections[m[1]] ? m[1] : (CR.sections.command ? 'command' : CR.sections.overview ? 'overview' : 'payments');
     var arg = m && m[2] ? decodeURIComponent(m[2]) : '';
     var navName = NAV_OF[name] || name;
     document.querySelectorAll('#nav a').forEach(function (a) { if (a.dataset.section === navName) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
