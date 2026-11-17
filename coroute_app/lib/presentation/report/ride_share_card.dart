@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_palette.dart';
 import '../../core/ui/ui.dart';
 import 'package:coroute_app/core/ui/coroute_logo.dart';
+import '../../domain/share/ride_card.dart';
 
 /// What the post-ride share card shows. Only real numbers: a value that is
 /// not known is left out of the card (never shown as 0 or guessed).
@@ -39,6 +40,13 @@ class RideShareData {
   /// the sketch is not drawn across them.
   final Set<int> sketchBreaks;
 
+  /// v3.63: my CoRoute rider score and level (null = not ready); road hazards logged on the ride and SOS count
+  /// (null = not known). Only real numbers are printed.
+  final int? score;
+  final String? scoreLevel;
+  final int? hazards;
+  final int? sos;
+
   const RideShareData({
     required this.tripName,
     required this.date,
@@ -50,6 +58,10 @@ class RideShareData {
     this.to = '',
     this.sketch = const [],
     this.sketchBreaks = const {},
+    this.score,
+    this.scoreLevel,
+    this.hazards,
+    this.sos,
   });
 
   bool get hasDistance => distanceM > 0 && distanceM.isFinite;
@@ -57,10 +69,8 @@ class RideShareData {
 
   String get dateText => DateFormat('EEE d MMM yyyy').format(date);
 
-  String get routeText {
-    if (from.isEmpty && to.isEmpty) return '';
-    return '${from.isEmpty ? 'Start' : from} to ${to.isEmpty ? 'destination' : to}';
-  }
+  /// v3.63 privacy: only where the ride went ("Ride to Nandi Hills"), never where it started (often home).
+  String get routeText => RideCard.routeLine(to);
 
   /// A safe file name for the image, from the trip name.
   String get fileName {
@@ -84,6 +94,9 @@ class RideShareData {
       if (routeText.isNotEmpty) routeText,
       if (facts.isNotEmpty) facts.join(', '),
       group.join(', '),
+      if (RideCard.scoreOf(score, scoreLevel) != null) '${RideCard.scoreOf(score, scoreLevel)!.label}: ${score!}',
+      if (RideCard.hazardsText(hazards) != null) RideCard.hazardsText(hazards)!,
+      if (RideCard.safetyLine(sos: sos) != null) RideCard.safetyLine(sos: sos)!,
     ].join('\n');
   }
 
@@ -111,101 +124,132 @@ class RideShareData {
 /// The card itself: a fixed light surface (it is an image to share, so it
 /// looks the same whatever theme the phone uses) with a hairline border, so it
 /// also reads well on a dark sheet. No gradients, no emoji, no map tiles.
+/// v3.63: [format] gives the exact shape of the shared image (square for WhatsApp, 9:16 for Instagram Stories);
+/// the route sketch takes the room that is left.
 class RideShareCard extends StatelessWidget {
   final RideShareData data;
+  final RideCardFormat format;
 
-  const RideShareCard({super.key, required this.data});
+  const RideShareCard({super.key, required this.data, this.format = RideCardFormat.square});
 
   static const AppPalette _p = AppPalette.light;
 
   @override
   Widget build(BuildContext context) {
+    final score = RideCard.scoreOf(data.score, data.scoreLevel);
     final stats = <_CardStat>[
       if (data.hasDistance) _distanceStat(data.distanceM),
       if (data.hasRiding) _CardStat(value: formatDuration(Duration(milliseconds: data.ridingMs!)), label: 'Riding time'),
+      if (score != null) _CardStat(value: score.value, label: score.label),
       if (data.riders > 0) _CardStat(value: '${data.riders}', label: data.riders == 1 ? 'Rider' : 'Riders'),
-      _CardStat(value: '${data.stops}', label: data.stops == 1 ? 'Stop' : 'Stops'),
+      if (score == null || format == RideCardFormat.story) _CardStat(value: '${data.stops}', label: data.stops == 1 ? 'Stop' : 'Stops'),
+    ];
+    final safety = <String>[
+      if (RideCard.hazardsText(data.hazards) != null) RideCard.hazardsText(data.hazards)!,
+      if (RideCard.safetyLine(sos: data.sos) != null) RideCard.safetyLine(sos: data.sos)!,
     ];
     final route = data.routeText;
-    // The image keeps its layout at large font sizes (up to x1.3).
+    final story = format == RideCardFormat.story;
+    final baseWidth = story ? 360.0 : 400.0;
+    final baseHeight = baseWidth / format.aspect;
+    // The image keeps its layout at large font sizes (up to x1.3) and scales to fit any card box.
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.3,
-      child: Container(
-        padding: const EdgeInsets.all(Space.s12),
-        color: _p.bg,
-        child: Container(
-          padding: const EdgeInsets.all(Space.s16),
-          decoration: BoxDecoration(
-            color: _p.card,
-            borderRadius: Radii.xlAll,
-            border: Border.all(color: _p.border, width: 2),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  // v3.58 logo on every shared ride card.
-                  CoRouteWordmark(fontSize: 18, color: _p.text),
-                  const SizedBox(width: Space.s8),
-                  Expanded(
-                    child: Text(
-                      data.dateText,
-                      textAlign: TextAlign.end,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.caption.copyWith(color: _p.muted, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: Space.s12),
-              Text(
-                data.tripName.isEmpty ? 'Group ride' : data.tripName,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: AppText.headline.copyWith(color: _p.text, fontSize: 20),
-              ),
-              if (route.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: Space.s4),
-                  child: Text(route, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: _p.muted)),
+      child: AspectRatio(
+        aspectRatio: format.aspect,
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: baseWidth,
+            height: baseHeight,
+            child: Container(
+              padding: const EdgeInsets.all(Space.s12),
+              color: _p.bg,
+              child: Container(
+                padding: EdgeInsets.all(story ? Space.s24 : Space.s16),
+                decoration: BoxDecoration(
+                  color: _p.card,
+                  borderRadius: Radii.xlAll,
+                  border: Border.all(color: _p.border, width: 2),
                 ),
-              if (data.sketch.isNotEmpty) ...[
-                const SizedBox(height: Space.s12),
-                AspectRatio(
-                  aspectRatio: 2,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(color: _p.brand, borderRadius: Radii.lgAll),
-                    child: CustomPaint(
-                      painter: RouteSketchPainter(
-                        points: data.sketch,
-                        breaks: data.sketchBreaks,
-                        lineColor: Colors.white,
-                        startColor: Colors.white,
-                        endColor: _p.brand,
-                        ringColor: Colors.white,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                Row(
+                  children: [
+                    // v3.58 logo on every shared ride card.
+                    CoRouteWordmark(fontSize: story ? 22 : 18, color: _p.text),
+                    const SizedBox(width: Space.s8),
+                    Expanded(
+                      child: Text(
+                        data.dateText,
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.caption.copyWith(color: _p.muted, fontWeight: FontWeight.w700),
                       ),
                     ),
+                  ],
+                ),
+                SizedBox(height: story ? Space.s24 : Space.s12),
+                Text(
+                  data.tripName.isEmpty ? 'Group ride' : data.tripName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.headline.copyWith(color: _p.text, fontSize: story ? 26 : 20),
+                ),
+                if (route.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: Space.s4),
+                    child: Text(route, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: _p.muted)),
+                  ),
+                const SizedBox(height: Space.s12),
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(color: _p.brand, borderRadius: Radii.lgAll),
+                    child: data.sketch.isEmpty
+                        ? Center(child: Icon(Icons.two_wheeler_rounded, size: story ? 96 : 64, color: Colors.white.withValues(alpha: 0.85)))
+                        : CustomPaint(
+                            painter: RouteSketchPainter(
+                              points: data.sketch,
+                              breaks: data.sketchBreaks,
+                              lineColor: Colors.white,
+                              startColor: Colors.white,
+                              endColor: _p.brand,
+                              ringColor: Colors.white,
+                            ),
+                          ),
                   ),
                 ),
+                const SizedBox(height: Space.s12),
+                LayoutBuilder(builder: (context, c) {
+                  final w = (c.maxWidth - Space.s8) / 2;
+                  return Wrap(
+                    spacing: Space.s8,
+                    runSpacing: Space.s8,
+                    children: [for (final s in stats) SizedBox(width: w, child: s)],
+                  );
+                }),
+                if (safety.isNotEmpty) ...[
+                  const SizedBox(height: Space.s8),
+                  Row(children: [
+                    Icon(Icons.verified_user_outlined, size: 18, color: _p.brand),
+                    const SizedBox(width: Space.s8),
+                    Expanded(
+                      child: Text(safety.join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis,
+                          style: AppText.label.copyWith(color: _p.text, fontWeight: FontWeight.w700)),
+                    ),
+                  ]),
+                ],
               ],
-              const SizedBox(height: Space.s12),
-              LayoutBuilder(builder: (context, c) {
-                final w = (c.maxWidth - Space.s8) / 2;
-                return Wrap(
-                  spacing: Space.s8,
-                  runSpacing: Space.s8,
-                  children: [for (final s in stats) SizedBox(width: w, child: s)],
-                );
-              }),
-            ],
+            ),
           ),
         ),
       ),
-    );
-  }
+    ),
+  ),
+);
+}
 
   /// "186 km" as value 186 and unit km.
   static _CardStat _distanceStat(double meters) {
@@ -396,7 +440,8 @@ class RideSharePreview extends StatefulWidget {
   static Future<Uint8List?> capturePng(GlobalKey key, {double targetWidthPx = 1080}) async {
     final ro = key.currentContext?.findRenderObject();
     if (ro is! RenderRepaintBoundary || !ro.hasSize || ro.size.width <= 0) return null;
-    final ratio = (targetWidthPx / ro.size.width).clamp(2.0, 4.0);
+    // v3.63: exactly 1080 px wide (1080 x 1080 square, 1080 x 1920 story: the card has the format's aspect ratio).
+    final ratio = (targetWidthPx / ro.size.width).clamp(1.0, 6.0);
     final image = await ro.toImage(pixelRatio: ratio);
     try {
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -413,6 +458,7 @@ class RideSharePreview extends StatefulWidget {
 class _RideSharePreviewState extends State<RideSharePreview> {
   final GlobalKey _boundary = GlobalKey();
   bool _busy = false;
+  RideCardFormat _format = RideCardFormat.square;
 
   String get _text => widget.text ?? widget.data.toText();
   String get _subject => 'CoRoute ride: ${widget.data.tripName}';
@@ -423,9 +469,17 @@ class _RideSharePreviewState extends State<RideSharePreview> {
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
-  Future<void> _shareText(Rect? origin) {
-    return SharePlus.instance.share(ShareParams(text: _text, subject: _subject, sharePositionOrigin: origin));
+  Future<void> _shareText(Rect? origin) async {
+    if (_textBusy) return; // v3.63: a double tap opens the share sheet once
+    _textBusy = true;
+    try {
+      await SharePlus.instance.share(ShareParams(text: _text, subject: _subject, sharePositionOrigin: origin));
+    } finally {
+      _textBusy = false;
+    }
   }
+
+  bool _textBusy = false;
 
   Future<void> _shareImage(BuildContext buttonContext) async {
     if (_busy) return;
@@ -445,7 +499,7 @@ class _RideSharePreviewState extends State<RideSharePreview> {
       }
       try {
         await SharePlus.instance.share(ShareParams(
-          files: [XFile.fromData(png, mimeType: 'image/png', name: widget.data.fileName)],
+          files: [XFile.fromData(png, mimeType: 'image/png', name: _format == RideCardFormat.story ? widget.data.fileName.replaceAll('.png', '_story.png') : widget.data.fileName)],
           subject: _subject,
           sharePositionOrigin: origin,
         ));
@@ -469,12 +523,23 @@ class _RideSharePreviewState extends State<RideSharePreview> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // v3.63: WhatsApp (square) or Instagram story (9:16).
+        SegmentedButton<RideCardFormat>(
+          key: const Key('ride_card_format'),
+          segments: const [
+            ButtonSegment(value: RideCardFormat.square, label: Text('WhatsApp'), icon: Icon(Icons.crop_square_rounded)),
+            ButtonSegment(value: RideCardFormat.story, label: Text('Story'), icon: Icon(Icons.crop_portrait_rounded)),
+          ],
+          selected: {_format},
+          onSelectionChanged: _busy ? null : (v) => setState(() => _format = v.first),
+        ),
+        const SizedBox(height: Space.s12),
         Flexible(
           child: SingleChildScrollView(
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 400),
-                child: RepaintBoundary(key: _boundary, child: RideShareCard(data: widget.data)),
+                constraints: BoxConstraints(maxWidth: _format == RideCardFormat.story ? 300 : 400),
+                child: RepaintBoundary(key: _boundary, child: RideShareCard(data: widget.data, format: _format)),
               ),
             ),
           ),

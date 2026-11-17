@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import '../../data/services/rider_score_service.dart';
+import '../../domain/share/ride_card.dart';
+import '../../domain/privacy/private_places.dart';
+import '../../data/services/private_places_store.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_theme.dart';
@@ -36,6 +40,7 @@ import '../../domain/engagement/ride_wrapup_flow.dart';
 import '../widgets/feature_switch.dart';
 import 'ride_safety_summary_card.dart';
 import '../explore/share_route_card.dart';
+import '../expenses/expenses_screen.dart'; // v3.63 trip planning lite
 
 /// Full report of a finished trip, in two tabs:
 ///  * Summary: the key numbers first (shown at once from the saved trip, no
@@ -338,7 +343,13 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     final me = _memberFor(r, myId);
     final moving = me?.movingMs ?? t.movingMs;
     final hasTimes = me != null || moving > 0 || t.restMs > 0;
-    final sketch = _sketch(myId);
+    // v3.63 privacy: the shared route never shows the first or last 300 m (home, a friend's place).
+    final raw = _sketch(myId);
+    final ends = RideCard.trimEnds(raw.points, raw.breaks);
+    // v3.63 privacy zones: nothing near a saved place (home, work) is drawn either.
+    final zones = PrivatePlacesStore.shared.places;
+    final sketch = zones.isEmpty ? ends : RideCard.withoutZones(ends.points, ends.breaks, (p) => PrivatePlaces.isNear(zones, p.latitude, p.longitude));
+    final rs = context.read<RiderScoreService?>()?.score;
     return RideShareData(
       tripName: t.tripName,
       date: DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs),
@@ -350,6 +361,10 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       to: t.destinationName,
       sketch: sketch.points,
       sketchBreaks: sketch.breaks,
+      score: rs != null && rs.ready ? rs.score : null,
+      scoreLevel: rs?.level,
+      hazards: r?.hazards,
+      sos: r?.sos,
     );
   }
 
@@ -422,6 +437,14 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
               // warnText (not Colors.amber): readable on the light theme in sunlight.
               icon: Icon(Icons.rate_review_outlined, color: AppTheme.warnText),
               onPressed: _openReview,
+            ),
+          // v3.63 trip planning lite: the ride's shared expenses (open 30 days after the ride).
+          if (!widget.adminView && widget.trip.groupId.isNotEmpty)
+            IconButton(
+              key: const Key('report_expenses'),
+              tooltip: 'Ride expenses',
+              icon: Icon(Icons.receipt_long_rounded, color: AppTheme.accentText),
+              onPressed: () => ExpensesScreen.open(context, groupId: widget.trip.groupId, rideName: widget.trip.tripName),
             ),
           IconButton(
             tooltip: '2D Replay & Scrubber',

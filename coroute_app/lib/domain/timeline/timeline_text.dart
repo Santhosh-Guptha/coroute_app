@@ -184,6 +184,9 @@ class TimelineText {
         // 3.55: two riders swapped bikes, or a rider and their pillion changed places.
         final other = e.dataString('withName').isEmpty ? 'another rider' : e.dataString('withName');
         return e.dataString('kind').toUpperCase() == 'PILLION' ? '$who and $other changed places (rider and pillion)' : '$who and $other swapped bikes';
+      // v3.63: a road hazard logged by the lead (counted on the trip report and the shared ride card).
+      case 'ROAD_HAZARD':
+        return '$who logged a road hazard';
       case 'CORIDE':
         final w = e.dataString('withName');
         return e.open ? '$who is riding with ${w.isEmpty ? 'another rider' : w}' : '$who rode with ${w.isEmpty ? 'another rider' : w} for $dur';

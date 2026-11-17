@@ -191,7 +191,13 @@ function attachSocial({ app, repo, auth, hub = null, lease = null, featureFlags 
         // The website design (shared header / footer partials, site.css) when the page is loaded; the
         // built-in plain page otherwise.
         .send(site && site.has('join_friend.html')
-          ? site.render('join_friend.html', { ...(pageVars ? pageVars(req) : {}), __CODE__: code })
+          ? site.render('join_friend.html', (() => {
+            // v3.63 rich invite card: a generic friend card (never says whose code it is).
+            const v = { ...(pageVars ? pageVars(req) : {}), __CODE__: code };
+            const IC = require('./invite_cards');
+            v.__OG_TAGS__ = IC.ogTags(IC.inviteMeta('friend', null, v.__ORIGIN__ || require('./domains').requestOrigin(require('./config'), req), `/join/friend/${code}`, { assetHash: site.assetHash }));
+            return v;
+          })())
           : friendInvitePage(code));
     });
   }

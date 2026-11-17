@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:coroute_app/domain/share/ride_card.dart';
 import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/presentation/report/ride_share_card.dart';
@@ -141,7 +142,9 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.byType(CoRouteWordmark), findsOneWidget); // v3.58 helmet wordmark
         expect(find.text('Hyderabad to Srisailam'), findsOneWidget);
-        expect(find.text('Gachibowli to Srisailam'), findsOneWidget);
+        // v3.63 privacy: only the destination, never the start place (often home).
+        expect(find.text('Ride to Srisailam'), findsOneWidget);
+        expect(find.textContaining('Gachibowli'), findsNothing);
         expect(find.text('Sun 4 Oct 2026'), findsOneWidget);
         expect(find.text('142 km'), findsOneWidget);
         expect(find.text('Distance'), findsOneWidget);
@@ -190,6 +193,19 @@ void main() {
       expect(unknown, isNot(contains('Distance')));
       expect(unknown, isNot(contains('riding')));
       expect(data().fileName, 'Hyderabad_to_Srisailam.png');
+    });
+
+    testWidgets('v3.63 story format: 9:16 card with score, hazards and the safety line', (tester) async {
+      final d = RideShareData(tripName: 'Hyderabad to Srisailam', date: DateTime(2026, 10, 4), distanceM: 142000, riders: 3, stops: 2,
+          to: 'Srisailam', sketch: track, score: 87, scoreLevel: 'Ace Rider', hazards: 3, sos: 0);
+      await render(tester, Center(child: SizedBox(width: 300, child: RideShareCard(data: d, format: RideCardFormat.story))), size: const Size(400, 900));
+      expect(tester.takeException(), isNull);
+      final size = tester.getSize(find.byType(RideShareCard));
+      expect(size.height / size.width, closeTo(16 / 9, 0.01));
+      expect(find.text('87'), findsOneWidget);
+      expect(find.text('Rider score · Ace Rider'), findsOneWidget);
+      expect(find.textContaining('3 hazards logged'), findsOneWidget);
+      expect(find.textContaining('No SOS on this ride'), findsOneWidget);
     });
 
     test('cleanPoints drops missing positions', () {

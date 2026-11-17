@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex">
 <title>Join ride __CODE__ | CoRoute</title>
 <meta name="description" content="You are invited to a CoRoute group ride. Open the app to join with code __CODE__.">
+__OG_TAGS__
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4F0">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15181C">
 <meta name="color-scheme" content="light dark">
@@ -67,6 +68,8 @@
         <div class="invite__actions">
           <a class="btn btn--primary btn--lg btn--block" href="coroute://join/__CODE__" data-no-transition>Open in CoRoute</a>
           <a class="btn btn--secondary btn--lg btn--block" href="/get">Get the app</a>
+          <a class="btn btn--secondary btn--lg btn--block" href="/ride/__CODE__" data-guest-join>Join in your browser</a>
+          <p class="invite__fallback">iPhone, or no app? Join in your browser: the group sees you on the map and you get SOS alerts while the page is open.</p>
           <p class="invite__fallback">CoRoute is free for Android. <a class="link" href="/download">Download the app directly</a>, then open this link again.</p>
         </div>
         <p class="invite__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg><span>While you ride in this group, your position is shared with its members so everyone stays together. Read the <a class="link" href="/privacy">privacy policy</a>.</span></p>

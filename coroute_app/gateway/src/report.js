@@ -125,6 +125,8 @@ function buildTripReport({ meta, tracksByUser, events, deviceStatsByUser = null,
       distanceM: perMember.reduce((mx, p) => Math.max(mx, p.stats.distanceM), 0),
       plannedStops: (meta.stopPoints || []).length, visitedStops,
       sos: events.filter((e) => e.type === 'SOS').length,
+      // v3.63: road hazards logged on this ride (the shared ride card shows it).
+      hazards: events.filter((e) => e.type === 'ROAD_HAZARD').length,
       speedLimitKmh: meta.speedLimitKmh || 0,
       overspeedCount: events.filter((e) => e.type === 'OVERSPEED').length,
       arrived: perMember.filter((p) => p.stats.reachedDestination).length,

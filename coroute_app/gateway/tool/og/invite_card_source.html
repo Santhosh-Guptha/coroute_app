@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- v3.63 source of the invite card images (public/assets/og/ride.png, friend.png), rendered at 1200x630 by render_invite_cards.js:
+     ?kind=ride or ?kind=friend. Not linked from any page. -->
+<html lang="en"><head><meta charset="utf-8"><title>CoRoute invite card</title>
+<style>
+@font-face{font-family:Manrope;src:url("/fonts/manrope-latin.woff2") format("woff2");font-weight:200 800}
+@font-face{font-family:"Barlow Condensed";src:url("/fonts/barlow-condensed-700.woff2") format("woff2");font-weight:700}
+html,body{margin:0;width:1200px;height:630px;overflow:hidden;background:#15181C}
+.card{position:relative;width:1200px;height:630px;box-sizing:border-box;padding:64px 72px;color:#F6F4F0;font-family:Manrope,system-ui,sans-serif;
+  background:radial-gradient(700px 420px at 92% 0%,rgba(43,122,140,.55),transparent 70%),radial-gradient(520px 360px at 0% 100%,rgba(217,130,43,.28),transparent 70%),#15181C}
+.logo{height:56px}
+.eyebrow{margin-top:56px;font-size:26px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#7FC4D2}
+h1{margin:14px 0 0;font-family:"Barlow Condensed",Manrope,sans-serif;font-weight:700;font-size:104px;line-height:.95;letter-spacing:.01em;max-width:720px}
+p{margin:22px 0 0;font-size:30px;line-height:1.35;color:#CFCBC3;max-width:640px}
+.chips{position:absolute;left:72px;bottom:60px;display:flex;gap:14px}
+.chip{padding:10px 18px;border-radius:99px;background:rgba(246,244,240,.1);border:1px solid rgba(246,244,240,.18);font-size:22px;font-weight:700}
+.chip--sos{background:rgba(192,57,43,.25);border-color:rgba(192,57,43,.6)}
+svg.road{position:absolute;right:40px;top:120px;width:440px;height:440px}
+</style></head><body>
+<div class="card">
+  <img class="logo" src="/brand/coroute-wordmark-on-dark.svg" alt="CoRoute">
+  <div class="eyebrow" id="eyebrow">Group ride invite</div>
+  <h1 id="title">Join the ride</h1>
+  <p id="sub">Live group map, push to talk and SOS for every rider. Tap to open CoRoute.</p>
+  <div class="chips"><span class="chip">Live group map</span><span class="chip">Push to talk</span><span class="chip chip--sos">SOS and crash alerts</span></div>
+  <svg class="road" viewBox="0 0 440 440" aria-hidden="true">
+    <path d="M60 400 C 120 300, 40 240, 150 190 S 300 170, 280 90 S 360 30, 400 40" fill="none" stroke="#2B7A8C" stroke-width="22" stroke-linecap="round"/>
+    <path d="M60 400 C 120 300, 40 240, 150 190 S 300 170, 280 90 S 360 30, 400 40" fill="none" stroke="#F6F4F0" stroke-width="3" stroke-dasharray="14 16" stroke-linecap="round" opacity=".7"/>
+    <circle cx="150" cy="190" r="16" fill="#D9822B" stroke="#15181C" stroke-width="5"/>
+    <circle cx="232" cy="168" r="14" fill="#F6F4F0" stroke="#15181C" stroke-width="5"/>
+    <circle cx="282" cy="104" r="14" fill="#F6F4F0" stroke="#15181C" stroke-width="5"/>
+    <circle cx="400" cy="40" r="20" fill="#2B7A8C" stroke="#F6F4F0" stroke-width="5"/>
+  </svg>
+</div>
+<script>
+  if (/kind=friend/.test(location.search)) {
+    document.getElementById('eyebrow').textContent = 'Friend invite';
+    document.getElementById('title').textContent = 'Ride with a friend';
+    document.getElementById('sub').textContent = 'Add your riding friend, plan rides together and keep each other safe.';
+  }
+</script>
+</body></html>

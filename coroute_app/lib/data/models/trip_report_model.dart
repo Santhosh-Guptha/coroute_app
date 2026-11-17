@@ -13,6 +13,9 @@ class TripReportModel {
   final int arrived;
   final int speedLimitKmh;
   final int overspeedCount;
+
+  /// v3.63: road hazards logged on the ride; null for a report made before the gateway counted them.
+  final int? hazards;
   final List<MemberReport> members;
 
   const TripReportModel({
@@ -28,6 +31,7 @@ class TripReportModel {
     required this.arrived,
     this.speedLimitKmh = 0,
     this.overspeedCount = 0,
+    this.hazards,
     required this.members,
   });
 
@@ -50,6 +54,7 @@ class TripReportModel {
       arrived: _i(g['arrived']),
       speedLimitKmh: _i(g['speedLimitKmh']),
       overspeedCount: _i(g['overspeedCount']),
+      hazards: g['hazards'] is num ? (g['hazards'] as num).toInt() : null,
       members: ms,
     );
   }

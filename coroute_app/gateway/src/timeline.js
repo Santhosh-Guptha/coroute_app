@@ -272,6 +272,9 @@ class TimelineEngine {
 
   // ------------------------------------------------------------ inputs
   async onTelemetry(gid, rider) {
+    // v3.63 privacy zones: a hidden rider (no position near a saved place) is alive: offline / stale entries close and
+    // the battery is watched, but no position rule runs (stops, off route, speed, separation, incident).
+    if (rider && rider.zoneHidden) return this._hiddenAlive(gid, rider);
     if (!rider || !Number.isFinite(rider.lat) || (rider.lat === 0 && rider.lng === 0)) return;
     const room = this.convoys.rooms.get(gid);
     if (!room) return;
@@ -366,6 +369,20 @@ class TimelineEngine {
       await this._checkSweeperDistress(gid, st, room, t);
       await this._checkRegroupConvergence(gid, st, room, t);
     }
+  }
+
+  /** v3.63: telemetry of a rider whose position is hidden near a saved place (no coordinates). */
+  async _hiddenAlive(gid, rider) {
+    const room = this.convoys.rooms.get(gid);
+    if (!room) return;
+    const st = await this._state(gid);
+    const t = rider.lastSeenEpochMs || this.now();
+    const rs = this._rs(st, rider.userId);
+    rs.lastFixAt = t;
+    rs.cluster = null; // no stop is built from missing positions
+    if (st.open.has(`OFFLINE:${rider.userId}`)) await this._close(gid, st, `OFFLINE:${rider.userId}`, t);
+    if (st.open.has(`STALE:${rider.userId}`)) await this._close(gid, st, `STALE:${rider.userId}`, t, { data: { result: 'RESUMED' } });
+    await this._battery(gid, st, room, rider, t);
   }
 
   /**
@@ -619,6 +636,9 @@ class TimelineEngine {
         return this._instant(gid, { ...who, type: 'STOP_SUGGESTED', lat: act.stop.lat, lng: act.stop.lng, placeName: act.stop.name, data: { stopId: act.stop.stopId, name: act.stop.name, category: act.stop.category } });
       case 'STOP_SKIPPED':
         return this._instant(gid, { ...who, type: 'STOP_SKIPPED', placeName: act.stop.name, data: { stopId: act.stop.stopId, name: act.stop.name } });
+      // v3.63: a road hazard the lead logged (counted in the trip report as hazards logged).
+      case 'ROAD_HAZARD':
+        return this._instant(gid, { ...who, type: 'ROAD_HAZARD', lat: act.lat, lng: act.lng, placeName: '', data: { classification: String(act.classification || '').slice(0, 30) } });
       case 'ROUTE_CHANGED':
         return this._instant(gid, { ...who, type: 'ROUTE_CHANGED', lat: act.place?.lat, lng: act.place?.lng, placeName: act.place?.name || '', data: { change: act.change } });
       case 'STATUS': {
