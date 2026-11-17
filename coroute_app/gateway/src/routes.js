@@ -291,6 +291,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./feature_flags').registerFeatureFlagRoutes({ r, flagsOf, repo, wrap, requireAdmin });
   // v3.60 admin features and limits by plan (src/plans.js; never safety).
   require('./plans').registerPlanRoutes({ r, repo, wrap, requireAdmin });
+  // v3.63 pricing model: group plans (today) or Rider Pass for every rider (web admin > Configuration > Pricing model).
+  require('./pricing_model').registerPricingModelRoutes({ r, repo, wrap, requireAdmin });
   // v3.62 phone sign-in rule (web admin Security > Phone sign-in): applies to new phone sign-ins only.
   if (auth.sessions && auth.sessions.settings) {
     require('./session_settings').registerSessionSettingsRoutes({ r, settings: auth.sessions.settings, repo, wrap, requireAdmin, sessions: auth.sessions });
@@ -305,6 +307,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./community_routes').registerCommunityRoutes({ r, repo, hub, wrap, flagsOf, plans: require('./plans').forRepo(repo) });
   // v3.60 chat: friends and communities (<= plan limit, default 50 members), text only, 90 days (src/chat.js).
   require('./chat').registerChatRoutes({ r, repo, hub, wrap, flagsOf });
+  // v3.63 trip planning lite: expense split per ride, records only (src/expenses.js).
+  require('./expenses').registerExpenseRoutes({ r, repo, convoys, wrap });
   // 3.55 "Start a ride with this crew": ride invites to chosen crew members (src/crew_ride_invites.js; switch crewRides).
   require('./crew_ride_invites').registerCrewRideInviteRoutes({ r, repo, hub, convoys, wrap, flagsOf, ensureProfileComplete: (req) => ensureProfileComplete(req) });
   // 3.55 push notifications: POST / DELETE /me/push-tokens (src/push.js).

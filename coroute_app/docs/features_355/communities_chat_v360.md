@@ -231,3 +231,53 @@ roads (k >= 5 riders per cell chain), route difficulty (Easy / Moderate / Challe
 * Ride lock also checked when an expired long token (older builds) is renewed.
 * An SOS raised on the other node still gets its "closed" push (own cap: 6 per rider per 10 min, SOS under 6 h old).
 * Tests: `gateway/test/intel_362b_added.test.js` (3), `gateway/test/security_362b.test.js` (4).
+
+## 18. Pricing model switch: Group plans or Rider Pass (round 23, 17 Nov 2026)
+
+Owner: "every rider pays 9 rs for one month with all features; only 2 plans: free Community (single user) and paid
+one month all features; n riders can join rides; before prod I'll decide which to make".
+
+Web admin > Configuration > **Pricing model** (`src/pricing_model.js`, `public/admin/pricing_model.js`):
+
+| Model | Sold on the website | Hosting | Joining |
+|---|---|---|---|
+| **Group plans** (default, today) | Small Group (2-6), Large Group (7-12), bought by the host | host's plan seats | free |
+| **Rider Pass** | Rider Pass: one rider, every feature, 30 days, list price Rs 9 (editable in Plans & pricing) | a pass holder hosts rides any number of riders join (server ceiling MAX_CONVOY_RIDERS) | free |
+
+Both: Community stays free (solo rides, every safety feature); safety is never gated; switching never cancels or
+refunds a running plan (a Small / Large Group or a Rider Pass bought before keeps working until it ends); only what
+can be bought changes. A Rider Pass can be renewed any time (unused days are credited). Features by plan has a Rider
+Pass column (all on by default). Admin assign plan, coupons (plan options follow the model), website plans page and
+the app admin plan names know the Rider Pass. The app never shows prices (Play policy unchanged).
+`GET|PUT /api/admin/pricing-model` (MASTER_ADMIN, audited). Tests: `gateway/test/pricing_model_363.test.js`.
+Changed on purpose: `membership_plans.test.js` (catalog has 4 plans), `intel_362_insights.test.js` (fixed time of day,
+was failing at night), `job_lease.test.js` real-timer test tolerant of a busy machine (still never twice per interval).
+
+## 19. Round 24: share card, browser riders, trip planning lite, privacy zones, admin opens the console (17 Nov 2026)
+
+* **Ride card + rich invite** (`lib/domain/share/ride_card.dart`, `report/ride_share_card.dart`, `gateway/src/invite_cards.js`):
+  WhatsApp 1080x1080 and Story 1080x1920 cards (route sketch without the first / last 300 m and without anything near
+  a privacy zone, km, time, rider score, hazards logged, safety line); `/join/<CODE>` and `/join/friend/<CODE>` carry
+  Open Graph / Twitter tags (host first name, ride name, destination, day, riders; nothing else; generic for bad codes).
+* **Guests and iPhone riders in the browser** (`gateway/src/guest_service.js`, `public/ride/`, `/ride/<CODE>`): first
+  name + browser key, host approval as usual, live map, position from the browser, group list, SOS alarm in, hold-3-s
+  SOS out (convoys.raiseSos), "Browser" badge in the app. Guest tokens: one ride, 12 h, refused by every other API.
+  iPhone limits shown on the page (page must stay open; no crash detection or texts from a browser).
+* **Trip planning lite** (docs/features_355/trip_planning_lite_v363.md): ride expenses with "who pays whom" (records
+  only, no money moves), pre-ride checklist (never blocks a ride), weather at each stop (MET Norway, wind added).
+* **Privacy zones** (Profile > Privacy zones; `private_places.dart` extended): Home / Work / Other at 300 m / 500 m /
+  1 km, kept only on the phone. Inside a zone nobody (group, guardians, public pages, browser riders, live links) gets
+  the position; the rider list says "Location hidden near a saved place". **In an emergency (SOS, crash alarm,
+  rider-down) the exact position is always shared**, also inside a zone (tests prove it). Tracks and road data skip
+  zones.
+* **Admins: one place.** App: administrators open straight into the admin console (splash, sign-in, and a late-loaded
+  role); the rider profile no longer has an "Admin" row (an admin who is riding keeps the cockpit until the ride ends).
+  Website: an admin signing in goes to /admin; /account sends admins to /admin (`?rider=1` keeps the page).
+* **Device compatibility (Samsung S24 report):** the website's 32-bit APK cannot be installed on 64-bit-only phones
+  (Galaxy S23 / S24 / S25, Pixel 7 and newer); the download page now says "32-bit Android (old phones only)". Static
+  review of targetSdk 36 rules (foreground service types and permissions, receiver export flags, 16 KB native
+  alignment, exact alarms not used) found no blocker; a crash log from the S24 is needed for anything else (see
+  release prompt part S).
+* Tests: `share_card_363`, `guest_join_363`, `expenses_363`, `privacy_zones_363` (gateway); `ride_card_363`,
+  `trip_planning_lite_363`, `privacy_zones_363` (Dart, pure). Changed on purpose: `share_card_quick_reply_test`,
+  `round6_wiring_356_test`, `access_control_and_admin_regression_test`.

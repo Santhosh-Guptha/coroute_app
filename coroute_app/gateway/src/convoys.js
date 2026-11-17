@@ -2953,6 +2953,12 @@ function sanitizeTelemetry(patch) {
   if (has('statusMessage')) out.statusMessage = String(patch.statusMessage).slice(0, 140);
   if (has('stoppedSince')) out.stoppedSince = Math.max(0, Math.min(now() + 60000, Math.round(num(patch.stoppedSince))));
   if (has('micMuted')) out.micMuted = !!patch.micMuted;
+  // v3.63 privacy zones: the rider is near a saved place; the phone sends no position (0, 0) and the server
+  // stores none either (a coordinate sent anyway is dropped). Never set during the rider's own emergency (phone rule).
+  if (has('zoneHidden')) {
+    out.zoneHidden = patch.zoneHidden === true;
+    if (out.zoneHidden) { out.lat = 0; out.lng = 0; out.heading = 0; }
+  }
   if (has('isSpeaking')) out.isSpeaking = !!patch.isSpeaking;
   // 3.55 group break planner: only a fatigue level 0..3 (whole number), never the raw signals behind it.
   if (has('fatigueLevel')) {
@@ -3091,10 +3097,13 @@ function publicRider(r) {
     fuelEstimate: r.fuelEstimate && now() - r.fuelEstimate.updatedAt < 120000 ? r.fuelEstimate : null,
     micMuted: !!r.micMuted,
     isSpeaking: !!r.isSpeaking,
+    zoneHidden: !!r.zoneHidden, // v3.63: "Location hidden near a saved place" (lat / lng are 0)
     // Round 10 offline link: the rider has no signal and is reached through this rider's phone (bridge), while recent.
     viaBridge: r.viaBridge && now() - (r.viaBridgeAt || 0) < 30000 ? r.viaBridge : '',
     // 3.55: fatigue level 0..3, only while recent (10 min); 0 for older apps that never send it.
     fatigueLevel: Number.isInteger(r.fatigueLevel) && Number.isFinite(r.fatigueAt) && now() - r.fatigueAt < 600000 ? r.fatigueLevel : 0,
+    // v3.63: a rider in a browser (guest, src/guest_service.js): the app shows a "Browser" badge.
+    isGuest: r.isGuest === true,
   };
 }
 
@@ -3106,6 +3115,7 @@ function buildRider(user, p, t) {
       name: user.name,
       lat: p.lat, lng: p.lng, speedKmh: 0, heading: num(p.heading),
       lastSeenEpochMs: t,
+      ...(user.isGuest === true ? { isGuest: true, vehicleType: 'Browser', vehicleKind: '' } : {}),
     }),
     joinedAt: p.joinedAt || t,
     smsOptOut: !!p.smsOptOut,

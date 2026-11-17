@@ -29,6 +29,8 @@ import 'trip_history_screen.dart';
 import '../engagement/ride_wrapup_sheet.dart';
 import '../review/app_review_prompt.dart';
 import '../../data/services/api_client.dart';
+import '../admin/master_admin_dashboard.dart';
+import '../../data/services/auth_service.dart';
 import '../../data/services/engagement_service.dart';
 import '../../domain/security/lock_screen_cockpit_policy.dart';
 import '../security/locked_cockpit_gate.dart';
@@ -129,7 +131,25 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       rn?.pendingUiAction.addListener(_onRideNotifAction);
       _onRideNotifAction();
       _offerStoredPlaceReviews();
+      // v3.63: administrators use the admin console only (one place). If the role arrives after this screen opened
+      // (a restored session whose profile loaded late), move to the console once.
+      final auth = context.read<AuthService>();
+      _auth = auth;
+      auth.addListener(_toAdminIfNeeded);
+      _toAdminIfNeeded();
     });
+  }
+
+  AuthService? _auth;
+  bool _sentToAdmin = false;
+  void _toAdminIfNeeded() {
+    final a = _auth;
+    if (!mounted || _sentToAdmin || a == null || !a.isAuthenticated || !a.isMasterAdmin) return;
+    // Never during a ride: an admin who is riding keeps the cockpit until the ride ends.
+    if (_convoys?.activeGroupId != null) return;
+    _sentToAdmin = true;
+    a.removeListener(_toAdminIfNeeded);
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute<void>(builder: (_) => const MasterAdminDashboard()), (_) => false);
   }
 
   /// 3.55 follow-up: after-ride place questions kept from an earlier ride (the app was closed
@@ -218,6 +238,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 
   @override
   void dispose() {
+    _auth?.removeListener(_toAdminIfNeeded);
     _convoys?.removeListener(_onConvoyChanged);
     _rideNotif?.pendingUiAction.removeListener(_onRideNotifAction);
     _mapFocus.dispose();

@@ -66,6 +66,8 @@ import '../../domain/notify/notice_dedupe.dart';
 import 'ride_chat_store.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
 import 'diag_log_service.dart';
+import '../../domain/privacy/private_places.dart'; // v3.63 privacy zones
+import 'private_places_store.dart';
 
 /// Convoy state for the signed-in rider.
 ///
@@ -1194,7 +1196,12 @@ class ConvoyService extends ChangeNotifier {
         break;
       case 'RIDER_UPDATE':
         if (convoy == null || e['rider'] is! Map) return;
-        final rider = RiderModel.fromJson(Map<String, dynamic>.from(e['rider'] as Map));
+        var rider = RiderModel.fromJson(Map<String, dynamic>.from(e['rider'] as Map));
+        // v3.63 privacy zones: the server holds no position for me while I am hidden: my own position stays local.
+        final localMe = rider.userId == _myUserId ? convoy.riders[rider.userId] : null;
+        if (localMe != null && (rider.zoneHidden || (rider.lat == 0 && rider.lng == 0)) && (localMe.lat != 0 || localMe.lng != 0)) {
+          rider = rider.copyWith(lat: localMe.lat, lng: localMe.lng, heading: localMe.heading, zoneHidden: false);
+        }
         final riders = Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider;
         _allConvoys[gid] = convoy.copyWith(riders: riders);
         if (e['joined'] == true) {
@@ -1765,7 +1772,8 @@ class ConvoyService extends ChangeNotifier {
       'startPoint': startPoint,
       if (start != null)
         'start': start.toJson()
-      else if (pos != null)
+      // v3.63: no automatic start point at a saved place (the group would see the rider's home).
+      else if (pos != null && _privatePos(pos.latitude, pos.longitude) != (0.0, 0.0))
         'start': {'lat': pos.latitude, 'lng': pos.longitude, 'name': startPoint},
       if (stops.isNotEmpty) 'stops': stops.map((p) => p.toJson()).toList(),
       // v3.60 meet first: riders come from different places and gather at the start.
@@ -1779,8 +1787,8 @@ class ConvoyService extends ChangeNotifier {
       if (speedLimitKmh > 0) 'speedLimitKmh': speedLimitKmh,
       'routeBreadcrumbs': routeBreadcrumbs,
       'rider': {
-        'lat': pos?.latitude ?? 0.0,
-        'lng': pos?.longitude ?? 0.0,
+        'lat': pos == null ? 0.0 : _privatePos(pos.latitude, pos.longitude).$1,
+        'lng': pos == null ? 0.0 : _privatePos(pos.latitude, pos.longitude).$2,
         'vehicleType': vehicleType,
         'vehicleNo': vehicleNo,
         'phone': phone,
@@ -1828,8 +1836,8 @@ class ConvoyService extends ChangeNotifier {
       await _flushPendingLeaves();
       final res = await send({
         'rider': {
-          'lat': rider.lat,
-          'lng': rider.lng,
+          'lat': _privatePos(rider.lat, rider.lng).$1,
+          'lng': _privatePos(rider.lat, rider.lng).$2,
           'vehicleType': rider.vehicleType,
           'vehicleNo': rider.vehicleNo,
           'phone': rider.phone,
@@ -2637,6 +2645,29 @@ class ConvoyService extends ChangeNotifier {
   /// Only an opted-in usable range, never tank contents or mileage.
   Map<String, dynamic>? Function()? fuelEstimate;
 
+  // ---------------------------------------------------------------- v3.63 privacy zones
+  /// Live position masking near the rider's saved places (domain/privacy/private_places.dart).
+  final LivePrivacyMask _privacyMask = LivePrivacyMask();
+
+  /// True while a crash alarm / countdown or rider-down alarm runs on this phone (set in main.dart from
+  /// SafetyService). Own SOS (open or pending) is known here. Either one: the exact position is shared.
+  bool Function()? privacyEmergency;
+
+  /// The rider's live position is hidden from others right now (cockpit "Location hidden" chip).
+  bool get myLocationHidden => _privacyMask.hidden;
+
+  bool _privacyEmergencyNow() {
+    final uid = _myUserId;
+    final ownSos = uid != null && (activeConvoy?.activeAlerts.any((a) => a.userId == uid && !a.resolved) ?? false);
+    return ownSos || pendingSos != null || (privacyEmergency?.call() ?? false);
+  }
+
+  /// One-off positions sent at create / join (no hysteresis): (0, 0) near a saved place, unless an emergency runs.
+  (double, double) _privatePos(double lat, double lng) {
+    if (_privacyEmergencyNow()) return (lat, lng);
+    return PrivatePlacesStore.shared.isNear(lat, lng) ? (0.0, 0.0) : (lat, lng);
+  }
+
   /// 3.55 group break planner: this phone's fatigue level 0..3 (null = not shared). Only the level
   /// is ever sent, never the signals behind it. Set by GroupSafetyService.
   int? Function()? fatigueLevel;
@@ -2649,6 +2680,12 @@ class ConvoyService extends ChangeNotifier {
   void _pushTelemetry(RiderModel r) {
     _lastTelemetryPush = DateTime.now();
     final now = _clock();
+    // v3.63 privacy zones: near a saved place the position is not shared (lat / lng 0 + zoneHidden), never
+    // during an emergency (own SOS open or pending, crash alarm / countdown, rider-down): exact then.
+    final wasHidden = _privacyMask.hidden;
+    final hidden = _privacyMask.update(PrivatePlacesStore.shared.places, r.lat, r.lng, emergency: _privacyEmergencyNow(), nowMs: now);
+    if (hidden != wasHidden) notifyListeners();
+    final (shareLat, shareLng) = LivePrivacyMask.shared(hidden, r.lat, r.lng);
     final ownSos = activeConvoy?.activeAlerts.any((a) => a.userId == r.userId && !a.resolved) ?? false;
     _posRate.noteSent(now, speedKmh: r.speedKmh, headingDeg: r.heading, ownSos: ownSos, leadOrSweep: r.role == 'LEAD' || r.role == 'SWEEPER');
     if (_activeGroupId != null && now - _lastAliveStampMs >= NetConstants.aliveStampEvery.inMilliseconds) {
@@ -2659,10 +2696,10 @@ class ConvoyService extends ChangeNotifier {
     }
     final hasActiveSos = activeConvoy?.activeAlerts.any((a) => a.userId == r.userId && !a.resolved) ?? false;
     mesh?.updateMyTelemetry(
-      lat: r.lat,
-      lng: r.lng,
+      lat: shareLat,
+      lng: shareLng,
       speedKmh: r.speedKmh,
-      heading: r.heading,
+      heading: hidden ? 0 : r.heading,
       batteryLevel: _currentBatteryLevel,
       isCharging: _isCharging,
       role: r.role,
@@ -2671,7 +2708,8 @@ class ConvoyService extends ChangeNotifier {
     );
     final fuel = activeConvoy?.featurePolicy.groupFuelEnabled == false ? null : fuelEstimate?.call();
     // Round 8 'pos2': a gateway that offers it gets the compact P2 frame (~65 bytes instead of ~240); others JSON.
-    if (_rt.pos2Active) {
+    // v3.63: a hidden position always goes as JSON (the P2 frame has no zoneHidden flag).
+    if (_rt.pos2Active && !hidden) {
       _rt.send(_rt.pos2.encode(
         lat: r.lat,
         lng: r.lng,
@@ -2691,10 +2729,11 @@ class ConvoyService extends ChangeNotifier {
     _rt.send({
       'type': 'TELEMETRY',
       'fuelEstimate': fuel,
-      'lat': r.lat,
-      'lng': r.lng,
+      'lat': shareLat,
+      'lng': shareLng,
       'speedKmh': double.parse(r.speedKmh.toStringAsFixed(1)),
-      'heading': double.parse(r.heading.toStringAsFixed(0)),
+      'heading': hidden ? 0.0 : double.parse(r.heading.toStringAsFixed(0)),
+      'zoneHidden': hidden, // v3.63: the gateway shows "Location hidden near a saved place" and skips distance checks
       'batteryLevel': _currentBatteryLevel,
       'isCharging': _isCharging,
       'statusReason': r.statusReason,

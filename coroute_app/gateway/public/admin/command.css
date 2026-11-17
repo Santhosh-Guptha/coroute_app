@@ -150,3 +150,10 @@ a.cc-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); bord
 .ins-bar__val { order: -1; margin-bottom: 4px; font-size: .72rem; font-weight: 700; color: var(--c-text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ins-bar__lbl { position: absolute; bottom: -22px; font-size: .72rem; color: var(--c-text-3); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .ins-bar__fill { transition: none; } }
+
+/* ---------- pricing model ---------- */
+.pm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.pm-grid .card + .card { margin-top: 0; }
+.pm-card { border-radius: var(--r-lg); }
+.pm-card.is-on { border-color: var(--c-brand); box-shadow: 0 0 0 3px var(--c-brand-glow); }
+.pm-list { margin: 0 0 14px; padding-left: 18px; display: grid; gap: 6px; color: var(--c-text-2); }

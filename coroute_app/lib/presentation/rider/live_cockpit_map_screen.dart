@@ -165,6 +165,8 @@ import '../../domain/ride/ride_stats_accumulator.dart';
 import '../../domain/road/road_ahead_engine.dart' show RoadAheadView;
 import '../map_places/place_chips.dart' show showPlacesSheet;
 import 'widgets/cockpit_talk_button.dart';
+import '../expenses/expenses_screen.dart'; // v3.63 trip planning lite
+import '../trip_planner/stop_weather_list.dart';
 import 'widgets/gathering_card.dart';
 import 'widgets/join_requests_card.dart';
 
@@ -1789,7 +1791,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       context,
       CockpitAction.shareInvite,
       () => SharePlus.instance.share(ShareParams(
-        text: 'Join my CoRoute ride "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
+        // v3.63: the link on its own line, so WhatsApp / Telegram build the rich invite card from it.
+        text: 'Join my CoRoute ride "${convoy.name}". Code ${convoy.joinCode}.\n$link',
         subject: 'CoRoute ride: ${convoy.name}',
       )),
     ).ignore();
@@ -3145,6 +3148,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                     chips: [
                       if (SmartAirbagBridgeService().isConnected || SmartAirbagBridgeService().connectionState == AirbagConnectionState.connected)
                         const HudStatusChip(icon: Icons.shield_outlined, label: 'Airbag'),
+                      // v3.63 privacy zones: near a saved place my position is not shared (never in an emergency).
+                      if (service.myLocationHidden)
+                        const HudStatusChip(key: Key('cockpit_pill_location_hidden'), icon: Icons.shield_moon_outlined, label: 'Location hidden'),
                       if (_bleRemote?.status == BleRemoteStatus.paired) const HudStatusChip(icon: Icons.radio_button_checked_rounded, label: 'Remote'),
                       if ((gps == GpsState.lowAccuracy || gps == GpsState.unavailable) && !me.isTunnelCoasting)
                         HudStatusChip(icon: Icons.gps_not_fixed_rounded, label: gps.label, warn: true),
@@ -4026,10 +4032,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               key: ValueKey<String>('hud_rider_${rung.rider.userId}'),
               name: rung.rider.name,
               color: colors[rung.rider.userId] ?? AppTheme.primary,
-              role: RideFacts.findLead(convoy)?.userId == rung.rider.userId ? 'Lead' : (rung.rider.isSweeper ? 'Sweep' : null),
+              // v3.63: a rider in a browser (no app) shows a "Browser" badge.
+              role: RideFacts.findLead(convoy)?.userId == rung.rider.userId ? 'Lead' : (rung.rider.isSweeper ? 'Sweep' : (rung.rider.isGuest ? 'Browser' : null)),
               distanceText: HudGroupPill.riderGap(rung.fromMeM,
                   speedKmh: (rung.fromMeM ?? 0) > 0 ? me.speedKmh : rung.rider.speedKmh),
-              statusText: rung.tooFarBehind ? 'Falling behind' : statuses[rung.rider.userId]?.label,
+              // v3.63 privacy zones: a rider near a saved place has no shared position (never in an emergency).
+              statusText: rung.tooFarBehind ? 'Falling behind' : (rung.rider.zoneHidden && statuses[rung.rider.userId] != RiderStatus.emergency ? 'Location hidden near a saved place' : statuses[rung.rider.userId]?.label),
               warn: rung.tooFarBehind || statuses[rung.rider.userId] == RiderStatus.emergency,
               battery: rung.rider.lastSeenEpochMs > 0 ? rung.rider.batteryLevel : null,
               onTap: () => _openRider(rung.rider),
@@ -4066,6 +4074,18 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         isSolo: convoy.isSolo,
         groupFeatures: convoy.hasGroupFeatures,
       ),
+      const SizedBox(height: Space.s8),
+      // v3.63 trip planning lite: shared expenses of this ride (group rides; records only) and weather at the stops.
+      if (!convoy.isSolo)
+        DsListRow(
+          key: const Key('sheet_expenses'),
+          icon: Icons.receipt_long_rounded,
+          label: 'Ride expenses',
+          value: 'Split fuel, food, tolls',
+          onTap: () => _popup<void>('expenses', () => ExpensesScreen.open(context, groupId: convoy.groupId, rideName: convoy.name)),
+          divider: false,
+        ),
+      const StopWeatherList(),
       const SizedBox(height: Space.s16),
 
       // 5. Ride Lifecycle Controls

@@ -689,6 +689,8 @@ class CoRouteApp extends StatelessWidget {
             final api = ctx.read<ApiClient>();
             final convoys = ctx.read<ConvoyService>();
             final safety = ctx.read<SafetyService>();
+            // v3.63 privacy zones: a crash alarm / countdown (or rider-down alarm) shares the exact position at once.
+            convoys.privacyEmergency = () => safety.alarm != null;
             final gs =
                 GroupSafetyService(
                     convoys,

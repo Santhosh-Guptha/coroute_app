@@ -13,8 +13,8 @@ class PrivatePlacesCard extends StatefulWidget {
 
   static const String title = 'Private places';
   static const String explain =
-      'Mark up to 3 places such as home or work. Within 300 m of them your route is not recorded, so it is missing from trip reports, shared trip links and the anonymous road data. '
-      'They stay on this phone only. Your live position during a ride is not hidden: your group, your guardian and an SOS always get your real position.';
+      'Mark up to 3 places such as home or work. Near them your location is hidden from your group, guardians, ride pages and live links, and your route is not recorded '
+      '(trip reports, shared trip links and the anonymous road data). They stay on this phone only. In an emergency your exact location is always shared.';
 
   @override
   State<PrivatePlacesCard> createState() => _PrivatePlacesCardState();
@@ -46,7 +46,7 @@ class _PrivatePlacesCardState extends State<PrivatePlacesCard> {
     final label = _labels.firstWhere((l) => !used.contains(l), orElse: () => 'Place ${_store.places.length + 1}');
     final picked = await MapPickerScreen.pick(context, title: 'Private place: $label', confirmLabel: 'Hide rides near here');
     if (picked == null || !mounted) return;
-    final ok = await _store.add(PrivatePlace(label: label, lat: picked.lat, lng: picked.lng));
+    final ok = await _store.add(PrivatePlace(label: label, lat: picked.lat, lng: picked.lng, radiusM: PrivatePlaces.defaultRadiusM));
     if (!mounted) return;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(ok ? '$label saved on this phone.' : 'You can keep up to ${PrivatePlaces.maxPlaces} private places.')));
   }
@@ -66,7 +66,7 @@ class _PrivatePlacesCardState extends State<PrivatePlacesCard> {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.shield_moon_outlined, color: AppTheme.accent),
               title: Text(places[i].label.isEmpty ? 'Place ${i + 1}' : places[i].label, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-              subtitle: Text('Rides are hidden within 300 m', style: AppText.caption),
+              subtitle: Text('Hidden within ${places[i].radiusM >= 1000 ? '1 km' : '${places[i].radiusM.round()} m'}', style: AppText.caption),
               trailing: IconButton(
                 tooltip: 'Remove ${places[i].label}',
                 icon: const Icon(Icons.delete_outline_rounded),

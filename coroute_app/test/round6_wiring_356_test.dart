@@ -31,8 +31,13 @@ void main() {
     for (final bad in ['ApiClient', 'http', '_api.', 'RealtimeService']) {
       expect(store.contains(bad), isFalse, reason: 'the store must not talk to the network ($bad)');
     }
-    // The live position path does not consult private places (group map, guardian link, SOS).
-    expect(read('lib/data/services/convoy_service.dart').contains('PrivatePlaces'), isFalse);
+    // v3.63 (owner decision 17 Nov 2026, privacy zones): the live position path hides the position near a saved
+    // place, BUT every emergency shares the exact position (own SOS open or pending, crash / rider-down alarm).
+    final cs = read('lib/data/services/convoy_service.dart');
+    expect(cs.contains('_privacyMask.update(PrivatePlacesStore.shared.places, r.lat, r.lng, emergency: _privacyEmergencyNow()'), isTrue);
+    expect(cs.contains('return ownSos || pendingSos != null || (privacyEmergency?.call() ?? false);'), isTrue);
+    expect(read('lib/main.dart').contains('convoys.privacyEmergency = () => safety.alarm != null;'), isTrue);
+    // The SOS / crash path itself never consults private places (it always sends the exact position).
     expect(read('lib/data/services/safety_service.dart').contains('PrivatePlaces'), isFalse);
   });
 
@@ -64,7 +69,8 @@ void main() {
     expect(read('lib/core/l10n/strings_safety.dart').contains('based on data from MET Norway'), isTrue);
   });
 
-  test('build number unchanged', () {
-    expect(read('pubspec.yaml').contains('version: 3.55.0+10032'), isTrue);
+  // v3.63: was pinned to +10026 (stale since round 7); the release owns the number, this only checks its shape.
+  test('build number has the release shape', () {
+    expect(RegExp(r'version: 3\.55\.0\+100\d\d').hasMatch(read('pubspec.yaml')), isTrue);
   });
 }

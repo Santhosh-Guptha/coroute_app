@@ -376,6 +376,7 @@ class IntelCareService extends ChangeNotifier {
     if (settings.consentOn) {
       // 3.56 (round 6): the rider's private places are privacy zones (nothing within 300 m is queued).
       queue.zones = PrivatePlacesStore.shared.zones;
+      queue.isPrivate = PrivatePlacesStore.shared.isNear; // v3.63: each place's own radius (300 m to 1 km)
       queue.onFix(p.lat, p.lng);
     }
     final em = emergency();

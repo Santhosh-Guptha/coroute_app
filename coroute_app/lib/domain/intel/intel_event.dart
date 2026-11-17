@@ -86,6 +86,9 @@ class IntelEventQueue {
 
   set zones(List<(double, double)> z) => _zones = z.take(4).toList();
 
+  /// v3.63: the rider's privacy zones with their own radius (PrivatePlacesStore.isNear); events inside are dropped.
+  bool Function(double lat, double lng)? isPrivate;
+
   bool get rideOpen => _start != null;
   int get pendingInRide => _ride.length;
 
@@ -107,6 +110,7 @@ class IntelEventQueue {
     final s = _start;
     if (s == null || _near(s, e.lat, e.lng)) return false;
     if (_zones.any((z) => _near(z, e.lat, e.lng))) return false;
+    if (isPrivate?.call(e.lat, e.lng) ?? false) return false;
     if (_ride.length >= maxPerRide) return false;
     _ride.add(e);
     return true;

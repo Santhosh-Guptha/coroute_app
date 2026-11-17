@@ -179,8 +179,8 @@ function verifyTokenDetailed(token, { allowExpired = false } = {}) {
   if (typeof token !== 'string' || token.length > 4096) return null;
   const opts = { issuer: 'coroute-gateway', algorithms: ['HS256'], ignoreExpiration: true };
   const finish = (claims, previous) => {
-    // 2-step tokens are never a session.
-    if (!claims || claims.typ === 'mfa') return null;
+    // 2-step tokens are never a session. v3.63: nor is a browser guest token (src/guest_service.js verifies its own).
+    if (!claims || claims.typ === 'mfa' || claims.typ === 'guest') return null;
     const expired = Number.isFinite(claims.exp) && claims.exp * 1000 <= Date.now();
     if (expired && !allowExpired) return null;
     return { claims, previous, expired };

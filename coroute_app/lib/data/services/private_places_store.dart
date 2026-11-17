@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/privacy/private_places.dart';
 
-/// 3.56 (round 6): the rider's private places, kept only on this phone (app-private storage; never
+/// 3.56 (round 6) / v3.63 privacy zones: the rider's private places, kept only on this phone (app-private storage; never
 /// sent to the gateway, not part of any backup the app makes). One shared instance: the track
 /// recorder and the road-data queue ask it on every fix, so reads are from memory.
 class PrivatePlacesStore extends ChangeNotifier {
@@ -40,6 +40,13 @@ class PrivatePlacesStore extends ChangeNotifier {
     if (next == null) return false;
     await _save(next);
     return true;
+  }
+
+  /// v3.63: change one place's hidden radius (one of PrivatePlaces.radiusChoices).
+  Future<void> setRadius(int index, double radiusM) async {
+    if (index < 0 || index >= _places.length || !PrivatePlaces.radiusChoices.contains(radiusM)) return;
+    final p = _places[index];
+    await _save([..._places]..[index] = PrivatePlace(label: p.label, lat: p.lat, lng: p.lng, radiusM: radiusM));
   }
 
   Future<void> removeAt(int index) async {

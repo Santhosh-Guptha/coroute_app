@@ -7,7 +7,7 @@ You are the release agent for CoRoute (motorcycle group/solo riding SAFETY app: 
 website + web admin). Build 3.55.0+10030 is committed (latest commit 1a2356a). Two rounds are in the working tree,
 uncommitted: round 16 (3.55.0+10031, docs/NEXT_AGENT_PROMPT_v3.55_round16_explore_10031.md) and round 17 (this prompt).
 Ship them together as build 3.55.0+10032 (pubspec already 3.55.0+10032). Commit round 16 first exactly as its prompt
-section 2 says (skip its pubspec commit), then round 17 below (commits 1-22, including L to Q in section 1). Then test, build, device QA, deploy, Play. Report after
+section 2 says (skip its pubspec commit), then round 17 below (commits 1-23, including L to R in section 1). Then test, build, device QA, deploy, Play. Report after
 each section. STOP at any failed safety gate.
 
 === 0. RULES ===
@@ -168,6 +168,22 @@ Q) ROUND 22 (communities_chat_v360.md section 17, docs/intelligence/INTEL_DATABA
    both, set INTEL_DB_MIGRATE=1 on vm1 only, watch Configuration: DB 1 only -> Copying -> DB 2 in use, then remove
    INTEL_DB_MIGRATE. Optional later: INTEL_DB_PROFILE=extended on both + INTEL_DB_MIGRATE=1 again on vm1.
 
+R) ROUND 23 (communities_chat_v360.md section 18): pricing model switch (Group plans default / Rider Pass).
+   23. feat(pricing): pricing model switch, Rider Pass (one rider, all features, 30 days, Rs 9 list price)
+       gateway/src/pricing_model.js gateway/src/entitlements.js gateway/src/plans.js gateway/src/plan_pricing.js
+       gateway/src/oracle/repo.js gateway/src/membership_routes.js gateway/src/subscription_routes.js gateway/src/routes.js
+       gateway/src/app.js gateway/public/admin/pricing_model.js gateway/public/admin/index.html
+       gateway/public/admin/command.js gateway/public/admin/command.css gateway/public/assets/plans.js
+       gateway/public/assets/account.js lib/presentation/admin/master_admin_dashboard.dart
+       lib/presentation/admin/admin_users_screen.dart lib/presentation/admin/admin_payments_logic.dart
+       gateway/test/pricing_model_363.test.js gateway/test/membership_plans.test.js
+       gateway/test/intel_362_insights.test.js gateway/test/job_lease.test.js docs/*
+   Deploy with the model left on Group plans (default). QA: z12) web admin > Pricing model shows Group plans in use;
+   /plans sells Small and Large Group. z13) on STAGING switch to Rider Pass: /plans shows Community + Rider Pass Rs 9;
+   buy it with a test card; that rider hosts a ride and 15+ riders join; every feature (talk, communities, chat)
+   works; renew early -> unused days credited; switch back to Group plans: the pass keeps working until it ends.
+   The OWNER decides the production model before launch; do not switch production yourself.
+
 === 2. COMMITS (round 17, after round 16's commits 1-8) ===
 1. feat(gateway): communities public/private, join requests, picture, hosted rides
    gateway/src/crews.js gateway/src/crew_routes.js gateway/src/community_routes.js gateway/src/crew_ride_invites.js
@@ -201,7 +217,7 @@ Q) ROUND 22 (communities_chat_v360.md section 17, docs/intelligence/INTEL_DATABA
     test/ui10_home_sections_test.dart
 11. docs(v3.60): communities_chat_v360.md and this prompt
     docs/features_355/communities_chat_v360.md docs/NEXT_AGENT_PROMPT_v3.55_round17_communities_10032.md
-    Before commit 12: make commits 13 to 22 (section 1, L to Q).
+    Before commit 12: make commits 13 to 23 (section 1, L to R).
 12. chore(release): 3.55.0+10032   pubspec.yaml (+ checksums as in 10030)
    After commit 12: `git status --short` shows only _incoming/ (and ignored caches).
 

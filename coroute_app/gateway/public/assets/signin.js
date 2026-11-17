@@ -23,7 +23,9 @@
     n.hidden = !text;
   }
   function say(node, text) { node.textContent = text || ''; }
-  function go() { window.location.replace(next); }
+  // v3.63: an administrator goes straight to the admin console (one place, no rider account page first).
+  var isAdmin = false;
+  function go() { window.location.replace(isAdmin ? '/admin' : next); }
 
   var mfaToken = null;
   var mfaEmail = false;
@@ -48,6 +50,7 @@
     }
     if (!json || !json.token) { say(status, 'Sign in did not complete. Try again.'); return; }
     S.setToken(json.token);
+    isAdmin = !!(json.user && json.user.role === 'MASTER_ADMIN');
     if (!S.token()) { say(status, 'This browser blocks session storage, so you cannot stay signed in. Allow site data for this site, or use another browser.'); return; }
     if (json.user && json.user.mustChangePassword) {
       form.hidden = true;

@@ -89,7 +89,9 @@ test('API: route difficulty for riders; insights and one-rider risk for admins o
   try {
     const u = await t.register('Ins Rider', 'ins.rider@coroute.test');
     const line = [{ lat: 12.97, lng: 77.59 }, { lat: 12.98, lng: 77.62 }, { lat: 13.0, lng: 77.66 }];
-    const d = await t.api('POST', '/intel/route-difficulty', { points: line }, u.token);
+    // Noon in India (06:30 UTC today): the result must not depend on the time the suite runs (night share).
+    const noon = new Date(); noon.setUTCHours(6, 30, 0, 0);
+    const d = await t.api('POST', '/intel/route-difficulty', { points: line, departAt: noon.getTime() }, u.token);
     assert.equal(d.status, 200, JSON.stringify(d.json));
     assert.equal(d.json.level, 'easy');
     assert.equal(d.json.coverage, 'little data yet');

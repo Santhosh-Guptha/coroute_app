@@ -295,9 +295,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify Admin tile is present for Master Admin (badge in the top box + admin row)
-      expect(find.text('Admin'), findsNWidgets(2));
-      expect(find.text('Live rides, history and users'), findsOneWidget);
+      // v3.63: administrators open straight into the admin console; the profile keeps only the Admin badge
+      // (no second "Admin" row: one place for admin work).
+      expect(find.text('Admin'), findsOneWidget);
+      expect(find.text('Live rides, history and users'), findsNothing);
 
       // Still no legacy Fleet Matrix tile
       expect(find.text('Fleet & Tour Dispatcher Matrix'), findsNothing);

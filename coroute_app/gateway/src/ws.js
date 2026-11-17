@@ -1218,6 +1218,8 @@ class Hub {
         const room = await this._liveRoom(ws, gid);
         if (!room) return;
         if (this.rideLock && ws.sid && !ws.safetyOnly) this.rideLock.noteRide(ws.sid, u.userId, gid).catch(() => {});
+        // v3.63: a P2 frame always carries a real position (the app sends hidden positions as JSON TELEMETRY).
+        dec.patch.zoneHidden = false;
         const rider = this.convoys.patchRider(room, u.userId, dec.patch, { emit: false });
         this._fanoutPosition(gid, ws, rider);
         if (this.mirror && rider) this.mirror.position(gid, rider);
@@ -1537,6 +1539,8 @@ class Hub {
 
         // If duplicate replayed frame, do not re-broadcast
         if (duplicate) return;
+        // v3.63: one timeline line per new hazard, so the trip report (and the shared ride card) can say "3 hazards logged".
+        if (isNew) this.convoys.emit('activity', gid, { type: 'ROAD_HAZARD', user: u, lat, lng, classification: pin.classification });
 
         // 3.55: saved for future rides along this road (no rider id; merged with nearby reports).
         if (this.repo && typeof this.repo.saveRoadHazard === 'function') {

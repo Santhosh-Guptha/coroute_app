@@ -284,6 +284,11 @@ async function createApp({ soda = createSoda(), intelSoda = null, logger = conso
   hub.rideLock = rideLock;
   // 3.57: sockets kept open only for a ride (their session was signed out) close when that ride ends.
   convoys.on('roomEnded', (gid) => { try { hub.closeRevokedOf(gid); } catch { /* the next message closes them */ } });
+  // v3.63 browser guests (src/guest_service.js): no account, a ride-scoped token, the host lets them in.
+  const guests = new (require('./guest_service').GuestService)({ repo, convoys, logger });
+  app.locals.guests = guests;
+  convoys.on('roomEnded', (gid) => { guests.endGroup(gid).catch(() => {}); });
+  app.use('/api/guest', require('./guest_service').guestRouter({ guests }));
   // 3.57: browsers may open the socket only from this site (the app sends no Origin).
   hub.allowedOrigins = new Set([...siteOriginsOf(config), ...config.corsOrigins].map((o) => String(o).toLowerCase()));
   network.attach(hub);
@@ -365,7 +370,7 @@ async function createApp({ soda = createSoda(), intelSoda = null, logger = conso
   const refreshSiteMaxRiders = () => {
     if (Date.now() - siteMaxReadAt < 60000) return;
     siteMaxReadAt = Date.now();
-    repo.getMembershipCatalog().then((catalog) => { siteMaxRiders = siteMaxRidersOf(catalog, config.maxConvoyRiders); }).catch(() => {});
+    repo.getMembershipCatalog().then((catalog) => { const pm = require('./pricing_model'); const model = pm.forRepo(repo).now(); siteMaxRiders = siteMaxRidersOf(catalog, config.maxConvoyRiders, (id) => pm.onSaleIn(model, id)); }).catch(() => {});
   };
   const pageVars = (req) => { refreshSiteMaxRiders(); return { __ORIGIN__: originOf(req), __MAX_RIDERS__: String(siteMaxRiders) }; };
   // A Cache-Control set earlier (the 3.56 shop pages: no-store) is kept.
@@ -439,11 +444,26 @@ async function createApp({ soda = createSoda(), intelSoda = null, logger = conso
     res.type('html').send(site.render('trip.html', pageVars(req)));
   });
   // Join link shared from the app: opens the app via its custom scheme, with the download as fallback.
-  app.get('/join/:code', (req, res) => {
+  // v3.63: rich invite card (Open Graph): host first name, ride name, destination, day and rider count only
+  // (src/invite_cards.js). A short cache lets a chat app's preview fetcher and the rider's tap share one render.
+  app.get('/join/:code', async (req, res) => {
     const code = String(req.params.code || '').toUpperCase();
     if (!/^[A-Z0-9]{4,10}$/.test(code)) return res.redirect(302, '/');
-    const html = site.render('join.html', { ...pageVars(req), __CODE__: code });
-    res.type('html').set('Cache-Control', 'no-store').send(html);
+    const IC = require('./invite_cards');
+    const facts = await IC.rideInviteFacts({ convoys, repo }, code).catch(() => null);
+    const vars = { ...pageVars(req), __CODE__: code };
+    vars.__OG_TAGS__ = IC.ogTags(IC.inviteMeta('ride', facts, originOf(req), `/join/${code}`, { assetHash: site.assetHash }));
+    const html = site.render('join.html', vars);
+    res.type('html').set('Cache-Control', 'private, max-age=60').set('X-Robots-Tag', 'noindex').send(html);
+  });
+  // v3.63 ride in a browser (iPhone / no app): the guest page. Strict CSP (own scripts, OSM tiles), never indexed.
+  app.get('/ride/:code', (req, res, next) => {
+    const code = String(req.params.code || '').toUpperCase();
+    if (!/^[A-Z0-9]{4,10}$/.test(code)) return next(); // the page's own files (/ride/ride.js ...) and 404s
+    res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex, nofollow')
+      .set('Permissions-Policy', 'geolocation=(self), camera=(), microphone=()')
+      .set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; manifest-src 'self'")
+      .type('html').sendFile(pub('ride/index.html'));
   });
   // 3.16 live emergency link page: the rider's first name, last position and time for 30 minutes. Never cached,
   // never indexed, no referrer leaves the page. A malformed token is a 404; a dead link the expired page (410).

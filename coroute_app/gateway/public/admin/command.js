@@ -16,7 +16,7 @@
     command: 'M3 12h4l3-8 4 16 3-8h4', overview: 'M4 19V9m6 10V5m6 14v-7m4 7H2', riders: 'M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6m13 9v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8',
     config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
     features: 'M7 7h10a5 5 0 0 1 0 10H7A5 5 0 0 1 7 7zm0 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4z', phonesignin: 'M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm4 17h2',
-    payments: 'M2 7h20v12H2zM2 11h20', plans: 'M3 7l9-4 9 4-9 4-9-4zm0 5l9 4 9-4M3 17l9 4 9-4', planfeatures: 'M4 6h16M4 12h10M4 18h6m10-6 2 2 4-4', coupons: 'M3 9a3 3 0 0 0 0 6v3h18v-3a3 3 0 0 0 0-6V6H3zm9-3v12',
+    payments: 'M2 7h20v12H2zM2 11h20', pricingmodel: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6', plans: 'M3 7l9-4 9 4-9 4-9-4zm0 5l9 4 9-4M3 17l9 4 9-4', planfeatures: 'M4 6h16M4 12h10M4 18h6m10-6 2 2 4-4', coupons: 'M3 9a3 3 0 0 0 0 6v3h18v-3a3 3 0 0 0 0-6V6H3zm9-3v12',
     revenue: 'M3 17l6-6 4 4 8-8m0 0h-6m6 0v6', email: 'M3 5h18v14H3zm0 0 9 8 9-8', push: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9m-4.3 13a2 2 0 0 1-3.4 0',
     board: 'M4 4h16v12H5l-1 4z', marketing: 'M3 11l15-6v14L3 13zm4 1v6', explore: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4 6-2 6-6 2 2-6z', operators: 'M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6',
     engagement: 'M12 17.3 18.2 21l-1.6-7 5.4-4.7-7.2-.6L12 2 9.2 8.7 2 9.3l5.4 4.7L5.8 21z', hazards: 'M12 3 2 21h20zm0 6v5m0 3h.01', crashbrain: 'M9 3a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-2zm6 0a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1',
@@ -187,7 +187,8 @@
       ['Feature switches', 'Turn app features on or off for everyone. Safety stays on.', '#/features', 'features', 'features'],
     ]],
     ['Plans and money', [
-      ['Features by plan', 'What Community, Small Group and Large Group include, and their limits.', '#/planfeatures', 'planfeatures', 'planfeatures'],
+      ['Pricing model', 'Group plans (host buys) or Rider Pass (every rider, all features, monthly).', '#/pricingmodel', 'plans', 'pricingmodel'],
+      ['Features by plan', 'What Community, Small Group, Large Group and Rider Pass include, and their limits.', '#/planfeatures', 'planfeatures', 'planfeatures'],
       ['Pricing and payments', 'Plan prices, offers and the payment gateway keys.', '#/settings/pricing', 'payments', null],
       ['Coupons', 'Codes, limits and who may use them.', '#/coupons', 'coupons', null],
     ]],
@@ -215,6 +216,7 @@
     features: function () { return api('GET', '/admin/features').then(function (v) { var off = v.features.filter(function (f) { return !f.enabled; }).length; return off ? [off + ' off', 'warn'] : ['All on', 'ok']; }); },
     planfeatures: function () { return api('GET', '/admin/plan-features').then(function (v) { var free = v.plans && v.plans.community ? Object.keys(v.plans.community.features).filter(function (k) { return v.plans.community.features[k]; }).length : 0; return [free + ' on for free', 'info']; }); },
     push: function () { return api('GET', '/admin/push/config').then(function (v) { return v.enabled ? ['Ready', 'ok'] : ['Not configured', 'bad']; }); },
+    pricingmodel: function () { return api('GET', '/admin/pricing-model').then(function (v) { return [v.model === 'rider_pass' ? 'Rider Pass' : 'Group plans', 'info']; }); },
     inteldb: function () { return api('GET', '/admin/intel/insights').then(function (v) { var d = v.database || {}; if (!d.separate) return ['DB 1 only', 'info']; if (d.intelDb !== 'UP') return ['DB 2 down', 'bad']; return d.mode === 'intel' ? ['DB 2 in use', 'ok'] : d.mode === 'dual' ? ['Copying to DB 2', 'warn'] : ['DB 2 ready', 'info']; }); },
     servers: function () { return api('GET', '/admin/business/servers').then(function (v) { return [v.status === 'ok' ? 'Healthy' : v.status === 'warn' ? 'Check' : 'Problem', v.status === 'ok' ? 'ok' : v.status === 'warn' ? 'warn' : 'bad']; }); },
   };

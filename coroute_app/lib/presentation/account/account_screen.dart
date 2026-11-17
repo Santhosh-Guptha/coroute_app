@@ -14,7 +14,6 @@ import '../../data/services/meta_service.dart';
 import '../../data/services/ride_invites_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../domain/profile/riding_checklist.dart';
-import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../engagement/rate_and_feedback.dart';
@@ -32,6 +31,7 @@ import '../social/user_avatar.dart';
 import '../widgets/feature_switch.dart';
 import 'edit_profile_screen.dart';
 import 'operator_apply_screen.dart';
+import '../privacy/privacy_zones_screen.dart';
 import 'privacy_terms_sheet.dart';
 import 'sign_out_flow.dart';
 import '../explore/share_route_card.dart' show MySharedRoutesScreen;
@@ -350,6 +350,8 @@ class _AccountScreenState extends State<AccountScreen> {
                         color: contactSet ? null : AppTheme.warnText,
                         onTap: () => _push(const EditProfileScreen()),
                       ),
+                      // v3.63 privacy zones: hide where the rider starts and ends (home, work); kept on the phone.
+                      _SettingsRow(key: const Key('profile_privacy_zones'), icon: Icons.shield_moon_outlined, title: PrivacyZonesScreen.title, subtitle: PrivacyZonesScreen.rowSubtitle, onTap: () => PrivacyZonesScreen.open(context)),
                       // v3.59: routes I shared on Explore (delete any time).
                       if (context.featureOn('exploreRoutes'))
                         _SettingsRow(key: const Key('profile_shared_routes'), icon: Icons.alt_route_rounded, title: 'My shared routes', onTap: () => MySharedRoutesScreen.open(context)),
@@ -363,14 +365,8 @@ class _AccountScreenState extends State<AccountScreen> {
                         title: PrivacyTermsSheet.title,
                         onTap: () => PrivacyTermsSheet.show(context, meta),
                       ),
-                      if (auth.isMasterAdmin)
-                        _SettingsRow(
-                          icon: Icons.admin_panel_settings_rounded,
-                          title: 'Admin',
-                          subtitle: 'Live rides, history and users',
-                          // One admin console for phones and tablets (it adapts its layout).
-                          onTap: () => _push(const MasterAdminDashboard()),
-                        ),
+                      // v3.63: no "Admin" row here: administrators open straight into the admin console (splash, sign-in
+                      // and RiderHomeScreen send them there), so there is one place for admin work.
                       _SettingsRow(key: const Key('profile_advanced'), icon: Icons.tune_rounded, title: SettingsScreen.moreTitle, divider: false, onTap: () => SettingsScreen.open(context)),
                     ]),
                     const SizedBox(height: Space.s24),
