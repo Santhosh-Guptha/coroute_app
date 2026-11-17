@@ -61,6 +61,9 @@ const PUBLIC = Object.freeze({
   'POST /api/feedback': 'website feedback form (honeypot, timing, rate limit)',
   // capability tokens / signatures (checked by the handler)
   'GET /api/public/live/:token': 'live emergency link (hashed token, 30 minutes)',
+  // v3.63 browser guests (src/guest_service.js): start needs no account (first name + device key, the host lets them in);
+  // the other /api/guest routes check their own ride-scoped guest token (typ 'guest', refused everywhere else).
+  'POST /api/guest/start': 'guest join request: name + device key + code, rate limited (10 / 15 min per address, 40 per code); the host approves',
   'GET /api/checkout/order/:orderId': 'old app checkout link (signed t / e)',
   'POST /api/verify-payment': 'legacy web checkout: Razorpay HMAC signature over our order',
   'POST /api/razorpay/callback': 'Razorpay redirect: HMAC signature',

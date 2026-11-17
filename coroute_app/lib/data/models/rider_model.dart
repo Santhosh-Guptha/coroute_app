@@ -88,6 +88,13 @@ class RiderModel {
   /// Whether the rider is currently broadcasting voice audio on intercom.
   final bool isSpeaking;
 
+  /// v3.63: a rider on the browser page (guest, no app): the group list shows a "Browser" badge.
+  final bool isGuest;
+
+  /// v3.63 privacy zones: the rider is near one of their saved places, so their position is not shared
+  /// (lat / lng are 0). Shown as "Location hidden near a saved place"; never during their own emergency.
+  final bool zoneHidden;
+
   RiderPresence get presenceState => RiderPresence.fromWire(presence);
 
   /// The lead made this rider the sweeper (3.16).
@@ -189,6 +196,8 @@ class RiderModel {
     this.trackingConfidence = TrackingConfidence.gpsFix,
     this.micMuted = false,
     this.isSpeaking = false,
+    this.isGuest = false,
+    this.zoneHidden = false,
     this.isMeshPeer = false,
     this.meshHops = 0,
     this.lastMeshEpochMs = 0,
@@ -226,6 +235,8 @@ class RiderModel {
     TrackingConfidence? trackingConfidence,
     bool? micMuted,
     bool? isSpeaking,
+    bool? isGuest,
+    bool? zoneHidden,
     bool? isMeshPeer,
     int? meshHops,
     int? lastMeshEpochMs,
@@ -264,6 +275,8 @@ class RiderModel {
       trackingConfidence: trackingConfidence ?? this.trackingConfidence,
       micMuted: micMuted ?? this.micMuted,
       isSpeaking: isSpeaking ?? this.isSpeaking,
+      isGuest: isGuest ?? this.isGuest,
+      zoneHidden: zoneHidden ?? this.zoneHidden,
       isMeshPeer: isMeshPeer ?? this.isMeshPeer,
       meshHops: meshHops ?? this.meshHops,
       lastMeshEpochMs: lastMeshEpochMs ?? this.lastMeshEpochMs,
@@ -306,6 +319,8 @@ class RiderModel {
       'trackingConfidence': trackingConfidence.toWire(),
       'micMuted': micMuted,
       'isSpeaking': isSpeaking,
+      if (isGuest) 'isGuest': true,
+      if (zoneHidden) 'zoneHidden': true,
       if (isMeshPeer) 'isMeshPeer': true,
       if (meshHops > 0) 'meshHops': meshHops,
       if (lastMeshEpochMs > 0) 'lastMeshEpochMs': lastMeshEpochMs,
@@ -347,6 +362,8 @@ class RiderModel {
       trackingConfidence: TrackingConfidence.fromWire(json['trackingConfidence'] as String?),
       micMuted: json['micMuted'] == true,
       isSpeaking: json['isSpeaking'] == true,
+      isGuest: json['isGuest'] == true,
+      zoneHidden: json['zoneHidden'] == true,
       isMeshPeer: json['isMeshPeer'] == true,
       meshHops: (json['meshHops'] as num?)?.toInt() ?? 0,
       lastMeshEpochMs: (json['lastMeshEpochMs'] as num?)?.toInt() ?? 0,

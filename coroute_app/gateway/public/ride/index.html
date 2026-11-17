@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#15181C">
+<title>Ride in your browser | CoRoute</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/ride/leaflet.css">
+<link rel="stylesheet" href="/ride/ride.css">
+<script src="/ride/leaflet.js" defer></script>
+<script src="/ride/ride.js" defer></script>
+</head>
+<body>
+<noscript><div class="noscript-note">This page needs JavaScript to share your position with the group and to warn you of an SOS.</div></noscript>
+
+<header class="bar">
+  <span class="bar__brand">CoRoute</span>
+  <span class="bar__ride" id="ride-name">Group ride</span>
+</header>
+
+<main id="view-join" class="panel" hidden>
+  <h1>Ride with the group in your browser</h1>
+  <p class="lead">No app needed. Your phone's browser shows the group on a map, shares your position with the riders and warns you if someone sends an SOS.</p>
+  <p class="code-line">Ride code <b id="join-code">-</b></p>
+  <form id="join-form" novalidate>
+    <label for="join-name">Your first name</label>
+    <input id="join-name" name="name" type="text" autocomplete="given-name" maxlength="30" required>
+    <label class="check"><input id="join-consent" type="checkbox" required> <span>Share my position with this group while this page is open. It stops when I leave the ride or close the page.</span></label>
+    <p class="err" id="join-err" role="alert" hidden></p>
+    <button class="btn btn--primary" id="join-btn" type="submit">Ask to join</button>
+  </form>
+  <p class="small">The host lets you in. On Android you can also <a href="/get">get the app</a> for crash detection, offline SOS texts and group talk.</p>
+</main>
+
+<main id="view-wait" class="panel" hidden>
+  <div class="spinner" aria-hidden="true"></div>
+  <h1>Waiting for the host</h1>
+  <p class="lead">The host of <b id="wait-ride">this ride</b> sees your request and lets you in. Keep this page open.</p>
+  <button class="btn" id="wait-cancel" type="button">Cancel</button>
+</main>
+
+<main id="view-end" class="panel" hidden>
+  <h1 id="end-title">The ride has ended</h1>
+  <p class="lead" id="end-text">Thanks for riding with the group.</p>
+  <a class="btn btn--primary" href="/get">Get CoRoute</a>
+</main>
+
+<div id="view-ride" class="ride" hidden>
+  <div id="map" class="map" role="application" aria-label="Map of the group"></div>
+  <div class="hud">
+    <span class="pill" id="loc-pill">Finding your position</span>
+    <button class="btn btn--sm" id="group-btn" type="button" aria-expanded="false" aria-controls="group-panel">Group</button>
+    <button class="btn btn--sm" id="alerts-btn" type="button" hidden>Turn on alerts</button>
+  </div>
+  <p class="tip" id="ios-tip" hidden>Keep this page open with the screen on. When the screen locks or you switch apps, your browser stops sharing your position.</p>
+  <section id="group-panel" class="sheet" hidden aria-label="Riders in this ride">
+    <h2>Riders</h2>
+    <ul id="group-list" class="riders"></ul>
+    <button class="btn btn--sm" id="leave-btn" type="button">Leave the ride</button>
+  </section>
+  <div class="sos-wrap">
+    <button class="sos" id="sos-btn" type="button" aria-describedby="sos-help"><span class="sos__ring" id="sos-ring"></span><span class="sos__text">SOS</span></button>
+    <p class="sos-help" id="sos-help">Hold 3 seconds to alert your group</p>
+  </div>
+  <div class="mine" id="my-sos" hidden role="status">
+    <b>Your SOS was sent to the group.</b>
+    <span class="small">Your position goes with it. No contacts are texted from the browser: call 112 if you need an ambulance.</span>
+    <button class="btn btn--sm" id="my-sos-cancel" type="button">I am OK, cancel SOS</button>
+  </div>
+</div>
+
+<div id="alarm" class="alarm" role="alertdialog" aria-modal="true" aria-labelledby="alarm-title" hidden>
+  <p class="alarm__kind" id="alarm-kind">SOS</p>
+  <h2 id="alarm-title">A rider needs help</h2>
+  <p id="alarm-text">Their position is on the map.</p>
+  <div class="alarm__actions">
+    <button class="btn btn--light" id="alarm-show" type="button">Show on map</button>
+    <button class="btn btn--ghost-light" id="alarm-ok" type="button">I have seen it</button>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

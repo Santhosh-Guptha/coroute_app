@@ -37,10 +37,18 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | LIVE | GET | /watch | app.js | Ride Guardian page; its whole API is LIVE |
 | LIVE | GET | /watch-sw.js | app.js | Ride Guardian service worker (scope /watch) |
 | LIVE | * | /api/guardian/* | guardian_routes.js | `GuardianService.viewGrant` -> `convoys.getRoom` (loads/reads rooms); push subscriptions |
+| LIVE | * | /api/guest/* | guest_service.js | v3.63 browser guests: join by code (`convoys.joinByCode`, approval), live view, positions (`convoys.patchRider`), SOS (`convoys.raiseSos`) |
+| LIVE | GET | /ride/:code | app.js | v3.63 guest ride page; next to the guest API |
 | LIVE | POST | /api/convoys | routes.js | `convoys.createConvoy` creates the room |
 | LIVE | POST | /api/convoys/join | routes.js | `convoys.joinByCode` (room membership, join limits in memory) |
 | LIVE | POST | /api/convoys/:groupId/gathering | routes.js | v3.60 meet first: start from the meeting point / move it (`convoys.updateGathering`, room meta) |
 | LIVE | POST | /api/convoys/:groupId/join-requests/:userId | routes.js | v3.60 host approves / declines a waiting rider (`convoys.decideJoin`, room meta) |
+| LIVE | GET | /api/convoys/:groupId/expenses | expenses.js | v3.63 expense split: membership from the room (`convoys.getRoom`) |
+| LIVE | POST | /api/convoys/:groupId/expenses | expenses.js | v3.63 add an expense; EXPENSES_CHANGED to the room |
+| LIVE | PUT | /api/convoys/:groupId/expenses/:id | expenses.js | v3.63 edit own expense; room event |
+| LIVE | DELETE | /api/convoys/:groupId/expenses/:id | expenses.js | v3.63 delete own expense; room event |
+| LIVE | POST | /api/convoys/:groupId/expenses/settle | expenses.js | v3.63 paid-back record; room event |
+| LIVE | DELETE | /api/convoys/:groupId/expenses/settle/:id | expenses.js | v3.63 undo own paid-back record; room event |
 | LIVE | GET | /api/convoys/active | routes.js | `convoys.getSnapshot` |
 | LIVE | GET | /api/convoys/:groupId | routes.js | `convoys.getSnapshot` / `isMember` |
 | LIVE | GET | /api/convoys/:groupId/emergency-roster | routes.js | `convoys.emergencyRoster` |
