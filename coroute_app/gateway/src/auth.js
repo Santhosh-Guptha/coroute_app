@@ -1039,7 +1039,23 @@ class AuthService {
   }
 
   /** Checks a TOTP code or a recovery code (single use). Returns the updated user or throws. */
-  async mfaCheck(user, { code, recoveryCode, emailCode }) {
+  /**
+   * v3.62 security: one 2-step check at a time per account on this node. Each check reads the account fresh, so two
+   * requests racing with the same recovery code (or the same TOTP step) can no longer both pass: the second one sees
+   * the code already used (recovery list / mfaLastStep written by the first).
+   */
+  mfaCheck(user, opts = {}) {
+    const id = String((user && user.userId) || '');
+    const locks = this._mfaLocks || (this._mfaLocks = new Map());
+    const prev = locks.get(id) || Promise.resolve();
+    const run = prev.catch(() => {}).then(() => this._mfaCheckNow(user, opts));
+    const tail = run.catch(() => {});
+    locks.set(id, tail);
+    tail.then(() => { if (locks.get(id) === tail) locks.delete(id); });
+    return run;
+  }
+
+  async _mfaCheckNow(user, { code, recoveryCode, emailCode }) {
     // Round 4: an e-mailed code (operators without an authenticator app; never MASTER_ADMIN).
     if (emailCode) {
       const u0 = await this.repo.findUserById(user.userId);
@@ -1257,11 +1273,16 @@ function requireAuth(gate) {
     const verified = token && verifyTokenDetailed(token, { allowExpired: true });
     if (!verified) return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
     const { claims } = verified;
+    let renewLong = false;
     if (verified.expired) {
       // 3.57: a short access token ran out: the client refreshes (POST /api/auth/refresh) and repeats the call once.
-      // A long token (older app builds) that ran out is a session that ended, as before.
       if (claims.typ === 'at') return res.status(401).json({ error: 'Your session needs to be refreshed.', code: 'TOKEN_EXPIRED' });
-      return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
+      // v3.62: a long token (older app builds, JWT_TTL_DAYS) that ran out but names a server session: the session
+      // decides (checked below: not revoked, account fine, password unchanged). If it lives, the call goes through
+      // and the client gets a fresh token (X-CoRoute-Token, adopted by every build). A phone left unused for longer
+      // than the token lifetime is no longer signed out by the token's date.
+      if (claims.typ === 'mfa' || !claims.sid || !gate || !gate.sessions) return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
+      renewLong = true;
     }
     req.tokenIssuedAt = (claims.iat || 0) * 1000;
     req.tokenClaims = claims;
@@ -1274,6 +1295,7 @@ function requireAuth(gate) {
       return next();
     }
     gate.checkDetailed(claims).then(async ({ user, session }) => {
+      if (renewLong && !(session && (session.kind === 'app' || session.kind === 'legacy'))) return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
       req.dbUser = user;
       req.user = identityOf(user);
       req.authSession = session;
@@ -1284,7 +1306,7 @@ function requireAuth(gate) {
           const sid = await migrateLegacyToken(gate, user, token, req);
           if (sid) { req.sessionSid = sid; res.set('X-CoRoute-Token', signToken(user, { sid })); }
         } catch { /* never in the way: the old token still works until it expires */ }
-      } else if (verified.previous) {
+      } else if (verified.previous || renewLong) {
         try { res.set('X-CoRoute-Token', signToken(user, { sid: claims.sid || null, short: req.tokenShort })); } catch { /* never in the way */ }
       }
       next();

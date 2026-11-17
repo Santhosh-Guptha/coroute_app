@@ -47,17 +47,29 @@ class SessionError extends Error {
 const MSG_SIGNED_OUT = 'You were signed out. Please sign in again.';
 const MSG_EXPIRED = 'Your session expired. Please sign in again.';
 
-/** Lifetimes of one kind of session (ms). touchMs: how stale lastSeenAt may get before it is written again. */
-function policyOf(kind, c = config) {
+/**
+ * Lifetimes of one kind of session (ms). touchMs: how stale lastSeenAt may get before it is written again.
+ * v3.62 phone sessions (app / legacy): the limits come from the session's own copy of the admin policy (`s.appPol`,
+ * stamped at sign-in, src/session_settings.js). A session without one (made before v3.62) has no time limit, so a
+ * policy change or a VM .env value never signs out riders who are already signed in.
+ */
+function policyOf(kind, c = config, s = null) {
   const min = 60000; const hour = 60 * min; const day = 24 * hour;
+  const ap = s && s.appPol && typeof s.appPol === 'object' ? s.appPol : null;
+  const appIdle = ap ? Math.max(0, Number(ap.idleDays) || 0) * day : 0;
+  const appAbs = ap ? Math.max(0, Number(ap.absDays) || 0) * day : 0;
   switch (kind) {
     case 'web': return { idleMs: c.sessionWebIdleMin * min, absMs: c.sessionWebAbsoluteDays * day, touchMs: min, absHard: true, short: true, cookie: '__Host-cr_rt', sameSite: 'Lax' };
     case 'admin': return { idleMs: c.sessionAdminIdleMin * min, absMs: c.sessionAdminAbsoluteHours * hour, touchMs: min, absHard: true, short: true, cookie: '__Host-cr_adm', sameSite: 'Strict' };
     case 'operator': return { idleMs: c.sessionAdminIdleMin * min, absMs: c.sessionAdminAbsoluteHours * hour, touchMs: min, absHard: true, short: true, cookie: '__Host-cr_op', sameSite: 'Strict' };
-    case 'app': return { idleMs: c.sessionAppIdleDays * day, absMs: c.sessionAppAbsoluteDays * day, touchMs: 10 * min, absHard: false, short: true, cookie: null };
-    default: return { idleMs: c.sessionAppIdleDays * day, absMs: 0, touchMs: 10 * min, absHard: false, short: false, cookie: null };
+    case 'app': return { idleMs: appIdle, absMs: appAbs, touchMs: 10 * min, absHard: false, short: true, cookie: null };
+    default: return { idleMs: appIdle, absMs: 0, touchMs: 10 * min, absHard: false, short: false, cookie: null };
   }
 }
+
+const isPhoneKind = (k) => k === 'app' || k === 'legacy';
+/** v3.62: how many times a phone may rotate from its previous refresh token after the 60 s window. */
+const PREV_LATE_MAX = 3;
 
 /** "Chrome on Windows", "CoRoute app on Android" ... from a User-Agent (no version numbers, no device ids). */
 function uaSummary(ua) {
@@ -86,6 +98,8 @@ class SessionStore {
     this.onRevoke = null;
     /** async (userId) => boolean: is the rider on a live ride / open alert right now (app.js). */
     this.isRiding = null;
+    /** v3.62 async () => {idleDays, absDays}: the admin's phone sign-in policy for NEW sessions (src/session_settings.js). */
+    this.appPolicy = null;
     this.reads = 0;
   }
 
@@ -136,7 +150,16 @@ class SessionStore {
    */
   async create({ user, kind = 'legacy', device = {}, ip = '', ua = '', mfa = false, build = 0, lockChecked = false }) {
     if (!KINDS.has(kind)) kind = 'legacy';
-    const pol = policyOf(kind);
+    // v3.62: a phone session keeps a copy of the admin policy of the moment it was made (0 / 0 = no limit: no copy).
+    let appPol = null;
+    if (isPhoneKind(kind)) {
+      let ap = null;
+      try { ap = this.appPolicy ? await this.appPolicy() : null; } catch { ap = null; }
+      const idleDays = Math.max(0, Math.round(Number(ap ? ap.idleDays : config.sessionAppIdleDays) || 0));
+      const absDays = Math.max(0, Math.round(Number(ap ? ap.absDays : config.sessionAppAbsoluteDays) || 0));
+      if (idleDays || absDays) appPol = { idleDays, absDays, setAt: this.clock() };
+    }
+    const pol = policyOf(kind, config, appPol ? { appPol } : null);
     const t = this.clock();
     const sessionId = `ses_${crypto.randomBytes(16).toString('base64url')}`;
     const s = {
@@ -154,6 +177,7 @@ class SessionStore {
       build: Number.isInteger(build) && build > 0 && build < 1000000 ? build : 0, lockChecked: !!lockChecked,
       refreshHash: '', refreshCounter: 0, prevRefreshHash: '', prevRefreshCounter: -1, rotatedAt: 0,
       revokedAt: 0, revokeReason: '',
+      ...(appPol ? { appPol } : {}),
     };
     let refreshToken = null;
     if (pol.short) {
@@ -228,7 +252,7 @@ class SessionStore {
     const s = await this._read(sessionId, { ...(maxAgeMs ? { maxAgeMs } : {}), swr });
     if (!s || s.userId !== userId) throw new SessionError(MSG_SIGNED_OUT);
     if (s.revokedAt) throw new SessionError(s.revokeReason === 'IDLE' || s.revokeReason === 'EXPIRED' ? MSG_EXPIRED : MSG_SIGNED_OUT);
-    const pol = policyOf(s.kind);
+    const pol = policyOf(s.kind, config, s);
     const t = this.clock();
     if (pol.idleMs && t - (Number(s.lastSeenAt) || 0) > pol.idleMs) {
       this.revoke(s.sessionId, 'IDLE').catch(() => {});
@@ -263,12 +287,15 @@ class SessionStore {
     if (s.revokedAt) throw new SessionError(MSG_SIGNED_OUT);
     const t = this.clock();
     const h = sha256(rawToken);
-    const pol = policyOf(s.kind);
+    const pol = policyOf(s.kind, config, s);
     let graced = false;
     if (n === s.refreshCounter && safeEq(h, s.refreshHash)) {
       // the current token
-    } else if (n === s.prevRefreshCounter && safeEq(h, s.prevRefreshHash) && t - (Number(s.rotatedAt) || 0) <= config.refreshReuseGraceSec * 1000) {
-      graced = true; // a lost reply or a second tab: rotate again from it, the sibling becomes invalid
+    } else if (n === s.prevRefreshCounter && safeEq(h, s.prevRefreshHash) && this._withinGrace(s, t)) {
+      // A lost reply or a second tab: rotate again from it, the sibling becomes invalid. v3.62: on a phone this is
+      // also the reply lost on a bad mobile network, or a token the phone could not save before it was closed: the
+      // previous token is accepted for REFRESH_REUSE_GRACE_APP_SEC (0 = any time) instead of 60 s.
+      graced = true;
     } else if (n <= s.refreshCounter) {
       await this.revoke(s.sessionId, 'REFRESH_REUSE');
       this._audit('REFRESH_REUSE', s.userId, s.sessionId);
@@ -297,8 +324,11 @@ class SessionStore {
     const next = this._newRefresh(s.sessionId, s.refreshCounter + 1);
     Object.assign(patch, {
       refreshHash: next.hash, refreshCounter: s.refreshCounter + 1, lastSeenAt: t,
-      ...(graced ? {} : { prevRefreshHash: s.refreshHash, prevRefreshCounter: s.refreshCounter, rotatedAt: t }),
+      ...(graced ? {} : { prevRefreshHash: s.refreshHash, prevRefreshCounter: s.refreshCounter, rotatedAt: t, prevLateUses: 0 }),
     });
+    // v3.62 security: after the short (60 s) window the previous token is a lost reply on a bad network; it may rotate
+    // only a few times (PREV_LATE_MAX), so a stolen old refresh token can no longer mint new tokens forever.
+    if (graced && t - (Number(s.rotatedAt) || 0) > config.refreshReuseGraceSec * 1000) patch.prevLateUses = (Number(s.prevLateUses) || 0) + 1;
     // Compare-and-replace: two refreshes racing on the same token never both rotate from the same state; the loser
     // runs again and finds its token as the previous one (graced), so neither client is signed out.
     const raw = { ...s }; delete raw.key;
@@ -311,6 +341,30 @@ class SessionStore {
     const saved = { ...doc, key: s.key };
     this._put(saved);
     return { session: saved, refreshToken: next.token, graced };
+  }
+
+  /** v3.62: may the previous refresh token still rotate (lost reply) at time t? */
+  _withinGrace(s, t) {
+    const since = t - (Number(s.rotatedAt) || 0);
+    if (isPhoneKind(s.kind)) {
+      if (since <= config.refreshReuseGraceSec * 1000) return true;
+      // v3.62 security: a late previous token (lost reply) is accepted a few times only (never an endless replay).
+      if ((Number(s.prevLateUses) || 0) >= PREV_LATE_MAX) return false;
+      const g = Number(config.refreshReuseGraceAppSec) || 0;
+      return g <= 0 || since <= g * 1000;
+    }
+    return since <= config.refreshReuseGraceSec * 1000;
+  }
+
+  /** v3.62: live phone sessions (for the admin page; capped count). */
+  async countLiveApp() {
+    // v3.62: cached 5 min (the command center polls the admin page every 15 s; a 5000-row scan each time is a load).
+    const c = this._liveAppCount;
+    if (c && this.clock() - c.at < 5 * 60000) return c.n;
+    const rows = await this.soda.query(COLLECTION, { revokedAt: 0 }, { limit: 5000 });
+    const n = rows.filter((r) => isPhoneKind(r.value && r.value.kind)).length;
+    this._liveAppCount = { n, at: this.clock() };
+    return n;
   }
 
   async get(sessionId) { return this._read(sessionId, { fresh: true }); }
@@ -374,7 +428,7 @@ class SessionStore {
     return rows.map((r) => r.value)
       .filter((s) => {
         if (s.revokedAt) return false;
-        const pol = policyOf(s.kind);
+        const pol = policyOf(s.kind, config, s);
         if (pol.idleMs && t - (Number(s.lastSeenAt) || 0) > pol.idleMs) return false;
         return !(pol.absHard && s.absoluteExpiresAt && t > s.absoluteExpiresAt);
       })
@@ -400,17 +454,37 @@ class SessionStore {
     void sessionId;
   }
 
-  /** Removes revoked / long idle session records (kept 30 days after they ended, for the audit trail). Leased. */
+  /**
+   * Removes ended session records 30 days after they ended (audit trail). v3.62: only records that really ended:
+   * revoked, or past their own idle / hard absolute limit. A live phone session is never removed, however long the
+   * phone was not used (before v3.62 a phone unused for 30 days lost its session here and was signed out). Leased.
+   */
   async sweep({ now = this.clock() } = {}) {
     const cutoff = now - 30 * 86400000;
     let removed = 0;
-    for (;;) {
-      const rows = await this.soda.query(COLLECTION, { lastSeenAt: { $lt: cutoff } }, { limit: 200 });
+    let after = 0;
+    for (let page = 0; page < 50; page++) {
+      const rows = await this.soda.query(COLLECTION, { lastSeenAt: { $lt: cutoff } }, { limit: 200, offset: after, orderBy: [{ path: 'lastSeenAt', datatype: 'number', order: 'asc' }] });
       if (!rows.length) break;
-      for (const r of rows) { await this.soda.remove(COLLECTION, r.key); removed++; }
+      let kept = 0;
+      for (const r of rows) {
+        const s = r.value || {};
+        if (this._ended(s, cutoff)) { await this.soda.remove(COLLECTION, r.key); removed++; } else kept++;
+      }
+      after += kept;
       if (rows.length < 200) break;
     }
     return removed;
+  }
+
+  /** True when the record ended more than 30 days before `now` (cutoff = now - 30 days). */
+  _ended(s, cutoff) {
+    if (s.revokedAt) return Number(s.revokedAt) < cutoff;
+    const pol = policyOf(s.kind, config, s);
+    const seen = Number(s.lastSeenAt) || 0;
+    if (pol.idleMs && seen + pol.idleMs < cutoff) return true;
+    if (pol.absHard && s.absoluteExpiresAt && Number(s.absoluteExpiresAt) < cutoff) return true;
+    return false;
   }
 
   // ---- mirror extension 'ss': revocations made on the peer node ----
@@ -425,4 +499,4 @@ class SessionStore {
   }
 }
 
-module.exports = { SessionStore, SessionError, policyOf, uaSummary, COLLECTION, SID_RE, RT_RE, MSG_SIGNED_OUT, MSG_EXPIRED, sha256 };
+module.exports = { SessionStore, SessionError, policyOf, isPhoneKind, PREV_LATE_MAX, uaSummary, COLLECTION, SID_RE, RT_RE, MSG_SIGNED_OUT, MSG_EXPIRED, sha256 };

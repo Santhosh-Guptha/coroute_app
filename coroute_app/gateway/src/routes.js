@@ -291,6 +291,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   require('./feature_flags').registerFeatureFlagRoutes({ r, flagsOf, repo, wrap, requireAdmin });
   // v3.60 admin features and limits by plan (src/plans.js; never safety).
   require('./plans').registerPlanRoutes({ r, repo, wrap, requireAdmin });
+  // v3.62 phone sign-in rule (web admin Security > Phone sign-in): applies to new phone sign-ins only.
+  if (auth.sessions && auth.sessions.settings) {
+    require('./session_settings').registerSessionSettingsRoutes({ r, settings: auth.sessions.settings, repo, wrap, requireAdmin, sessions: auth.sessions });
+  }
   // 3.55 platform: admin warnings for the rider (GET /me/warnings, POST /me/warnings/:id/ack).
   if (hub && hub.publicRides && hub.publicRides.adminWarnings) require('./admin_warnings').registerAdminWarningRoutes({ r, warnings: hub.publicRides.adminWarnings, wrap });
   // 3.55 usernames, profiles, friends, blocks, profile pictures (src/social_routes.js).

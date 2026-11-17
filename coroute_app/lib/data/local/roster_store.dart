@@ -1,11 +1,12 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'secure_store.dart';
 import '../../core/constants/net_constants.dart';
 import '../models/emergency_roster.dart';
 
 /// Encrypted copy of the emergency SMS roster (flutter_secure_storage).
 /// Phone numbers are never written to SharedPreferences and never logged.
 class RosterStore {
-  RosterStore({FlutterSecureStorage? storage}) : _storage = storage ?? const FlutterSecureStorage();
+  RosterStore({FlutterSecureStorage? storage}) : _storage = storage ?? kSecureStorage;
 
   final FlutterSecureStorage _storage;
 

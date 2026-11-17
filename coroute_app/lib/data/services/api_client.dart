@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../local/secure_store.dart';
 import 'package:http/http.dart' as http;
 import '../../core/config/app_config.dart';
 import '../../domain/diag/diag_log.dart'; // 3.55 diagnostics log (no personal data)
@@ -67,7 +68,7 @@ class ApiClient extends ChangeNotifier {
 
   ApiClient({http.Client? httpClient, FlutterSecureStorage? storage})
       : _http = httpClient ?? http.Client(),
-        _storage = storage ?? const FlutterSecureStorage();
+        _storage = storage ?? kSecureStorage;
 
   static const _tokenKey = 'coroute_jwt';
   static const _refreshKey = 'coroute_refresh';
@@ -99,7 +100,8 @@ class ApiClient extends ChangeNotifier {
   /// the phone is busy): retry instead of treating a failed read as "signed out".
   Future<void> init() async {
     if (_loaded) return;
-    for (var attempt = 0; attempt < 4; attempt++) {
+    // v3.62: up to ~10 s (the keystore can be busy for seconds right after boot); nothing is wiped on a failure.
+    for (var attempt = 0; attempt < 8; attempt++) {
       try {
         _token = await _storage.read(key: _tokenKey);
         _refreshToken = await _storage.read(key: _refreshKey);

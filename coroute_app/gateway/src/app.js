@@ -60,12 +60,32 @@ function createSoda() {
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore, mailTransport, smsProviders, smsFetch, pushImageStore } = {}) {
+function createIntelSoda() {
+  if (!config.intelSodaUrl) return null;
+  if (config.intelSodaUrl === 'memory') return new MemorySoda();
+  return new SodaClient({ baseUrl: config.intelSodaUrl, user: config.intelOracleUser || config.oracleUser, password: config.intelOraclePassword || config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
+}
+
+async function createApp({ soda = createSoda(), intelSoda = null, logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts, pushTransport, diagObjectStore, mailTransport, smsProviders, smsFetch, pushImageStore } = {}) {
   // 3.57 security: every log line is redacted (tokens, passwords, OTPs, e-mails, phone numbers; src/redact.js).
   logger = require('./redact').redactingLogger(logger);
   // v3.56: Prometheus metrics (GET /metrics, loopback / METRICS_ALLOW / METRICS_TOKEN only) and SODA call counters.
   const metrics = new Metrics({ allow: config.metricsAllow, token: config.metricsToken });
   soda = instrumentSoda(soda, metrics);
+  // v3.62: optional own database for the intelligence collections (INTEL_SODA_URL; src/oracle/intel_store.js).
+  let intelDb = null;
+  const intelBase = intelSoda || createIntelSoda();
+  if (intelBase) {
+    const IS = require('./oracle/intel_store');
+    const intelRaw = instrumentSoda(intelBase, metrics);
+    const state = new IS.IntelDbState({ main: soda, logger });
+    await state.refresh(); // never route a write before the switch state is known
+    const collections = IS.intelCollections();
+    const routed = IS.routedSoda(soda, intelRaw, { state, collections, logger });
+    intelDb = { state, intel: intelRaw, main: soda, collections, routed };
+    soda = routed;
+    logger.info?.(`[intel-db] intelligence database configured (mode ${state.value.mode})`);
+  }
   // 3.57 security: protected fields (phones, emergency contact, medical ID, 2-step secrets) are encrypted at rest
   // with AES-256-GCM when DATA_ENC_KEY is set (src/field_crypto.js); every module reads them decrypted.
   const fieldCrypto = require('./field_crypto').fieldCryptoFromConfig(config, logger);
@@ -96,6 +116,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // 3.57 server-side sessions (src/sessions.js): every token is bound to one; revokes end it everywhere at once.
   const sessions = new (require('./sessions').SessionStore)({ soda, logger, fieldCrypto });
   if (migrate) await sessions.init();
+  // v3.62: the admin's phone sign-in rule, copied onto each NEW phone session (riders signed in are never affected).
+  sessions.settings = new (require('./session_settings').SessionSettings)({ repo, logger });
+  sessions.appPolicy = () => sessions.settings.appPolicy();
   const gate = new UserGate(repo, { sessions });
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
@@ -234,6 +257,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   });
   // CORS_ORIGINS, when set, always includes every site origin (PUBLIC_ORIGIN and the legacy hosts).
   const corsOrigins = config.corsOrigins.length ? [...new Set([...config.corsOrigins, ...siteOriginsOf(config)])] : [];
+  // v3.62 security: query values are strings (or arrays of strings), never objects (`?id[$ne]=` stays a literal key).
+  app.set('query parser', 'simple');
   app.use(cors(corsOrigins.length ? { origin: corsOrigins } : { origin: false }));
   // REDIRECT_LEGACY_HOST=true: website pages on the old host -> PUBLIC_ORIGIN (301). Never /api, /ws, /.well-known.
   app.use(legacyHostRedirect(config));
@@ -246,6 +271,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.use('/api/subscription/webhook', express.raw({ type: () => true, limit: '1mb' }));
   app.use('/api/membership/webhook', express.raw({ type: () => true, limit: '1mb' }));
   app.use(express.json({ limit: '2mb' }));
+  // v3.62 security (src/input_guard.js): no "$" operator keys or prototype keys reach a database filter or an object.
+  app.use(require('./input_guard').bodyGuard());
 
   const server = http.createServer(app);
   // v3.56 keep-alive above Caddy's upstream idle timeout (60 s), headers timeout above that (Node's rule).
@@ -540,6 +567,11 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Round 4 road & safety intelligence: consent, events, hazards, stops, ETAs, crash brain, admin pages' API.
   intel = require('./intel/routes').attachIntel({ app, soda, repo, gate, lease, convoys, mirror, poiCells, logger, jwtSecret: config.jwtSecret, audit, ...(clock ? { clock } : {}) });
   if (migrate) await intel.init().catch((e) => logger.warn(`[intel] collection setup failed: ${e.message}`));
+  intel.intelDb = intelDb;
+  if (intelDb && migrate) {
+    await new (require('./oracle/intel_store').IntelDbMigration)({ main: intelDb.main, intel: intelDb.intel, state: intelDb.state, collections: intelDb.collections, logger })
+      .ensureIntelIndexes().catch((e) => logger.warn(`[intel-db] index setup failed: ${e.message}`));
+  }
   intel.start();
   // Round 7: road-geometry cells for curve prediction and speed limits on the phone, and "wrong limit" votes
   // (src/road_cells.js, docs/features_355/curve_and_speed_limit.md). Before the main router, like the mounts above.
@@ -622,6 +654,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     notifications.startJobs();
     publicStats.start(lease);
     intel.startJobs(lease);
+    // v3.62: one-shot copy of the intelligence collections to their own database (INTEL_DB_MIGRATE=1, resumable).
+    if (intelDb && config.intelDbMigrate) {
+      const mig = new (require('./oracle/intel_store').IntelDbMigration)({ main: intelDb.main, intel: intelDb.intel, state: intelDb.state, collections: intelDb.collections, logger, batch: config.intelDbMigrateBatch });
+      lease.run('intel-db-migrate', min, ({ signal } = {}) => mig.step({ signal }), { firstDelayMs: 30000 });
+    }
+    // Every node re-reads the switch state (the migration job changes it on one node).
+    if (intelDb) { const t = setInterval(() => { intelDb.state.refresh().catch(() => {}); }, 15000); t.unref?.(); }
     business.startJobs();
     if (backupModule && typeof backupModule.startBackupJobs === 'function') {
       // Backups copy the stored (encrypted) documents as they are: the raw client, not the decrypting wrapper.
@@ -686,7 +725,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { business, metrics, shedder, intel, roadCells, rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { intelDb, business, metrics, shedder, intel, roadCells, rideLock, sessions, fieldCrypto, rawSoda, notifications, riderAdmin, diagLogs, push, riderScore, leaderboard, publicStats, featureFlags, accessMode, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../local/secure_store.dart';
 
 import '../../../core/permissions/nearby_permission.dart';
 import '../../../domain/mesh/mesh_chain_keeper.dart';
@@ -43,7 +44,7 @@ import 'mesh_voice_link.dart';
 
 /// The ride key on the phone (secure storage) so the link still works after a restart in a dead zone.
 class OfflineLinkKeyStore {
-  OfflineLinkKeyStore({FlutterSecureStorage? storage}) : _s = storage ?? const FlutterSecureStorage();
+  OfflineLinkKeyStore({FlutterSecureStorage? storage}) : _s = storage ?? kSecureStorage;
   final FlutterSecureStorage _s;
   static const String _k = 'offline_link_ride_key_v1';
 

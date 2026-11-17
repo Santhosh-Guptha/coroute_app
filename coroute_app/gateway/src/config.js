@@ -78,6 +78,13 @@ const config = {
   oracleUser: isTest ? 'test' : required('ORACLE_USER'),
   oraclePassword: isTest ? 'test' : required('ORACLE_PASSWORD'),
   oracleTimeoutMs: int('ORACLE_TIMEOUT_MS', 6000),
+  // v3.62 own database for the road & safety intelligence (src/oracle/intel_store.js, docs/intelligence/INTEL_DATABASE.md).
+  // Empty = every collection stays in the main database (as before). 'memory' = an in-process store (tests / dev).
+  intelSodaUrl: (process.env.INTEL_SODA_URL || '').trim(),
+  intelOracleUser: (process.env.INTEL_ORACLE_USER || '').trim(),
+  intelOraclePassword: process.env.INTEL_ORACLE_PASSWORD || '',
+  intelDbMigrate: process.env.INTEL_DB_MIGRATE === '1' || process.env.INTEL_DB_MIGRATE === 'true',
+  intelDbMigrateBatch: Math.max(50, Math.min(5000, int('INTEL_DB_MIGRATE_BATCH', 500))),
   // SOS never waits on a slow database: duplicate check and store each get this long before the alert goes out.
   sosLookupWaitMs: Math.max(200, int('SOS_LOOKUP_WAIT_MS', 1500)),
   sosStoreWaitMs: Math.max(200, int('SOS_STORE_WAIT_MS', 2000)),
@@ -116,6 +123,10 @@ const config = {
   // A refresh token presented again within this many seconds of its rotation is a lost reply or a second tab,
   // not theft (the session continues with a new token). Older reuse revokes the whole session.
   refreshReuseGraceSec: int('REFRESH_REUSE_GRACE_SEC', 60),
+  // v3.62: on a phone the previous refresh token stays usable this long (0 = any time): a reply lost on a bad mobile
+  // network, or a new token the phone could not save before it was closed, never signs the rider out. Older tokens
+  // still count as theft (the session ends).
+  refreshReuseGraceAppSec: int('REFRESH_REUSE_GRACE_APP_SEC', 0),
   // Recent re-authentication window for sensitive actions (password / e-mail change, account deletion, 2FA).
   reauthWindowMin: int('REAUTH_WINDOW_MIN', 10),
   // Failed sign-ins before an account is locked (progressive: 15 min, 30, 60 ... up to 24 h) and the step of the

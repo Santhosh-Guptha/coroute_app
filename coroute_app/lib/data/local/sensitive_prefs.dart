@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'secure_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 3.57: the rider's phone number, emergency contact and e-mail kept on the phone in the Android Keystore
@@ -10,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// * When the keystore is briefly unavailable (right after boot) or missing (tests), SharedPreferences is used,
 ///   so an offline SOS never loses the emergency contact.
 class SensitivePrefs {
-  SensitivePrefs({FlutterSecureStorage? storage}) : _storage = storage ?? const FlutterSecureStorage();
+  SensitivePrefs({FlutterSecureStorage? storage}) : _storage = storage ?? kSecureStorage;
 
   final FlutterSecureStorage _storage;
   static const String _prefix = 'coroute_secure_';
