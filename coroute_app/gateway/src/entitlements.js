@@ -26,11 +26,12 @@ const config = require('./config');
 const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
 
 /** The only plans sold (paid), in price order. */
-const MEMBERSHIP_PLANS = Object.freeze(['group_small', 'group_large']);
+// v3.63: + Rider Pass (one rider, every feature, 30 days; sold only in the rider_pass pricing model, pricing_model.js).
+const MEMBERSHIP_PLANS = Object.freeze(['group_small', 'group_large', 'rider_pass']);
 const PAID_PLANS = MEMBERSHIP_PLANS;
 
 /** Every plan of the catalog: the free Community plan first, then the paid plans. */
-const CATALOG_PLANS = Object.freeze(['community', 'group_small', 'group_large']);
+const CATALOG_PLANS = Object.freeze(['community', 'group_small', 'group_large', 'rider_pass']);
 
 /** The free default plan every rider has (not purchasable). */
 const COMMUNITY_PLAN = 'community';
@@ -45,7 +46,8 @@ const LEGACY_MEMBERSHIP_PLANS = Object.freeze(['individual']);
 const LEGACY_INDIVIDUAL_PLAN = Object.freeze({ id: 'individual', name: 'Individual', monthlyPriceInr: 9, capacity: 1, minCapacity: 1, maxCapacity: 1, billingPeriodDays: 30 });
 
 /** Seats of each plan when a stored membership or catalog does not say (host included). */
-const DEFAULT_SEATS = Object.freeze({ community: 1, individual: 1, group_small: 6, group_large: 12 });
+// rider_pass: hosts any number of riders, i.e. the server ceiling (clampSeats caps every plan at MAX_CONVOY_RIDERS).
+const DEFAULT_SEATS = Object.freeze({ community: 1, individual: 1, group_small: 6, group_large: 12, rider_pass: Math.max(12, Number(config.maxConvoyRiders) || 50) });
 
 /** Legacy tier -> the membership plan whose access it keeps until it ends. */
 const LEGACY_PLAN_MAP = Object.freeze({
@@ -72,6 +74,7 @@ function normalizePlanId(raw) {
   if (['community', 'free', 'community_rider'].includes(s)) return 'community';
   if (['group_small', 'small_group', 'small', 'smallgroup', 'groupsmall', 'individual'].includes(s)) return 'group_small';
   if (['group_large', 'large_group', 'large', 'largegroup', 'grouplarge'].includes(s)) return 'group_large';
+  if (['rider_pass', 'riderpass', 'pass', 'monthly_pass'].includes(s)) return 'rider_pass';
   return null;
 }
 

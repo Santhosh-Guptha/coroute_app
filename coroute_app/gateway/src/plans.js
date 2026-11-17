@@ -23,8 +23,8 @@ const rateLimit = require('express-rate-limit');
 const { COLLECTIONS: C } = require('./oracle/repo');
 
 const DOC_KEY = 'plan_features';
-const PLAN_IDS = Object.freeze(['community', 'group_small', 'group_large']);
-const PLAN_NAMES = Object.freeze({ community: 'Community (free)', group_small: 'Small Group', group_large: 'Large Group' });
+const PLAN_IDS = Object.freeze(['community', 'group_small', 'group_large', 'rider_pass']);
+const PLAN_NAMES = Object.freeze({ community: 'Community (free)', group_small: 'Small Group', group_large: 'Large Group', rider_pass: 'Rider Pass' });
 
 /** Features an admin may put behind a plan. Never safety. */
 const FEATURES = Object.freeze([
@@ -46,6 +46,7 @@ const DEFAULT_LIMITS = Object.freeze({
   community: { communitiesOwnedMax: 10, communityMembersMax: 100, chatMembersMax: 50, upcomingRidesMax: 10 },
   group_small: { communitiesOwnedMax: 10, communityMembersMax: 100, chatMembersMax: 50, upcomingRidesMax: 10 },
   group_large: { communitiesOwnedMax: 10, communityMembersMax: 100, chatMembersMax: 50, upcomingRidesMax: 10 },
+  rider_pass: { communitiesOwnedMax: 10, communityMembersMax: 100, chatMembersMax: 50, upcomingRidesMax: 10 },
 });
 const FEATURE_IDS = FEATURES.map((f) => f.id);
 /**
@@ -56,6 +57,7 @@ const DEFAULT_FEATURES = Object.freeze({
   community: Object.freeze(Object.fromEntries(FEATURE_IDS.map((id) => [id, false]))),
   group_small: Object.freeze(Object.fromEntries(FEATURE_IDS.map((id) => [id, true]))),
   group_large: Object.freeze(Object.fromEntries(FEATURE_IDS.map((id) => [id, true]))),
+  rider_pass: Object.freeze(Object.fromEntries(FEATURE_IDS.map((id) => [id, true]))), // v3.63: all features
 });
 const LIMIT_BY_ID = Object.fromEntries(LIMITS.map((l) => [l.id, l]));
 

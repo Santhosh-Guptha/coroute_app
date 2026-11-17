@@ -130,6 +130,8 @@ String adminPlanLabel(String id) {
       return 'Small group';
     case 'group_large':
       return 'Large group';
+    case 'rider_pass':
+      return 'Rider Pass';
     default:
       return adminCapitalize(id.replaceAll('_', ' '));
   }

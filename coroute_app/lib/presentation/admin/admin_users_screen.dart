@@ -34,7 +34,7 @@ class AdminUsersScreen extends StatefulWidget {
 
   /// The plans the gateway can filter by ('' = every rider). 3.55: the plans riders have; a rider
   /// still on a legacy tier is listed under the plan it maps to (CoRoute Pro -> Small Group ...).
-  static const List<String> tiers = ['', 'community', 'group_small', 'group_large'];
+  static const List<String> tiers = ['', 'community', 'group_small', 'group_large', 'rider_pass'];
 
   /// Query string for one page (pure, for tests).
   static Map<String, String> queryFor({
@@ -284,6 +284,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         'community' => 'Community (free)',
         'group_small' => 'Small Group (2–6)',
         'group_large' => 'Large Group (7–12)',
+        'rider_pass' => 'Rider Pass',
         'proRider' => 'Legacy: CoRoute Pro',
         'roadCaptain' => 'Legacy: Road Captain',
         'tourOperator' => 'Legacy: Tour Operator',

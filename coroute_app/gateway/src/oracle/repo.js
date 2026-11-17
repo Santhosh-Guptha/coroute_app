@@ -2086,6 +2086,19 @@ class Repo {
         entitlements: { ptt: true, convoy: true, groupSafety: true, personalTracking: true, basicNav: true, sharedTrip: true },
         description: 'For larger convoys and weekend expeditions with up to 12 members.',
       },
+      // v3.63: sold only when the pricing model is 'rider_pass' (src/pricing_model.js). One rider, every feature, a month.
+      rider_pass: {
+        id: 'rider_pass',
+        name: 'Rider Pass',
+        monthlyPriceInr: 9,
+        capacity: Math.max(12, Number(require('../config').maxConvoyRiders) || 50),
+        minCapacity: 1,
+        maxCapacity: Math.max(12, Number(require('../config').maxConvoyRiders) || 50),
+        billingPeriodDays: 30,
+        features: ['convoy_tracking', 'group_trips', 'ptt_intercom', 'group_safety', 'shared_trips', 'Communities, chat and Explore sharing', 'Any number of riders can join your rides'],
+        entitlements: { ptt: true, convoy: true, groupSafety: true, personalTracking: true, basicNav: true, sharedTrip: true },
+        description: 'Every feature for one rider for a month. Host group rides with any number of riders; joining rides stays free.',
+      },
     };
   }
 

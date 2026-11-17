@@ -113,7 +113,8 @@ test('downgrade: no credit or refund, starts when the current paid period ends; 
 });
 
 test('plan changes (3.55): only a bigger plan while a paid plan runs; any plan once it ends', () => {
-  assert.deepEqual(pricing.PLAN_ORDER, ['community', 'individual', 'group_small', 'group_large']);
+  // v3.63: the Rider Pass ranks last (one rider, every feature, any number of riders join).
+  assert.deepEqual(pricing.PLAN_ORDER, ['community', 'individual', 'group_small', 'group_large', 'rider_pass']);
   const block = (planId, m) => pricing.changeBlock({ membership: m, planId, now: NOW });
   // Mid-period downgrade and same tier are refused with one clear code.
   const down = block('group_small', mem('group_large', 12 * DAY));
@@ -353,7 +354,7 @@ test('plans v2 over HTTP and WebSocket', async (t) => {
 
   await t.test('admin: Community is listed (free, not sold), only its description and features change; coupon plans are the paid plans', async () => {
     const cat = await env.api('GET', '/admin/membership/catalog', null, admin.token);
-    assert.deepEqual(Object.keys(cat.json.catalog), ['community', 'group_small', 'group_large']);
+    assert.deepEqual(Object.keys(cat.json.catalog), ['community', 'group_small', 'group_large', 'rider_pass']); // v3.63 Rider Pass in the catalog
     const c = cat.json.catalog;
     c.community = { ...c.community, monthlyPriceInr: 10, features: ['Solo rides', 'Safety for everyone'] };
     c.individual = { name: 'Individual', monthlyPriceInr: 9 }; // an older admin build sends it back

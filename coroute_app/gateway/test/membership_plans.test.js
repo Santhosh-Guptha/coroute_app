@@ -205,9 +205,10 @@ test('membership plans drive hosting, capacity and the legacy cut-over', async (
     const mixed = await env.api('POST', '/admin/coupons', { code: 'GROUP10', discountType: 'percentage', discountValue: 10, applicablePlans: ['group_small', 'roadCaptain'] }, admin.token);
     assert.equal(mixed.status, 201);
     assert.deepEqual(mixed.json.coupon.applicableTiers, ['group_small']);
-    // The admin cannot add a fourth plan to the catalog.
+    // The admin cannot add another plan to the catalog. v3.63: the Rider Pass is a built-in catalog plan (sold only in
+    // the rider_pass pricing model), so the catalog now has four.
     const catalog = await repo.getMembershipCatalog();
-    assert.deepEqual(Object.keys(catalog), ['community', 'group_small', 'group_large']);
+    assert.deepEqual(Object.keys(catalog), ['community', 'group_small', 'group_large', 'rider_pass']);
     const extra = await env.api('PUT', '/admin/membership/catalog', { catalog: { ...catalog, roadCaptain: { name: 'Road Captain', monthlyPriceInr: 599, capacity: 40 } } }, admin.token);
     assert.equal(extra.status, 400);
   });

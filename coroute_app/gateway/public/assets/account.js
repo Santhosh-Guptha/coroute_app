@@ -151,6 +151,8 @@
     if (rs[0].status === 401) { window.location.replace('/signin?expired=1&next=%2Faccount'); return; }
     if (!rs[0].ok) { S.$('ac-who').textContent = 'Could not load your account. Refresh the page to try again.'; return; }
     var me = rs[0].json;
+    // v3.63: administrators use the admin console only (one place); ?rider=1 still shows this page.
+    if (me.role === 'MASTER_ADMIN' && !S.query('rider')) { window.location.replace('/admin'); return; }
     if (me.role === 'MASTER_ADMIN') {
       var ab = S.$('ac-admin-banner');
       if (ab) {
@@ -213,7 +215,7 @@
         var st = STATE[c.state] || [c.state, 'muted'];
         top.appendChild(el('span', 'sh-pill sh-pill--' + st[1], st[0]));
         card.appendChild(top);
-        card.appendChild(el('p', 'ac-coupon__what', c.discount + (c.plans && c.plans.length ? ' on ' + c.plans.map(function (p) { return p === 'group_large' ? 'Large Group' : p === 'group_small' ? 'Small Group' : p; }).join(', ') : ' on a group plan')));
+        card.appendChild(el('p', 'ac-coupon__what', c.discount + (c.plans && c.plans.length ? ' on ' + c.plans.map(function (p) { return p === 'group_large' ? 'Large Group' : p === 'group_small' ? 'Small Group' : p === 'rider_pass' ? 'Rider Pass' : p; }).join(', ') : ' on a group plan')));
         if (c.validUntil) card.appendChild(el('p', 't-small t-muted', (c.state === 'EXPIRED' ? 'Ended ' : 'Valid until ') + c.validUntil));
         if (c.state === 'ACTIVE') {
           var row = el('div', 'sh-actions');

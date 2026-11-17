@@ -94,7 +94,11 @@ function freeCouponBlock(coupon, { uid, userDoc, category, plan }) {
 }
 
 /** A catalog plan that is switched off is not sold (the admin "active" toggle). Community is never sold. */
-const planOnSale = (plan) => !!plan && plan.isActive !== false && plan.id !== COMMUNITY_PLAN && plan.purchasable !== false;
+const pricingModel = require('./pricing_model');
+// v3.63: a plan is on sale when the admin left it on AND the current pricing model sells it (pricing_model.js).
+// `model` is the cached value of this node (re-read every 30 s); the website and orders follow it.
+let currentModel = () => 'group_plans';
+const planOnSale = (plan) => !!plan && plan.isActive !== false && plan.id !== COMMUNITY_PLAN && plan.purchasable !== false && pricingModel.onSaleIn(currentModel(), plan.id);
 
 /** Sends the refusal for a plan that cannot be ordered (legacy Individual 410, Community, unknown); true when sent. */
 function refusePlan(res, category, catalog) {
@@ -411,6 +415,10 @@ const isMembershipOrder = (order) => !!(order && order.category && !order.planTi
  * Public membership routes: catalog, categories and HMAC webhook.
  */
 function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null, hub = null }) {
+  // v3.63 pricing model: the catalog and orders use the model as stored (cached 30 s; read fresh before membership calls).
+  const pm = pricingModel.forRepo(repo);
+  currentModel = () => pm.now();
+  r.use('/membership', (req, res, next) => { pm.get().then(() => next(), () => next()); });
   const WEBHOOK_MAX_BYTES = 1024 * 1024;
   const seenWebhookIds = new Set();
   const seenWebhookQueue = [];
@@ -631,6 +639,10 @@ async function inHostedGroupRide(repo, uid, activeTrip) {
 }
 
 function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin, hub = null }) {
+  // v3.63 pricing model: the catalog and orders use the model as stored (cached 30 s; read fresh before membership calls).
+  const pm = pricingModel.forRepo(repo);
+  currentModel = () => pm.now();
+  r.use('/membership', (req, res, next) => { pm.get().then(() => next(), () => next()); });
   /**
    * GET /api/membership/my
    */

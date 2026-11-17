@@ -34,16 +34,18 @@ const Map<String, String> adminMembershipPlanNames = {
   'community': 'Community',
   'group_small': 'Small Group (2–6)',
   'group_large': 'Large Group (7–12)',
+  'rider_pass': 'Rider Pass',
 };
 
 /// The group plans an admin can assign to a rider (besides Community).
-const List<String> adminGroupPlanIds = ['group_small', 'group_large'];
+/// v3.63: + Rider Pass (one rider, every feature; sold in the rider_pass pricing model).
+const List<String> adminGroupPlanIds = ['group_small', 'group_large', 'rider_pass'];
 
 /// The plan id for any value the gateway may send: a plan id as is, a legacy tier mapped to its
 /// plan (CoRoute Pro -> Small Group, Road Captain / Tour Operator -> Large Group), else Community.
 String adminPlanIdOf(String? raw) {
   final v = (raw ?? '').trim();
-  if (v == 'group_small' || v == 'group_large' || v == 'community') return v;
+  if (v == 'group_small' || v == 'group_large' || v == 'rider_pass' || v == 'community') return v;
   if (v == 'proRider') return 'group_small';
   if (v == 'roadCaptain' || v == 'tourOperator') return 'group_large';
   return 'community';

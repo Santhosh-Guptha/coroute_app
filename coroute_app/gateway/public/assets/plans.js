@@ -28,7 +28,7 @@
     shared_trips: 'Shared trip report and replay'
   };
   // Lowest first; the server's rule is the truth (409), this only greys out what it would refuse.
-  var RANK = ['community', 'individual', 'group_small', 'group_large'];
+  var RANK = ['community', 'individual', 'group_small', 'group_large', 'rider_pass'];
 
   var st = {
     plans: [], paymentsEnabled: true, me: null, my: null, access: null,
@@ -43,6 +43,7 @@
   }
   function num(v) { var n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null; }
   function seatsText(p) {
+    if (p.id === 'rider_pass') return 'Every feature for you; any number of riders can join your rides';
     if (p.max <= 1) return 'Solo rider';
     if (p.min > 1 && p.min < p.max) return p.min + ' to ' + p.max + ' riders, host included';
     return 'Up to ' + p.max + ' riders, host included';

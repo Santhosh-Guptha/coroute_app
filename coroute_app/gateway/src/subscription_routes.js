@@ -8,6 +8,8 @@ const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle'
 const { isStaffAccount, isGuestAccount, staffEmails } = require('./staff');
 const { verifyToken } = require('./auth');
 const { MEMBERSHIP_PLANS, isLegacyTier, normalizePlanId } = require('./entitlements');
+// v3.63: the launch coupons stay bound to the group plans (never silently to the Rider Pass).
+const LAUNCH_COUPON_PLANS = Object.freeze(['group_small', 'group_large']);
 const { couponFitsPlan } = require('./plan_pricing');
 const sec = require('./payment_security');
 
@@ -40,7 +42,7 @@ const DEFAULT_COUPONS = [
     discountType: 'percentage',
     discountValue: 50,
     // Bound to the paid plans; no minimum order (the plans cost less than the old ₹100 minimum).
-    applicableTiers: [...MEMBERSHIP_PLANS],
+    applicableTiers: [...LAUNCH_COUPON_PLANS],
     applicableCycles: ['all'],
     maxUsageTotal: 1000,
     maxUsagePerUser: 1,
@@ -55,7 +57,7 @@ const DEFAULT_COUPONS = [
     discountType: 'free',
     discountValue: 100,
     // Bound to named plans (not "all"): the paid plans.
-    applicableTiers: [...MEMBERSHIP_PLANS],
+    applicableTiers: [...LAUNCH_COUPON_PLANS],
     applicableCycles: ['all'],
     maxUsageTotal: 100,
     maxUsagePerUser: 1,
@@ -228,7 +230,11 @@ function normalizeTier(tier) {
 async function couponPlanOptions(repo) {
   const out = [];
   const catalog = repo && typeof repo.getMembershipCatalog === 'function' ? await repo.getMembershipCatalog().catch(() => ({})) : {};
+  // v3.63: the paid plans of the current pricing model (group plans, or the Rider Pass).
+  const pm = require('./pricing_model');
+  const model = repo && repo.soda ? await pm.forRepo(repo).model().catch(() => 'group_plans') : 'group_plans';
   for (const id of MEMBERSHIP_PLANS) {
+    if (!pm.onSaleIn(model, id)) continue;
     const c = catalog && catalog[id];
     if (!c || typeof c !== 'object') continue;
     out.push({ id, label: c.name || id, kind: 'membership', monthlyInr: Number(c.monthlyPriceInr) || 0, annualInr: null, isActive: c.isActive !== false });

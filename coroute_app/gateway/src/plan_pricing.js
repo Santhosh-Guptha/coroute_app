@@ -54,11 +54,13 @@ function seatsOf(p, id) {
  * (`maxCapacity`, else `capacity`), DEFAULT_SEATS.group_large (12) when the catalog says nothing.
  * The server ceiling MAX_CONVOY_RIDERS ([ceiling]) only caps it; it is never the advertised number.
  */
-function siteMaxRiders(catalog, ceiling) {
+function siteMaxRiders(catalog, ceiling, onSale = null) {
   let most = 0;
   for (const id of PAID_PLANS) {
     const p = catalog && catalog[id];
     if (!p || typeof p !== 'object' || p.isActive === false) continue;
+    // v3.63: only plans sold in the current pricing model (onSale(id)); the Rider Pass is not sold under group plans.
+    if (typeof onSale === 'function' ? !onSale(id) : id === 'rider_pass') continue;
     const seats = Math.floor(Number(p.maxCapacity)) || Math.floor(Number(p.capacity)) || 0;
     if (seats > most) most = seats;
   }
@@ -350,6 +352,8 @@ const DOWNGRADE_MESSAGE = 'You can move to a bigger plan anytime. Smaller plans 
 function changeBlock({ membership, planId, now = Date.now() }) {
   const cur = currentPaidPeriod(membership, now);
   if (!cur) return null;
+  // v3.63: a Rider Pass can be renewed any time (the unused days are credited, quote kind 'renewal').
+  if (planId === 'rider_pass' && cur.category === 'rider_pass') return null;
   const from = planRank(cur.category);
   const to = planRank(planId);
   if (from < 0 || to < 0 || to > from) return null;
