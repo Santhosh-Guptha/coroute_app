@@ -115,7 +115,7 @@ function attachOperators({ app, repo, gate, convoys, hub = null, tracks = null, 
   const publicLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
   const pushOf = () => (hub && hub.push) || (convoys && convoys.push) || null;
   const socket = (userId, payload) => { try { if (hub) hub.sendToUser(userId, payload); } catch { /* best effort */ } };
-  const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  const originOf = (req) => require('./domains').requestOrigin(config, req);
   const feature = (req, res, next) => (isOn() ? next() : res.status(403).set('Cache-Control', 'no-store').json(FEATURE_OFF));
   const fail = (res, e) => {
     if (e instanceof OP.OperatorError) {

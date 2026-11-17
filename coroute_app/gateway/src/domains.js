@@ -47,6 +47,25 @@ function linkOriginOf(cfg) {
   return normaliseOrigin(cfg.publicOrigin) || FALLBACK_ORIGIN;
 }
 
+/**
+ * v3.62b origin for links built inside a request (reset links, invites, checkout). PUBLIC_ORIGIN when set. Without it
+ * the request's Host is used ONLY when it is one of this site's own hosts (public / legacy / CORS origins), a loopback
+ * address, or outside production; any other Host (a forged header) gets the fallback origin, so an attacker can never
+ * make the server e-mail a link to their own domain.
+ */
+function requestOrigin(cfg, req) {
+  const pub = normaliseOrigin(cfg.publicOrigin);
+  if (pub) return pub;
+  const rawHost = String((req && typeof req.get === 'function' ? req.get('host') : req && req.headers && req.headers.host) || '').trim().toLowerCase();
+  const proto = req && req.protocol === 'http' ? 'http' : 'https';
+  if (!/^[a-z0-9.-]+(:\d{1,5})?$/.test(rawHost)) return linkOriginOf(cfg);
+  const bare = rawHost.replace(/:\d+$/, '');
+  const known = new Set([...siteOriginsOf(cfg), ...((cfg.corsOrigins) || [])].map((o) => hostOf(o)).filter(Boolean));
+  const loopback = bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+  if (known.has(bare) || loopback || process.env.NODE_ENV !== 'production') return `${proto}://${rawHost}`;
+  return linkOriginOf(cfg);
+}
+
 // Paths that are never redirected from a legacy host (prefix match; '/ws' also exact).
 const NO_REDIRECT_PREFIXES = Object.freeze(['/api/', '/ws/', '/.well-known/', '/e/', '/watch', '/uploads/', '/status']);
 
@@ -85,6 +104,6 @@ function legacyHostRedirect(cfg) {
 }
 
 module.exports = {
-  FALLBACK_ORIGIN, normaliseOrigin, hostOf, siteOriginsOf, linkOriginOf,
+  FALLBACK_ORIGIN, normaliseOrigin, hostOf, siteOriginsOf, linkOriginOf, requestOrigin,
   isRedirectablePath, legacyRedirectTarget, legacyHostRedirect,
 };

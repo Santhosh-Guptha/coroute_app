@@ -161,6 +161,7 @@ async function createApp({ soda = createSoda(), intelSoda = null, logger = conso
   // Round 4 ride lock (src/ride_lock.js): no sign-in on another device while this account's device is on a live ride.
   const rideLock = new (require('./ride_lock').RideLock)({ sessions, repo, convoys, audit, codes: auth.codes, logger });
   auth.rideLock = rideLock;
+  gate.rideLock = rideLock; // v3.62b: also checked when an expired long token (older builds) is renewed
   // A phone number, emergency-text opt-out or nearby-assistance switch change reaches the rider's live ride.
   auth.onProfileChanged = (user, keys) => convoys.applyProfile(user.userId, user, keys);
   const tracks = new TrackStore(repo);
@@ -351,7 +352,7 @@ async function createApp({ soda = createSoda(), intelSoda = null, logger = conso
   // ---- Public website, served from here so no extra hosting is needed ----
   const path = require('path');
   const pub = (f) => path.join(__dirname, '..', 'public', f);
-  const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  const originOf = (req) => require('./domains').requestOrigin(config, req);
   // Pages are assembled once at startup (shared header/footer partials, asset version); per request only
   // __ORIGIN__ (canonical, og:image, sitemap work for any domain) and __MAX_RIDERS__ are filled in.
   const site = loadSite(pub(''));
@@ -764,4 +765,4 @@ function plainLivePage(v) {
     + '<p>What to do: call 112, say the location, stay on the line.</p></body></html>';
 }
 
-module.exports = { createApp, createSoda, securityTxt };
+module.exports = { createApp, createSoda, createIntelSoda, securityTxt };

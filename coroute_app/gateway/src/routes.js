@@ -32,7 +32,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (feature) res.once('finish', () => convoys.featureAnalytics?.record(feature, res.statusCode < 400, Date.now() - started));
     next();
   });
-  const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  const originOf = (req) => require('./domains').requestOrigin(config, req);
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.', code: 'RATE_LIMITED' } });
   // v3.61: an SOS over HTTP never counts against (or is refused by) the general limit: a busy app near 240
@@ -119,7 +119,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // App metadata: version gate + links. Public, cacheable.
   r.get('/meta', (req, res) => {
-    const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+    const origin = require('./domains').requestOrigin(config, req);
     const pkgVersion = require('../package.json').version;
     res.set('Cache-Control', 'no-cache').json({
       minBuild: config.minAppBuild,

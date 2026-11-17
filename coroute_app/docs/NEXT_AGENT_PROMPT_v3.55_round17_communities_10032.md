@@ -7,7 +7,7 @@ You are the release agent for CoRoute (motorcycle group/solo riding SAFETY app: 
 website + web admin). Build 3.55.0+10030 is committed (latest commit 1a2356a). Two rounds are in the working tree,
 uncommitted: round 16 (3.55.0+10031, docs/NEXT_AGENT_PROMPT_v3.55_round16_explore_10031.md) and round 17 (this prompt).
 Ship them together as build 3.55.0+10032 (pubspec already 3.55.0+10032). Commit round 16 first exactly as its prompt
-section 2 says (skip its pubspec commit), then round 17 below (commits 1-21, including L to P in section 1). Then test, build, device QA, deploy, Play. Report after
+section 2 says (skip its pubspec commit), then round 17 below (commits 1-22, including L to Q in section 1). Then test, build, device QA, deploy, Play. Report after
 each section. STOP at any failed safety gate.
 
 === 0. RULES ===
@@ -153,6 +153,21 @@ P) ROUND 21 (communities_chat_v360.md section 16; docs/intelligence/INTEL_DATABA
    Insights loads; with INTEL_SODA_URL set on a staging pair, run INTEL_DB_MIGRATE=1 and watch Main -> Copying ->
    Own database; then remove INTEL_DB_MIGRATE. z8) a recovery code used twice at once: one succeeds.
 
+Q) ROUND 22 (communities_chat_v360.md section 17, docs/intelligence/INTEL_DATABASE.md "v3.62b additions"):
+   22. feat(intel-db): readiness check, extended profile, safe late additions; fix(security): 2-step single use across
+       nodes, link origin from own hosts only, ride lock on long-token renew, cross-node SOS close push
+       gateway/src/oracle/intel_store.js gateway/scripts/intel_db_check.js gateway/src/auth.js gateway/src/app.js
+       gateway/src/domains.js gateway/src/routes.js gateway/src/operator_routes.js gateway/src/marketing_templates.js
+       gateway/src/subscription_routes.js gateway/src/web_admin.js gateway/src/convoys.js gateway/deploy/.env.example
+       gateway/public/admin/command.js gateway/test/intel_362b_added.test.js gateway/test/security_362b.test.js docs/*
+   QA: z9) web admin > Configuration shows "Intelligence database: DB 1 only". z10) a password-reset e-mail requested
+   with a forged Host header still links to PUBLIC_ORIGIN. z11) the same authenticator code sent to both VMs at once:
+   one sign-in only.
+   DB 2 switch (ONLY when the owner gives DB 2 details, never in chat): put INTEL_SODA_URL / INTEL_ORACLE_USER /
+   INTEL_ORACLE_PASSWORD in both VMs' .env, run `node scripts/intel_db_check.js` on each (must print READY), restart
+   both, set INTEL_DB_MIGRATE=1 on vm1 only, watch Configuration: DB 1 only -> Copying -> DB 2 in use, then remove
+   INTEL_DB_MIGRATE. Optional later: INTEL_DB_PROFILE=extended on both + INTEL_DB_MIGRATE=1 again on vm1.
+
 === 2. COMMITS (round 17, after round 16's commits 1-8) ===
 1. feat(gateway): communities public/private, join requests, picture, hosted rides
    gateway/src/crews.js gateway/src/crew_routes.js gateway/src/community_routes.js gateway/src/crew_ride_invites.js
@@ -186,12 +201,12 @@ P) ROUND 21 (communities_chat_v360.md section 16; docs/intelligence/INTEL_DATABA
     test/ui10_home_sections_test.dart
 11. docs(v3.60): communities_chat_v360.md and this prompt
     docs/features_355/communities_chat_v360.md docs/NEXT_AGENT_PROMPT_v3.55_round17_communities_10032.md
-    Before commit 12: make commits 13 to 21 (section 1, L to P).
+    Before commit 12: make commits 13 to 22 (section 1, L to Q).
 12. chore(release): 3.55.0+10032   pubspec.yaml (+ checksums as in 10030)
    After commit 12: `git status --short` shows only _incoming/ (and ignored caches).
 
 === 3. TESTS ===
-- cd gateway && npm test -> expect 1508 tests, 0 failures. If public_ride_mirror or two_node_failover time out,
+- cd gateway && npm test -> expect 1515 tests, 0 failures. If public_ride_mirror or two_node_failover time out,
   re-run those two files alone (timing tests); a repeat failure alone is a real bug.
 - node deploy/gen_caddy_routes.js -> no change after commit 2.
 - flutter analyze -> 0 issues. flutter test -> all pass. Expected intentional changes are already in the tests

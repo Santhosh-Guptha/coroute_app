@@ -1072,6 +1072,7 @@ class AuthService {
     if (recoveryCode) {
       const i = totpLib.matchRecoveryCode(recoveryCode, fresh.mfaRecovery);
       if (i < 0) { await this._failedSignIn(fresh.email || fresh.userId, fresh); throw new AuthError('That recovery code is not right.', 401, 'MFA_CODE_WRONG'); }
+      await this._claimMfaUse(fresh.userId, 'rc', String(fresh.mfaRecovery[i]));
       const left = fresh.mfaRecovery.filter((_, j) => j !== i);
       const u = await this.repo.updateUser(fresh.key, { mfaRecovery: left });
       this._event('MFA_RECOVERY_USED', u || fresh, { left: left.length });
@@ -1079,7 +1080,35 @@ class AuthService {
     }
     const step = totpLib.verifyTotp(fresh.mfaSecret, code, { lastStep: Number.isFinite(fresh.mfaLastStep) ? fresh.mfaLastStep : -1 });
     if (step < 0) { await this._failedSignIn(fresh.email || fresh.userId, fresh); throw new AuthError('That code is not right. Use the newest code from your authenticator app.', 401, 'MFA_CODE_WRONG'); }
+    await this._claimMfaUse(fresh.userId, 'totp', String(step));
     return (await this.repo.updateUser(fresh.key, { mfaLastStep: step })) || fresh;
+  }
+
+  /**
+   * v3.62b: one-time use of a 2-step code across BOTH nodes. A unique row per (account, kind, code) in `mfa_used`:
+   * the second node's insert hits the unique index and the code counts as used. A database problem never blocks a
+   * sign-in (the per-node lock and the account fields still apply). Rows older than 2 days are removed now and then.
+   */
+  async _claimMfaUse(userId, kind, value) {
+    const soda = this.repo && this.repo.soda;
+    if (!soda || typeof soda.insert !== 'function') return;
+    const C = 'mfa_used';
+    if (!this._mfaUsedReady) {
+      this._mfaUsedReady = (async () => {
+        await soda.ensureCollection(C);
+        await soda.ensureIndex(C, { name: 'mfa_used_k_ux', unique: true, fields: [{ path: 'k' }] });
+      })().catch((e) => { this._mfaUsedReady = null; throw e; });
+    }
+    try { await this._mfaUsedReady; } catch { return; }
+    const k = require('crypto').createHash('sha256').update(`${userId}|${kind}|${value}`).digest('hex');
+    try {
+      await soda.insert(C, { k, at: Date.now() });
+    } catch (e) {
+      const msg = String((e && e.message) || '') + String((e && e.body && JSON.stringify(e.body)) || '');
+      if ((e && e.status === 409) || /ORA-00001|unique/i.test(msg)) throw new AuthError('That code was already used. Use the newest code from your authenticator app.', 401, 'MFA_CODE_WRONG');
+      return; // database trouble: never in the way of a sign-in
+    }
+    if (Math.random() < 0.02) soda.removeWhere(C, { at: { $lt: Date.now() - 2 * 86400000 } }).catch(() => {});
   }
 
   /** Second sign-in step: { mfaToken, code | recoveryCode } -> a session that passed 2-step verification. */
@@ -1296,6 +1325,13 @@ function requireAuth(gate) {
     }
     gate.checkDetailed(claims).then(async ({ user, session }) => {
       if (renewLong && !(session && (session.kind === 'app' || session.kind === 'legacy'))) return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
+      // v3.62b: renewing a long token mints a new one, so the ride lock rule for refreshes applies (same as /auth/refresh).
+      if (renewLong && gate.rideLock && typeof gate.rideLock.checkRefresh === 'function') {
+        try { await gate.rideLock.checkRefresh(session, user); } catch (e) {
+          if (e instanceof AuthError) return res.status(e.status).json({ error: e.message, code: e.code, ...(e.extra || {}) });
+          throw e;
+        }
+      }
       req.dbUser = user;
       req.user = identityOf(user);
       req.authSession = session;

@@ -691,7 +691,7 @@ function webCheckoutTokenValid(orderId, expiresAt, t) {
   return ok;
 }
 function webCheckoutUrl(req, orderId, expiresAt) {
-  const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  const origin = require('./domains').requestOrigin(config, req);
   return `${origin}/checkout.html?order=${encodeURIComponent(orderId)}&t=${webCheckoutToken(orderId, expiresAt)}&e=${expiresAt}`;
 }
 

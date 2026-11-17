@@ -205,6 +205,7 @@
     ]],
     ['System', [
       ['Servers', 'Both gateway nodes, scheduled jobs and backups.', '#/servers', 'servers', 'servers'],
+      ['Intelligence database', 'DB 2 for road intelligence and analytics: not set, copying, or in use.', '#/insights', 'servers', 'inteldb'],
       ['Audit log', 'Every admin change, who and when.', '#/audit', 'audit', null],
     ]],
   ];
@@ -214,6 +215,7 @@
     features: function () { return api('GET', '/admin/features').then(function (v) { var off = v.features.filter(function (f) { return !f.enabled; }).length; return off ? [off + ' off', 'warn'] : ['All on', 'ok']; }); },
     planfeatures: function () { return api('GET', '/admin/plan-features').then(function (v) { var free = v.plans && v.plans.community ? Object.keys(v.plans.community.features).filter(function (k) { return v.plans.community.features[k]; }).length : 0; return [free + ' on for free', 'info']; }); },
     push: function () { return api('GET', '/admin/push/config').then(function (v) { return v.enabled ? ['Ready', 'ok'] : ['Not configured', 'bad']; }); },
+    inteldb: function () { return api('GET', '/admin/intel/insights').then(function (v) { var d = v.database || {}; if (!d.separate) return ['DB 1 only', 'info']; if (d.intelDb !== 'UP') return ['DB 2 down', 'bad']; return d.mode === 'intel' ? ['DB 2 in use', 'ok'] : d.mode === 'dual' ? ['Copying to DB 2', 'warn'] : ['DB 2 ready', 'info']; }); },
     servers: function () { return api('GET', '/admin/business/servers').then(function (v) { return [v.status === 'ok' ? 'Healthy' : v.status === 'warn' ? 'Check' : 'Problem', v.status === 'ok' ? 'ok' : v.status === 'warn' ? 'warn' : 'bad']; }); },
   };
 

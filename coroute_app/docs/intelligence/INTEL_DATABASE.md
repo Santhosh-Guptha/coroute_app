@@ -38,3 +38,31 @@ Account erase and "delete my contributions" go through the same layer, so they r
 
 To go back: set the state document to `{ k: 'state', mode: 'main' }` (data written after the switch is only in the
 intel DB; copy it back first if needed).
+
+## v3.62b additions (17 Nov 2026)
+
+**Is DB 2 in use?** Web admin > Configuration > "Intelligence database" card, or Insights, or `/api/health` ->
+`intel.database`: `separate: false, mode: main` = DB 1 only (today). `dual` = copying. `intel` = DB 2 in use.
+
+**Readiness check before switching** (on a VM, prints no secrets, leaves no data):
+
+    cd gateway && node scripts/intel_db_check.js
+
+It checks that DB 2 answers, the user / password work, it can write / read / delete a test document, that it is a
+different database from DB 1, and the round-trip times. Exit 0 = ready.
+
+**What moves to DB 2**
+
+| Profile | Collections |
+|---|---|
+| default | intel_raw, intel_cells, intel_meta, intel_crash_train, intel_consent, intel_insights, business_agg, business_riders, business_obs, road_risk |
+| `INTEL_DB_PROFILE=extended` | default + pageviews, mail_log, rider_scores, device_diagnostics, track_chunks (trip history) |
+| never (refused even in INTEL_DB_COLLECTIONS) | users, convoys, convoy_riders, messages, alerts, active_trips, auth_sessions, leases, guardian_*, safety_audit, memberships, subscription_config, payment_events, coupons, room_snapshots, push_tokens, geo_cache |
+
+So an outage of DB 2 can only slow intelligence, analytics, page views and trip history; SOS, rides, sign-in,
+guardians and payments run on DB 1 alone.
+
+**Adding collections later** (for example turning on the extended profile after the first switch): set the profile on
+both VMs, restart, set `INTEL_DB_MIGRATE=1` on one VM again. The new collections go pending (written to both) ->
+copied -> migrated, one group at a time, with no downtime; the ones already moved keep running on DB 2. A collection
+that was moved keeps answering from DB 2 even if it is later removed from the list (its data never "disappears").

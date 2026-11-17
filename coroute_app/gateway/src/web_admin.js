@@ -202,7 +202,7 @@ function webAdminApi({ repo, config }) {
   const r = express.Router();
   r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   r.get('/config', (req, res) => {
-    const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+    const origin = require('./domains').requestOrigin(config, req);
     res.json({
       publicOrigin: origin,
       plansUrl: `${origin}/plans`,

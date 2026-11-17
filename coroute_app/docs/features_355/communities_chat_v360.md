@@ -218,3 +218,16 @@ copy (`INTEL_DB_MIGRATE=1`: main -> dual writes -> intel), erase / export / back
 roads (k >= 5 riders per cell chain), route difficulty (Easy / Moderate / Challenging + reasons,
 `POST /api/intel/route-difficulty`, chip in Plan a ride), where and when riders stop, monthly trends, rider risk
 (aggregate; one rider for MASTER_ADMIN only, audited). Web admin > Road & safety intelligence > Insights.
+
+## 17. Round 22: DB 2 readiness and the last open security items
+
+* DB 2: `scripts/intel_db_check.js` readiness check; `INTEL_DB_PROFILE=extended` (page views, e-mail log, rider
+  scores, diagnostics, trip tracks); safety collections can never be moved; collections added after the switch are
+  copied safely (pending -> migrated); web admin Configuration shows "Intelligence database: DB 1 only / Copying /
+  DB 2 in use". docs/intelligence/INTEL_DATABASE.md "v3.62b additions".
+* 2-step codes single use across both nodes (`mfa_used`, unique index; a database problem never blocks a sign-in).
+* Generated links never use a forged Host header (`domains.requestOrigin`: PUBLIC_ORIGIN, else only own / loopback
+  hosts, else the fallback origin).
+* Ride lock also checked when an expired long token (older builds) is renewed.
+* An SOS raised on the other node still gets its "closed" push (own cap: 6 per rider per 10 min, SOS under 6 h old).
+* Tests: `gateway/test/intel_362b_added.test.js` (3), `gateway/test/security_362b.test.js` (4).

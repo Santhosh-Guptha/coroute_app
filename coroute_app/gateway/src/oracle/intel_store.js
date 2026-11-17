@@ -33,9 +33,40 @@ const MODES = new Set(['main', 'dual', 'intel']);
 const READS = new Set(['get', 'query', 'findOne', 'scan']);
 const BOTH = new Set(['ensureCollection', 'ensureIndex']);
 
+/**
+ * v3.62b INTEL_DB_PROFILE=extended also moves heavy collections that no safety path reads (admin and history only):
+ * website page views, e-mail log, rider scores, phone diagnostics and ride track chunks (trip history). Accounts,
+ * rides, alerts / SOS, sessions, guardians, the safety audit, payments, geo / road caches stay in the main database.
+ */
+const EXTENDED_COLLECTIONS = Object.freeze(['pageviews', 'mail_log', 'rider_scores', 'device_diagnostics', 'track_chunks']);
+/** Never moved, whatever INTEL_DB_COLLECTIONS says (safety, sign-in, money, live rides). */
+const NEVER_MOVE = Object.freeze(['users', 'convoys', 'convoy_riders', 'messages', 'alerts', 'active_trips', 'auth_sessions', 'leases',
+  'guardian_grants', 'guardian_sessions', 'guardian_revocations', 'guardian_consents', 'guardian_subscriptions', 'guardian_jobs', 'guardian_pauses',
+  'safety_audit', 'memberships', 'subscription_config', 'payment_events', 'coupons', 'room_snapshots', 'push_tokens', 'geo_cache', STATE_COLL]);
+
 function intelCollections(env = process.env) {
   const raw = String(env.INTEL_DB_COLLECTIONS || '').split(',').map((s) => s.trim()).filter((s) => /^[a-z][a-z0-9_]{1,62}$/.test(s));
-  return new Set(raw.length ? raw : DEFAULT_COLLECTIONS);
+  const base = raw.length ? raw : [...DEFAULT_COLLECTIONS, ...(String(env.INTEL_DB_PROFILE || '').trim() === 'extended' ? EXTENDED_COLLECTIONS : [])];
+  return new Set(base.filter((c) => !NEVER_MOVE.includes(c)));
+}
+
+/**
+ * v3.62b per-collection switch: which store answers for collection `c` right now.
+ *   state.migrated  collections whose copy finished (answer from the intel store, also if later removed from the
+ *                   configured list, so their data never "disappears"); absent on a state from before v3.62b = every
+ *                   configured collection once mode is 'intel'.
+ *   state.pending   collections added to the list after the switch: written to both while their copy runs.
+ */
+function storeFor(c, mode, v, collections) {
+  const migrated = Array.isArray(v && v.migrated) ? v.migrated : null;
+  if (mode === 'intel') {
+    if (!migrated) return collections.has(c) ? 'intel' : 'main';
+    if (migrated.includes(c)) return 'intel';
+    if (Array.isArray(v.pending) && v.pending.includes(c)) return 'dual';
+    return 'main';
+  }
+  if (mode === 'dual') return collections.has(c) ? 'dual' : 'main';
+  return 'main';
 }
 
 const strip = (row) => {
@@ -89,7 +120,7 @@ class IntelDbState {
  * collection when the mode is 'main', goes to `main` unchanged.
  */
 function routedSoda(main, intel, { state, collections = intelCollections(), logger = console, stats = { mirrored: 0, mirrorErrors: 0, translated: 0 } } = {}) {
-  const isIntel = (c) => typeof c === 'string' && collections.has(c);
+  const isIntel = (c) => typeof c === 'string' && (collections.has(c) || (Array.isArray(state.value && state.value.migrated) && state.value.migrated.includes(c)));
   const mirrorErr = (op, c, e) => { stats.mirrorErrors++; logger.warn?.(`[intel-db] mirror ${op} ${c} failed: ${e && e.message}`); };
 
   async function intelKeyOf(c, key) {
@@ -181,7 +212,7 @@ function routedSoda(main, intel, { state, collections = intelCollections(), logg
           const b = typeof intel[prop] === 'function' ? intel[prop](c, ...rest) : null;
           return Promise.all([a, b]).then((x) => x[0]);
         }
-        const mode = state.mode();
+        const mode = storeFor(c, state.mode(), state.value, collections);
         if (mode === 'intel') {
           if (intelMode[prop]) return intelMode[prop](c, ...rest);
           return typeof intel[prop] === 'function' ? intel[prop](c, ...rest) : v.call(target, c, ...rest);
@@ -209,7 +240,7 @@ class IntelDbMigration {
   /** One run. Returns { mode, copied, done }. */
   async step({ signal } = {}) {
     const s = await this.state.refresh();
-    if (s.mode === 'intel') return { mode: 'intel', copied: 0, done: true };
+    if (s.mode === 'intel') return this._stepAdded(s, { signal });
     if (s.mode === 'main') {
       await this.ensureIntelIndexes();
       await this.state.set({ mode: 'dual', dualSince: this.clock(), progress: { i: 0, offset: 0, passCopied: 0, pass: 1 }, copiedTotal: 0 });
@@ -222,7 +253,7 @@ class IntelDbMigration {
     while (budget > 0 && !signal?.aborted) {
       if (p.i >= this.collections.length) {
         if (p.passCopied === 0) {
-          await this.state.set({ mode: 'intel', doneAt: this.clock(), progress: p, copiedTotal: (s.copiedTotal || 0) + copied });
+          await this.state.set({ mode: 'intel', doneAt: this.clock(), progress: p, copiedTotal: (s.copiedTotal || 0) + copied, migrated: [...this.collections], pending: [] });
           this.log.info?.(`[intel-db] copy complete after ${p.pass} pass(es): reads and writes now use the intelligence database`);
           return { mode: 'intel', copied, done: true };
         }
@@ -248,6 +279,55 @@ class IntelDbMigration {
   }
 }
 
+/**
+ * v3.62b after the switch: collections added to the list later (INTEL_DB_PROFILE=extended or INTEL_DB_COLLECTIONS) are
+ * copied the same way, one group at a time: pending (writes to both) -> settle -> copy passes -> migrated.
+ */
+IntelDbMigration.prototype._stepAdded = async function _stepAdded(s, { signal } = {}) {
+  const migrated = Array.isArray(s.migrated) ? s.migrated : [...this.collections];
+  if (!Array.isArray(s.migrated)) await this.state.set({ migrated });
+  const pending = Array.isArray(s.pending) && s.pending.length ? s.pending : this.collections.filter((c) => !migrated.includes(c));
+  if (!pending.length) return { mode: 'intel', copied: 0, done: true };
+  if (!Array.isArray(s.pending) || !s.pending.length) {
+    for (const c of pending) {
+      await this.intel.ensureCollection(c).catch(() => {});
+      await this.intel.ensureIndex(c, { name: `${c}_mk_ix`, fields: [{ path: '_mk' }] }).catch(() => {});
+    }
+    await this.state.set({ pending, pendingSince: this.clock(), addProgress: { i: 0, offset: 0, passCopied: 0, pass: 1 } });
+    this.log.info?.(`[intel-db] adding ${pending.join(', ')}: mirroring writes, the copy starts after both nodes switch`);
+    return { mode: 'intel', copied: 0, done: false, adding: pending };
+  }
+  if (this.clock() - (Number(s.pendingSince) || 0) < this.settleMs) return { mode: 'intel', copied: 0, done: false, waiting: true, adding: pending };
+  const p = { i: 0, offset: 0, passCopied: 0, pass: 1, ...(s.addProgress || {}) };
+  let budget = this.batch, copied = 0;
+  while (budget > 0 && !(signal && signal.aborted)) {
+    if (p.i >= pending.length) {
+      if (p.passCopied === 0) {
+        await this.state.set({ migrated: [...new Set([...migrated, ...pending])], pending: [], addProgress: p, copiedTotal: (s.copiedTotal || 0) + copied });
+        this.log.info?.(`[intel-db] added ${pending.join(', ')} to the intelligence database`);
+        return { mode: 'intel', copied, done: true, added: pending };
+      }
+      Object.assign(p, { i: 0, offset: 0, passCopied: 0, pass: p.pass + 1 });
+      if (p.pass > 20) break;
+      continue;
+    }
+    const c = pending[p.i];
+    const page = Math.min(budget, 200);
+    const rows = await this.main.query(c, {}, { limit: page, offset: p.offset }).catch(() => []);
+    for (const r of rows) {
+      const have = await this.intel.findOne(c, { _mk: r.key }).catch(() => null);
+      if (have) continue;
+      try { await this.intel.insert(c, { ...stripDoc(r.value), _mk: r.key }); copied++; p.passCopied++; } catch (e) {
+        if (!(e && e.status === 409)) this.log.warn?.(`[intel-db] copy ${c} failed: ${e.message}`);
+      }
+    }
+    budget -= Math.max(1, rows.length);
+    if (rows.length < page) { p.i++; p.offset = 0; } else p.offset += rows.length;
+  }
+  await this.state.set({ addProgress: p, copiedTotal: (s.copiedTotal || 0) + copied });
+  return { mode: 'intel', copied, done: false, adding: pending };
+};
+
 /** Health of both stores for /api/health and the admin page. `intelDb`: { state, intel, routed } or null. */
 async function intelDbHealth(intelDb) {
   if (!intelDb) return { separate: false, mode: 'main' };
@@ -256,7 +336,7 @@ async function intelDbHealth(intelDb) {
   const v = intelDb.state.value || {};
   return { separate: true, mode: intelDb.state.mode(), intelDb: intelUp ? 'UP' : 'DOWN', progress: v.progress || null, copiedTotal: v.copiedTotal || 0,
     dualSince: v.dualSince || 0, doneAt: v.doneAt || 0, mirrorErrors: intelDb.routed ? intelDb.routed.intelStats.mirrorErrors : 0,
-    collections: intelDb.collections ? [...intelDb.collections] : [] };
+    collections: intelDb.collections ? [...intelDb.collections] : [], migrated: Array.isArray(v.migrated) ? v.migrated : null, pending: Array.isArray(v.pending) ? v.pending : [] };
 }
 
-module.exports = { routedSoda, IntelDbState, IntelDbMigration, intelDbHealth, intelCollections, DEFAULT_COLLECTIONS, STATE_COLL, STATE_TTL_MS };
+module.exports = { storeFor, EXTENDED_COLLECTIONS, NEVER_MOVE, routedSoda, IntelDbState, IntelDbMigration, intelDbHealth, intelCollections, DEFAULT_COLLECTIONS, STATE_COLL, STATE_TTL_MS };

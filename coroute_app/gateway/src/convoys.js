@@ -1142,12 +1142,26 @@ class ConvoyManager extends EventEmitter {
       const sent = this._sosPushed || (this._sosPushed = new Set());
       if (kind === 'RAISED') {
         const list = (book.get(a.userId) || []).filter((x) => t - x < 10 * 60000);
-        if (list.length >= SOS_PUSH_MAX) { book.set(a.userId, list); return; }
+        if (list.length >= SOS_PUSH_MAX) {
+          book.set(a.userId, list);
+          const capped = this._sosCapped || (this._sosCapped = new Set());
+          capped.add(a.alertId); if (capped.size > 5000) capped.delete(capped.values().next().value);
+          return;
+        }
         list.push(t); book.set(a.userId, list);
         sent.add(a.alertId);
         if (sent.size > 5000) sent.delete(sent.values().next().value);
         if (book.size > 5000) book.delete(book.keys().next().value);
-      } else if (!sent.delete(a.alertId)) return;
+      } else if (this._sosCapped && this._sosCapped.delete(a.alertId)) {
+        return; // its SOS was not pushed (cap): no close either
+      } else if (!sent.delete(a.alertId)) {
+        // v3.62b: raised on the OTHER node (two-node pair) -> no local record. The close is still pushed so the alarm
+        // notification is replaced, under its own cap (one rider cannot flood the group with closes either).
+        const ck = `close:${a.userId}`;
+        const list = (book.get(ck) || []).filter((x) => t - x < 10 * 60000);
+        if (list.length >= SOS_PUSH_MAX || t - (Number(a.timestamp) || 0) > 6 * 3600000) { book.set(ck, list); return; }
+        list.push(t); book.set(ck, list);
+      }
       const first = String(a.userName || 'A rider').trim().split(/\s+/)[0] || 'A rider';
       const ride = String((room.meta && room.meta.name) || 'your ride').slice(0, 60);
       const crash = a.alertType === 'CRASH' || a.auto === true;

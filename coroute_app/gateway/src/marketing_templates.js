@@ -503,7 +503,7 @@ function registerMarketingRoutes({ r, repo, wrap, requireAdmin, flagsOf = () => 
     return out;
   };
   /** The site origin for coupon links (PUBLIC_ORIGIN, else this request's host). */
-  const siteOrigin = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  const siteOrigin = (req) => require('./domains').requestOrigin(config, req);
   const findCoupon = async (code) => (code && typeof repo.findCoupon === 'function' ? repo.findCoupon(code).catch(() => null) : null);
 
   /** The template as the console gets it: the stored doc + the live coupon view (or a missing-coupon warning). */
